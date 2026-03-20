@@ -39,7 +39,7 @@ The package includes pre-computed SINDy coefficients and validation datasets in 
   ```
 
 - **From source repo**: Run `julia --project=SolarSINDy.jl` from the cloned directory.
-- **Via Pkg.add()**: (Future support) Data will be downloaded as an artifact on first use and cached locally.
+- **Via Pkg.add()**: Data will be downloaded as an artifact on first use and cached locally.
 
 ## Quick Start
 
