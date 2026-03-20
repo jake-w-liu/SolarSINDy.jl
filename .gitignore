@@ -1,0 +1,7 @@
+docs/build/
+docs/site/
+storm_monitor.log
+.DS_Store
+
+data/omni_hourly_raw.dat
+data/omni_extracted.csv

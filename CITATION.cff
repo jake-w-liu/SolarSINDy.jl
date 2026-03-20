@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use SolarSINDy.jl, please cite this software and the associated paper/project materials."
+title: "SolarSINDy.jl"
+type: software
+authors:
+  - family-names: "Liu"
+    given-names: "Jake W."
+version: "0.1.0"
+license: "MIT"
+date-released: "2026-03-20"
+abstract: >-
+  Julia package for sparse equation discovery and forecast-style evaluation of
+  solar wind-magnetosphere coupling models using SINDy, classical Dst
+  baselines, OMNI2 storm extraction, and rolling forecast utilities.

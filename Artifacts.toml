@@ -1,0 +1,12 @@
+# SolarSINDy dataset artifact
+# Data files for storm monitoring and discovery demonstration
+
+[[SolarSINDyData]]
+arch = "*"
+git-tree-sha1 = "0000000000000000000000000000000000000000"
+os = "*"
+
+[SolarSINDyData.download]
+sha256 = "f7c145c81956c27ced7ffc23069ea54bd3b114b940bf06385d7862792961b9d9"
+url = "https://github.com/user/SolarSINDy.jl/releases/download/v0.1.0/data.tar.gz"
+
