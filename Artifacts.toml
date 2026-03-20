@@ -3,7 +3,7 @@
 
 [[SolarSINDyData]]
 arch = "*"
-git-tree-sha1 = "09bd6558f3ba3bfea4a6dfabed2aee2f80e02892"
+git-tree-sha1 = "e74ded393ce3334b4dee20f6b22612026264ba00"
 os = "*"
 
 [SolarSINDyData.download]
