@@ -71,20 +71,14 @@ end
 
 Return the path to the SolarSINDy data directory.
 
-When installed via package manager, users can download data separately.
-When running from source (cloned repo), uses the local `data` directory.
+The `data/` directory is bundled with the package and available both when
+running from a cloned repo and when installed via `Pkg.add`.
 
 # Returns
 - `::String`: Absolute path to the data directory
 """
 function get_data_dir()::String
-    # Check for local data/ directory first (for development/cloned repos)
-    local_data = joinpath(@__DIR__, "..", "data")
-    if isdir(local_data)
-        return local_data
-    end
-    
-    # Could check for artifact here in future, but for now fallback only
-    error("Data directory not found. Clone the repository to access example data: " *
-          "https://github.com/user/SolarSINDy.jl")
+    data_dir = joinpath(@__DIR__, "..", "data")
+    isdir(data_dir) || error("Data directory not found at $data_dir")
+    return data_dir
 end

@@ -2,8 +2,6 @@
 
 `SolarSINDy.jl` is a Julia package for discovering and evaluating closed-form solar wind-magnetosphere coupling models using sparse identification of nonlinear dynamics (SINDy).
 
-Version: `0.1.0`
-
 The package supports:
 
 - synthetic storm generation for controlled validation
@@ -15,14 +13,18 @@ The package supports:
 
 ## Installation
 
-From a local checkout:
-
 ```julia
 using Pkg
+Pkg.add(url="https://github.com/jake-w-liu/SolarSINDy.jl")
+```
+
+Or from a local checkout:
+
+```julia
 Pkg.develop(path="SolarSINDy.jl")
 ```
 
-Then load the package with:
+Then:
 
 ```julia
 using SolarSINDy
@@ -38,8 +40,7 @@ The package includes pre-computed SINDy coefficients and validation datasets in 
   coef_csv = joinpath(data_dir, "real_sindy_discovery_coefficients.csv")
   ```
 
-- **From source repo**: Run `julia --project=SolarSINDy.jl` from the cloned directory.
-- **Via Pkg.add()**: Data will be downloaded as an artifact on first use and cached locally.
+- Data is bundled with the package (~830 KB) and available automatically via both `Pkg.add` and cloned repos.
 
 ## Quick Start
 
@@ -74,7 +75,7 @@ Main exported entry points:
 
 The forecasting example is in:
 
-- [examples/storm_monitor.jl](/Users/jake/EMPIRE/projects/ongoing/2026_045/SolarSINDy.jl/examples/storm_monitor.jl)
+- [examples/storm_monitor.jl](examples/storm_monitor.jl)
 
 Run it with:
 
@@ -89,7 +90,7 @@ That example:
 - runs rolling forecasts with ensemble uncertainty bands
 - emits configurable storm alarms
 
-The example is designed to work from a cloned repository. For package installations (future), data will be available via Julia Artifacts.
+The example works from both cloned repos and `Pkg.add` installations.
 
 ## Reproducing Research Results
 
@@ -131,7 +132,7 @@ Coverage now includes:
 
 See:
 
-- [TEST_REPORT.md](/Users/jake/EMPIRE/projects/ongoing/2026_045/TEST_REPORT.md)
+- [TEST_REPORT.md](../TEST_REPORT.md)
 
 ## Docs
 
@@ -149,7 +150,7 @@ The current package release notes live in `SolarSINDy.jl/CHANGELOG.md`.
 
 ## Notes
 
-- `Manifest.toml` is included here for reproducible research runs, not because this is already a polished registry release.
+- `Manifest.toml` is included for reproducible research runs.
 - The realtime data path depends on external NOAA SWPC availability.
 - The monitor writes a local log file and is intended as an example/prototype workflow.
 

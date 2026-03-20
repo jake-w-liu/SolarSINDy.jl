@@ -12,7 +12,6 @@ using Random
 using CSV
 using DataFrames
 using Dates
-using Artifacts
 
 include("utils.jl")
 include("library.jl")
