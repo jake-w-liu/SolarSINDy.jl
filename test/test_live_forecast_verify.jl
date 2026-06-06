@@ -100,4 +100,47 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test df.obrien_residual_dst_nt[1] == -17.0
         end
     end
+
+    @testset "A/D: backfill_baselines! upgrades legacy verified rows" begin
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "live_forecast_log.csv")
+            row = DataFrame(
+                issue_time_utc = ["2026-06-06T04:00:34.31"],
+                latest_solar_wind_utc = ["2026-06-06T03:57:00"],
+                latest_dst_time_utc = ["2026-06-06T03:00:00"],
+                latest_dst_nt = [-49.0],
+                anchor_dst_star_nt = [-44.66383751003725],
+                target_time_utc = ["2026-06-06T04:00:00"],
+                horizon_hours = [-0.009530555555555556],
+                driver_assumption = ["legacy"],
+                V_kms = [584.2931034482758],
+                Bz_nt = [-1.821551724137931],
+                By_nt = [2.879655172413793],
+                n_cm3 = [1.494655172413793],
+                Pdyn_npa = [0.8534825033123322],
+                pred_dst_star_nt = [-43.64275511399697],
+                pred_dst_nt = [-47.93566823580722],
+                pred_dst_ci05_nt = [-52.31545743478508],
+                pred_dst_ci95_nt = [-43.37255925892829],
+                observation_dst_nt = [-63.0],
+                residual_dst_nt = [-15.06433176419278],
+                observed_in_90ci = [false],
+            )
+            CSV.write(log_path, row)
+
+            n_backfilled = backfill_baselines!(log_path)
+            df = CSV.read(log_path, DataFrame)
+
+            @test n_backfilled == 1
+            @test df.model_step_hours[1] == 1
+            @test df.persistence_dst_nt[1] == -49.0
+            @test isfinite(df.burton_dst_nt[1])
+            @test isfinite(df.burton_full_dst_nt[1])
+            @test isfinite(df.obrien_dst_nt[1])
+            @test df.persistence_residual_dst_nt[1] == -14.0
+            @test df.burton_residual_dst_nt[1] ≈ -63.0 - df.burton_dst_nt[1] atol=1e-12
+            @test df.burton_full_residual_dst_nt[1] ≈ -63.0 - df.burton_full_dst_nt[1] atol=1e-12
+            @test df.obrien_residual_dst_nt[1] ≈ -63.0 - df.obrien_dst_nt[1] atol=1e-12
+        end
+    end
 end

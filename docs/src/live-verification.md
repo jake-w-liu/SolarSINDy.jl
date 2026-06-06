@@ -45,11 +45,16 @@ Available modes:
 ```bash
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --issue
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --verify-pending
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --backfill-baselines
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --summary
 ```
 
 Use `--poll-seconds=N`, `--timeout-hours=N`, `--horizon-hours=N`, and
 `--log=PATH` to adjust the run.
+
+Use `--backfill-baselines` after schema changes to fill baseline forecasts and
+residuals for older rows that already contain locked SINDy predictions and live
+driver values.
 
 ## Interpretation
 

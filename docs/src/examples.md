@@ -41,6 +41,7 @@ Other useful modes:
 ```bash
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --issue
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --verify-pending
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --backfill-baselines
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --summary
 ```
 

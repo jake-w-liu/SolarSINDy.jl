@@ -34,6 +34,7 @@ function _usage()
     Modes:
       --issue                Issue and lock one future forecast row. This is the default.
       --verify-pending       Score all pending rows whose target Dst is now available.
+      --backfill-baselines   Fill baseline forecasts/residuals for existing rows.
       --wait                 Issue one row, then poll until its target observation arrives.
       --summary              Print aggregate live-log scores.
 
@@ -62,6 +63,8 @@ function _parse_args(args)::LiveVerifyConfig
             mode = :issue
         elseif arg == "--verify-pending"
             mode = :verify_pending
+        elseif arg == "--backfill-baselines"
+            mode = :backfill_baselines
         elseif arg == "--wait"
             mode = :wait
         elseif arg == "--summary"
@@ -208,6 +211,50 @@ function _advance_baselines(dst_star::Float64, drivers)
         burton=clamp(dst_star + d_burton, -2000.0, 50.0),
         burton_full=clamp(dst_star + d_burton_full, -2000.0, 50.0),
         obrien=clamp(dst_star + d_obrien, -2000.0, 50.0),
+    )
+end
+
+function _model_step_hours(df::DataFrame, row_idx::Int)
+    existing = _optional_float(df, row_idx, :model_step_hours)
+    ismissing(existing) || return max(1, round(Int, existing))
+
+    target = _parse_dt(df[row_idx, :target_time_utc])
+    latest_dst = _parse_dt(df[row_idx, :latest_dst_time_utc])
+    return max(1, round(Int, (target - latest_dst) / Hour(1)))
+end
+
+function _row_drivers(df::DataFrame, row_idx::Int)
+    return (
+        V=Float64(df[row_idx, :V_kms]),
+        Bz=Float64(df[row_idx, :Bz_nt]),
+        By=Float64(df[row_idx, :By_nt]),
+        n=Float64(df[row_idx, :n_cm3]),
+        Pdyn=Float64(df[row_idx, :Pdyn_npa]),
+    )
+end
+
+function _baseline_predictions_from_row(df::DataFrame, row_idx::Int)
+    drivers = _row_drivers(df, row_idx)
+    n_steps = _model_step_hours(df, row_idx)
+    burton_star = Float64(df[row_idx, :anchor_dst_star_nt])
+    burton_full_star = burton_star
+    obrien_star = burton_star
+
+    for _ in 1:n_steps
+        baselines = _advance_baselines(burton_star, drivers)
+        burton_star = baselines.burton
+        baselines = _advance_baselines(burton_full_star, drivers)
+        burton_full_star = baselines.burton_full
+        baselines = _advance_baselines(obrien_star, drivers)
+        obrien_star = baselines.obrien
+    end
+
+    return (
+        persistence=Float64(df[row_idx, :latest_dst_nt]),
+        burton=_dst_from_dst_star(burton_star, drivers.Pdyn),
+        burton_full=_dst_from_dst_star(burton_full_star, drivers.Pdyn),
+        obrien=_dst_from_dst_star(obrien_star, drivers.Pdyn),
+        model_steps=n_steps,
     )
 end
 
@@ -374,6 +421,35 @@ function verify_pending!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=noth
     return verified
 end
 
+function backfill_baselines!(log_path::String)
+    isfile(log_path) || error("No forecast log exists at $log_path")
+    df = CSV.read(log_path, DataFrame)
+    updated = 0
+
+    for row_idx in 1:nrow(df)
+        required = (:anchor_dst_star_nt, :latest_dst_nt, :target_time_utc,
+                    :latest_dst_time_utc, :V_kms, :Bz_nt, :By_nt, :n_cm3, :Pdyn_npa)
+        all(String(col) in names(df) for col in required) || continue
+        baseline = _baseline_predictions_from_row(df, row_idx)
+
+        _set_value!(df, row_idx, :persistence_dst_nt, baseline.persistence)
+        _set_value!(df, row_idx, :burton_dst_nt, baseline.burton)
+        _set_value!(df, row_idx, :burton_full_dst_nt, baseline.burton_full)
+        _set_value!(df, row_idx, :obrien_dst_nt, baseline.obrien)
+        _set_value!(df, row_idx, :model_step_hours, baseline.model_steps)
+
+        observed = _optional_float(df, row_idx, :observation_dst_nt)
+        if !ismissing(observed)
+            _score_row!(df, row_idx, observed)
+        end
+        updated += 1
+    end
+
+    updated > 0 && CSV.write(log_path, df)
+    println("Backfilled baseline forecasts for $updated row(s).")
+    return updated
+end
+
 function wait_for_observation(cfg::LiveVerifyConfig, forecast)
     deadline = now(UTC) + Millisecond(round(Int, cfg.timeout_hours * 3600 * 1000))
     target = forecast.target_time
@@ -472,6 +548,8 @@ function main(args=ARGS)
         issue_forecast(cfg)
     elseif cfg.mode == :verify_pending
         verify_pending!(cfg)
+    elseif cfg.mode == :backfill_baselines
+        backfill_baselines!(cfg.log_path)
     elseif cfg.mode == :wait
         forecast = issue_forecast(cfg)
         wait_for_observation(cfg, forecast)
