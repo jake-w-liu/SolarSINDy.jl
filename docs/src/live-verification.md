@@ -32,14 +32,24 @@ The script:
 - fetches live NOAA SWPC plasma and magnetic-field data,
 - fetches the latest SWPC Kyoto Dst observation,
 - anchors the rolling Dst* state to the latest observed Dst,
-- forecasts the next unavailable hourly Dst target,
+- forecasts a strictly future hourly Dst target,
 - appends the locked prediction to `live_forecasts/live_forecast_log.csv`,
+- logs persistence, Burton, BurtonFull, O'Brien--McPherron, and SINDy
+  predictions for the same target,
 - polls the Dst feed until the target observation appears,
 - updates the same log row with the observed Dst, residual, and 90% interval
   coverage flag.
 
-Use `--no-wait` to create only the locked forecast row. Use `--poll-seconds=N`,
-`--timeout-hours=N`, `--horizon-hours=N`, and `--log=PATH` to adjust the run.
+Available modes:
+
+```bash
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --issue
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --verify-pending
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --summary
+```
+
+Use `--poll-seconds=N`, `--timeout-hours=N`, `--horizon-hours=N`, and
+`--log=PATH` to adjust the run.
 
 ## Interpretation
 

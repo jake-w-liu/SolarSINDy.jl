@@ -188,5 +188,6 @@ using Random
     include("test_forecast_alarm.jl")
     include("test_data_pipeline_cleaning.jl")
     include("test_realtime_monitor.jl")
+    include("test_live_forecast_verify.jl")
 
 end

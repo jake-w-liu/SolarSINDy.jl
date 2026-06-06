@@ -33,7 +33,16 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --w
 The script writes locked prediction rows to
 `live_forecasts/live_forecast_log.csv` before the target observation exists,
 then updates the same row with the observed Dst and residual after the target
-hour is published.
+hour is published. It also logs persistence, Burton, BurtonFull, and
+O'Brien--McPherron baselines for the same target.
+
+Other useful modes:
+
+```bash
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --issue
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --verify-pending
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --summary
+```
 
 ## Synthetic Discovery Example
 

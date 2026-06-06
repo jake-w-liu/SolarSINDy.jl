@@ -1,12 +1,11 @@
 #!/usr/bin/env julia
-# Issue a live Dst forecast, then optionally wait for the target observation.
+# Issue live Dst forecasts and verify locked predictions against future Dst.
 #
 # Usage:
 #   julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --wait
 #
-# The script appends a pre-observation forecast row to live_forecasts/live_forecast_log.csv.
-# When --wait is enabled, it polls the SWPC Kyoto Dst feed until the target
-# observation appears, then updates that same row with the residual.
+# The forecast row is written before the target observation exists. Verification
+# only updates that row after the exact target timestamp appears in the Dst feed.
 
 using SolarSINDy
 using CSV
@@ -20,7 +19,7 @@ const KYOTO_DST_JSON_URL = "https://services.swpc.noaa.gov/products/kyoto-dst.js
 const DEFAULT_LOG_PATH = joinpath("live_forecasts", "live_forecast_log.csv")
 
 Base.@kwdef struct LiveVerifyConfig
-    wait::Bool = false
+    mode::Symbol = :issue
     poll_seconds::Int = 300
     timeout_hours::Float64 = 4.0
     horizon_hours::Int = 1
@@ -32,12 +31,16 @@ function _usage()
     Usage:
       julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl [options]
 
+    Modes:
+      --issue                Issue and lock one future forecast row. This is the default.
+      --verify-pending       Score all pending rows whose target Dst is now available.
+      --wait                 Issue one row, then poll until its target observation arrives.
+      --summary              Print aggregate live-log scores.
+
     Options:
-      --wait                 Poll Dst and verify the forecast when the target arrives.
-      --no-wait              Only log the forecast row. This is the default.
       --poll-seconds=N       Poll interval for --wait. Default: 300.
       --timeout-hours=N      Maximum wait time for --wait. Default: 4.
-      --horizon-hours=N      Forecast at least N hours beyond latest complete SWPC hour. Default: 1.
+      --horizon-hours=N      Hourly target index after issue time. Default: 1.
       --log=PATH             CSV log path. Default: live_forecasts/live_forecast_log.csv.
       --help                 Print this message.
     """
@@ -45,7 +48,7 @@ end
 
 function _parse_args(args)::LiveVerifyConfig
     cfg = LiveVerifyConfig()
-    wait = cfg.wait
+    mode = cfg.mode
     poll_seconds = cfg.poll_seconds
     timeout_hours = cfg.timeout_hours
     horizon_hours = cfg.horizon_hours
@@ -55,10 +58,14 @@ function _parse_args(args)::LiveVerifyConfig
         if arg == "--help"
             println(_usage())
             exit(0)
+        elseif arg == "--issue" || arg == "--no-wait"
+            mode = :issue
+        elseif arg == "--verify-pending"
+            mode = :verify_pending
         elseif arg == "--wait"
-            wait = true
-        elseif arg == "--no-wait"
-            wait = false
+            mode = :wait
+        elseif arg == "--summary"
+            mode = :summary
         elseif startswith(arg, "--poll-seconds=")
             poll_seconds = parse(Int, split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--timeout-hours=")
@@ -77,7 +84,7 @@ function _parse_args(args)::LiveVerifyConfig
     horizon_hours > 0 || throw(ArgumentError("--horizon-hours must be positive"))
 
     return LiveVerifyConfig(;
-        wait=wait,
+        mode=mode,
         poll_seconds=poll_seconds,
         timeout_hours=timeout_hours,
         horizon_hours=horizon_hours,
@@ -87,6 +94,16 @@ end
 
 _floor_hour(t::DateTime) = DateTime(year(t), month(t), day(t), hour(t))
 _parse_dt(x) = x isa DateTime ? x : DateTime(String(x))
+_dst_from_dst_star(dst_star::Real, pdyn::Real) = dst_star + 7.26 * sqrt(max(pdyn, 0.0)) - 11.0
+
+function _next_hourly_target(issue_time::DateTime, horizon_hours::Int,
+                             latest_dst_time::DateTime)
+    target_time = _floor_hour(issue_time) + Hour(horizon_hours)
+    while target_time <= issue_time || target_time <= latest_dst_time
+        target_time += Hour(1)
+    end
+    return target_time
+end
 
 function _fetch_dst()
     resp = HTTP.get(KYOTO_DST_JSON_URL; connect_timeout=15, readtimeout=30)
@@ -128,19 +145,70 @@ end
 function _append_forecast!(log_path::String, row::DataFrame)
     dir = dirname(log_path)
     !isempty(dir) && mkpath(dir)
-    CSV.write(log_path, row; append=isfile(log_path), writeheader=!isfile(log_path))
-    return nrow(CSV.read(log_path, DataFrame))
+    if isfile(log_path)
+        df = CSV.read(log_path, DataFrame)
+        df = vcat(df, row; cols=:union)
+    else
+        df = row
+    end
+    CSV.write(log_path, df)
+    return nrow(df)
 end
 
-function _update_observation!(log_path::String, row_idx::Int,
-                              obs::Float64, residual::Float64, in_ci::Bool)
-    df = CSV.read(log_path, DataFrame)
-    allowmissing!(df, [:observation_dst_nt, :residual_dst_nt, :observed_in_90ci])
-    df.observation_dst_nt[row_idx] = obs
-    df.residual_dst_nt[row_idx] = residual
-    df.observed_in_90ci[row_idx] = in_ci
-    CSV.write(log_path, df)
+function _set_value!(df::DataFrame, row_idx::Int, col::Symbol, value)
+    if !(String(col) in names(df))
+        df[!, col] = fill(missing, nrow(df))
+    end
+    if eltype(df[!, col]) === Missing
+        df[!, col] = Vector{Union{Missing, typeof(value)}}(missing, nrow(df))
+    else
+        allowmissing!(df, col)
+    end
+    df[row_idx, col] = value
     return nothing
+end
+
+function _optional_float(df::DataFrame, row_idx::Int, col::Symbol)
+    String(col) in names(df) || return missing
+    value = df[row_idx, col]
+    ismissing(value) && return missing
+    return Float64(value)
+end
+
+function _score_row!(df::DataFrame, row_idx::Int, observed_dst::Float64)
+    pred = Float64(df[row_idx, :pred_dst_nt])
+    ci05 = Float64(df[row_idx, :pred_dst_ci05_nt])
+    ci95 = Float64(df[row_idx, :pred_dst_ci95_nt])
+    _set_value!(df, row_idx, :observation_dst_nt, observed_dst)
+    _set_value!(df, row_idx, :residual_dst_nt, observed_dst - pred)
+    _set_value!(df, row_idx, :observed_in_90ci, min(ci05, ci95) <= observed_dst <= max(ci05, ci95))
+
+    for (pred_col, residual_col) in (
+        (:persistence_dst_nt, :persistence_residual_dst_nt),
+        (:burton_dst_nt, :burton_residual_dst_nt),
+        (:burton_full_dst_nt, :burton_full_residual_dst_nt),
+        (:obrien_dst_nt, :obrien_residual_dst_nt),
+    )
+        baseline_pred = _optional_float(df, row_idx, pred_col)
+        ismissing(baseline_pred) || _set_value!(df, row_idx, residual_col, observed_dst - baseline_pred)
+    end
+
+    return (; observed_dst, residual=observed_dst - pred)
+end
+
+function _advance_baselines(dst_star::Float64, drivers)
+    Bs = max(-drivers.Bz, 0.0)
+    V = [drivers.V]
+    Bs_vec = [Bs]
+    dst_vec = [dst_star]
+    d_burton = clamp(burton_model(V, Bs_vec, dst_vec)[1], -200.0, 200.0)
+    d_burton_full = clamp(burton_model_full(V, Bs_vec, dst_vec)[1], -200.0, 200.0)
+    d_obrien = clamp(obrien_mcpherron_model(V, Bs_vec, dst_vec)[1], -200.0, 200.0)
+    return (
+        burton=clamp(dst_star + d_burton, -2000.0, 50.0),
+        burton_full=clamp(dst_star + d_burton_full, -2000.0, 50.0),
+        obrien=clamp(dst_star + d_obrien, -2000.0, 50.0),
+    )
 end
 
 function issue_forecast(cfg::LiveVerifyConfig)
@@ -153,8 +221,9 @@ function issue_forecast(cfg::LiveVerifyConfig)
     latest_complete_hour = _floor_hour(latest_common_sw)
     latest_dst_time = dst_times[end]
     latest_dst = dst_vals[end]
-    target_time = max(latest_complete_hour + Hour(cfg.horizon_hours),
-                      latest_dst_time + Hour(1))
+    target_time = _next_hourly_target(issue_time, cfg.horizon_hours, latest_dst_time)
+    @assert target_time > issue_time
+    @assert target_time > latest_dst_time
 
     recent_start = latest_common_sw - Hour(1)
     recent = _drivers_for_window(plasma, mag, recent_start, latest_common_sw)
@@ -175,6 +244,10 @@ function issue_forecast(cfg::LiveVerifyConfig)
 
     result = nothing
     used_drivers = recent
+    burton_star = anchor_dst_star
+    burton_full_star = anchor_dst_star
+    obrien_star = anchor_dst_star
+
     step_time = latest_dst_time + Hour(1)
     while step_time <= target_time
         source_hour = step_time - Hour(1)
@@ -196,13 +269,22 @@ function issue_forecast(cfg::LiveVerifyConfig)
             drivers.n,
             drivers.Pdyn,
         )
+        baselines = _advance_baselines(burton_star, drivers)
+        burton_star = baselines.burton
+        baselines = _advance_baselines(burton_full_star, drivers)
+        burton_full_star = baselines.burton_full
+        baselines = _advance_baselines(obrien_star, drivers)
+        obrien_star = baselines.obrien
         step_time += Hour(1)
     end
 
-    pressure_term = 7.26 * sqrt(max(used_drivers.Pdyn, 0.0)) - 11.0
-    pred_dst = result.dst_predicted + pressure_term
-    ci05_dst = result.dst_ci_05 + pressure_term
-    ci95_dst = result.dst_ci_95 + pressure_term
+    pred_dst = _dst_from_dst_star(result.dst_predicted, used_drivers.Pdyn)
+    ci05_dst = _dst_from_dst_star(result.dst_ci_05, used_drivers.Pdyn)
+    ci95_dst = _dst_from_dst_star(result.dst_ci_95, used_drivers.Pdyn)
+    persistence_dst = latest_dst
+    burton_dst = _dst_from_dst_star(burton_star, used_drivers.Pdyn)
+    burton_full_dst = _dst_from_dst_star(burton_full_star, used_drivers.Pdyn)
+    obrien_dst = _dst_from_dst_star(obrien_star, used_drivers.Pdyn)
     model_steps = Int((target_time - latest_dst_time) / Hour(1))
     wall_horizon = (target_time - issue_time) / Hour(1)
 
@@ -214,7 +296,9 @@ function issue_forecast(cfg::LiveVerifyConfig)
         anchor_dst_star_nt=[anchor_dst_star],
         target_time_utc=[string(target_time)],
         horizon_hours=[wall_horizon],
-        driver_assumption=["observed_solar_wind_until_latest_complete_hour_then_latest_60min_persistence; model_step_hours=$model_steps"],
+        wall_clock_lead_hours=[wall_horizon],
+        model_step_hours=[model_steps],
+        driver_assumption=["observed_solar_wind_until_latest_complete_hour_then_latest_60min_persistence"],
         V_kms=[used_drivers.V],
         Bz_nt=[used_drivers.Bz],
         By_nt=[used_drivers.By],
@@ -224,9 +308,17 @@ function issue_forecast(cfg::LiveVerifyConfig)
         pred_dst_nt=[pred_dst],
         pred_dst_ci05_nt=[ci05_dst],
         pred_dst_ci95_nt=[ci95_dst],
+        persistence_dst_nt=[persistence_dst],
+        burton_dst_nt=[burton_dst],
+        burton_full_dst_nt=[burton_full_dst],
+        obrien_dst_nt=[obrien_dst],
         observation_dst_nt=[missing],
         residual_dst_nt=[missing],
         observed_in_90ci=[missing],
+        persistence_residual_dst_nt=[missing],
+        burton_residual_dst_nt=[missing],
+        burton_full_residual_dst_nt=[missing],
+        obrien_residual_dst_nt=[missing],
     )
     row_idx = _append_forecast!(cfg.log_path, row)
 
@@ -235,10 +327,17 @@ function issue_forecast(cfg::LiveVerifyConfig)
     println("Latest SWPC solar wind: $latest_common_sw")
     println("Latest observed Kyoto Dst: $latest_dst_time = $latest_dst nT")
     println("Target observation UTC: $target_time")
+    println("Lead time: $(round(wall_horizon; digits=3)) hr wall-clock, $model_steps model steps")
     println("Forecast Dst*: $(round(result.dst_predicted; digits=2)) nT")
     println(
-        "Forecast Dst: $(round(pred_dst; digits=2)) nT; 90% CI " *
+        "SINDy Dst: $(round(pred_dst; digits=2)) nT; 90% CI " *
         "[$(round(ci05_dst; digits=2)), $(round(ci95_dst; digits=2))]"
+    )
+    println(
+        "Baselines Dst: persistence=$(round(persistence_dst; digits=2)), " *
+        "Burton=$(round(burton_dst; digits=2)), " *
+        "BurtonFull=$(round(burton_full_dst; digits=2)), " *
+        "OBrien=$(round(obrien_dst; digits=2))"
     )
     println(
         "Forecast drivers: V=$(round(used_drivers.V; digits=1)) km/s, " *
@@ -251,6 +350,30 @@ function issue_forecast(cfg::LiveVerifyConfig)
     return (; row_idx, target_time, pred_dst, ci05_dst, ci95_dst)
 end
 
+function verify_pending!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=nothing)
+    isfile(cfg.log_path) || error("No forecast log exists at $(cfg.log_path)")
+    df = CSV.read(cfg.log_path, DataFrame)
+    if dst_times === nothing || dst_vals === nothing
+        dst_times, dst_vals = _fetch_dst()
+    end
+
+    verified = 0
+    for row_idx in 1:nrow(df)
+        if String(:observation_dst_nt) in names(df) && !ismissing(df[row_idx, :observation_dst_nt])
+            continue
+        end
+        target = _parse_dt(df[row_idx, :target_time_utc])
+        idx = findfirst(==(target), dst_times)
+        idx === nothing && continue
+        _score_row!(df, row_idx, Float64(dst_vals[idx]))
+        verified += 1
+    end
+
+    verified > 0 && CSV.write(cfg.log_path, df)
+    println("Verified $verified pending forecast row(s).")
+    return verified
+end
+
 function wait_for_observation(cfg::LiveVerifyConfig, forecast)
     deadline = now(UTC) + Millisecond(round(Int, cfg.timeout_hours * 3600 * 1000))
     target = forecast.target_time
@@ -261,18 +384,17 @@ function wait_for_observation(cfg::LiveVerifyConfig, forecast)
         latest = times[end]
 
         if idx !== nothing
-            obs = dst[idx]
-            residual = obs - forecast.pred_dst
-            in_ci = min(forecast.ci05_dst, forecast.ci95_dst) <= obs <=
-                    max(forecast.ci05_dst, forecast.ci95_dst)
-            _update_observation!(cfg.log_path, forecast.row_idx, obs, residual, in_ci)
-            println("Observed target Dst arrived: $target = $obs nT")
+            df = CSV.read(cfg.log_path, DataFrame)
+            result = _score_row!(df, forecast.row_idx, Float64(dst[idx]))
+            CSV.write(cfg.log_path, df)
+            in_ci = df[forecast.row_idx, :observed_in_90ci]
+            println("Observed target Dst arrived: $target = $(result.observed_dst) nT")
             println(
                 "Prediction: $(round(forecast.pred_dst; digits=2)) nT; " *
-                "residual obs-pred = $(round(residual; digits=2)) nT; " *
+                "residual obs-pred = $(round(result.residual; digits=2)) nT; " *
                 "in 90% CI = $in_ci"
             )
-            return (; obs, residual, in_ci)
+            return result
         end
 
         now(UTC) >= deadline && error(
@@ -286,11 +408,81 @@ function wait_for_observation(cfg::LiveVerifyConfig, forecast)
     end
 end
 
-function main(args=ARGS)
-    cfg = _parse_args(args)
-    forecast = issue_forecast(cfg)
-    cfg.wait && wait_for_observation(cfg, forecast)
+function _metric_rows(df::DataFrame, pred_col::Symbol)
+    String(pred_col) in names(df) || return Float64[], Float64[]
+    preds = Float64[]
+    obs = Float64[]
+    for row_idx in 1:nrow(df)
+        observed = _optional_float(df, row_idx, :observation_dst_nt)
+        predicted = _optional_float(df, row_idx, pred_col)
+        if !ismissing(observed) && !ismissing(predicted)
+            push!(obs, observed)
+            push!(preds, predicted)
+        end
+    end
+    return preds, obs
+end
+
+function _print_metric(name::String, preds::Vector{Float64}, obs::Vector{Float64})
+    if isempty(preds)
+        println(rpad(name, 16), " no verified rows")
+        return nothing
+    end
+    residuals = obs .- preds
+    rmse_val = sqrt(mean(residuals .^ 2))
+    mae_val = mean(abs.(residuals))
+    bias_val = mean(residuals)
+    println(
+        rpad(name, 16),
+        " n=", length(preds),
+        " RMSE=", round(rmse_val; digits=2),
+        " MAE=", round(mae_val; digits=2),
+        " bias=", round(bias_val; digits=2),
+    )
     return nothing
 end
 
-main()
+function summarize_log(log_path::String)
+    isfile(log_path) || error("No forecast log exists at $log_path")
+    df = CSV.read(log_path, DataFrame)
+    println("Live forecast log: $log_path")
+    for (name, col) in (
+        ("SINDy", :pred_dst_nt),
+        ("Persistence", :persistence_dst_nt),
+        ("Burton", :burton_dst_nt),
+        ("BurtonFull", :burton_full_dst_nt),
+        ("OBrien", :obrien_dst_nt),
+    )
+        preds, obs = _metric_rows(df, col)
+        _print_metric(name, preds, obs)
+    end
+    if String(:observed_in_90ci) in names(df)
+        flags = Bool[]
+        for value in df.observed_in_90ci
+            ismissing(value) || push!(flags, Bool(value))
+        end
+        isempty(flags) || println("SINDy 90% coverage n=$(length(flags)) coverage=$(round(mean(flags); digits=3))")
+    end
+    return nothing
+end
+
+function main(args=ARGS)
+    cfg = _parse_args(args)
+    if cfg.mode == :issue
+        issue_forecast(cfg)
+    elseif cfg.mode == :verify_pending
+        verify_pending!(cfg)
+    elseif cfg.mode == :wait
+        forecast = issue_forecast(cfg)
+        wait_for_observation(cfg, forecast)
+    elseif cfg.mode == :summary
+        summarize_log(cfg.log_path)
+    else
+        error("Unsupported mode: $(cfg.mode)")
+    end
+    return nothing
+end
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end
