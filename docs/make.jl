@@ -13,5 +13,6 @@ makedocs(
         "Home" => "index.md",
         "API" => "api.md",
         "Examples" => "examples.md",
+        "Live Verification" => "live-verification.md",
     ],
 )

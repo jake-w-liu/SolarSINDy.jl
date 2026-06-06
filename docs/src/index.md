@@ -52,6 +52,7 @@ println(prediction_efficiency(Dst_pred, swd.Dst_star))
 The realtime forecasting example is not hidden in the validation pipeline. It is provided directly in:
 
 - `SolarSINDy.jl/examples/storm_monitor.jl`
+- `SolarSINDy.jl/examples/live_forecast_verify.jl`
 
 That example:
 
@@ -60,7 +61,9 @@ That example:
 - advances rolling forecasts with uncertainty bands
 - emits configurable storm alarms
 
-See the [Examples](examples.md) page for the exact command.
+See the [Examples](examples.md) page for the monitor command and the
+[Live Verification](live-verification.md) page for the prediction-to-observation
+verification workflow.
 
 ## Validation Status
 

@@ -21,6 +21,20 @@ This example:
 
 This is the package's primary user-facing forecasting example.
 
+## Live Verification Example
+
+To issue a forecast now and verify it when the future Kyoto Dst observation
+arrives:
+
+```bash
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --wait
+```
+
+The script writes locked prediction rows to
+`live_forecasts/live_forecast_log.csv` before the target observation exists,
+then updates the same row with the observed Dst and residual after the target
+hour is published.
+
 ## Synthetic Discovery Example
 
 ```julia
