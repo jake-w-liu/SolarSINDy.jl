@@ -43,6 +43,11 @@ Dst_v2 = Dst_v1 + β₀ + Σ βⱼ zⱼ
 where `zⱼ` are standardized issue-time features. The interval scale inflates
 the v1 ensemble interval from calibration residuals. This type deliberately
 does not alter `ForecastState` or v1 SINDy coefficients.
+
+When mandatory baseline columns are present during calibration, v2 also stores
+a guarded selector over corrected SINDy, persistence, Burton, BurtonFull, and
+O'Brien--McPherron. A baseline is selected only when its calibration-window MAE
+beats corrected SINDy by the configured margin.
 """
 struct OperationalV2Calibration
     feature_names::Vector{Symbol}
@@ -51,6 +56,12 @@ struct OperationalV2Calibration
     coefficients::Vector{Float64}
     interval_scale::Float64
     label::String
+    selector_names::Vector{Symbol}
+    selector_rmse::Vector{Float64}
+    selector_mae::Vector{Float64}
+    selector_half_width::Vector{Float64}
+    selected_component::Symbol
+    guard_margin_nt::Float64
 
 
     function OperationalV2Calibration(feature_names::Vector{Symbol},
@@ -58,7 +69,13 @@ struct OperationalV2Calibration
                                       feature_scale::Vector{Float64},
                                       coefficients::Vector{Float64},
                                       interval_scale::Float64,
-                                      label::AbstractString)
+                                      label::AbstractString;
+                                      selector_names::Vector{Symbol}=Symbol[:v2],
+                                      selector_rmse::Vector{Float64}=Float64[NaN],
+                                      selector_mae::Vector{Float64}=Float64[NaN],
+                                      selector_half_width::Vector{Float64}=Float64[0.0],
+                                      selected_component::Symbol=:v2,
+                                      guard_margin_nt::Real=0.0)
         n = length(feature_names)
         length(feature_mean) == n ||
             throw(DimensionMismatch("feature_mean length $(length(feature_mean)) != $n"))
@@ -72,8 +89,30 @@ struct OperationalV2Calibration
         all(isfinite, coefficients) || throw(ArgumentError("coefficients must be finite"))
         isfinite(interval_scale) && interval_scale > 0 ||
             throw(ArgumentError("interval_scale must be positive and finite"))
+        n_selector = length(selector_names)
+        n_selector > 0 || throw(ArgumentError("at least one selector component is required"))
+        length(selector_rmse) == n_selector ||
+            throw(DimensionMismatch("selector_rmse length $(length(selector_rmse)) != $n_selector"))
+        length(selector_mae) == n_selector ||
+            throw(DimensionMismatch("selector_mae length $(length(selector_mae)) != $n_selector"))
+        length(selector_half_width) == n_selector ||
+            throw(DimensionMismatch("selector_half_width length $(length(selector_half_width)) != $n_selector"))
+        all(x -> isfinite(x) || isnan(x), selector_rmse) ||
+            throw(ArgumentError("selector RMSE values must be finite or NaN"))
+        all(x -> isfinite(x) || isnan(x), selector_mae) ||
+            throw(ArgumentError("selector MAE values must be finite or NaN"))
+        all(isfinite, selector_half_width) ||
+            throw(ArgumentError("selector interval half-widths must be finite"))
+        all(>=(0.0), selector_half_width) ||
+            throw(ArgumentError("selector interval half-widths must be nonnegative"))
+        selected_component in selector_names ||
+            throw(ArgumentError("selected_component must appear in selector_names"))
+        isfinite(Float64(guard_margin_nt)) && Float64(guard_margin_nt) >= 0 ||
+            throw(ArgumentError("guard_margin_nt must be finite and nonnegative"))
         return new(feature_names, feature_mean, feature_scale, coefficients,
-                   interval_scale, String(label))
+                   interval_scale, String(label), selector_names, selector_rmse,
+                   selector_mae, selector_half_width, selected_component,
+                   Float64(guard_margin_nt))
     end
 end
 
@@ -84,6 +123,13 @@ const DEFAULT_OPERATIONAL_V2_FEATURES = [
     :By_nt,
     :n_cm3,
     :Pdyn_npa,
+]
+
+const OPERATIONAL_V2_BASELINE_COLUMNS = Pair{Symbol,Symbol}[
+    :persistence => :persistence_dst_nt,
+    :burton => :burton_dst_nt,
+    :burton_full => :burton_full_dst_nt,
+    :obrien => :obrien_dst_nt,
 ]
 
 function default_operational_v2_calibration(;
@@ -136,6 +182,105 @@ function _quantile_sorted(v::Vector{Float64}, q::Real)
     return sorted[idx]
 end
 
+function _component_index(cal::OperationalV2Calibration, component::Symbol)
+    idx = findfirst(==(component), cal.selector_names)
+    idx === nothing && throw(ArgumentError("unknown v2 selector component: $component"))
+    return idx
+end
+
+function _selector_metric_columns(df::DataFrame)
+    out = Pair{Symbol,Symbol}[]
+    for spec in OPERATIONAL_V2_BASELINE_COLUMNS
+        String(last(spec)) in names(df) && push!(out, spec)
+    end
+    return out
+end
+
+function _candidate_selector_stats(clean::DataFrame, corrected::Vector{Float64},
+                                   interval_coverage::Real,
+                                   guard_margin_nt::Real)
+    obs = Float64.(clean.observation_dst_nt)
+    names_out = Symbol[:v2]
+    preds = [corrected]
+
+    for (component, col) in _selector_metric_columns(clean)
+        values = Float64.(clean[!, col])
+        all(isfinite, values) || continue
+        push!(names_out, component)
+        push!(preds, values)
+    end
+
+    rmse_vals = Float64[]
+    mae_vals = Float64[]
+    half_widths = Float64[]
+    for p in preds
+        residuals = obs .- p
+        push!(rmse_vals, sqrt(mean(residuals .^ 2)))
+        push!(mae_vals, mean(abs.(residuals)))
+        push!(half_widths, _quantile_sorted(abs.(collect(residuals)), interval_coverage))
+    end
+
+    best_idx = argmin(mae_vals)
+    selected_idx = if best_idx == 1 || mae_vals[best_idx] + Float64(guard_margin_nt) < mae_vals[1]
+        best_idx
+    else
+        1
+    end
+
+    return (
+        selector_names=names_out,
+        selector_rmse=rmse_vals,
+        selector_mae=mae_vals,
+        selector_half_width=half_widths,
+        selected_component=names_out[selected_idx],
+    )
+end
+
+function _component_value(baselines, component::Symbol)
+    baselines === nothing && throw(ArgumentError(
+        "v2 selector component $component requires baseline predictions"
+    ))
+    if baselines isa NamedTuple
+        haskey(baselines, component) || throw(ArgumentError(
+            "missing v2 selector baseline: $component"
+        ))
+        return Float64(getfield(baselines, component))
+    end
+    haskey(baselines, component) || throw(ArgumentError(
+        "missing v2 selector baseline: $component"
+    ))
+    return Float64(baselines[component])
+end
+
+function _selected_component_prediction(component::Symbol, corrected_center::Float64,
+                                        baselines)
+    component == :v2 && return corrected_center
+    value = _component_value(baselines, component)
+    isfinite(value) || throw(ArgumentError("v2 selector baseline $component is not finite"))
+    return value
+end
+
+function _join_symbols(v::Vector{Symbol})
+    return join(String.(v), ";")
+end
+
+function _join_floats(v::Vector{Float64})
+    return join(string.(v), ";")
+end
+
+function _split_symbols(s)
+    text = String(s)
+    isempty(text) && return Symbol[]
+    return Symbol.(split(text, ";"))
+end
+
+function _split_floats(s)
+    s isa Real && return Float64[Float64(s)]
+    text = String(s)
+    isempty(text) && return Float64[]
+    return parse.(Float64, split(text, ";"))
+end
+
 """
     fit_operational_v2_calibration(df; kwargs...)
 
@@ -149,10 +294,13 @@ function fit_operational_v2_calibration(df::DataFrame;
         ridge::Real=100.0,
         interval_coverage::Real=0.90,
         label::AbstractString="operational_v2",
+        guard_margin_nt::Real=0.5,
     )
     ridge >= 0 || throw(ArgumentError("ridge must be nonnegative"))
     0 < interval_coverage < 1 ||
         throw(ArgumentError("interval_coverage must lie in (0, 1)"))
+    isfinite(Float64(guard_margin_nt)) && Float64(guard_margin_nt) >= 0 ||
+        throw(ArgumentError("guard_margin_nt must be finite and nonnegative"))
     required = vcat(
         [:pred_dst_nt, :observation_dst_nt, :pred_dst_ci05_nt, :pred_dst_ci95_nt],
         feature_names,
@@ -182,6 +330,12 @@ function fit_operational_v2_calibration(df::DataFrame;
     ratios = abs.(Float64.(clean.observation_dst_nt) .- corrected) ./
              max.(half_width, eps(Float64))
     interval_scale = max(1.0, _quantile_sorted(collect(ratios), interval_coverage))
+    selector = _candidate_selector_stats(
+        clean,
+        collect(corrected),
+        interval_coverage,
+        guard_margin_nt,
+    )
 
     return OperationalV2Calibration(
         feature_names,
@@ -190,6 +344,12 @@ function fit_operational_v2_calibration(df::DataFrame;
         collect(β),
         interval_scale,
         label,
+        selector_names=selector.selector_names,
+        selector_rmse=selector.selector_rmse,
+        selector_mae=selector.selector_mae,
+        selector_half_width=selector.selector_half_width,
+        selected_component=selector.selected_component,
+        guard_margin_nt=guard_margin_nt,
     )
 end
 
@@ -210,17 +370,26 @@ end
     operational_v2_predict(cal, pred_dst, ci05, ci95, features)
 
 Apply a fitted v2 residual correction and interval inflation to a v1 Dst
-forecast. `features` must contain the calibration feature names.
+forecast. `features` must contain the calibration feature names. If the
+calibration selected a baseline component, pass `baselines` with matching
+component names such as `obrien` or `burton_full`.
 """
 function operational_v2_predict(cal::OperationalV2Calibration,
                                 pred_dst::Real,
                                 ci05::Real,
                                 ci95::Real,
-                                features::NamedTuple)
+                                features::NamedTuple;
+                                baselines=nothing)
     correction = operational_v2_correction(cal, features)
-    center = Float64(pred_dst) + correction
+    corrected_center = Float64(pred_dst) + correction
+    center = _selected_component_prediction(
+        cal.selected_component,
+        corrected_center,
+        baselines,
+    )
     half_width = abs(Float64(ci95) - Float64(ci05)) / 2
-    inflated = cal.interval_scale * half_width
+    selector_half_width = cal.selector_half_width[_component_index(cal, cal.selected_component)]
+    inflated = max(cal.interval_scale * half_width, selector_half_width)
     return (
         pred_dst=center,
         ci05_dst=center - inflated,
@@ -228,7 +397,23 @@ function operational_v2_predict(cal::OperationalV2Calibration,
         correction=correction,
         interval_scale=cal.interval_scale,
         label=cal.label,
+        selected_component=String(cal.selected_component),
+        selected_component_pred=center,
+        corrected_sindy_pred=corrected_center,
+        selector_half_width=selector_half_width,
     )
+end
+
+function _row_baselines(df::DataFrame, row_idx::Int)
+    baselines = Dict{Symbol,Float64}()
+    for (component, col) in OPERATIONAL_V2_BASELINE_COLUMNS
+        String(col) in names(df) || continue
+        value = df[row_idx, col]
+        if !ismissing(value)
+            baselines[component] = Float64(value)
+        end
+    end
+    return baselines
 end
 
 function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
@@ -243,6 +428,8 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
     v2_corr = Vector{Float64}(undef, nrow(out))
     v2_residual = Vector{Float64}(undef, nrow(out))
     v2_in_ci = Vector{Bool}(undef, nrow(out))
+    v2_component = Vector{String}(undef, nrow(out))
+    v2_component_pred = Vector{Float64}(undef, nrow(out))
 
     for i in 1:nrow(out)
         features = NamedTuple{Tuple(cal.feature_names)}(
@@ -254,6 +441,7 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
             Float64(out[i, :pred_dst_ci05_nt]),
             Float64(out[i, :pred_dst_ci95_nt]),
             features,
+            baselines=_row_baselines(out, i),
         )
         obs = Float64(out[i, :observation_dst_nt])
         v2_pred[i] = pred.pred_dst
@@ -263,6 +451,8 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
         v2_residual[i] = obs - pred.pred_dst
         v2_in_ci[i] = min(pred.ci05_dst, pred.ci95_dst) <= obs <=
                       max(pred.ci05_dst, pred.ci95_dst)
+        v2_component[i] = pred.selected_component
+        v2_component_pred[i] = pred.selected_component_pred
     end
 
     out[!, :v2_pred_dst_nt] = v2_pred
@@ -272,6 +462,8 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
     out[!, :v2_residual_dst_nt] = v2_residual
     out[!, :v2_observed_in_90ci] = v2_in_ci
     out[!, :v2_calibration_label] = fill(cal.label, nrow(out))
+    out[!, :v2_selected_component] = v2_component
+    out[!, :v2_selected_component_pred_nt] = v2_component_pred
     return out
 end
 
@@ -280,6 +472,10 @@ function write_operational_v2_calibration(path::String,
     dir = dirname(path)
     !isempty(dir) && mkpath(dir)
     rows = NamedTuple[]
+    selector_components = _join_symbols(cal.selector_names)
+    selector_rmse = _join_floats(cal.selector_rmse)
+    selector_mae = _join_floats(cal.selector_mae)
+    selector_half_width = _join_floats(cal.selector_half_width)
     push!(rows, (
         feature="intercept",
         feature_mean=0.0,
@@ -287,6 +483,12 @@ function write_operational_v2_calibration(path::String,
         coefficient=cal.coefficients[1],
         interval_scale=cal.interval_scale,
         label=cal.label,
+        selected_component=String(cal.selected_component),
+        guard_margin_nt=cal.guard_margin_nt,
+        selector_components=selector_components,
+        selector_rmse_nt=selector_rmse,
+        selector_mae_nt=selector_mae,
+        selector_half_width_nt=selector_half_width,
     ))
     for (j, name) in enumerate(cal.feature_names)
         push!(rows, (
@@ -296,6 +498,12 @@ function write_operational_v2_calibration(path::String,
             coefficient=cal.coefficients[j + 1],
             interval_scale=cal.interval_scale,
             label=cal.label,
+            selected_component=String(cal.selected_component),
+            guard_margin_nt=cal.guard_margin_nt,
+            selector_components=selector_components,
+            selector_rmse_nt=selector_rmse,
+            selector_mae_nt=selector_mae,
+            selector_half_width_nt=selector_half_width,
         ))
     end
     CSV.write(path, DataFrame(rows))
@@ -315,6 +523,18 @@ function read_operational_v2_calibration(path::String)
     coefficients = Float64.(df.coefficient)
     interval_scale = Float64(df.interval_scale[1])
     label = String(df.label[1])
+    selector_names = String(:selector_components) in names(df) ?
+        _split_symbols(df[1, :selector_components]) : Symbol[:v2]
+    selector_rmse = String(:selector_rmse_nt) in names(df) ?
+        _split_floats(df[1, :selector_rmse_nt]) : fill(NaN, length(selector_names))
+    selector_mae = String(:selector_mae_nt) in names(df) ?
+        _split_floats(df[1, :selector_mae_nt]) : fill(NaN, length(selector_names))
+    selector_half_width = String(:selector_half_width_nt) in names(df) ?
+        _split_floats(df[1, :selector_half_width_nt]) : zeros(length(selector_names))
+    selected_component = String(:selected_component) in names(df) ?
+        Symbol(String(df[1, :selected_component])) : :v2
+    guard_margin_nt = String(:guard_margin_nt) in names(df) ?
+        Float64(df[1, :guard_margin_nt]) : 0.0
     return OperationalV2Calibration(
         collect(feature_names),
         collect(feature_mean),
@@ -322,6 +542,12 @@ function read_operational_v2_calibration(path::String)
         collect(coefficients),
         interval_scale,
         label,
+        selector_names=collect(selector_names),
+        selector_rmse=collect(selector_rmse),
+        selector_mae=collect(selector_mae),
+        selector_half_width=collect(selector_half_width),
+        selected_component=selected_component,
+        guard_margin_nt=guard_margin_nt,
     )
 end
 

@@ -173,6 +173,7 @@ using Dates
         @test :v2_pred_dst_nt in propertynames(scored)
         @test maximum(abs.(scored.v2_residual_dst_nt)) < 1e-10
         @test all(scored.v2_observed_in_90ci)
+        @test all(scored.v2_selected_component .== "v2")
 
         mktempdir() do tmp
             path = joinpath(tmp, "v2_calibration.csv")
@@ -184,7 +185,85 @@ using Dates
             @test reread.coefficients ≈ cal.coefficients
             @test reread.interval_scale == cal.interval_scale
             @test reread.label == cal.label
+            @test reread.selector_names == cal.selector_names
+            @test reread.selector_rmse ≈ cal.selector_rmse
+            @test reread.selector_mae ≈ cal.selector_mae
+            @test reread.selector_half_width ≈ cal.selector_half_width
+            @test reread.selected_component == cal.selected_component
+            @test reread.guard_margin_nt == cal.guard_margin_nt
         end
+    end
+
+    @testset "A/D: Operational v2 guarded baseline selector" begin
+        n = 8
+        v1_pred = fill(-40.0, n)
+        observed = collect(-48.0:-1.0:-55.0)
+        obrien = observed .+ 0.2
+        df = DataFrame(
+            pred_dst_nt=v1_pred,
+            pred_dst_ci05_nt=v1_pred .- 3.0,
+            pred_dst_ci95_nt=v1_pred .+ 3.0,
+            observation_dst_nt=observed,
+            latest_dst_nt=fill(-42.0, n),
+            V_kms=fill(420.0, n),
+            Bz_nt=collect(-4.0:1.0:3.0),
+            By_nt=fill(1.0, n),
+            n_cm3=fill(5.0, n),
+            Pdyn_npa=fill(1.5, n),
+            persistence_dst_nt=fill(-42.0, n),
+            burton_dst_nt=fill(-43.0, n),
+            burton_full_dst_nt=fill(-44.0, n),
+            obrien_dst_nt=obrien,
+        )
+        cal = fit_operational_v2_calibration(
+            df;
+            ridge=1_000.0,
+            guard_margin_nt=0.5,
+            interval_coverage=0.90,
+            label="guarded_unit_test",
+        )
+        @test cal.selected_component == :obrien
+        @test :obrien in cal.selector_names
+        @test cal.selector_mae[findfirst(==(:obrien), cal.selector_names)] < cal.selector_mae[1]
+
+        pred = operational_v2_predict(
+            cal,
+            -40.0,
+            -43.0,
+            -37.0,
+            (
+                latest_dst_nt=-42.0,
+                V_kms=420.0,
+                Bz_nt=-1.0,
+                By_nt=1.0,
+                n_cm3=5.0,
+                Pdyn_npa=1.5,
+            );
+            baselines=(; persistence=-42.0, burton=-43.0, burton_full=-44.0, obrien=-52.5),
+        )
+        @test pred.pred_dst == -52.5
+        @test pred.selected_component == "obrien"
+        @test pred.ci05_dst < pred.pred_dst < pred.ci95_dst
+
+        @test_throws ArgumentError operational_v2_predict(
+            cal,
+            -40.0,
+            -43.0,
+            -37.0,
+            (
+                latest_dst_nt=-42.0,
+                V_kms=420.0,
+                Bz_nt=-1.0,
+                By_nt=1.0,
+                n_cm3=5.0,
+                Pdyn_npa=1.5,
+            ),
+        )
+
+        scored = score_operational_v2(df, cal)
+        @test all(scored.v2_selected_component .== "obrien")
+        @test scored.v2_pred_dst_nt == obrien
+        @test maximum(abs.(scored.v2_residual_dst_nt)) ≈ 0.2 atol=1e-12
     end
 
 end

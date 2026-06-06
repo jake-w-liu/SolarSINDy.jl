@@ -37,6 +37,7 @@ Base.@kwdef struct LiveVerifyConfig
     v2_train_fraction::Float64 = 0.70
     v2_ridge::Float64 = 100.0
     v2_interval_coverage::Float64 = 0.90
+    v2_selector_margin_nt::Float64 = 0.5
 end
 
 function _usage()
@@ -71,6 +72,8 @@ function _usage()
       --v2-train-fraction=N  Chronological fraction used to fit v2 calibration. Default: 0.70.
       --v2-ridge=N           Ridge penalty for v2 residual calibration. Default: 100.
       --v2-coverage=N        Target train coverage for v2 interval inflation. Default: 0.90.
+      --v2-selector-margin=N Minimum MAE gain needed before v2 selects a baseline
+                            instead of corrected SINDy. Default: 0.5 nT.
       --help                 Print this message.
     """
 end
@@ -97,6 +100,7 @@ function _parse_args(args)::LiveVerifyConfig
     v2_train_fraction = cfg.v2_train_fraction
     v2_ridge = cfg.v2_ridge
     v2_interval_coverage = cfg.v2_interval_coverage
+    v2_selector_margin_nt = cfg.v2_selector_margin_nt
 
     for arg in args
         if arg == "--help"
@@ -144,6 +148,8 @@ function _parse_args(args)::LiveVerifyConfig
             v2_ridge = parse(Float64, split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--v2-coverage=")
             v2_interval_coverage = parse(Float64, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--v2-selector-margin=")
+            v2_selector_margin_nt = parse(Float64, split(arg, "=", limit=2)[2])
         else
             error("Unknown argument: $arg\n$(_usage())")
         end
@@ -159,6 +165,8 @@ function _parse_args(args)::LiveVerifyConfig
     v2_ridge >= 0 || throw(ArgumentError("--v2-ridge must be nonnegative"))
     0 < v2_interval_coverage < 1 ||
         throw(ArgumentError("--v2-coverage must lie in (0, 1)"))
+    v2_selector_margin_nt >= 0 ||
+        throw(ArgumentError("--v2-selector-margin must be nonnegative"))
 
     return LiveVerifyConfig(;
         mode=mode,
@@ -175,6 +183,7 @@ function _parse_args(args)::LiveVerifyConfig
         v2_train_fraction=v2_train_fraction,
         v2_ridge=v2_ridge,
         v2_interval_coverage=v2_interval_coverage,
+        v2_selector_margin_nt=v2_selector_margin_nt,
     )
 end
 
@@ -374,7 +383,8 @@ function _select_model_prediction(model::Symbol, calibration,
                                   latest_dst::Real, drivers,
                                   v1_pred_dst::Real,
                                   v1_ci05_dst::Real,
-                                  v1_ci95_dst::Real)
+                                  v1_ci95_dst::Real;
+                                  baselines=nothing)
     if model == :v1
         return (
             model_version="v1",
@@ -387,6 +397,8 @@ function _select_model_prediction(model::Symbol, calibration,
             v2_correction=missing,
             v2_interval_scale=missing,
             v2_label=missing,
+            v2_selected_component=missing,
+            v2_selected_component_pred=missing,
         )
     elseif model == :v2
         calibration === nothing && error("v2 model requested without calibration")
@@ -396,6 +408,7 @@ function _select_model_prediction(model::Symbol, calibration,
             v1_ci05_dst,
             v1_ci95_dst,
             _v2_features(latest_dst, drivers),
+            baselines=baselines,
         )
         return (
             model_version="v2",
@@ -408,6 +421,8 @@ function _select_model_prediction(model::Symbol, calibration,
             v2_correction=v2.correction,
             v2_interval_scale=v2.interval_scale,
             v2_label=v2.label,
+            v2_selected_component=v2.selected_component,
+            v2_selected_component_pred=v2.selected_component_pred,
         )
     else
         error("Unsupported model: $model")
@@ -455,6 +470,12 @@ function _forecast_one_replay(anchor_time::DateTime, target_time::DateTime,
     v1_pred = _dst_from_dst_star(result.dst_predicted, drivers.Pdyn)
     v1_ci05 = _dst_from_dst_star(result.dst_ci_05, drivers.Pdyn)
     v1_ci95 = _dst_from_dst_star(result.dst_ci_95, drivers.Pdyn)
+    baseline_predictions = (
+        persistence=anchor_dst,
+        burton=_dst_from_dst_star(baselines.burton, drivers.Pdyn),
+        burton_full=_dst_from_dst_star(baselines.burton_full, drivers.Pdyn),
+        obrien=_dst_from_dst_star(baselines.obrien, drivers.Pdyn),
+    )
     selected = _select_model_prediction(
         model,
         calibration,
@@ -463,6 +484,7 @@ function _forecast_one_replay(anchor_time::DateTime, target_time::DateTime,
         v1_pred,
         v1_ci05,
         v1_ci95,
+        baselines=baseline_predictions,
     )
 
     return (
@@ -481,10 +503,12 @@ function _forecast_one_replay(anchor_time::DateTime, target_time::DateTime,
         v2_correction=selected.v2_correction,
         v2_interval_scale=selected.v2_interval_scale,
         v2_label=selected.v2_label,
-        persistence_dst=anchor_dst,
-        burton_dst=_dst_from_dst_star(baselines.burton, drivers.Pdyn),
-        burton_full_dst=_dst_from_dst_star(baselines.burton_full, drivers.Pdyn),
-        obrien_dst=_dst_from_dst_star(baselines.obrien, drivers.Pdyn),
+        v2_selected_component=selected.v2_selected_component,
+        v2_selected_component_pred=selected.v2_selected_component_pred,
+        persistence_dst=baseline_predictions.persistence,
+        burton_dst=baseline_predictions.burton,
+        burton_full_dst=baseline_predictions.burton_full,
+        obrien_dst=baseline_predictions.obrien,
     )
 end
 
@@ -542,6 +566,8 @@ function replay_recent_table(plasma::DataFrame, mag::DataFrame,
             v2_correction_dst_nt=forecast.v2_correction,
             v2_interval_scale=forecast.v2_interval_scale,
             v2_calibration_label=forecast.v2_label,
+            v2_selected_component=forecast.v2_selected_component,
+            v2_selected_component_pred_nt=forecast.v2_selected_component_pred,
             persistence_dst_nt=forecast.persistence_dst,
             persistence_residual_dst_nt=observed - forecast.persistence_dst,
             burton_dst_nt=forecast.burton_dst,
@@ -586,6 +612,7 @@ function write_markdown_table(path::String, df::DataFrame; limit::Int=24)
         :observed_in_90ci,
         :v1_pred_dst_nt,
         :v2_pred_dst_nt,
+        :v2_selected_component,
         :persistence_dst_nt,
         :burton_dst_nt,
         :obrien_dst_nt,
@@ -677,6 +704,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
         train;
         ridge=cfg.v2_ridge,
         interval_coverage=cfg.v2_interval_coverage,
+        guard_margin_nt=cfg.v2_selector_margin_nt,
         label="operational_v2_ridge$(cfg.v2_ridge)_n$(nrow(train))",
     )
     write_operational_v2_calibration(cfg.v2_calibration_path, cal)
@@ -713,6 +741,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
         Float64.(test_scored.observation_dst_nt),
     )
     println("V2 interval scale: $(round(cal.interval_scale; digits=3))")
+    println("V2 selected component: $(cal.selected_component)")
     return cal
 end
 
@@ -787,6 +816,16 @@ function issue_forecast(cfg::LiveVerifyConfig)
     v1_pred_dst = _dst_from_dst_star(result.dst_predicted, used_drivers.Pdyn)
     v1_ci05_dst = _dst_from_dst_star(result.dst_ci_05, used_drivers.Pdyn)
     v1_ci95_dst = _dst_from_dst_star(result.dst_ci_95, used_drivers.Pdyn)
+    persistence_dst = latest_dst
+    burton_dst = _dst_from_dst_star(burton_star, used_drivers.Pdyn)
+    burton_full_dst = _dst_from_dst_star(burton_full_star, used_drivers.Pdyn)
+    obrien_dst = _dst_from_dst_star(obrien_star, used_drivers.Pdyn)
+    baseline_predictions = (
+        persistence=persistence_dst,
+        burton=burton_dst,
+        burton_full=burton_full_dst,
+        obrien=obrien_dst,
+    )
     selected = _select_model_prediction(
         cfg.model,
         calibration,
@@ -795,14 +834,11 @@ function issue_forecast(cfg::LiveVerifyConfig)
         v1_pred_dst,
         v1_ci05_dst,
         v1_ci95_dst,
+        baselines=baseline_predictions,
     )
     pred_dst = selected.pred_dst
     ci05_dst = selected.ci05_dst
     ci95_dst = selected.ci95_dst
-    persistence_dst = latest_dst
-    burton_dst = _dst_from_dst_star(burton_star, used_drivers.Pdyn)
-    burton_full_dst = _dst_from_dst_star(burton_full_star, used_drivers.Pdyn)
-    obrien_dst = _dst_from_dst_star(obrien_star, used_drivers.Pdyn)
     model_steps = Int((target_time - latest_dst_time) / Hour(1))
     wall_horizon = (target_time - issue_time) / Hour(1)
 
@@ -836,6 +872,8 @@ function issue_forecast(cfg::LiveVerifyConfig)
         v2_correction_dst_nt=[selected.v2_correction],
         v2_interval_scale=[selected.v2_interval_scale],
         v2_calibration_label=[selected.v2_label],
+        v2_selected_component=[selected.v2_selected_component],
+        v2_selected_component_pred_nt=[selected.v2_selected_component_pred],
         persistence_dst_nt=[persistence_dst],
         burton_dst_nt=[burton_dst],
         burton_full_dst_nt=[burton_full_dst],
@@ -866,7 +904,8 @@ function issue_forecast(cfg::LiveVerifyConfig)
         println(
             "SINDy-v1 Dst: $(round(v1_pred_dst; digits=2)) nT; " *
             "v2 correction=$(round(selected.v2_correction; digits=2)) nT; " *
-            "interval scale=$(round(selected.v2_interval_scale; digits=2))"
+            "interval scale=$(round(selected.v2_interval_scale; digits=2)); " *
+            "component=$(selected.v2_selected_component)"
         )
     end
     println(
@@ -1153,8 +1192,8 @@ function write_live_comparison_report(log_path::String, report_path::String)
     push!(lines, "")
     push!(lines, "## Verified Rows Used")
     push!(lines, "")
-    push!(lines, "| issue UTC | target UTC | model | lead h | observed | selected pred | residual obs-pred | abs error | inside 90% CI | v1 pred | persistence | Burton | OBrien |")
-    push!(lines, "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |")
+    push!(lines, "| issue UTC | target UTC | model | component | lead h | observed | selected pred | residual obs-pred | abs error | inside 90% CI | v1 pred | persistence | Burton | OBrien |")
+    push!(lines, "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |")
     for row_idx in valid_verified
         observed = _optional_float(df, row_idx, :observation_dst_nt)
         pred = _optional_float(df, row_idx, :pred_dst_nt)
@@ -1166,10 +1205,13 @@ function write_live_comparison_report(log_path::String, report_path::String)
         end
         in_ci = String(:observed_in_90ci) in names(df) ? df[row_idx, :observed_in_90ci] : missing
         model_version = _row_model_version(df, row_idx)
+        component = String(:v2_selected_component) in names(df) ?
+            df[row_idx, :v2_selected_component] : missing
         push!(lines,
             "| $(_fmt_text(df[row_idx, :issue_time_utc])) | " *
             "$(_fmt_text(df[row_idx, :target_time_utc])) | " *
             "$(_fmt_text(model_version)) | " *
+            "$(_fmt_text(component)) | " *
             "$(_fmt2(lead)) | $(_fmt2(observed)) | $(_fmt2(pred)) | " *
             "$(_fmt2(residual)) | $(_fmt2(abs_error)) | $(_fmt_bool(in_ci)) | " *
             "$(_fmt2(_prediction_value(df, row_idx, :v1_pred_dst_nt))) | " *
@@ -1198,14 +1240,17 @@ function write_live_comparison_report(log_path::String, report_path::String)
         push!(lines, "")
         push!(lines, "## Pending Rows")
         push!(lines, "")
-        push!(lines, "| issue UTC | target UTC | model | selected pred | CI05 | CI95 |")
-        push!(lines, "| --- | --- | --- | ---: | ---: | ---: |")
+        push!(lines, "| issue UTC | target UTC | model | component | selected pred | CI05 | CI95 |")
+        push!(lines, "| --- | --- | --- | --- | ---: | ---: | ---: |")
         for row_idx in pending
             model_version = _row_model_version(df, row_idx)
+            component = String(:v2_selected_component) in names(df) ?
+                df[row_idx, :v2_selected_component] : missing
             push!(lines,
                 "| $(_fmt_text(df[row_idx, :issue_time_utc])) | " *
                 "$(_fmt_text(df[row_idx, :target_time_utc])) | " *
                 "$(_fmt_text(model_version)) | " *
+                "$(_fmt_text(component)) | " *
                 "$(_fmt2(_optional_float(df, row_idx, :pred_dst_nt))) | " *
                 "$(_fmt2(_optional_float(df, row_idx, :pred_dst_ci05_nt))) | " *
                 "$(_fmt2(_optional_float(df, row_idx, :pred_dst_ci95_nt))) |"

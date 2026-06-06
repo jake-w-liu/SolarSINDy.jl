@@ -29,6 +29,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             "--v2-train-fraction=0.6",
             "--v2-ridge=10",
             "--v2-coverage=0.8",
+            "--v2-selector-margin=1.25",
         ])
         @test cfg.mode == :fit_v2_calibration
         @test cfg.model == :v2
@@ -38,6 +39,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         @test cfg.v2_train_fraction == 0.6
         @test cfg.v2_ridge == 10.0
         @test cfg.v2_interval_coverage == 0.8
+        @test cfg.v2_selector_margin_nt == 1.25
     end
 
     @testset "A/D: append preserves old log rows while adding baseline columns" begin
@@ -105,6 +107,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
                 observed_in_90ci=Union{Missing,Bool}[false, false, missing],
                 v1_pred_dst_nt=[-40.63, -40.42, -36.0],
                 v2_pred_dst_nt=[-39.38, -39.12, -35.0],
+                v2_selected_component=["v2", "v2", "v2"],
                 persistence_dst_nt=[-44.0, -44.0, -34.0],
                 burton_dst_nt=[-34.30, -34.20, -33.0],
                 burton_full_dst_nt=[-34.30, -34.20, -33.0],
@@ -123,6 +126,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test occursin("| Operational-v2 | 2 |", text)
             @test occursin("## Pending Rows", text)
             @test occursin("2026-06-06T10:00:00", text)
+            @test occursin("| v2 |", text)
             @test occursin("## Worst Selected-Model Misses", text)
             @test !occursin("| Operational-v2 | 3 |", text)
         end
@@ -261,6 +265,8 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         @test df_v2.pred_dst_nt == df_v2.v2_pred_dst_nt
         @test df_v2.pred_dst_nt == df_v2.v1_pred_dst_nt
         @test all(df_v2.v2_correction_dst_nt .== 0.0)
+        @test all(df_v2.v2_selected_component .== "v2")
+        @test df_v2.v2_selected_component_pred_nt == df_v2.v2_pred_dst_nt
 
         mktempdir() do tmp
             md_path = joinpath(tmp, "replay.md")
@@ -308,9 +314,11 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             scored_path = replace(cal_path, r"\.csv$" => "_scored.csv")
             @test isfile(scored_path)
             @test cal.label == "operational_v2_ridge0.0_n8"
+            @test cal.selected_component == :v2
             reread = read_operational_v2_calibration(cal_path)
             scored = CSV.read(scored_path, DataFrame)
             @test maximum(abs.(scored.v2_residual_dst_nt)) < 1e-8
+            @test all(scored.v2_selected_component .== "v2")
             pred_v2 = operational_v2_predict(
                 reread,
                 pred[end],

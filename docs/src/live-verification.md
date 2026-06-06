@@ -85,13 +85,21 @@ ridge residual correction to the v1 forecast and inflates the prediction
 interval. The correction uses only issue-time fields: latest Dst, solar-wind
 speed, IMF components, density, and dynamic pressure.
 
+Current v2 calibration is guarded and baseline-aware. When replay or live-log
+baseline columns are available, the calibration stores skill estimates for
+corrected SINDy-v2, persistence, Burton, BurtonFull, and O'Brien--McPherron. The
+issued v2 forecast selects a baseline only when that component beats corrected
+SINDy by the configured MAE margin on the calibration rows. The log records the
+choice in `v2_selected_component`.
+
 Fit the calibration from a prior replay or locked live log:
 
 ```bash
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --fit-v2-calibration \
   --table=live_forecasts/live_replay_144h.csv \
-  --v2-calibration=live_forecasts/operational_v2_calibration.csv
+  --v2-calibration=live_forecasts/operational_v2_calibration.csv \
+  --v2-selector-margin=0.5
 ```
 
 Then run a calibrated replay or live issue:
