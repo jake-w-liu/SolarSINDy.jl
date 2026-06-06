@@ -10,7 +10,61 @@ Stores candidate function library for SINDy discovery.
 struct CandidateLibrary
     names::Vector{String}
     funcs::Vector{Function}  # Each func: Dict -> Vector{Float64}
+    term_codes::Vector{UInt8}
 end
+
+CandidateLibrary(names::Vector{String}, funcs::Vector{Function}) =
+    CandidateLibrary(names, funcs, _term_codes(names))
+
+const TERM_FALLBACK = UInt8(0)
+const TERM_ONE = UInt8(1)
+const TERM_V = UInt8(2)
+const TERM_BS = UInt8(3)
+const TERM_N = UInt8(4)
+const TERM_PDYN = UInt8(5)
+const TERM_DST_STAR = UInt8(6)
+const TERM_V2 = UInt8(7)
+const TERM_BS2 = UInt8(8)
+const TERM_N2 = UInt8(9)
+const TERM_V_BS = UInt8(10)
+const TERM_N_V = UInt8(11)
+const TERM_N_BS = UInt8(12)
+const TERM_PDYN_BS = UInt8(13)
+const TERM_N_V_BS = UInt8(14)
+const TERM_N_V2 = UInt8(15)
+const TERM_SIN_HALF = UInt8(16)
+const TERM_SIN_HALF2 = UInt8(17)
+const TERM_SIN_HALF4 = UInt8(18)
+const TERM_SIN_HALF_8_3 = UInt8(19)
+const TERM_V_SIN_HALF2 = UInt8(20)
+const TERM_NEWELL = UInt8(21)
+
+function _term_code(name::String)
+    return name == "1" ? TERM_ONE :
+           name == "V" ? TERM_V :
+           name == "Bs" ? TERM_BS :
+           name == "n" ? TERM_N :
+           name == "Pdyn" ? TERM_PDYN :
+           name == "Dst_star" ? TERM_DST_STAR :
+           name == "V^2" ? TERM_V2 :
+           name == "Bs^2" ? TERM_BS2 :
+           name == "n^2" ? TERM_N2 :
+           name == "V*Bs" ? TERM_V_BS :
+           name == "n*V" ? TERM_N_V :
+           name == "n*Bs" ? TERM_N_BS :
+           name == "Pdyn*Bs" ? TERM_PDYN_BS :
+           name == "n*V*Bs" ? TERM_N_V_BS :
+           name == "n*V^2" ? TERM_N_V2 :
+           name == "sin(θ_c/2)" ? TERM_SIN_HALF :
+           name == "sin²(θ_c/2)" ? TERM_SIN_HALF2 :
+           name == "sin⁴(θ_c/2)" ? TERM_SIN_HALF4 :
+           name == "sin^(8/3)(θ_c/2)" ? TERM_SIN_HALF_8_3 :
+           name == "V*sin²(θ_c/2)" ? TERM_V_SIN_HALF2 :
+           name == "Newell_d_Φ" ? TERM_NEWELL :
+           TERM_FALLBACK
+end
+
+_term_codes(names::Vector{String}) = [_term_code(name) for name in names]
 
 function Base.length(lib::CandidateLibrary)
     return length(lib.names)

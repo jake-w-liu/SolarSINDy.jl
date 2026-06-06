@@ -71,9 +71,12 @@ metrics_summary
 ```@docs
 ForecastState
 ForecastResult
+OperationalV2Calibration
 init_forecast
 step_forecast!
 forecast_ahead
+fit_operational_v2_calibration
+operational_v2_predict
 StormSeverity
 Alarm
 AlarmConfig

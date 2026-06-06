@@ -46,7 +46,10 @@ Available modes:
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --issue
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --verify-pending
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --backfill-baselines
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --replay-recent
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --fit-v2-calibration
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --summary
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --comparison-report
 ```
 
 Use `--poll-seconds=N`, `--timeout-hours=N`, `--horizon-hours=N`, and
@@ -55,6 +58,56 @@ Use `--poll-seconds=N`, `--timeout-hours=N`, `--horizon-hours=N`, and
 Use `--backfill-baselines` after schema changes to fill baseline forecasts and
 residuals for older rows that already contain locked SINDy predictions and live
 driver values.
+
+Use `--replay-recent --replay-hours=N` to build a longer predicted-versus-
+observed comparison table from the recent live feeds. The replay is causal: each
+row anchors on the observed Dst at the issue hour, persists the previous
+complete solar-wind hour into the one-hour-ahead target, and compares the
+prediction with the already-published target Dst. This provides more rows for
+diagnostics, but it is not a substitute for locked forecasts that were issued
+before observations arrived.
+
+Use `--comparison-report` after `--verify-pending` to create the standard
+locked-live report:
+
+```bash
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
+  --comparison-report \
+  --log=live_forecasts/live_forecast_log.csv \
+  --report=live_forecasts/live_comparison_report.md
+```
+
+## Operational v2 Calibration
+
+The default live model is `--model=v1`, which preserves the paper model path.
+`--model=v2` enables an experimental operational wrapper that applies a causal
+ridge residual correction to the v1 forecast and inflates the prediction
+interval. The correction uses only issue-time fields: latest Dst, solar-wind
+speed, IMF components, density, and dynamic pressure.
+
+Fit the calibration from a prior replay or locked live log:
+
+```bash
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
+  --fit-v2-calibration \
+  --table=live_forecasts/live_replay_144h.csv \
+  --v2-calibration=live_forecasts/operational_v2_calibration.csv
+```
+
+Then run a calibrated replay or live issue:
+
+```bash
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
+  --replay-recent \
+  --model=v2 \
+  --v2-calibration=live_forecasts/operational_v2_calibration.csv \
+  --replay-hours=144 \
+  --table=live_forecasts/live_replay_v2_144h.csv
+```
+
+The v2 calibration is not evidence of industrial readiness by itself. It must be
+scored chronologically against held-out rows and then accumulated through locked
+live forecasts exactly like v1.
 
 ## Interpretation
 

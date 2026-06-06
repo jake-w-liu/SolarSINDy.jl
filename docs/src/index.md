@@ -75,4 +75,4 @@ The package currently has deterministic automated tests for:
 - OMNI parsing, fill-value replacement, cleaning, and storm catalog extraction
 - realtime hourly aggregation and forecast initialization
 
-The current local suite result is `157/157` passing tests.
+The current local suite result is `236/236` passing tests.

@@ -19,6 +19,27 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
               DateTime(2026, 6, 6, 5)
     end
 
+    @testset "D: argument parser accepts v2 workflow options" begin
+        cfg = _parse_args([
+            "--fit-v2-calibration",
+            "--model=v2",
+            "--table=/tmp/replay.csv",
+            "--report=/tmp/live_report.md",
+            "--v2-calibration=/tmp/v2.csv",
+            "--v2-train-fraction=0.6",
+            "--v2-ridge=10",
+            "--v2-coverage=0.8",
+        ])
+        @test cfg.mode == :fit_v2_calibration
+        @test cfg.model == :v2
+        @test cfg.table_path == "/tmp/replay.csv"
+        @test cfg.report_path == "/tmp/live_report.md"
+        @test cfg.v2_calibration_path == "/tmp/v2.csv"
+        @test cfg.v2_train_fraction == 0.6
+        @test cfg.v2_ridge == 10.0
+        @test cfg.v2_interval_coverage == 0.8
+    end
+
     @testset "A/D: append preserves old log rows while adding baseline columns" begin
         mktempdir() do tmp
             log_path = joinpath(tmp, "live_forecast_log.csv")
@@ -56,6 +77,54 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test :obrien_dst_nt in propertynames(df)
             @test ismissing(df.obrien_dst_nt[1])
             @test df.obrien_dst_nt[2] == -46.0
+        end
+    end
+
+    @testset "A/D: comparison report uses verified rows and separates pending rows" begin
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "live_forecast_log.csv")
+            report_path = joinpath(tmp, "comparison.md")
+            log = DataFrame(
+                issue_time_utc=[
+                    "2026-06-06T07:06:43.957",
+                    "2026-06-06T07:23:05.548",
+                    "2026-06-06T09:15:00",
+                ],
+                target_time_utc=[
+                    "2026-06-06T08:00:00",
+                    "2026-06-06T08:00:00",
+                    "2026-06-06T10:00:00",
+                ],
+                model_version=["v2", "v2", "v2"],
+                wall_clock_lead_hours=[0.89, 0.62, 0.75],
+                pred_dst_nt=[-39.38, -39.12, -35.0],
+                pred_dst_ci05_nt=[-44.94, -42.23, -40.0],
+                pred_dst_ci95_nt=[-33.82, -36.01, -30.0],
+                observation_dst_nt=Union{Missing,Float64}[-33.0, -33.0, missing],
+                residual_dst_nt=Union{Missing,Float64}[6.38, 6.12, missing],
+                observed_in_90ci=Union{Missing,Bool}[false, false, missing],
+                v1_pred_dst_nt=[-40.63, -40.42, -36.0],
+                v2_pred_dst_nt=[-39.38, -39.12, -35.0],
+                persistence_dst_nt=[-44.0, -44.0, -34.0],
+                burton_dst_nt=[-34.30, -34.20, -33.0],
+                burton_full_dst_nt=[-34.30, -34.20, -33.0],
+                obrien_dst_nt=[-39.91, -39.81, -35.0],
+            )
+            CSV.write(log_path, log)
+
+            out = write_live_comparison_report(log_path, report_path)
+            text = read(report_path, String)
+
+            @test out == report_path
+            @test occursin("Verified rows used: 2", text)
+            @test occursin("Invalid verified rows excluded: 0", text)
+            @test occursin("Pending rows: 1", text)
+            @test occursin("## Aggregate Metrics", text)
+            @test occursin("| Operational-v2 | 2 |", text)
+            @test occursin("## Pending Rows", text)
+            @test occursin("2026-06-06T10:00:00", text)
+            @test occursin("## Worst Selected-Model Misses", text)
+            @test !occursin("| Operational-v2 | 3 |", text)
         end
     end
 
@@ -141,6 +210,122 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test df.burton_residual_dst_nt[1] ≈ -63.0 - df.burton_dst_nt[1] atol=1e-12
             @test df.burton_full_residual_dst_nt[1] ≈ -63.0 - df.burton_full_dst_nt[1] atol=1e-12
             @test df.obrien_residual_dst_nt[1] ≈ -63.0 - df.obrien_dst_nt[1] atol=1e-12
+        end
+    end
+
+    @testset "A/D: replay_recent_table builds causal predicted-vs-observed rows" begin
+        t0 = DateTime(2026, 6, 6, 0)
+        times = collect(t0:Hour(1):t0 + Hour(4))
+        plasma = DataFrame(
+            time_tag=times,
+            density=[4.0, 4.2, 4.4, 4.6, 4.8],
+            speed=[410.0, 420.0, 430.0, 440.0, 450.0],
+            temperature=fill(100_000.0, length(times)),
+        )
+        mag = DataFrame(
+            time_tag=times,
+            bx_gsm=zeros(length(times)),
+            by_gsm=[1.0, 1.1, 1.2, 1.3, 1.4],
+            bz_gsm=[-1.0, -1.2, -1.4, -1.6, -1.8],
+            bt=[1.4, 1.6, 1.8, 2.0, 2.2],
+        )
+        dst_vals = [-20.0, -21.0, -23.0, -22.0, -24.0]
+
+        df = replay_recent_table(plasma, mag, times, dst_vals; replay_hours=24)
+
+        @test nrow(df) == 3
+        @test all(df.model_version .== "v1")
+        @test df.issue_time_utc[1] == string(t0 + Hour(1))
+        @test df.source_driver_start_utc[1] == string(t0)
+        @test df.source_driver_end_utc[1] == df.issue_time_utc[1]
+        @test df.target_time_utc[1] == string(t0 + Hour(2))
+        @test all(df.target_time_utc .> df.issue_time_utc)
+        @test all(isfinite, df.pred_dst_nt)
+        @test df.pred_dst_nt == df.v1_pred_dst_nt
+        @test all(ismissing, df.v2_pred_dst_nt)
+        @test all(isfinite, df.obrien_dst_nt)
+        @test df.residual_dst_nt[1] ≈ df.observation_dst_nt[1] - df.pred_dst_nt[1] atol=1e-12
+        @test df.persistence_residual_dst_nt[1] ≈ df.observation_dst_nt[1] - df.persistence_dst_nt[1] atol=1e-12
+
+        cal = default_operational_v2_calibration()
+        df_v2 = replay_recent_table(
+            plasma,
+            mag,
+            times,
+            dst_vals;
+            replay_hours=24,
+            model=:v2,
+            calibration=cal,
+        )
+        @test all(df_v2.model_version .== "v2")
+        @test df_v2.pred_dst_nt == df_v2.v2_pred_dst_nt
+        @test df_v2.pred_dst_nt == df_v2.v1_pred_dst_nt
+        @test all(df_v2.v2_correction_dst_nt .== 0.0)
+
+        mktempdir() do tmp
+            md_path = joinpath(tmp, "replay.md")
+            write_markdown_table(md_path, df; limit=2)
+            text = read(md_path, String)
+            @test occursin("target_time_utc", text)
+            @test count(==('\n'), text) == 4
+        end
+    end
+
+    @testset "A/D: fit_v2_calibration! writes calibration and scored replay rows" begin
+        mktempdir() do tmp
+            table_path = joinpath(tmp, "replay.csv")
+            cal_path = joinpath(tmp, "v2_calibration.csv")
+            pred = collect(-20.0:1.0:-11.0)
+            bz = collect(-4.0:1.0:5.0)
+            observed = pred .+ 2.0 .+ 0.5 .* bz
+            replay = DataFrame(
+                issue_time_utc=[string(DateTime(2026, 1, 1) + Hour(i)) for i in 1:length(pred)],
+                pred_dst_nt=pred .+ 20.0,
+                pred_dst_ci05_nt=pred .+ 17.0,
+                pred_dst_ci95_nt=pred .+ 23.0,
+                observation_dst_nt=observed,
+                v1_pred_dst_nt=pred,
+                v1_pred_dst_ci05_nt=pred .- 3.0,
+                v1_pred_dst_ci95_nt=pred .+ 3.0,
+                latest_dst_nt=pred .- 1.0,
+                V_kms=fill(420.0, length(pred)),
+                Bz_nt=bz,
+                By_nt=fill(1.0, length(pred)),
+                n_cm3=fill(5.0, length(pred)),
+                Pdyn_npa=fill(1.5, length(pred)),
+            )
+            CSV.write(table_path, replay)
+
+            cfg = LiveVerifyConfig(;
+                mode=:fit_v2_calibration,
+                table_path=table_path,
+                v2_calibration_path=cal_path,
+                v2_train_fraction=0.8,
+                v2_ridge=0.0,
+            )
+            cal = fit_v2_calibration!(cfg)
+            @test isfile(cal_path)
+            scored_path = replace(cal_path, r"\.csv$" => "_scored.csv")
+            @test isfile(scored_path)
+            @test cal.label == "operational_v2_ridge0.0_n8"
+            reread = read_operational_v2_calibration(cal_path)
+            scored = CSV.read(scored_path, DataFrame)
+            @test maximum(abs.(scored.v2_residual_dst_nt)) < 1e-8
+            pred_v2 = operational_v2_predict(
+                reread,
+                pred[end],
+                pred[end] - 3.0,
+                pred[end] + 3.0,
+                (
+                    latest_dst_nt=pred[end] - 1.0,
+                    V_kms=420.0,
+                    Bz_nt=bz[end],
+                    By_nt=1.0,
+                    n_cm3=5.0,
+                    Pdyn_npa=1.5,
+                ),
+            )
+            @test pred_v2.pred_dst ≈ observed[end]
         end
     end
 end

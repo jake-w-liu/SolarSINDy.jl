@@ -3,40 +3,33 @@ using HTTP
 @testset "Realtime And Monitor" begin
 
     @testset "A/B: fetch_realtime_solar_wind performs hourly averaging and interpolation" begin
-        @eval SolarSINDy begin
-            function fetch_swpc_plasma(; url::String=SWPC_PLASMA_URL)
-                DataFrame(
-                    time_tag = [
-                        DateTime(2026, 1, 1, 0, 0, 0),
-                        DateTime(2026, 1, 1, 0, 30, 0),
-                        DateTime(2026, 1, 1, 2, 15, 0),
-                        DateTime(2026, 1, 1, 2, 45, 0),
-                        DateTime(2026, 1, 1, 3, 0, 0),
-                    ],
-                    density = [5.0, 7.0, 9.0, 11.0, 11.0],
-                    speed = [400.0, 420.0, 440.0, 460.0, 460.0],
-                    temperature = [1.0e5, 1.1e5, 1.2e5, 1.3e5, 1.3e5],
-                )
-            end
+        plasma = DataFrame(
+            time_tag = [
+                DateTime(2026, 1, 1, 0, 0, 0),
+                DateTime(2026, 1, 1, 0, 30, 0),
+                DateTime(2026, 1, 1, 2, 15, 0),
+                DateTime(2026, 1, 1, 2, 45, 0),
+                DateTime(2026, 1, 1, 3, 0, 0),
+            ],
+            density = [5.0, 7.0, 9.0, 11.0, 11.0],
+            speed = [400.0, 420.0, 440.0, 460.0, 460.0],
+            temperature = [1.0e5, 1.1e5, 1.2e5, 1.3e5, 1.3e5],
+        )
+        mag = DataFrame(
+            time_tag = [
+                DateTime(2026, 1, 1, 0, 0, 0),
+                DateTime(2026, 1, 1, 0, 30, 0),
+                DateTime(2026, 1, 1, 2, 15, 0),
+                DateTime(2026, 1, 1, 2, 45, 0),
+                DateTime(2026, 1, 1, 3, 0, 0),
+            ],
+            bx_gsm = [1.0, 1.0, 1.0, 1.0, 1.0],
+            by_gsm = [2.0, 4.0, 8.0, 10.0, 10.0],
+            bz_gsm = [-3.0, -5.0, -7.0, -9.0, -9.0],
+            bt = [3.7, 6.4, 10.7, 13.5, 13.5],
+        )
 
-            function fetch_swpc_mag(; url::String=SWPC_MAG_URL)
-                DataFrame(
-                    time_tag = [
-                        DateTime(2026, 1, 1, 0, 0, 0),
-                        DateTime(2026, 1, 1, 0, 30, 0),
-                        DateTime(2026, 1, 1, 2, 15, 0),
-                        DateTime(2026, 1, 1, 2, 45, 0),
-                        DateTime(2026, 1, 1, 3, 0, 0),
-                    ],
-                    bx_gsm = [1.0, 1.0, 1.0, 1.0, 1.0],
-                    by_gsm = [2.0, 4.0, 8.0, 10.0, 10.0],
-                    bz_gsm = [-3.0, -5.0, -7.0, -9.0, -9.0],
-                    bt = [0.0, 0.0, 0.0, 0.0, 0.0],
-                )
-            end
-        end
-
-        swd, tags = fetch_realtime_solar_wind(hours=3)
+        swd, tags = fetch_realtime_solar_wind(hours=3; plasma=plasma, mag=mag)
 
         @test length(tags) == 3
         @test swd.t == [0.0, 1.0, 2.0]
@@ -50,6 +43,41 @@ using HTTP
         @test swd.V[3] ≈ 450.0 atol=1e-12
         @test swd.Pdyn[1] ≈ 1.6726e-6 * 6.0 * 410.0^2 atol=1e-12
         @test all(isnan, swd.Dst_star)
+    end
+
+    @testset "A/D: SWPC parsers retry truncated JSON and preserve magnetic Bt" begin
+        plasma_calls = Ref(0)
+        function flaky_plasma_get(url; kwargs...)
+            plasma_calls[] += 1
+            if plasma_calls[] == 1
+                return (; status=200, body="""[["time_tag",""")
+            end
+            return (; status=200, body="""
+                [["time_tag","density","speed","temperature"],
+                 ["2026-01-01 00:00:00.000","5.5","610.0","500000"]]
+                """)
+        end
+
+        plasma_df = fetch_swpc_plasma(;
+            http_get=flaky_plasma_get,
+            max_retries=2,
+            retry_delay_sec=0,
+        )
+        @test plasma_calls[] == 2
+        @test plasma_df.speed == [610.0]
+        @test plasma_df.density == [5.5]
+
+        function mag_get(url; kwargs...)
+            return (; status=200, body="""
+                [["time_tag","bx_gsm","by_gsm","bz_gsm","lon_gsm","lat_gsm","bt"],
+                 ["2026-01-01 00:00:00.000","1.0","2.0","-8.0","123.0","77.0","8.31"]]
+                """)
+        end
+
+        mag_df = fetch_swpc_mag(; http_get=mag_get)
+        @test mag_df.bz_gsm == [-8.0]
+        @test mag_df.bt == [8.31]
+        @test mag_df.bt != [77.0]  # Regression guard: column 6 is lat_gsm, not bt.
     end
 
     @testset "A/D: init_forecast maps coefficient CSVs into deterministic state" begin

@@ -1,5 +1,7 @@
 # Tests for forecast.jl, alarm.jl, and untested baselines/sindy functions
 
+using CSV
+using DataFrames
 using Dates
 
 @testset "Forecast Module" begin
@@ -31,15 +33,12 @@ using Dates
 
         # Hand calculation: dDst/dt = -100 × (-1/7.7) = +12.99 nT/hr
         # Dst_next = -100 + 1 × 12.99 = -87.01 nT
-        # atol=0.5 because library also has constant term (=0 coeff) and other
-        # terms that are zero but get evaluated — exact match depends on all
-        # library terms being zero. With only Dst_star active, should be close.
         @test isapprox(result.dst_predicted, -100.0 + (-100.0 * (-1.0/7.7)),
-                       atol=0.01)  # Forward Euler with only decay term
+                       atol=1e-12)  # Forward Euler with only decay term
 
         # Since all ensemble members are identical, CI should be very tight
-        @test isapprox(result.dst_ci_05, result.dst_predicted, atol=0.1)
-        @test isapprox(result.dst_ci_95, result.dst_predicted, atol=0.1)
+        @test isapprox(result.dst_ci_05, result.dst_predicted, atol=1e-12)
+        @test isapprox(result.dst_ci_95, result.dst_predicted, atol=1e-12)
     end
 
     @testset "B: Properties — forecast state anchoring" begin
@@ -127,6 +126,65 @@ using Dates
         # So Dst_next = 0 + 1 × (-200) = -200, not -20000
         @test r.dst_predicted >= -200.0  # clamped
         @test r.dst_predicted <= 50.0    # within state bounds
+    end
+
+    @testset "A/D: Operational v2 calibration" begin
+        cal0 = default_operational_v2_calibration(;
+            feature_names=[:latest_dst_nt],
+            interval_scale=2.0,
+        )
+        pred0 = operational_v2_predict(
+            cal0,
+            -10.0,
+            -12.0,
+            -8.0,
+            (; latest_dst_nt=-10.0),
+        )
+        @test pred0.pred_dst == -10.0
+        @test pred0.ci05_dst == -14.0
+        @test pred0.ci95_dst == -6.0
+        @test pred0.correction == 0.0
+
+        # Independent oracle: observations are exactly pred + 3 + 2*Bz.
+        # Ridge-free residual calibration with a single feature should recover
+        # that affine law and make scored residuals numerically zero.
+        bz = [-2.0, -1.0, 0.0, 1.0, 2.0, 3.0]
+        base_pred = [-20.0, -18.0, -16.0, -14.0, -12.0, -10.0]
+        observed = base_pred .+ 3.0 .+ 2.0 .* bz
+        df = DataFrame(
+            pred_dst_nt=base_pred,
+            pred_dst_ci05_nt=base_pred .- 5.0,
+            pred_dst_ci95_nt=base_pred .+ 5.0,
+            observation_dst_nt=observed,
+            Bz_nt=bz,
+        )
+        cal = fit_operational_v2_calibration(
+            df;
+            feature_names=[:Bz_nt],
+            ridge=0.0,
+            interval_coverage=0.90,
+            label="unit_test_v2",
+        )
+        pred = operational_v2_predict(cal, -8.0, -13.0, -3.0, (; Bz_nt=4.0))
+        @test isapprox(pred.pred_dst, -8.0 + 3.0 + 8.0, atol=1e-10)
+        @test pred.interval_scale >= 1.0
+
+        scored = score_operational_v2(df, cal)
+        @test :v2_pred_dst_nt in propertynames(scored)
+        @test maximum(abs.(scored.v2_residual_dst_nt)) < 1e-10
+        @test all(scored.v2_observed_in_90ci)
+
+        mktempdir() do tmp
+            path = joinpath(tmp, "v2_calibration.csv")
+            write_operational_v2_calibration(path, cal)
+            reread = read_operational_v2_calibration(path)
+            @test reread.feature_names == cal.feature_names
+            @test reread.feature_mean ≈ cal.feature_mean
+            @test reread.feature_scale ≈ cal.feature_scale
+            @test reread.coefficients ≈ cal.coefficients
+            @test reread.interval_scale == cal.interval_scale
+            @test reread.label == cal.label
+        end
     end
 
 end
@@ -233,7 +291,7 @@ end
         Bs_high = 10.0 .* ones(n)  # Ey = 6 mV/m >> 0.5
         dDdt_full2 = burton_model_full(V_high, Bs_high, Dst)
         dDdt_simple2 = burton_model(V_high, Bs_high, Dst)
-        @test isapprox(dDdt_full2, dDdt_simple2, rtol=0.01)
+        @test isapprox(dDdt_full2, dDdt_simple2, rtol=1e-12)
     end
 
     @testset "A: O'Brien-McPherron — known analytical values" begin

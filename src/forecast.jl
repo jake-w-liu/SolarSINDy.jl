@@ -30,6 +30,302 @@ mutable struct ForecastState
 end
 
 """
+    OperationalV2Calibration
+
+Small causal post-processing layer for an operational v2 forecast.
+
+The correction is fit from prior replay/live rows only:
+
+```
+Dst_v2 = Dst_v1 + β₀ + Σ βⱼ zⱼ
+```
+
+where `zⱼ` are standardized issue-time features. The interval scale inflates
+the v1 ensemble interval from calibration residuals. This type deliberately
+does not alter `ForecastState` or v1 SINDy coefficients.
+"""
+struct OperationalV2Calibration
+    feature_names::Vector{Symbol}
+    feature_mean::Vector{Float64}
+    feature_scale::Vector{Float64}
+    coefficients::Vector{Float64}
+    interval_scale::Float64
+    label::String
+
+
+    function OperationalV2Calibration(feature_names::Vector{Symbol},
+                                      feature_mean::Vector{Float64},
+                                      feature_scale::Vector{Float64},
+                                      coefficients::Vector{Float64},
+                                      interval_scale::Float64,
+                                      label::AbstractString)
+        n = length(feature_names)
+        length(feature_mean) == n ||
+            throw(DimensionMismatch("feature_mean length $(length(feature_mean)) != $n"))
+        length(feature_scale) == n ||
+            throw(DimensionMismatch("feature_scale length $(length(feature_scale)) != $n"))
+        length(coefficients) == n + 1 ||
+            throw(DimensionMismatch("coefficients length $(length(coefficients)) != $(n + 1)"))
+        all(isfinite, feature_mean) || throw(ArgumentError("feature means must be finite"))
+        all(isfinite, feature_scale) || throw(ArgumentError("feature scales must be finite"))
+        all(>(0.0), feature_scale) || throw(ArgumentError("feature scales must be positive"))
+        all(isfinite, coefficients) || throw(ArgumentError("coefficients must be finite"))
+        isfinite(interval_scale) && interval_scale > 0 ||
+            throw(ArgumentError("interval_scale must be positive and finite"))
+        return new(feature_names, feature_mean, feature_scale, coefficients,
+                   interval_scale, String(label))
+    end
+end
+
+const DEFAULT_OPERATIONAL_V2_FEATURES = [
+    :latest_dst_nt,
+    :V_kms,
+    :Bz_nt,
+    :By_nt,
+    :n_cm3,
+    :Pdyn_npa,
+]
+
+function default_operational_v2_calibration(;
+        feature_names::Vector{Symbol}=copy(DEFAULT_OPERATIONAL_V2_FEATURES),
+        interval_scale::Real=1.0,
+        label::AbstractString="uncalibrated_v2",
+    )
+    n = length(feature_names)
+    return OperationalV2Calibration(
+        feature_names,
+        zeros(n),
+        ones(n),
+        zeros(n + 1),
+        Float64(interval_scale),
+        label,
+    )
+end
+
+function _require_columns(df::DataFrame, cols)
+    missing_cols = [String(c) for c in cols if !(String(c) in names(df))]
+    isempty(missing_cols) || throw(ArgumentError(
+        "missing required calibration column(s): $(join(missing_cols, ", "))"
+    ))
+    return nothing
+end
+
+function _finite_rows(df::DataFrame, cols)
+    mask = trues(nrow(df))
+    for c in cols
+        mask .&= isfinite.(Float64.(df[!, c]))
+    end
+    return df[mask, :]
+end
+
+function _standardized_design(df::DataFrame, feature_names::Vector{Symbol},
+                              feature_mean::Vector{Float64},
+                              feature_scale::Vector{Float64})
+    n_features = length(feature_names)
+    x = ones(nrow(df), n_features + 1)
+    for (j, name) in enumerate(feature_names)
+        x[:, j + 1] = (Float64.(df[!, name]) .- feature_mean[j]) ./ feature_scale[j]
+    end
+    return x
+end
+
+function _quantile_sorted(v::Vector{Float64}, q::Real)
+    isempty(v) && throw(ArgumentError("cannot compute quantile of empty vector"))
+    sorted = sort(v)
+    idx = clamp(ceil(Int, Float64(q) * length(sorted)), 1, length(sorted))
+    return sorted[idx]
+end
+
+"""
+    fit_operational_v2_calibration(df; kwargs...)
+
+Fit a causal residual-correction and interval-inflation layer from prior replay
+or locked-live rows. Required columns are `pred_dst_nt`,
+`observation_dst_nt`, `pred_dst_ci05_nt`, `pred_dst_ci95_nt`, and the selected
+issue-time features.
+"""
+function fit_operational_v2_calibration(df::DataFrame;
+        feature_names::Vector{Symbol}=copy(DEFAULT_OPERATIONAL_V2_FEATURES),
+        ridge::Real=100.0,
+        interval_coverage::Real=0.90,
+        label::AbstractString="operational_v2",
+    )
+    ridge >= 0 || throw(ArgumentError("ridge must be nonnegative"))
+    0 < interval_coverage < 1 ||
+        throw(ArgumentError("interval_coverage must lie in (0, 1)"))
+    required = vcat(
+        [:pred_dst_nt, :observation_dst_nt, :pred_dst_ci05_nt, :pred_dst_ci95_nt],
+        feature_names,
+    )
+    _require_columns(df, required)
+    clean = _finite_rows(df, required)
+    nrow(clean) > length(feature_names) + 1 ||
+        throw(ArgumentError("not enough finite rows to fit operational v2 calibration"))
+
+    μ = [mean(Float64.(clean[!, c])) for c in feature_names]
+    σ = [std(Float64.(clean[!, c])) for c in feature_names]
+    σ = [s == 0.0 ? 1.0 : s for s in σ]
+    x = _standardized_design(clean, feature_names, μ, σ)
+    y = Float64.(clean.observation_dst_nt) .- Float64.(clean.pred_dst_nt)
+    λ = Float64(ridge)
+    β = if iszero(λ)
+        x \ y
+    else
+        penalty = Matrix{Float64}(I, size(x, 2), size(x, 2))
+        penalty[1, 1] = 0.0
+        (x' * x + λ * penalty) \ (x' * y)
+    end
+
+    corrected = Float64.(clean.pred_dst_nt) .+ x * β
+    half_width = abs.(Float64.(clean.pred_dst_ci95_nt) .-
+                      Float64.(clean.pred_dst_ci05_nt)) ./ 2
+    ratios = abs.(Float64.(clean.observation_dst_nt) .- corrected) ./
+             max.(half_width, eps(Float64))
+    interval_scale = max(1.0, _quantile_sorted(collect(ratios), interval_coverage))
+
+    return OperationalV2Calibration(
+        feature_names,
+        μ,
+        σ,
+        collect(β),
+        interval_scale,
+        label,
+    )
+end
+
+function operational_v2_correction(cal::OperationalV2Calibration,
+                                   features::NamedTuple)
+    correction = cal.coefficients[1]
+    for (j, name) in enumerate(cal.feature_names)
+        haskey(features, name) ||
+            throw(ArgumentError("missing v2 feature: $(String(name))"))
+        value = Float64(getfield(features, name))
+        correction += cal.coefficients[j + 1] *
+                      ((value - cal.feature_mean[j]) / cal.feature_scale[j])
+    end
+    return correction
+end
+
+"""
+    operational_v2_predict(cal, pred_dst, ci05, ci95, features)
+
+Apply a fitted v2 residual correction and interval inflation to a v1 Dst
+forecast. `features` must contain the calibration feature names.
+"""
+function operational_v2_predict(cal::OperationalV2Calibration,
+                                pred_dst::Real,
+                                ci05::Real,
+                                ci95::Real,
+                                features::NamedTuple)
+    correction = operational_v2_correction(cal, features)
+    center = Float64(pred_dst) + correction
+    half_width = abs(Float64(ci95) - Float64(ci05)) / 2
+    inflated = cal.interval_scale * half_width
+    return (
+        pred_dst=center,
+        ci05_dst=center - inflated,
+        ci95_dst=center + inflated,
+        correction=correction,
+        interval_scale=cal.interval_scale,
+        label=cal.label,
+    )
+end
+
+function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
+    _require_columns(df, vcat(
+        [:pred_dst_nt, :pred_dst_ci05_nt, :pred_dst_ci95_nt, :observation_dst_nt],
+        cal.feature_names,
+    ))
+    out = copy(df)
+    v2_pred = Vector{Float64}(undef, nrow(out))
+    v2_ci05 = Vector{Float64}(undef, nrow(out))
+    v2_ci95 = Vector{Float64}(undef, nrow(out))
+    v2_corr = Vector{Float64}(undef, nrow(out))
+    v2_residual = Vector{Float64}(undef, nrow(out))
+    v2_in_ci = Vector{Bool}(undef, nrow(out))
+
+    for i in 1:nrow(out)
+        features = NamedTuple{Tuple(cal.feature_names)}(
+            Tuple(Float64(out[i, c]) for c in cal.feature_names)
+        )
+        pred = operational_v2_predict(
+            cal,
+            Float64(out[i, :pred_dst_nt]),
+            Float64(out[i, :pred_dst_ci05_nt]),
+            Float64(out[i, :pred_dst_ci95_nt]),
+            features,
+        )
+        obs = Float64(out[i, :observation_dst_nt])
+        v2_pred[i] = pred.pred_dst
+        v2_ci05[i] = pred.ci05_dst
+        v2_ci95[i] = pred.ci95_dst
+        v2_corr[i] = pred.correction
+        v2_residual[i] = obs - pred.pred_dst
+        v2_in_ci[i] = min(pred.ci05_dst, pred.ci95_dst) <= obs <=
+                      max(pred.ci05_dst, pred.ci95_dst)
+    end
+
+    out[!, :v2_pred_dst_nt] = v2_pred
+    out[!, :v2_pred_dst_ci05_nt] = v2_ci05
+    out[!, :v2_pred_dst_ci95_nt] = v2_ci95
+    out[!, :v2_correction_dst_nt] = v2_corr
+    out[!, :v2_residual_dst_nt] = v2_residual
+    out[!, :v2_observed_in_90ci] = v2_in_ci
+    out[!, :v2_calibration_label] = fill(cal.label, nrow(out))
+    return out
+end
+
+function write_operational_v2_calibration(path::String,
+                                          cal::OperationalV2Calibration)
+    dir = dirname(path)
+    !isempty(dir) && mkpath(dir)
+    rows = NamedTuple[]
+    push!(rows, (
+        feature="intercept",
+        feature_mean=0.0,
+        feature_scale=1.0,
+        coefficient=cal.coefficients[1],
+        interval_scale=cal.interval_scale,
+        label=cal.label,
+    ))
+    for (j, name) in enumerate(cal.feature_names)
+        push!(rows, (
+            feature=String(name),
+            feature_mean=cal.feature_mean[j],
+            feature_scale=cal.feature_scale[j],
+            coefficient=cal.coefficients[j + 1],
+            interval_scale=cal.interval_scale,
+            label=cal.label,
+        ))
+    end
+    CSV.write(path, DataFrame(rows))
+    return path
+end
+
+function read_operational_v2_calibration(path::String)
+    df = CSV.read(path, DataFrame)
+    _require_columns(df, [:feature, :feature_mean, :feature_scale,
+                          :coefficient, :interval_scale, :label])
+    nrow(df) >= 1 || throw(ArgumentError("empty operational v2 calibration: $path"))
+    String(df.feature[1]) == "intercept" ||
+        throw(ArgumentError("first calibration row must be feature=intercept"))
+    feature_names = Symbol.(String.(df.feature[2:end]))
+    feature_mean = Float64.(df.feature_mean[2:end])
+    feature_scale = Float64.(df.feature_scale[2:end])
+    coefficients = Float64.(df.coefficient)
+    interval_scale = Float64(df.interval_scale[1])
+    label = String(df.label[1])
+    return OperationalV2Calibration(
+        collect(feature_names),
+        collect(feature_mean),
+        collect(feature_scale),
+        collect(coefficients),
+        interval_scale,
+        label,
+    )
+end
+
+"""
     init_forecast(; coefficients_csv, ensemble_csv, t0, dst0, dt=1.0)
 
 Initialise a ForecastState from saved discovery results.
@@ -92,10 +388,15 @@ function _evaluate_point(lib::CandidateLibrary,
                          dst_star::Float64, V::Float64,
                          Bz::Float64, By::Float64,
                          n_density::Float64, Pdyn::Float64)
-    Bs = max(-Bz, 0.0)
-    theta_c = atan(abs(By), Bz)
-    BT = sqrt(By^2 + Bz^2)
-    data = Dict{String,Vector{Float64}}(
+    θ = Vector{Float64}(undef, length(lib))
+    _evaluate_point_vector!(θ, lib, dst_star, V, Bz, By, n_density, Pdyn)
+    return reshape(θ, 1, :)
+end
+
+function _point_data(dst_star::Float64, V::Float64, Bz::Float64, By::Float64,
+                     n_density::Float64, Pdyn::Float64, Bs::Float64,
+                     theta_c::Float64, BT::Float64)
+    return Dict{String,Vector{Float64}}(
         "V"        => [V],
         "Bs"       => [Bs],
         "n"        => [n_density],
@@ -106,7 +407,81 @@ function _evaluate_point(lib::CandidateLibrary,
         "By"       => [By],
         "Bz"       => [Bz],
     )
-    return evaluate_library(lib, data)  # 1 × n_terms
+end
+
+function _evaluate_point_vector!(θ::Vector{Float64},
+                                 lib::CandidateLibrary,
+                                 dst_star::Float64, V::Float64,
+                                 Bz::Float64, By::Float64,
+                                 n_density::Float64, Pdyn::Float64)
+    length(θ) == length(lib) || throw(DimensionMismatch("θ length $(length(θ)) != library length $(length(lib))"))
+    Bs = max(-Bz, 0.0)
+    theta_c = atan(abs(By), Bz)
+    BT = sqrt(By^2 + Bz^2)
+    sin_half = sin(theta_c / 2)
+    fallback_data = nothing
+
+    @inbounds for j in eachindex(lib.term_codes)
+        code = lib.term_codes[j]
+        if code == TERM_ONE
+            θ[j] = 1.0
+        elseif code == TERM_V
+            θ[j] = V
+        elseif code == TERM_BS
+            θ[j] = Bs
+        elseif code == TERM_N
+            θ[j] = n_density
+        elseif code == TERM_PDYN
+            θ[j] = Pdyn
+        elseif code == TERM_DST_STAR
+            θ[j] = dst_star
+        elseif code == TERM_V2
+            θ[j] = V^2
+        elseif code == TERM_BS2
+            θ[j] = Bs^2
+        elseif code == TERM_N2
+            θ[j] = n_density^2
+        elseif code == TERM_V_BS
+            θ[j] = V * Bs
+        elseif code == TERM_N_V
+            θ[j] = n_density * V
+        elseif code == TERM_N_BS
+            θ[j] = n_density * Bs
+        elseif code == TERM_PDYN_BS
+            θ[j] = Pdyn * Bs
+        elseif code == TERM_N_V_BS
+            θ[j] = n_density * V * Bs
+        elseif code == TERM_N_V2
+            θ[j] = n_density * V^2
+        elseif code == TERM_SIN_HALF
+            θ[j] = sin_half
+        elseif code == TERM_SIN_HALF2
+            θ[j] = sin_half^2
+        elseif code == TERM_SIN_HALF4
+            θ[j] = sin_half^4
+        elseif code == TERM_SIN_HALF_8_3
+            θ[j] = sin_half^(8/3)
+        elseif code == TERM_V_SIN_HALF2
+            θ[j] = V * sin_half^2
+        elseif code == TERM_NEWELL
+            θ[j] = V^(4/3) * max(BT, 1e-10)^(2/3) * sin_half^(8/3)
+        else
+            if fallback_data === nothing
+                fallback_data = _point_data(dst_star, V, Bz, By, n_density, Pdyn, Bs, theta_c, BT)
+            end
+            θ[j] = lib.funcs[j](fallback_data)[1]
+        end
+    end
+
+    return θ
+end
+
+function _dot_ensemble_row(θ::Vector{Float64}, ξ_ensemble::Matrix{Float64}, i::Int)
+    s = 0.0
+    @inbounds @simd for j in eachindex(θ)
+        s += θ[j] * ξ_ensemble[i, j]
+    end
+    return s
 end
 
 """
@@ -122,18 +497,19 @@ function step_forecast!(state::ForecastState,
                         V::Float64, Bz::Float64, By::Float64,
                         n_density::Float64, Pdyn::Float64;
                         dst_observed::Float64=NaN)
-    Θ_k = _evaluate_point(state.lib, state.dst_current,
-                           V, Bz, By, n_density, Pdyn)
+    θ_k = Vector{Float64}(undef, length(state.lib))
+    _evaluate_point_vector!(θ_k, state.lib, state.dst_current,
+                            V, Bz, By, n_density, Pdyn)
 
     # Primary prediction
-    dDst = clamp((Θ_k * state.ξ_primary)[1], -200.0, 200.0)
+    dDst = clamp(dot(θ_k, state.ξ_primary), -200.0, 200.0)
     dst_next = clamp(state.dst_current + state.dt * dDst, -2000.0, 50.0)
 
     # Ensemble predictions
     n_ens = size(state.ξ_ensemble, 1)
     dst_ens = Vector{Float64}(undef, n_ens)
     for i in 1:n_ens
-        dDst_i = clamp((Θ_k * @view(state.ξ_ensemble[i, :]))[1], -200.0, 200.0)
+        dDst_i = clamp(_dot_ensemble_row(θ_k, state.ξ_ensemble, i), -200.0, 200.0)
         dst_ens[i] = clamp(state.dst_current + state.dt * dDst_i, -2000.0, 50.0)
     end
     sort!(dst_ens)
@@ -175,21 +551,22 @@ function forecast_ahead(state::ForecastState,
 
     n_ens = size(state.ξ_ensemble, 1)
     dst_ens_curr = fill(dst_curr, n_ens)
+    θ_k = Vector{Float64}(undef, length(state.lib))
 
     for h in 1:n_hours
         t_next = t_curr + Hour(1)
 
-        Θ_k = _evaluate_point(state.lib, dst_curr, V, Bz, By, n_density, Pdyn)
+        _evaluate_point_vector!(θ_k, state.lib, dst_curr, V, Bz, By, n_density, Pdyn)
 
         # Primary
-        dDst = clamp((Θ_k * state.ξ_primary)[1], -200.0, 200.0)
+        dDst = clamp(dot(θ_k, state.ξ_primary), -200.0, 200.0)
         dst_next = clamp(dst_curr + state.dt * dDst, -2000.0, 50.0)
 
         # Ensemble (each starts from its own previous prediction)
         for i in 1:n_ens
-            Θ_i = _evaluate_point(state.lib, dst_ens_curr[i],
-                                   V, Bz, By, n_density, Pdyn)
-            dDst_i = clamp((Θ_i * @view(state.ξ_ensemble[i, :]))[1], -200.0, 200.0)
+            _evaluate_point_vector!(θ_k, state.lib, dst_ens_curr[i],
+                                    V, Bz, By, n_density, Pdyn)
+            dDst_i = clamp(_dot_ensemble_row(θ_k, state.ξ_ensemble, i), -200.0, 200.0)
             dst_ens_curr[i] = clamp(dst_ens_curr[i] + state.dt * dDst_i, -2000.0, 50.0)
         end
         sorted_ens = sort(dst_ens_curr)

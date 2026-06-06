@@ -17,13 +17,26 @@ using Statistics
 
 const KYOTO_DST_JSON_URL = "https://services.swpc.noaa.gov/products/kyoto-dst.json"
 const DEFAULT_LOG_PATH = joinpath("live_forecasts", "live_forecast_log.csv")
+const DEFAULT_REPORT_PATH = joinpath("live_forecasts", "live_comparison_report.md")
+const DEFAULT_V2_CALIBRATION_PATH = joinpath(
+    "live_forecasts", "operational_v2_calibration.csv"
+)
 
 Base.@kwdef struct LiveVerifyConfig
     mode::Symbol = :issue
+    model::Symbol = :v1
     poll_seconds::Int = 300
     timeout_hours::Float64 = 4.0
     horizon_hours::Int = 1
     log_path::String = DEFAULT_LOG_PATH
+    report_path::String = DEFAULT_REPORT_PATH
+    replay_hours::Int = 48
+    table_path::String = joinpath("live_forecasts", "live_replay_table.csv")
+    table_limit::Int = 24
+    v2_calibration_path::String = DEFAULT_V2_CALIBRATION_PATH
+    v2_train_fraction::Float64 = 0.70
+    v2_ridge::Float64 = 100.0
+    v2_interval_coverage::Float64 = 0.90
 end
 
 function _usage()
@@ -35,25 +48,55 @@ function _usage()
       --issue                Issue and lock one future forecast row. This is the default.
       --verify-pending       Score all pending rows whose target Dst is now available.
       --backfill-baselines   Fill baseline forecasts/residuals for existing rows.
+      --replay-recent        Build a recent causal replay table from live feeds.
+      --fit-v2-calibration   Fit operational v2 calibration from --table CSV.
       --wait                 Issue one row, then poll until its target observation arrives.
       --summary              Print aggregate live-log scores.
+      --comparison-report    Write standard locked-live comparison report.
 
     Options:
+      --model=v1|v2          Forecast model to log/score. Default: v1.
       --poll-seconds=N       Poll interval for --wait. Default: 300.
       --timeout-hours=N      Maximum wait time for --wait. Default: 4.
       --horizon-hours=N      Hourly target index after issue time. Default: 1.
       --log=PATH             CSV log path. Default: live_forecasts/live_forecast_log.csv.
+      --report=PATH          Markdown output path for --comparison-report.
+                            Default: live_forecasts/live_comparison_report.md.
+      --replay-hours=N       Recent hourly anchors for --replay-recent. Default: 48.
+      --table=PATH           CSV output path for --replay-recent.
+                            Default: live_forecasts/live_replay_table.csv.
+      --table-limit=N        Number of recent rows to print for --replay-recent. Default: 24.
+      --v2-calibration=PATH  Calibration path for --model=v2 or --fit-v2-calibration.
+                            Default: live_forecasts/operational_v2_calibration.csv.
+      --v2-train-fraction=N  Chronological fraction used to fit v2 calibration. Default: 0.70.
+      --v2-ridge=N           Ridge penalty for v2 residual calibration. Default: 100.
+      --v2-coverage=N        Target train coverage for v2 interval inflation. Default: 0.90.
       --help                 Print this message.
     """
+end
+
+function _parse_model(s::AbstractString)
+    s == "v1" && return :v1
+    s == "v2" && return :v2
+    throw(ArgumentError("--model must be v1 or v2, got $s"))
 end
 
 function _parse_args(args)::LiveVerifyConfig
     cfg = LiveVerifyConfig()
     mode = cfg.mode
+    model = cfg.model
     poll_seconds = cfg.poll_seconds
     timeout_hours = cfg.timeout_hours
     horizon_hours = cfg.horizon_hours
     log_path = cfg.log_path
+    report_path = cfg.report_path
+    replay_hours = cfg.replay_hours
+    table_path = cfg.table_path
+    table_limit = cfg.table_limit
+    v2_calibration_path = cfg.v2_calibration_path
+    v2_train_fraction = cfg.v2_train_fraction
+    v2_ridge = cfg.v2_ridge
+    v2_interval_coverage = cfg.v2_interval_coverage
 
     for arg in args
         if arg == "--help"
@@ -65,10 +108,18 @@ function _parse_args(args)::LiveVerifyConfig
             mode = :verify_pending
         elseif arg == "--backfill-baselines"
             mode = :backfill_baselines
+        elseif arg == "--replay-recent"
+            mode = :replay_recent
+        elseif arg == "--fit-v2-calibration"
+            mode = :fit_v2_calibration
         elseif arg == "--wait"
             mode = :wait
         elseif arg == "--summary"
             mode = :summary
+        elseif arg == "--comparison-report"
+            mode = :comparison_report
+        elseif startswith(arg, "--model=")
+            model = _parse_model(split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--poll-seconds=")
             poll_seconds = parse(Int, split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--timeout-hours=")
@@ -77,6 +128,22 @@ function _parse_args(args)::LiveVerifyConfig
             horizon_hours = parse(Int, split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--log=")
             log_path = split(arg, "=", limit=2)[2]
+        elseif startswith(arg, "--report=")
+            report_path = split(arg, "=", limit=2)[2]
+        elseif startswith(arg, "--replay-hours=")
+            replay_hours = parse(Int, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--table=")
+            table_path = split(arg, "=", limit=2)[2]
+        elseif startswith(arg, "--table-limit=")
+            table_limit = parse(Int, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--v2-calibration=")
+            v2_calibration_path = split(arg, "=", limit=2)[2]
+        elseif startswith(arg, "--v2-train-fraction=")
+            v2_train_fraction = parse(Float64, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--v2-ridge=")
+            v2_ridge = parse(Float64, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--v2-coverage=")
+            v2_interval_coverage = parse(Float64, split(arg, "=", limit=2)[2])
         else
             error("Unknown argument: $arg\n$(_usage())")
         end
@@ -85,13 +152,29 @@ function _parse_args(args)::LiveVerifyConfig
     poll_seconds > 0 || throw(ArgumentError("--poll-seconds must be positive"))
     timeout_hours > 0 || throw(ArgumentError("--timeout-hours must be positive"))
     horizon_hours > 0 || throw(ArgumentError("--horizon-hours must be positive"))
+    replay_hours > 0 || throw(ArgumentError("--replay-hours must be positive"))
+    table_limit >= 0 || throw(ArgumentError("--table-limit must be nonnegative"))
+    0 < v2_train_fraction < 1 ||
+        throw(ArgumentError("--v2-train-fraction must lie in (0, 1)"))
+    v2_ridge >= 0 || throw(ArgumentError("--v2-ridge must be nonnegative"))
+    0 < v2_interval_coverage < 1 ||
+        throw(ArgumentError("--v2-coverage must lie in (0, 1)"))
 
     return LiveVerifyConfig(;
         mode=mode,
+        model=model,
         poll_seconds=poll_seconds,
         timeout_hours=timeout_hours,
         horizon_hours=horizon_hours,
         log_path=log_path,
+        report_path=report_path,
+        replay_hours=replay_hours,
+        table_path=table_path,
+        table_limit=table_limit,
+        v2_calibration_path=v2_calibration_path,
+        v2_train_fraction=v2_train_fraction,
+        v2_ridge=v2_ridge,
+        v2_interval_coverage=v2_interval_coverage,
     )
 end
 
@@ -115,6 +198,14 @@ function _fetch_dst()
     times = DateTime[DateTime(String(r.time_tag)) for r in rows]
     dst = Float64[Float64(r.dst) for r in rows]
     return times, dst
+end
+
+function _dst_lookup(dst_times, dst_vals)
+    lookup = Dict{DateTime,Float64}()
+    for (t, v) in zip(dst_times, dst_vals)
+        lookup[_parse_dt(t)] = Float64(v)
+    end
+    return lookup
 end
 
 function _window(df::DataFrame, t0::DateTime, t1::DateTime)
@@ -258,11 +349,379 @@ function _baseline_predictions_from_row(df::DataFrame, row_idx::Int)
     )
 end
 
+function _v2_features(latest_dst::Real, drivers)
+    return (
+        latest_dst_nt=Float64(latest_dst),
+        V_kms=Float64(drivers.V),
+        Bz_nt=Float64(drivers.Bz),
+        By_nt=Float64(drivers.By),
+        n_cm3=Float64(drivers.n),
+        Pdyn_npa=Float64(drivers.Pdyn),
+    )
+end
+
+function _load_calibration_for_model(cfg::LiveVerifyConfig)
+    cfg.model == :v1 && return nothing
+    cfg.model == :v2 || error("Unsupported model: $(cfg.model)")
+    isfile(cfg.v2_calibration_path) || error(
+        "Operational v2 calibration not found at $(cfg.v2_calibration_path). " *
+        "Run --fit-v2-calibration first."
+    )
+    return read_operational_v2_calibration(cfg.v2_calibration_path)
+end
+
+function _select_model_prediction(model::Symbol, calibration,
+                                  latest_dst::Real, drivers,
+                                  v1_pred_dst::Real,
+                                  v1_ci05_dst::Real,
+                                  v1_ci95_dst::Real)
+    if model == :v1
+        return (
+            model_version="v1",
+            pred_dst=Float64(v1_pred_dst),
+            ci05_dst=Float64(v1_ci05_dst),
+            ci95_dst=Float64(v1_ci95_dst),
+            v2_pred_dst=missing,
+            v2_ci05_dst=missing,
+            v2_ci95_dst=missing,
+            v2_correction=missing,
+            v2_interval_scale=missing,
+            v2_label=missing,
+        )
+    elseif model == :v2
+        calibration === nothing && error("v2 model requested without calibration")
+        v2 = operational_v2_predict(
+            calibration,
+            v1_pred_dst,
+            v1_ci05_dst,
+            v1_ci95_dst,
+            _v2_features(latest_dst, drivers),
+        )
+        return (
+            model_version="v2",
+            pred_dst=v2.pred_dst,
+            ci05_dst=v2.ci05_dst,
+            ci95_dst=v2.ci95_dst,
+            v2_pred_dst=v2.pred_dst,
+            v2_ci05_dst=v2.ci05_dst,
+            v2_ci95_dst=v2.ci95_dst,
+            v2_correction=v2.correction,
+            v2_interval_scale=v2.interval_scale,
+            v2_label=v2.label,
+        )
+    else
+        error("Unsupported model: $model")
+    end
+end
+
+function _replay_anchor_hours(plasma::DataFrame, mag::DataFrame, dst_times, replay_hours::Int)
+    dst_dt = DateTime[_parse_dt(t) for t in dst_times]
+    latest_complete_sw = _floor_hour(min(maximum(plasma.time_tag), maximum(mag.time_tag)))
+    first_complete_sw = _floor_hour(max(minimum(plasma.time_tag), minimum(mag.time_tag))) + Hour(1)
+    latest_dst_time = maximum(dst_dt)
+    earliest_dst_time = minimum(dst_dt)
+
+    last_anchor = min(latest_complete_sw, latest_dst_time - Hour(1))
+    first_anchor = max(first_complete_sw, earliest_dst_time)
+    first_anchor <= last_anchor || error("No overlapping replay window between SWPC solar wind and Kyoto Dst feeds")
+
+    requested_start = last_anchor - Hour(replay_hours - 1)
+    start_anchor = max(first_anchor, requested_start)
+    return collect(start_anchor:Hour(1):last_anchor)
+end
+
+function _forecast_one_replay(anchor_time::DateTime, target_time::DateTime,
+                              anchor_dst::Float64, drivers;
+                              model::Symbol=:v1, calibration=nothing)
+    anchor_dst_star = pressure_correct_dst([anchor_dst], [drivers.Pdyn])[1]
+    coef_csv = joinpath(get_data_dir(), "real_sindy_discovery_coefficients.csv")
+    ens_csv = joinpath(get_data_dir(), "real_ensemble_inclusion.csv")
+    state = init_forecast(;
+        coefficients_csv=coef_csv,
+        ensemble_csv=ens_csv,
+        t0=anchor_time,
+        dst0=anchor_dst_star,
+    )
+    result = step_forecast!(
+        state,
+        target_time,
+        drivers.V,
+        drivers.Bz,
+        drivers.By,
+        drivers.n,
+        drivers.Pdyn,
+    )
+    baselines = _advance_baselines(anchor_dst_star, drivers)
+    v1_pred = _dst_from_dst_star(result.dst_predicted, drivers.Pdyn)
+    v1_ci05 = _dst_from_dst_star(result.dst_ci_05, drivers.Pdyn)
+    v1_ci95 = _dst_from_dst_star(result.dst_ci_95, drivers.Pdyn)
+    selected = _select_model_prediction(
+        model,
+        calibration,
+        anchor_dst,
+        drivers,
+        v1_pred,
+        v1_ci05,
+        v1_ci95,
+    )
+
+    return (
+        model_version=selected.model_version,
+        anchor_dst_star=anchor_dst_star,
+        pred_dst_star=result.dst_predicted,
+        pred_dst=selected.pred_dst,
+        ci05_dst=selected.ci05_dst,
+        ci95_dst=selected.ci95_dst,
+        v1_pred_dst=v1_pred,
+        v1_ci05_dst=v1_ci05,
+        v1_ci95_dst=v1_ci95,
+        v2_pred_dst=selected.v2_pred_dst,
+        v2_ci05_dst=selected.v2_ci05_dst,
+        v2_ci95_dst=selected.v2_ci95_dst,
+        v2_correction=selected.v2_correction,
+        v2_interval_scale=selected.v2_interval_scale,
+        v2_label=selected.v2_label,
+        persistence_dst=anchor_dst,
+        burton_dst=_dst_from_dst_star(baselines.burton, drivers.Pdyn),
+        burton_full_dst=_dst_from_dst_star(baselines.burton_full, drivers.Pdyn),
+        obrien_dst=_dst_from_dst_star(baselines.obrien, drivers.Pdyn),
+    )
+end
+
+function replay_recent_table(plasma::DataFrame, mag::DataFrame,
+                             dst_times, dst_vals; replay_hours::Int=48,
+                             model::Symbol=:v1, calibration=nothing)
+    dst_map = _dst_lookup(dst_times, dst_vals)
+    anchors = _replay_anchor_hours(plasma, mag, dst_times, replay_hours)
+    rows = NamedTuple[]
+
+    for anchor_time in anchors
+        target_time = anchor_time + Hour(1)
+        haskey(dst_map, anchor_time) || continue
+        haskey(dst_map, target_time) || continue
+
+        source_start = anchor_time - Hour(1)
+        source_end = anchor_time
+        drivers = _drivers_for_window(plasma, mag, source_start, source_end)
+        if !all(isfinite, (drivers.V, drivers.n, drivers.Bz, drivers.By, drivers.Pdyn))
+            continue
+        end
+
+        forecast = _forecast_one_replay(
+            anchor_time,
+            target_time,
+            dst_map[anchor_time],
+            drivers,
+            model=model,
+            calibration=calibration,
+        )
+        observed = dst_map[target_time]
+        in_ci = min(forecast.ci05_dst, forecast.ci95_dst) <= observed <=
+                max(forecast.ci05_dst, forecast.ci95_dst)
+
+        push!(rows, (
+            issue_time_utc=string(anchor_time),
+            source_driver_start_utc=string(source_start),
+            source_driver_end_utc=string(source_end),
+            latest_dst_time_utc=string(anchor_time),
+            target_time_utc=string(target_time),
+            model_version=forecast.model_version,
+            latest_dst_nt=dst_map[anchor_time],
+            observation_dst_nt=observed,
+            pred_dst_nt=forecast.pred_dst,
+            residual_dst_nt=observed - forecast.pred_dst,
+            pred_dst_ci05_nt=forecast.ci05_dst,
+            pred_dst_ci95_nt=forecast.ci95_dst,
+            observed_in_90ci=in_ci,
+            v1_pred_dst_nt=forecast.v1_pred_dst,
+            v1_pred_dst_ci05_nt=forecast.v1_ci05_dst,
+            v1_pred_dst_ci95_nt=forecast.v1_ci95_dst,
+            v2_pred_dst_nt=forecast.v2_pred_dst,
+            v2_pred_dst_ci05_nt=forecast.v2_ci05_dst,
+            v2_pred_dst_ci95_nt=forecast.v2_ci95_dst,
+            v2_correction_dst_nt=forecast.v2_correction,
+            v2_interval_scale=forecast.v2_interval_scale,
+            v2_calibration_label=forecast.v2_label,
+            persistence_dst_nt=forecast.persistence_dst,
+            persistence_residual_dst_nt=observed - forecast.persistence_dst,
+            burton_dst_nt=forecast.burton_dst,
+            burton_residual_dst_nt=observed - forecast.burton_dst,
+            burton_full_dst_nt=forecast.burton_full_dst,
+            burton_full_residual_dst_nt=observed - forecast.burton_full_dst,
+            obrien_dst_nt=forecast.obrien_dst,
+            obrien_residual_dst_nt=observed - forecast.obrien_dst,
+            V_kms=drivers.V,
+            Bz_nt=drivers.Bz,
+            By_nt=drivers.By,
+            n_cm3=drivers.n,
+            Pdyn_npa=drivers.Pdyn,
+            replay_note="causal_replay_previous_complete_hour_driver_persistence",
+        ))
+    end
+
+    isempty(rows) && error("No replay rows could be scored from the available feeds")
+    return DataFrame(rows)
+end
+
+function _markdown_path(table_path::String)
+    root, ext = splitext(table_path)
+    return isempty(ext) ? table_path * ".md" : root * ".md"
+end
+
+function _fmt_cell(value)
+    value isa AbstractString && return value
+    value isa Bool && return string(value)
+    value isa Real && return string(round(Float64(value); digits=2))
+    return string(value)
+end
+
+function write_markdown_table(path::String, df::DataFrame; limit::Int=24)
+    cols = [
+        :issue_time_utc,
+        :target_time_utc,
+        :model_version,
+        :observation_dst_nt,
+        :pred_dst_nt,
+        :residual_dst_nt,
+        :observed_in_90ci,
+        :v1_pred_dst_nt,
+        :v2_pred_dst_nt,
+        :persistence_dst_nt,
+        :burton_dst_nt,
+        :obrien_dst_nt,
+    ]
+    view_df = limit == 0 || nrow(df) <= limit ? df : last(df, limit)
+    open(path, "w") do io
+        println(io, "| ", join(String.(cols), " | "), " |")
+        println(io, "| ", join(fill("---", length(cols)), " | "), " |")
+        for row in eachrow(view_df)
+            println(io, "| ", join((_fmt_cell(row[col]) for col in cols), " | "), " |")
+        end
+    end
+    return path
+end
+
+function _print_replay_metrics(df::DataFrame)
+    println("Recent causal replay rows: $(nrow(df))")
+    for (name, col) in (
+        ("Selected", :pred_dst_nt),
+        ("SINDy-v1", :v1_pred_dst_nt),
+        ("Operational-v2", :v2_pred_dst_nt),
+        ("Persistence", :persistence_dst_nt),
+        ("Burton", :burton_dst_nt),
+        ("BurtonFull", :burton_full_dst_nt),
+        ("OBrien", :obrien_dst_nt),
+    )
+        String(col) in names(df) || continue
+        vals = df[!, col]
+        all(ismissing, vals) && continue
+        idx = .!ismissing.(vals)
+        _print_metric(name, Float64.(vals[idx]), Float64.(df.observation_dst_nt[idx]))
+    end
+    println(
+        "Selected 90% coverage n=$(nrow(df)) coverage=",
+        round(mean(Bool.(df.observed_in_90ci)); digits=3),
+    )
+    return nothing
+end
+
+function run_replay_recent(cfg::LiveVerifyConfig)
+    plasma = fetch_swpc_plasma(; max_retries=3, retry_delay_sec=1.0)
+    mag = fetch_swpc_mag(; max_retries=3, retry_delay_sec=1.0)
+    dst_times, dst_vals = _fetch_dst()
+    calibration = _load_calibration_for_model(cfg)
+    df = replay_recent_table(plasma, mag, dst_times, dst_vals;
+        replay_hours=cfg.replay_hours,
+        model=cfg.model,
+        calibration=calibration,
+    )
+
+    dir = dirname(cfg.table_path)
+    !isempty(dir) && mkpath(dir)
+    CSV.write(cfg.table_path, df)
+    md_path = _markdown_path(cfg.table_path)
+    write_markdown_table(md_path, df; limit=cfg.table_limit)
+
+    _print_replay_metrics(df)
+    println("Wrote CSV table: $(cfg.table_path)")
+    println("Wrote Markdown table: $md_path")
+    return df
+end
+
+function _chronological_train_test(df::DataFrame, fraction::Float64)
+    sort_cols = Symbol[]
+    String(:issue_time_utc) in names(df) && push!(sort_cols, :issue_time_utc)
+    !isempty(sort_cols) && sort!(df, sort_cols)
+    n_train = floor(Int, fraction * nrow(df))
+    n_train = clamp(n_train, 1, nrow(df) - 1)
+    return df[1:n_train, :], df[n_train + 1:end, :]
+end
+
+function _v2_base_prediction_table(df::DataFrame)
+    out = copy(df)
+    v1_cols = [:v1_pred_dst_nt, :v1_pred_dst_ci05_nt, :v1_pred_dst_ci95_nt]
+    if all(String(c) in names(out) for c in v1_cols)
+        out[!, :pred_dst_nt] = Float64.(out.v1_pred_dst_nt)
+        out[!, :pred_dst_ci05_nt] = Float64.(out.v1_pred_dst_ci05_nt)
+        out[!, :pred_dst_ci95_nt] = Float64.(out.v1_pred_dst_ci95_nt)
+    end
+    return out
+end
+
+function fit_v2_calibration!(cfg::LiveVerifyConfig)
+    isfile(cfg.table_path) || error("Replay table not found: $(cfg.table_path)")
+    df = _v2_base_prediction_table(CSV.read(cfg.table_path, DataFrame))
+    nrow(df) >= 4 || error("Need at least 4 replay rows to fit/test v2 calibration")
+    train, test = _chronological_train_test(df, cfg.v2_train_fraction)
+    cal = fit_operational_v2_calibration(
+        train;
+        ridge=cfg.v2_ridge,
+        interval_coverage=cfg.v2_interval_coverage,
+        label="operational_v2_ridge$(cfg.v2_ridge)_n$(nrow(train))",
+    )
+    write_operational_v2_calibration(cfg.v2_calibration_path, cal)
+
+    train_scored = score_operational_v2(train, cal)
+    test_scored = score_operational_v2(test, cal)
+    scored = vcat(train_scored, test_scored; cols=:union)
+    scored_path = replace(cfg.v2_calibration_path, r"\.csv$" => "_scored.csv")
+    scored_path == cfg.v2_calibration_path &&
+        (scored_path = cfg.v2_calibration_path * "_scored.csv")
+    CSV.write(scored_path, scored)
+
+    println("Fitted operational v2 calibration: $(cfg.v2_calibration_path)")
+    println("Scored replay rows: $scored_path")
+    println("Train rows: $(nrow(train)); held-out rows: $(nrow(test))")
+    _print_metric(
+        "Train SINDy-v1",
+        Float64.(train.pred_dst_nt),
+        Float64.(train.observation_dst_nt),
+    )
+    _print_metric(
+        "Train v2",
+        Float64.(train_scored.v2_pred_dst_nt),
+        Float64.(train_scored.observation_dst_nt),
+    )
+    _print_metric(
+        "Heldout SINDy-v1",
+        Float64.(test.pred_dst_nt),
+        Float64.(test.observation_dst_nt),
+    )
+    _print_metric(
+        "Heldout v2",
+        Float64.(test_scored.v2_pred_dst_nt),
+        Float64.(test_scored.observation_dst_nt),
+    )
+    println("V2 interval scale: $(round(cal.interval_scale; digits=3))")
+    return cal
+end
+
 function issue_forecast(cfg::LiveVerifyConfig)
     issue_time = now(UTC)
     plasma = fetch_swpc_plasma(; max_retries=3, retry_delay_sec=1.0)
     mag = fetch_swpc_mag(; max_retries=3, retry_delay_sec=1.0)
     dst_times, dst_vals = _fetch_dst()
+    calibration = _load_calibration_for_model(cfg)
 
     latest_common_sw = min(maximum(plasma.time_tag), maximum(mag.time_tag))
     latest_complete_hour = _floor_hour(latest_common_sw)
@@ -325,9 +784,21 @@ function issue_forecast(cfg::LiveVerifyConfig)
         step_time += Hour(1)
     end
 
-    pred_dst = _dst_from_dst_star(result.dst_predicted, used_drivers.Pdyn)
-    ci05_dst = _dst_from_dst_star(result.dst_ci_05, used_drivers.Pdyn)
-    ci95_dst = _dst_from_dst_star(result.dst_ci_95, used_drivers.Pdyn)
+    v1_pred_dst = _dst_from_dst_star(result.dst_predicted, used_drivers.Pdyn)
+    v1_ci05_dst = _dst_from_dst_star(result.dst_ci_05, used_drivers.Pdyn)
+    v1_ci95_dst = _dst_from_dst_star(result.dst_ci_95, used_drivers.Pdyn)
+    selected = _select_model_prediction(
+        cfg.model,
+        calibration,
+        latest_dst,
+        used_drivers,
+        v1_pred_dst,
+        v1_ci05_dst,
+        v1_ci95_dst,
+    )
+    pred_dst = selected.pred_dst
+    ci05_dst = selected.ci05_dst
+    ci95_dst = selected.ci95_dst
     persistence_dst = latest_dst
     burton_dst = _dst_from_dst_star(burton_star, used_drivers.Pdyn)
     burton_full_dst = _dst_from_dst_star(burton_full_star, used_drivers.Pdyn)
@@ -342,6 +813,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
         latest_dst_nt=[latest_dst],
         anchor_dst_star_nt=[anchor_dst_star],
         target_time_utc=[string(target_time)],
+        model_version=[selected.model_version],
         horizon_hours=[wall_horizon],
         wall_clock_lead_hours=[wall_horizon],
         model_step_hours=[model_steps],
@@ -355,6 +827,15 @@ function issue_forecast(cfg::LiveVerifyConfig)
         pred_dst_nt=[pred_dst],
         pred_dst_ci05_nt=[ci05_dst],
         pred_dst_ci95_nt=[ci95_dst],
+        v1_pred_dst_nt=[v1_pred_dst],
+        v1_pred_dst_ci05_nt=[v1_ci05_dst],
+        v1_pred_dst_ci95_nt=[v1_ci95_dst],
+        v2_pred_dst_nt=[selected.v2_pred_dst],
+        v2_pred_dst_ci05_nt=[selected.v2_ci05_dst],
+        v2_pred_dst_ci95_nt=[selected.v2_ci95_dst],
+        v2_correction_dst_nt=[selected.v2_correction],
+        v2_interval_scale=[selected.v2_interval_scale],
+        v2_calibration_label=[selected.v2_label],
         persistence_dst_nt=[persistence_dst],
         burton_dst_nt=[burton_dst],
         burton_full_dst_nt=[burton_full_dst],
@@ -374,12 +855,20 @@ function issue_forecast(cfg::LiveVerifyConfig)
     println("Latest SWPC solar wind: $latest_common_sw")
     println("Latest observed Kyoto Dst: $latest_dst_time = $latest_dst nT")
     println("Target observation UTC: $target_time")
+    println("Selected model: $(selected.model_version)")
     println("Lead time: $(round(wall_horizon; digits=3)) hr wall-clock, $model_steps model steps")
     println("Forecast Dst*: $(round(result.dst_predicted; digits=2)) nT")
     println(
-        "SINDy Dst: $(round(pred_dst; digits=2)) nT; 90% CI " *
+        "Selected Dst: $(round(pred_dst; digits=2)) nT; 90% CI " *
         "[$(round(ci05_dst; digits=2)), $(round(ci95_dst; digits=2))]"
     )
+    if selected.model_version == "v2"
+        println(
+            "SINDy-v1 Dst: $(round(v1_pred_dst; digits=2)) nT; " *
+            "v2 correction=$(round(selected.v2_correction; digits=2)) nT; " *
+            "interval scale=$(round(selected.v2_interval_scale; digits=2))"
+        )
+    end
     println(
         "Baselines Dst: persistence=$(round(persistence_dst; digits=2)), " *
         "Burton=$(round(burton_dst; digits=2)), " *
@@ -394,7 +883,8 @@ function issue_forecast(cfg::LiveVerifyConfig)
         "Pdyn=$(round(used_drivers.Pdyn; digits=3)) nPa"
     )
 
-    return (; row_idx, target_time, pred_dst, ci05_dst, ci95_dst)
+    return (; row_idx, target_time, pred_dst, ci05_dst, ci95_dst,
+            model_version=selected.model_version)
 end
 
 function verify_pending!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=nothing)
@@ -518,6 +1008,251 @@ function _print_metric(name::String, preds::Vector{Float64}, obs::Vector{Float64
     return nothing
 end
 
+_fmt2(x) = ismissing(x) ? "" : string(round(Float64(x); digits=2))
+_fmt3(x) = ismissing(x) ? "" : string(round(Float64(x); digits=3))
+_fmt_bool(x) = ismissing(x) ? "" : string(Bool(x))
+_fmt_text(x) = ismissing(x) ? "" : string(x)
+
+function _metric_values(preds::Vector{Float64}, obs::Vector{Float64})
+    isempty(preds) && return nothing
+    residuals = obs .- preds
+    return (
+        n=length(preds),
+        rmse=sqrt(mean(residuals .^ 2)),
+        mae=mean(abs.(residuals)),
+        bias=mean(residuals),
+    )
+end
+
+function _metric_markdown_row(name::String, preds::Vector{Float64}, obs::Vector{Float64})
+    m = _metric_values(preds, obs)
+    m === nothing && return "| $name | 0 |  |  |  |"
+    return "| $name | $(m.n) | $(_fmt2(m.rmse)) | $(_fmt2(m.mae)) | $(_fmt2(m.bias)) |"
+end
+
+function _verified_indices(df::DataFrame)
+    String(:observation_dst_nt) in names(df) || return Int[]
+    return [i for i in 1:nrow(df) if !ismissing(df[i, :observation_dst_nt])]
+end
+
+function _pending_indices(df::DataFrame)
+    String(:observation_dst_nt) in names(df) || return collect(1:nrow(df))
+    return [i for i in 1:nrow(df) if ismissing(df[i, :observation_dst_nt])]
+end
+
+function _row_model_version(df::DataFrame, row_idx::Int)
+    if String(:model_version) in names(df)
+        value = df[row_idx, :model_version]
+        if !ismissing(value) && !isempty(String(value))
+            return String(value)
+        end
+    end
+    return "v1"
+end
+
+function _row_is_strictly_future(df::DataFrame, row_idx::Int)
+    try
+        issue = _parse_dt(df[row_idx, :issue_time_utc])
+        target = _parse_dt(df[row_idx, :target_time_utc])
+        target > issue || return false
+        if String(:latest_dst_time_utc) in names(df) && !ismissing(df[row_idx, :latest_dst_time_utc])
+            target > _parse_dt(df[row_idx, :latest_dst_time_utc]) || return false
+        end
+        return true
+    catch
+        return false
+    end
+end
+
+function _coverage_fraction(df::DataFrame, rows::Vector{Int})
+    String(:observed_in_90ci) in names(df) || return missing
+    flags = Bool[]
+    for i in rows
+        value = df[i, :observed_in_90ci]
+        ismissing(value) || push!(flags, Bool(value))
+    end
+    isempty(flags) && return missing
+    return mean(flags)
+end
+
+function _standard_model_columns(df::DataFrame)
+    specs = Pair{String,Symbol}[
+        "Selected" => :pred_dst_nt,
+        "SINDy-v1" => :v1_pred_dst_nt,
+        "Operational-v2" => :v2_pred_dst_nt,
+        "Persistence" => :persistence_dst_nt,
+        "Burton" => :burton_dst_nt,
+        "BurtonFull" => :burton_full_dst_nt,
+        "OBrien" => :obrien_dst_nt,
+    ]
+    return [spec for spec in specs if String(last(spec)) in names(df)]
+end
+
+function _prediction_value(df::DataFrame, row_idx::Int, pred_col::Symbol)
+    if pred_col == :v1_pred_dst_nt
+        value = _optional_float(df, row_idx, :v1_pred_dst_nt)
+        if ismissing(value) && _row_model_version(df, row_idx) == "v1"
+            return _optional_float(df, row_idx, :pred_dst_nt)
+        end
+        return value
+    end
+    return _optional_float(df, row_idx, pred_col)
+end
+
+function _metric_rows_for_indices(df::DataFrame, pred_col::Symbol, rows::Vector{Int})
+    preds = Float64[]
+    obs = Float64[]
+    if pred_col != :v1_pred_dst_nt && !(String(pred_col) in names(df))
+        return preds, obs
+    end
+    for row_idx in rows
+        observed = _optional_float(df, row_idx, :observation_dst_nt)
+        predicted = _prediction_value(df, row_idx, pred_col)
+        if !ismissing(observed) && !ismissing(predicted)
+            push!(obs, observed)
+            push!(preds, predicted)
+        end
+    end
+    return preds, obs
+end
+
+function write_live_comparison_report(log_path::String, report_path::String)
+    isfile(log_path) || error("No forecast log exists at $log_path")
+    df = CSV.read(log_path, DataFrame)
+    verified = _verified_indices(df)
+    valid_verified = [i for i in verified if _row_is_strictly_future(df, i)]
+    invalid_verified = setdiff(verified, valid_verified)
+    pending = _pending_indices(df)
+    model_specs = _standard_model_columns(df)
+    coverage = _coverage_fraction(df, valid_verified)
+
+    lines = String[]
+    push!(lines, "# Locked Live Forecast Comparison Report")
+    push!(lines, "")
+    push!(lines, "Source log: `$log_path`")
+    push!(lines, "Evidence tier: locked-live forecast, scored only after target observation publication.")
+    push!(lines, "Generated UTC: $(Dates.format(now(UTC), dateformat"yyyy-mm-ddTHH:MM:SS"))Z")
+    push!(lines, "")
+    push!(lines, "Verified rows used: $(length(valid_verified))")
+    push!(lines, "Invalid verified rows excluded: $(length(invalid_verified))")
+    push!(lines, "Pending rows: $(length(pending))")
+    if !ismissing(coverage)
+        push!(lines, "Selected-model 90% interval coverage: $(_fmt3(coverage))")
+    end
+
+    push!(lines, "")
+    push!(lines, "## Aggregate Metrics")
+    push!(lines, "")
+    push!(lines, "| model | n | RMSE nT | MAE nT | bias nT |")
+    push!(lines, "| --- | ---: | ---: | ---: | ---: |")
+    for spec in model_specs
+        preds, obs = _metric_rows_for_indices(df, last(spec), valid_verified)
+        push!(lines, _metric_markdown_row(first(spec), preds, obs))
+    end
+
+    push!(lines, "")
+    push!(lines, "## Verified Rows Used")
+    push!(lines, "")
+    push!(lines, "| issue UTC | target UTC | model | lead h | observed | selected pred | residual obs-pred | abs error | inside 90% CI | v1 pred | persistence | Burton | OBrien |")
+    push!(lines, "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |")
+    for row_idx in valid_verified
+        observed = _optional_float(df, row_idx, :observation_dst_nt)
+        pred = _optional_float(df, row_idx, :pred_dst_nt)
+        residual = _optional_float(df, row_idx, :residual_dst_nt)
+        abs_error = ismissing(residual) ? missing : abs(residual)
+        lead = _optional_float(df, row_idx, :wall_clock_lead_hours)
+        if ismissing(lead)
+            lead = _optional_float(df, row_idx, :horizon_hours)
+        end
+        in_ci = String(:observed_in_90ci) in names(df) ? df[row_idx, :observed_in_90ci] : missing
+        model_version = _row_model_version(df, row_idx)
+        push!(lines,
+            "| $(_fmt_text(df[row_idx, :issue_time_utc])) | " *
+            "$(_fmt_text(df[row_idx, :target_time_utc])) | " *
+            "$(_fmt_text(model_version)) | " *
+            "$(_fmt2(lead)) | $(_fmt2(observed)) | $(_fmt2(pred)) | " *
+            "$(_fmt2(residual)) | $(_fmt2(abs_error)) | $(_fmt_bool(in_ci)) | " *
+            "$(_fmt2(_prediction_value(df, row_idx, :v1_pred_dst_nt))) | " *
+            "$(_fmt2(_optional_float(df, row_idx, :persistence_dst_nt))) | " *
+            "$(_fmt2(_optional_float(df, row_idx, :burton_dst_nt))) | " *
+            "$(_fmt2(_optional_float(df, row_idx, :obrien_dst_nt))) |"
+        )
+    end
+
+    if !isempty(invalid_verified)
+        push!(lines, "")
+        push!(lines, "## Invalid Verified Rows Excluded")
+        push!(lines, "")
+        push!(lines, "| issue UTC | target UTC | reason |")
+        push!(lines, "| --- | --- | --- |")
+        for row_idx in invalid_verified
+            push!(lines,
+                "| $(_fmt_text(df[row_idx, :issue_time_utc])) | " *
+                "$(_fmt_text(df[row_idx, :target_time_utc])) | " *
+                "target is not strictly after issue/latest observed Dst time |"
+            )
+        end
+    end
+
+    if !isempty(pending)
+        push!(lines, "")
+        push!(lines, "## Pending Rows")
+        push!(lines, "")
+        push!(lines, "| issue UTC | target UTC | model | selected pred | CI05 | CI95 |")
+        push!(lines, "| --- | --- | --- | ---: | ---: | ---: |")
+        for row_idx in pending
+            model_version = _row_model_version(df, row_idx)
+            push!(lines,
+                "| $(_fmt_text(df[row_idx, :issue_time_utc])) | " *
+                "$(_fmt_text(df[row_idx, :target_time_utc])) | " *
+                "$(_fmt_text(model_version)) | " *
+                "$(_fmt2(_optional_float(df, row_idx, :pred_dst_nt))) | " *
+                "$(_fmt2(_optional_float(df, row_idx, :pred_dst_ci05_nt))) | " *
+                "$(_fmt2(_optional_float(df, row_idx, :pred_dst_ci95_nt))) |"
+            )
+        end
+    end
+
+    if !isempty(valid_verified)
+        worst = sort(valid_verified; by=i -> abs(Float64(df[i, :residual_dst_nt])), rev=true)
+        push!(lines, "")
+        push!(lines, "## Worst Selected-Model Misses")
+        push!(lines, "")
+        push!(lines, "| target UTC | observed | selected pred | residual obs-pred | abs error | model |")
+        push!(lines, "| --- | ---: | ---: | ---: | ---: | --- |")
+        for row_idx in worst[1:min(10, length(worst))]
+            model_version = _row_model_version(df, row_idx)
+            residual = _optional_float(df, row_idx, :residual_dst_nt)
+            push!(lines,
+                "| $(_fmt_text(df[row_idx, :target_time_utc])) | " *
+                "$(_fmt2(_optional_float(df, row_idx, :observation_dst_nt))) | " *
+                "$(_fmt2(_optional_float(df, row_idx, :pred_dst_nt))) | " *
+                "$(_fmt2(residual)) | $(_fmt2(abs(residual))) | " *
+                "$(_fmt_text(model_version)) |"
+            )
+        end
+    end
+
+    push!(lines, "")
+    push!(lines, "## Standard Interpretation")
+    push!(lines, "")
+    push!(lines, "- A row is correct for point accuracy only by its absolute error against the locked target observation.")
+    push!(lines, "- A row is correct for probabilistic coverage only if the observation falls inside the locked interval.")
+    push!(lines, "- A model upgrade must improve locked-live RMSE and MAE against all mandatory baselines over enough rows, not only one row or a replay window.")
+    push!(lines, "- Pending rows are not evidence for or against the model.")
+
+    dir = dirname(report_path)
+    !isempty(dir) && mkpath(dir)
+    write(report_path, join(lines, "\n") * "\n")
+    println("Wrote locked-live comparison report: $report_path")
+    println(
+        "Verified rows used: $(length(valid_verified)); " *
+        "invalid verified rows excluded: $(length(invalid_verified)); " *
+        "pending rows: $(length(pending))"
+    )
+    return report_path
+end
+
 function summarize_log(log_path::String)
     isfile(log_path) || error("No forecast log exists at $log_path")
     df = CSV.read(log_path, DataFrame)
@@ -550,11 +1285,17 @@ function main(args=ARGS)
         verify_pending!(cfg)
     elseif cfg.mode == :backfill_baselines
         backfill_baselines!(cfg.log_path)
+    elseif cfg.mode == :replay_recent
+        run_replay_recent(cfg)
+    elseif cfg.mode == :fit_v2_calibration
+        fit_v2_calibration!(cfg)
     elseif cfg.mode == :wait
         forecast = issue_forecast(cfg)
         wait_for_observation(cfg, forecast)
     elseif cfg.mode == :summary
         summarize_log(cfg.log_path)
+    elseif cfg.mode == :comparison_report
+        write_live_comparison_report(cfg.log_path, cfg.report_path)
     else
         error("Unsupported mode: $(cfg.mode)")
     end
