@@ -47,6 +47,24 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         grid_cfg = _parse_args(["--fit-v2-calibration", "--v2-ridge-grid=0,10,100"])
         @test grid_cfg.v2_ridge_grid == [0.0, 10.0, 100.0]
 
+        omni_cfg = _parse_args([
+            "--replay-omni",
+            "--omni=/tmp/omni.csv",
+            "--omni-year-start=2024",
+            "--omni-year-end=2025",
+            "--replay-hours=100",
+        ])
+        @test omni_cfg.mode == :replay_omni
+        @test omni_cfg.omni_path == "/tmp/omni.csv"
+        @test omni_cfg.omni_year_start == 2024
+        @test omni_cfg.omni_year_end == 2025
+        @test omni_cfg.replay_hours == 100
+        @test_throws ArgumentError _parse_args([
+            "--replay-omni",
+            "--omni-year-start=2026",
+            "--omni-year-end=2025",
+        ])
+
         campaign = _parse_args([
             "--campaign",
             "--campaign-horizons=1,3,6",
@@ -73,6 +91,27 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         @test features.Bperp_nt == 5.0
         @test features.clock_angle_sin2 ≈ 0.9 atol=1e-12
         @test features.sqrt_Pdyn_npa == 1.5
+        @test features.dst_delta_1h_nt == 0.0
+        @test features.baseline_spread_nt == 0.0
+
+        expert = _v2_features(
+            -20.0,
+            (; V=500.0, Bz=-4.0, By=3.0, n=5.0, Pdyn=2.25);
+            memory=(;
+                dst_delta_1h_nt=-2.0,
+                dst_delta_3h_nt=-5.0,
+                Bz_delta_1h_nt=-1.0,
+                VBsouth_delta_1h_mvm=0.4,
+                VBsouth_mean_3h_mvm=1.5,
+                Bsouth_mean_3h_nt=3.0,
+            ),
+            baselines=(; persistence=-22.0, burton=-18.0, burton_full=-19.0, obrien=-21.0),
+            v1_pred_dst=-20.0,
+        )
+        @test expert.dst_delta_3h_nt == -5.0
+        @test expert.baseline_spread_nt == 4.0
+        @test expert.v1_minus_persistence_nt == 2.0
+        @test expert.obrien_minus_v1_nt == -1.0
     end
 
     @testset "A/D: append preserves old log rows while adding baseline columns" begin
@@ -285,6 +324,9 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         @test df.pred_dst_nt == df.v1_pred_dst_nt
         @test all(ismissing, df.v2_pred_dst_nt)
         @test all(isfinite, df.obrien_dst_nt)
+        @test :dst_delta_1h_nt in propertynames(df)
+        @test :baseline_spread_nt in propertynames(df)
+        @test df.dst_delta_1h_nt[1] == 0.0
         @test df.residual_dst_nt[1] ≈ df.observation_dst_nt[1] - df.pred_dst_nt[1] atol=1e-12
         @test df.persistence_residual_dst_nt[1] ≈ df.observation_dst_nt[1] - df.persistence_dst_nt[1] atol=1e-12
 
@@ -311,6 +353,36 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             text = read(md_path, String)
             @test occursin("target_time_utc", text)
             @test count(==('\n'), text) == 4
+        end
+
+        mktempdir() do tmp
+            omni_path = joinpath(tmp, "omni.csv")
+            raw = DataFrame(
+                year=fill(2026, 5),
+                doy=fill(157, 5),
+                hour=0:4,
+                By=[1.0, 1.1, 1.2, 1.3, 1.4],
+                Bz=[-1.0, -1.2, -1.4, -1.6, -1.8],
+                T=fill(100_000.0, 5),
+                n=[4.0, 4.2, 4.4, 4.6, 4.8],
+                V=[410.0, 420.0, 430.0, 440.0, 450.0],
+                Pdyn=[1.13, 1.24, 1.36, 1.49, 1.62],
+                Dst=[-20.0, -21.0, -23.0, -22.0, -24.0],
+                AE=fill(100.0, 5),
+                AL=fill(-50.0, 5),
+                AU=fill(50.0, 5),
+            )
+            CSV.write(omni_path, raw)
+
+            plasma_omni, mag_omni, dst_times_omni, dst_vals_omni =
+                _omni_replay_inputs(omni_path, 2026, 2026)
+
+            @test nrow(plasma_omni) == 5
+            @test nrow(mag_omni) == 5
+            @test dst_times_omni[1] == t0
+            @test dst_vals_omni[end] == -24.0
+            @test plasma_omni.speed[2] == 420.0
+            @test mag_omni.bz_gsm[3] == -1.4
         end
     end
 
@@ -353,7 +425,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             selection_path = replace(cal_path, r"\.csv$" => "_selection.csv")
             @test isfile(scored_path)
             @test isfile(selection_path)
-            @test cal.label == "operational_v2_validated_full_ridge0.0_fit16_val3"
+            @test startswith(cal.label, "operational_v2_validated_")
             @test cal.selected_component == :ensemble
             reread = read_operational_v2_calibration(cal_path)
             scored = CSV.read(scored_path, DataFrame)
@@ -362,7 +434,9 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test all(scored.v2_selected_component .== "ensemble")
             @test Set(scored.v2_split) == Set(["fit", "validation", "holdout"])
             @test nrow(selection) == 4
-            @test all(selection.validation_pass)
+            @test any(selection.selected_by_validation)
+            @test all(selection.holdout_gate_pass)
+            @test :final_benchmark_component in propertynames(selection)
             @test all(occursin(";", w) for w in selection.selector_weights)
             @test sum(reread.selector_weights) ≈ 1.0 atol=1e-12
             pred_v2 = operational_v2_predict(
@@ -370,7 +444,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
                 pred[end],
                 pred[end] - 3.0,
                 pred[end] + 3.0,
-                operational_v2_feature_tuple(pred[end] - 1.0, 420.0, bz[end], 1.0, 5.0, 1.5),
+                _v2_features(pred[end] - 1.0, (; V=420.0, Bz=bz[end], By=1.0, n=5.0, Pdyn=1.5)),
             )
             @test pred_v2.pred_dst ≈ observed[end] atol=0.5
         end

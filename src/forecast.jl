@@ -152,6 +152,22 @@ const DEFAULT_OPERATIONAL_V2_FEATURES = [
     :sqrt_Pdyn_npa,
 ]
 
+const OPERATIONAL_V2_MEMORY_FEATURES = [
+    :dst_delta_1h_nt,
+    :dst_delta_3h_nt,
+    :Bz_delta_1h_nt,
+    :VBsouth_delta_1h_mvm,
+    :VBsouth_mean_3h_mvm,
+    :Bsouth_mean_3h_nt,
+]
+
+const OPERATIONAL_V2_EXPERT_FEATURES = [
+    :baseline_spread_nt,
+    :v1_minus_persistence_nt,
+    :obrien_minus_v1_nt,
+    :burton_minus_v1_nt,
+]
+
 const OPERATIONAL_V2_BASELINE_COLUMNS = Pair{Symbol,Symbol}[
     :persistence => :persistence_dst_nt,
     :burton => :burton_dst_nt,
@@ -212,6 +228,50 @@ function _column_float_or_nan(df::DataFrame, col::Symbol)
     return Float64[ismissing(x) ? NaN : Float64(x) for x in df[!, col]]
 end
 
+function _chronological_order(df::DataFrame)
+    for col in (:issue_time_utc, :latest_dst_time_utc, :target_time_utc)
+        String(col) in names(df) || continue
+        values = DateTime[]
+        ok = true
+        for x in df[!, col]
+            if ismissing(x)
+                ok = false
+                break
+            end
+            push!(values, x isa DateTime ? x : DateTime(String(x)))
+        end
+        ok && return sortperm(values)
+    end
+    return collect(1:nrow(df))
+end
+
+function _lagged_difference(values::Vector{Float64}, order::Vector{Int}, lag::Int)
+    out = zeros(length(values))
+    for k in eachindex(order)
+        idx = order[k]
+        out[idx] = k > lag ? values[idx] - values[order[k - lag]] : 0.0
+    end
+    return out
+end
+
+function _rolling_mean(values::Vector{Float64}, order::Vector{Int}, width::Int)
+    out = similar(values)
+    for k in eachindex(order)
+        lo = max(1, k - width + 1)
+        idxs = order[lo:k]
+        vals = values[idxs]
+        finite = vals[isfinite.(vals)]
+        out[order[k]] = isempty(finite) ? 0.0 : mean(finite)
+    end
+    return out
+end
+
+function _maybe_add_column!(df::DataFrame, col::Symbol, values::Vector{Float64})
+    String(col) in names(df) && return df
+    df[!, col] = values
+    return df
+end
+
 function add_operational_v2_features!(df::DataFrame)
     base = [:latest_dst_nt, :V_kms, :Bz_nt, :By_nt, :n_cm3, :Pdyn_npa]
     all(String(c) in names(df) for c in base) || return df
@@ -232,6 +292,59 @@ function add_operational_v2_features!(df::DataFrame)
     df[!, :Bperp_nt] = [f.Bperp_nt for f in features]
     df[!, :clock_angle_sin2] = [f.clock_angle_sin2 for f in features]
     df[!, :sqrt_Pdyn_npa] = [f.sqrt_Pdyn_npa for f in features]
+
+    order = _chronological_order(df)
+    _maybe_add_column!(df, :dst_delta_1h_nt, _lagged_difference(latest, order, 1))
+    _maybe_add_column!(df, :dst_delta_3h_nt, _lagged_difference(latest, order, 3))
+    _maybe_add_column!(df, :Bz_delta_1h_nt, _lagged_difference(bz, order, 1))
+    _maybe_add_column!(
+        df,
+        :VBsouth_delta_1h_mvm,
+        _lagged_difference(Float64.(df.VBsouth_mvm), order, 1),
+    )
+    _maybe_add_column!(
+        df,
+        :VBsouth_mean_3h_mvm,
+        _rolling_mean(Float64.(df.VBsouth_mvm), order, 3),
+    )
+    _maybe_add_column!(
+        df,
+        :Bsouth_mean_3h_nt,
+        _rolling_mean(Float64.(df.Bsouth_nt), order, 3),
+    )
+    if all(String(c) in names(df) for c in (:pred_dst_nt, :persistence_dst_nt))
+        v1 = _column_float_or_nan(df, :pred_dst_nt)
+        persistence = _column_float_or_nan(df, :persistence_dst_nt)
+        _maybe_add_column!(df, :v1_minus_persistence_nt, v1 .- persistence)
+        expert_cols = Symbol[:pred_dst_nt, :persistence_dst_nt]
+        String(:obrien_dst_nt) in names(df) && push!(expert_cols, :obrien_dst_nt)
+        String(:burton_dst_nt) in names(df) && push!(expert_cols, :burton_dst_nt)
+        String(:burton_full_dst_nt) in names(df) && push!(expert_cols, :burton_full_dst_nt)
+        spread = zeros(nrow(df))
+        for i in 1:nrow(df)
+            vals = Float64[
+                Float64(df[i, c])
+                for c in expert_cols
+                if !ismissing(df[i, c]) && isfinite(Float64(df[i, c]))
+            ]
+            spread[i] = isempty(vals) ? 0.0 : maximum(vals) - minimum(vals)
+        end
+        _maybe_add_column!(df, :baseline_spread_nt, spread)
+    end
+    if all(String(c) in names(df) for c in (:obrien_dst_nt, :pred_dst_nt))
+        _maybe_add_column!(
+            df,
+            :obrien_minus_v1_nt,
+            _column_float_or_nan(df, :obrien_dst_nt) .- _column_float_or_nan(df, :pred_dst_nt),
+        )
+    end
+    if all(String(c) in names(df) for c in (:burton_dst_nt, :pred_dst_nt))
+        _maybe_add_column!(
+            df,
+            :burton_minus_v1_nt,
+            _column_float_or_nan(df, :burton_dst_nt) .- _column_float_or_nan(df, :pred_dst_nt),
+        )
+    end
     return df
 end
 

@@ -47,6 +47,7 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --i
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --verify-pending
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --backfill-baselines
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --replay-recent
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --replay-omni
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --fit-v2-calibration
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --campaign
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --summary
@@ -72,6 +73,25 @@ complete solar-wind hour into the one-hour-ahead target, and compares the
 prediction with the already-published target Dst. This provides more rows for
 diagnostics, but it is not a substitute for locked forecasts that were issued
 before observations arrived.
+
+Use `--replay-omni` for a longer research replay from a local extracted OMNI
+CSV without adding that large data file to git:
+
+```bash
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
+  --replay-omni \
+  --omni=paper/data/omni_extracted.csv \
+  --omni-year-start=2024 \
+  --omni-year-end=2025 \
+  --replay-hours=4000 \
+  --table=/private/tmp/solar_v2_omni_replay_2024_2025.csv \
+  --table-limit=0
+```
+
+The OMNI replay uses the same one-hour-ahead predicted-versus-observed table as
+`--replay-recent`, but it can cover thousands of chronological rows. It remains
+retrospective evidence; locked live forecasts are still required for operational
+claims.
 
 Use `--comparison-report` after `--verify-pending` to create the standard
 locked-live report:
@@ -99,16 +119,20 @@ speed, IMF components, density, dynamic pressure, and derived causal coupling
 features such as southward IMF, `V Bs`, transverse IMF magnitude, IMF clock-angle
 coupling, and square-root dynamic pressure.
 
-Current v2 calibration is guarded, validation-selected, and baseline-aware. The
-fit command sorts replay/live-log rows chronologically, fits candidate
-calibrations on the earliest rows, then fits robust convex ensemble weights on
-later validation rows. The ensemble can blend corrected SINDy-v2, uncorrected
-SINDy v1, persistence, Burton, BurtonFull, and O'Brien--McPherron when those
-columns are available. The final untouched holdout rows shrink the validated
-weight vector toward the SINDy-v1 component until v2 is no worse than SINDy v1
-on both RMSE and MAE. The issued operational v2 output is therefore one
-upgraded ensemble forecast; the internal `v2_selected_component` and weight
-fields are audit metadata, not separate headline models.
+Current v2 calibration is guarded, validation-selected, memory-aware, and
+baseline-aware. The fit command sorts replay/live-log rows chronologically,
+fits candidate calibrations on the earliest rows, then fits robust convex
+ensemble weights on later validation rows. Validation-gate-passing candidates
+are preferred before ranking by validation RMSE and MAE. Candidate feature sets
+include instantaneous coupling terms, causal Dst and solar-wind memory terms,
+and expert disagreement terms when baseline predictions are available. The ensemble can
+blend corrected SINDy-v2, uncorrected SINDy v1, persistence, Burton,
+BurtonFull, and O'Brien--McPherron. The final safety window first tries a
+robust safety-window blend and then falls back to the best available expert
+when needed, so the deployed v2 is no worse than that expert on RMSE and MAE.
+The issued operational v2 output is one upgraded ensemble forecast; the
+internal `v2_selected_component` and weight fields are audit metadata, not
+separate headline models.
 
 Fit the calibration from a prior replay or locked live log:
 
@@ -122,9 +146,22 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --v2-selector-margin=0.5
 ```
 
+For a longer research calibration, pair `--replay-omni` with the same fit
+command:
+
+```bash
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
+  --fit-v2-calibration \
+  --table=/private/tmp/solar_v2_omni_replay_2024_2025.csv \
+  --v2-calibration=/private/tmp/solar_v2_omni_calibration_2024_2025.csv \
+  --v2-ridge-grid=0,0.1,1,10,100,1000 \
+  --v2-validation-fraction=0.15 \
+  --v2-selector-margin=0.5
+```
+
 This also writes `live_forecasts/operational_v2_calibration_selection.csv`,
 which records each tested v2 candidate, validation metrics, holdout metrics, and
-the validation and final holdout-shrunk ensemble weights.
+the validation and final safety-shrunk ensemble weights.
 
 Then run a calibrated replay or live issue:
 
