@@ -195,9 +195,9 @@ using Dates
     end
 
     @testset "A/D: Operational v2 guarded baseline selector" begin
-        n = 8
+        n = 16
         v1_pred = fill(-40.0, n)
-        observed = collect(-48.0:-1.0:-55.0)
+        observed = collect(-48.0:-1.0:-63.0)
         obrien = observed .+ 0.2
         df = DataFrame(
             pred_dst_nt=v1_pred,
@@ -206,7 +206,7 @@ using Dates
             observation_dst_nt=observed,
             latest_dst_nt=fill(-42.0, n),
             V_kms=fill(420.0, n),
-            Bz_nt=collect(-4.0:1.0:3.0),
+            Bz_nt=collect(-8.0:1.0:7.0),
             By_nt=fill(1.0, n),
             n_cm3=fill(5.0, n),
             Pdyn_npa=fill(1.5, n),
@@ -231,14 +231,7 @@ using Dates
             -40.0,
             -43.0,
             -37.0,
-            (
-                latest_dst_nt=-42.0,
-                V_kms=420.0,
-                Bz_nt=-1.0,
-                By_nt=1.0,
-                n_cm3=5.0,
-                Pdyn_npa=1.5,
-            );
+            operational_v2_feature_tuple(-42.0, 420.0, -1.0, 1.0, 5.0, 1.5);
             baselines=(; persistence=-42.0, burton=-43.0, burton_full=-44.0, obrien=-52.5),
         )
         @test pred.pred_dst == -52.5
@@ -250,14 +243,7 @@ using Dates
             -40.0,
             -43.0,
             -37.0,
-            (
-                latest_dst_nt=-42.0,
-                V_kms=420.0,
-                Bz_nt=-1.0,
-                By_nt=1.0,
-                n_cm3=5.0,
-                Pdyn_npa=1.5,
-            ),
+            operational_v2_feature_tuple(-42.0, 420.0, -1.0, 1.0, 5.0, 1.5),
         )
 
         scored = score_operational_v2(df, cal)

@@ -40,9 +40,10 @@ The correction is fit from prior replay/live rows only:
 Dst_v2 = Dst_v1 + β₀ + Σ βⱼ zⱼ
 ```
 
-where `zⱼ` are standardized issue-time features. The interval scale inflates
-the v1 ensemble interval from calibration residuals. This type deliberately
-does not alter `ForecastState` or v1 SINDy coefficients.
+where `zⱼ` are standardized issue-time features, including derived causal
+coupling features in the default configuration. The interval scale inflates the
+v1 ensemble interval from calibration residuals. This type deliberately does
+not alter `ForecastState` or v1 SINDy coefficients.
 
 When mandatory baseline columns are present during calibration, v2 also stores
 a guarded selector over corrected SINDy, persistence, Burton, BurtonFull, and
@@ -123,6 +124,11 @@ const DEFAULT_OPERATIONAL_V2_FEATURES = [
     :By_nt,
     :n_cm3,
     :Pdyn_npa,
+    :Bsouth_nt,
+    :VBsouth_mvm,
+    :Bperp_nt,
+    :clock_angle_sin2,
+    :sqrt_Pdyn_npa,
 ]
 
 const OPERATIONAL_V2_BASELINE_COLUMNS = Pair{Symbol,Symbol}[
@@ -146,6 +152,66 @@ function default_operational_v2_calibration(;
         Float64(interval_scale),
         label,
     )
+end
+
+"""
+    operational_v2_feature_tuple(latest_dst, V, Bz, By, n, Pdyn)
+
+Return the causal issue-time feature tuple used by the default operational-v2
+calibration. The derived features are computed only from quantities available at
+issue time.
+"""
+function operational_v2_feature_tuple(latest_dst::Real, V::Real, Bz::Real,
+                                      By::Real, n::Real, Pdyn::Real)
+    latest = Float64(latest_dst)
+    speed = Float64(V)
+    bz = Float64(Bz)
+    by = Float64(By)
+    density = Float64(n)
+    pdyn = Float64(Pdyn)
+    bsouth = max(-bz, 0.0)
+    bperp = hypot(by, bz)
+    clock_angle_sin2 = iszero(bperp) ? 0.0 : clamp((1.0 - bz / bperp) / 2.0, 0.0, 1.0)
+    return (
+        latest_dst_nt=latest,
+        V_kms=speed,
+        Bz_nt=bz,
+        By_nt=by,
+        n_cm3=density,
+        Pdyn_npa=pdyn,
+        Bsouth_nt=bsouth,
+        VBsouth_mvm=1e-3 * speed * bsouth,
+        Bperp_nt=bperp,
+        clock_angle_sin2=clock_angle_sin2,
+        sqrt_Pdyn_npa=sqrt(max(pdyn, 0.0)),
+    )
+end
+
+function _column_float_or_nan(df::DataFrame, col::Symbol)
+    return Float64[ismissing(x) ? NaN : Float64(x) for x in df[!, col]]
+end
+
+function add_operational_v2_features!(df::DataFrame)
+    base = [:latest_dst_nt, :V_kms, :Bz_nt, :By_nt, :n_cm3, :Pdyn_npa]
+    all(String(c) in names(df) for c in base) || return df
+
+    latest = _column_float_or_nan(df, :latest_dst_nt)
+    speed = _column_float_or_nan(df, :V_kms)
+    bz = _column_float_or_nan(df, :Bz_nt)
+    by = _column_float_or_nan(df, :By_nt)
+    density = _column_float_or_nan(df, :n_cm3)
+    pdyn = _column_float_or_nan(df, :Pdyn_npa)
+
+    features = [
+        operational_v2_feature_tuple(latest[i], speed[i], bz[i], by[i], density[i], pdyn[i])
+        for i in eachindex(latest)
+    ]
+    df[!, :Bsouth_nt] = [f.Bsouth_nt for f in features]
+    df[!, :VBsouth_mvm] = [f.VBsouth_mvm for f in features]
+    df[!, :Bperp_nt] = [f.Bperp_nt for f in features]
+    df[!, :clock_angle_sin2] = [f.clock_angle_sin2 for f in features]
+    df[!, :sqrt_Pdyn_npa] = [f.sqrt_Pdyn_npa for f in features]
+    return df
 end
 
 function _require_columns(df::DataFrame, cols)
@@ -305,8 +371,9 @@ function fit_operational_v2_calibration(df::DataFrame;
         [:pred_dst_nt, :observation_dst_nt, :pred_dst_ci05_nt, :pred_dst_ci95_nt],
         feature_names,
     )
-    _require_columns(df, required)
-    clean = _finite_rows(df, required)
+    prepared = add_operational_v2_features!(copy(df))
+    _require_columns(prepared, required)
+    clean = _finite_rows(prepared, required)
     nrow(clean) > length(feature_names) + 1 ||
         throw(ArgumentError("not enough finite rows to fit operational v2 calibration"))
 
@@ -417,11 +484,11 @@ function _row_baselines(df::DataFrame, row_idx::Int)
 end
 
 function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
-    _require_columns(df, vcat(
+    out = add_operational_v2_features!(copy(df))
+    _require_columns(out, vcat(
         [:pred_dst_nt, :pred_dst_ci05_nt, :pred_dst_ci95_nt, :observation_dst_nt],
         cal.feature_names,
     ))
-    out = copy(df)
     v2_pred = Vector{Float64}(undef, nrow(out))
     v2_ci05 = Vector{Float64}(undef, nrow(out))
     v2_ci95 = Vector{Float64}(undef, nrow(out))

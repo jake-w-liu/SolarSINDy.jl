@@ -48,12 +48,18 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --v
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --backfill-baselines
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --replay-recent
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --fit-v2-calibration
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --campaign
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --summary
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --comparison-report
 ```
 
 Use `--poll-seconds=N`, `--timeout-hours=N`, `--horizon-hours=N`, and
 `--log=PATH` to adjust the run.
+
+Use `--campaign --campaign-horizons=1,2,3,6 --model=v2` to issue multiple
+future operational-v2 forecasts, poll the observation feed, verify the locked
+rows, and regenerate the comparison report from one command. `--campaign`
+defaults to `--model=v2` if no model is specified.
 
 Use `--backfill-baselines` after schema changes to fill baseline forecasts and
 residuals for older rows that already contain locked SINDy predictions and live
@@ -89,7 +95,9 @@ The default live model is `--model=v1`, which preserves the paper model path.
 `--model=v2` enables an experimental operational wrapper that applies a causal
 ridge residual correction to the v1 forecast and inflates the prediction
 interval. The correction uses only issue-time fields: latest Dst, solar-wind
-speed, IMF components, density, and dynamic pressure.
+speed, IMF components, density, dynamic pressure, and derived causal coupling
+features such as southward IMF, `V Bs`, transverse IMF magnitude, IMF clock-angle
+coupling, and square-root dynamic pressure.
 
 Current v2 calibration is guarded and baseline-aware. When replay or live-log
 baseline columns are available, the calibration stores skill estimates for

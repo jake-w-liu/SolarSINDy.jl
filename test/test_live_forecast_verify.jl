@@ -40,6 +40,33 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         @test cfg.v2_ridge == 10.0
         @test cfg.v2_interval_coverage == 0.8
         @test cfg.v2_selector_margin_nt == 1.25
+
+        campaign = _parse_args([
+            "--campaign",
+            "--campaign-horizons=1,3,6",
+            "--poll-seconds=1",
+            "--timeout-hours=0.1",
+        ])
+        @test campaign.mode == :campaign
+        @test campaign.model == :v2
+        @test campaign.campaign_horizons == [1, 3, 6]
+
+        explicit_v1 = _parse_args(["--campaign", "--model=v1"])
+        @test explicit_v1.model == :v1
+        @test_throws ArgumentError _parse_args(["--campaign-horizons=1,0"])
+    end
+
+    @testset "A/D: v2 derived features are causal and deterministic" begin
+        features = _v2_features(
+            -20.0,
+            (; V=500.0, Bz=-4.0, By=3.0, n=5.0, Pdyn=2.25),
+        )
+        @test features.latest_dst_nt == -20.0
+        @test features.Bsouth_nt == 4.0
+        @test features.VBsouth_mvm == 2.0
+        @test features.Bperp_nt == 5.0
+        @test features.clock_angle_sin2 ≈ 0.9 atol=1e-12
+        @test features.sqrt_Pdyn_npa == 1.5
     end
 
     @testset "A/D: append preserves old log rows while adding baseline columns" begin
@@ -285,9 +312,9 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")
             cal_path = joinpath(tmp, "v2_calibration.csv")
-            pred = collect(-20.0:1.0:-11.0)
-            bz = collect(-4.0:1.0:5.0)
-            observed = pred .+ 2.0 .+ 0.5 .* bz
+            pred = collect(-30.0:1.0:-11.0)
+            bz = collect(-10.0:1.0:9.0)
+            observed = pred .+ 2.0
             replay = DataFrame(
                 issue_time_utc=[string(DateTime(2026, 1, 1) + Hour(i)) for i in 1:length(pred)],
                 pred_dst_nt=pred .+ 20.0,
@@ -317,7 +344,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test isfile(cal_path)
             scored_path = replace(cal_path, r"\.csv$" => "_scored.csv")
             @test isfile(scored_path)
-            @test cal.label == "operational_v2_ridge0.0_n8"
+            @test cal.label == "operational_v2_ridge0.0_n16"
             @test cal.selected_component == :v2
             reread = read_operational_v2_calibration(cal_path)
             scored = CSV.read(scored_path, DataFrame)
@@ -328,16 +355,84 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
                 pred[end],
                 pred[end] - 3.0,
                 pred[end] + 3.0,
-                (
-                    latest_dst_nt=pred[end] - 1.0,
-                    V_kms=420.0,
-                    Bz_nt=bz[end],
-                    By_nt=1.0,
-                    n_cm3=5.0,
-                    Pdyn_npa=1.5,
-                ),
+                operational_v2_feature_tuple(pred[end] - 1.0, 420.0, bz[end], 1.0, 5.0, 1.5),
             )
             @test pred_v2.pred_dst ≈ observed[end]
+        end
+    end
+
+    @testset "A/D: campaign mode issues, verifies, and reports requested horizons" begin
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "campaign.csv")
+            report_path = joinpath(tmp, "campaign.md")
+            targets = DateTime(2026, 6, 6, 10):Hour(1):DateTime(2026, 6, 6, 12)
+            cfg = LiveVerifyConfig(;
+                mode=:campaign,
+                model=:v2,
+                poll_seconds=1,
+                timeout_hours=0.1,
+                campaign_horizons=[1, 2],
+                log_path=log_path,
+                report_path=report_path,
+            )
+
+            function fake_issue(issue_cfg)
+                row_idx = isfile(log_path) ? nrow(CSV.read(log_path, DataFrame)) + 1 : 1
+                target = collect(targets)[row_idx]
+                pred = -30.0 - row_idx
+                row = DataFrame(
+                    issue_time_utc=["2026-06-06T09:00:00"],
+                    latest_dst_time_utc=["2026-06-06T09:00:00"],
+                    target_time_utc=[string(target)],
+                    model_version=["v2"],
+                    wall_clock_lead_hours=[Float64(issue_cfg.horizon_hours)],
+                    pred_dst_nt=[pred],
+                    pred_dst_ci05_nt=[pred - 10.0],
+                    pred_dst_ci95_nt=[pred + 10.0],
+                    observation_dst_nt=[missing],
+                    residual_dst_nt=[missing],
+                    observed_in_90ci=[missing],
+                    v1_pred_dst_nt=[pred - 1.0],
+                    v2_pred_dst_nt=[pred],
+                    v2_pred_dst_ci05_nt=[pred - 10.0],
+                    v2_pred_dst_ci95_nt=[pred + 10.0],
+                    v2_selected_component=["v2"],
+                    persistence_dst_nt=[-30.0],
+                    burton_dst_nt=[-29.0],
+                    burton_full_dst_nt=[-29.0],
+                    obrien_dst_nt=[-31.0],
+                )
+                idx = _append_forecast!(log_path, row)
+                return (; row_idx=idx, target_time=target, pred_dst=pred,
+                        ci05_dst=pred - 10.0, ci95_dst=pred + 10.0,
+                        model_version="v2")
+            end
+
+            function fake_verify(verify_cfg)
+                df = CSV.read(verify_cfg.log_path, DataFrame)
+                n_verified = 0
+                for row_idx in 1:nrow(df)
+                    ismissing(df[row_idx, :observation_dst_nt]) || continue
+                    _score_row!(df, row_idx, df[row_idx, :pred_dst_nt] + 1.0)
+                    n_verified += 1
+                end
+                CSV.write(verify_cfg.log_path, df)
+                return n_verified
+            end
+
+            result = run_campaign(
+                cfg;
+                issue_fn=fake_issue,
+                verify_fn=fake_verify,
+                sleep_fn=_ -> nothing,
+            )
+            df = CSV.read(log_path, DataFrame)
+            text = read(report_path, String)
+            @test result.rows == [1, 2]
+            @test nrow(df) == 2
+            @test all(!ismissing, df.observation_dst_nt)
+            @test occursin("Same-row v2 comparison rows: 2", text)
+            @test occursin("Operational v2 is the upgraded method", text)
         end
     end
 end

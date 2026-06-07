@@ -55,6 +55,7 @@ export # Utils
        ForecastState, ForecastResult, init_forecast,
        step_forecast!, forecast_ahead,
        OperationalV2Calibration, default_operational_v2_calibration,
+       operational_v2_feature_tuple,
        fit_operational_v2_calibration, operational_v2_predict,
        score_operational_v2, write_operational_v2_calibration,
        read_operational_v2_calibration,

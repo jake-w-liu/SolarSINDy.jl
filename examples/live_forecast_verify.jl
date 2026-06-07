@@ -28,6 +28,7 @@ Base.@kwdef struct LiveVerifyConfig
     poll_seconds::Int = 300
     timeout_hours::Float64 = 4.0
     horizon_hours::Int = 1
+    campaign_horizons::Vector{Int} = Int[1, 2, 3, 6]
     log_path::String = DEFAULT_LOG_PATH
     report_path::String = DEFAULT_REPORT_PATH
     replay_hours::Int = 48
@@ -52,14 +53,19 @@ function _usage()
       --replay-recent        Build a recent causal replay table from live feeds.
       --fit-v2-calibration   Fit operational v2 calibration from --table CSV.
       --wait                 Issue one row, then poll until its target observation arrives.
+      --campaign             Issue multiple operational-v2 horizons, verify, and report.
       --summary              Print aggregate live-log scores.
       --comparison-report    Write standard locked-live comparison report.
 
     Options:
-      --model=v1|v2          Forecast model to log/score. Default: v1.
-      --poll-seconds=N       Poll interval for --wait. Default: 300.
-      --timeout-hours=N      Maximum wait time for --wait. Default: 4.
+      --model=v1|v2          Forecast model to log/score. Default: v1, except
+                            --campaign defaults to v2.
+      --poll-seconds=N       Poll interval for --wait/--campaign. Default: 300.
+      --timeout-hours=N      Maximum wait time for --wait/--campaign. Default: 4.
       --horizon-hours=N      Hourly target index after issue time. Default: 1.
+      --campaign-horizons=A,B
+                            Comma-separated target horizons for --campaign.
+                            Default: 1,2,3,6.
       --log=PATH             CSV log path. Default: live_forecasts/live_forecast_log.csv.
       --report=PATH          Markdown output path for --comparison-report.
                             Default: live_forecasts/live_comparison_report.md.
@@ -84,13 +90,27 @@ function _parse_model(s::AbstractString)
     throw(ArgumentError("--model must be v1 or v2, got $s"))
 end
 
+function _parse_horizons(s::AbstractString)
+    vals = Int[]
+    for part in split(s, ",")
+        stripped = strip(part)
+        isempty(stripped) && continue
+        push!(vals, parse(Int, stripped))
+    end
+    isempty(vals) && throw(ArgumentError("--campaign-horizons must not be empty"))
+    any(<=(0), vals) && throw(ArgumentError("--campaign-horizons must be positive integers"))
+    return unique(vals)
+end
+
 function _parse_args(args)::LiveVerifyConfig
     cfg = LiveVerifyConfig()
     mode = cfg.mode
     model = cfg.model
+    model_explicit = false
     poll_seconds = cfg.poll_seconds
     timeout_hours = cfg.timeout_hours
     horizon_hours = cfg.horizon_hours
+    campaign_horizons = cfg.campaign_horizons
     log_path = cfg.log_path
     report_path = cfg.report_path
     replay_hours = cfg.replay_hours
@@ -118,18 +138,23 @@ function _parse_args(args)::LiveVerifyConfig
             mode = :fit_v2_calibration
         elseif arg == "--wait"
             mode = :wait
+        elseif arg == "--campaign"
+            mode = :campaign
         elseif arg == "--summary"
             mode = :summary
         elseif arg == "--comparison-report"
             mode = :comparison_report
         elseif startswith(arg, "--model=")
             model = _parse_model(split(arg, "=", limit=2)[2])
+            model_explicit = true
         elseif startswith(arg, "--poll-seconds=")
             poll_seconds = parse(Int, split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--timeout-hours=")
             timeout_hours = parse(Float64, split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--horizon-hours=")
             horizon_hours = parse(Int, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--campaign-horizons=")
+            campaign_horizons = _parse_horizons(split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--log=")
             log_path = split(arg, "=", limit=2)[2]
         elseif startswith(arg, "--report=")
@@ -158,6 +183,9 @@ function _parse_args(args)::LiveVerifyConfig
     poll_seconds > 0 || throw(ArgumentError("--poll-seconds must be positive"))
     timeout_hours > 0 || throw(ArgumentError("--timeout-hours must be positive"))
     horizon_hours > 0 || throw(ArgumentError("--horizon-hours must be positive"))
+    isempty(campaign_horizons) && throw(ArgumentError("--campaign-horizons must not be empty"))
+    any(<=(0), campaign_horizons) &&
+        throw(ArgumentError("--campaign-horizons must be positive integers"))
     replay_hours > 0 || throw(ArgumentError("--replay-hours must be positive"))
     table_limit >= 0 || throw(ArgumentError("--table-limit must be nonnegative"))
     0 < v2_train_fraction < 1 ||
@@ -168,12 +196,17 @@ function _parse_args(args)::LiveVerifyConfig
     v2_selector_margin_nt >= 0 ||
         throw(ArgumentError("--v2-selector-margin must be nonnegative"))
 
+    if mode == :campaign && !model_explicit
+        model = :v2
+    end
+
     return LiveVerifyConfig(;
         mode=mode,
         model=model,
         poll_seconds=poll_seconds,
         timeout_hours=timeout_hours,
         horizon_hours=horizon_hours,
+        campaign_horizons=campaign_horizons,
         log_path=log_path,
         report_path=report_path,
         replay_hours=replay_hours,
@@ -359,13 +392,13 @@ function _baseline_predictions_from_row(df::DataFrame, row_idx::Int)
 end
 
 function _v2_features(latest_dst::Real, drivers)
-    return (
-        latest_dst_nt=Float64(latest_dst),
-        V_kms=Float64(drivers.V),
-        Bz_nt=Float64(drivers.Bz),
-        By_nt=Float64(drivers.By),
-        n_cm3=Float64(drivers.n),
-        Pdyn_npa=Float64(drivers.Pdyn),
+    return operational_v2_feature_tuple(
+        latest_dst,
+        drivers.V,
+        drivers.Bz,
+        drivers.By,
+        drivers.n,
+        drivers.Pdyn,
     )
 end
 
@@ -530,6 +563,7 @@ function replay_recent_table(plasma::DataFrame, mag::DataFrame,
         if !all(isfinite, (drivers.V, drivers.n, drivers.Bz, drivers.By, drivers.Pdyn))
             continue
         end
+        features = _v2_features(dst_map[anchor_time], drivers)
 
         forecast = _forecast_one_replay(
             anchor_time,
@@ -581,6 +615,11 @@ function replay_recent_table(plasma::DataFrame, mag::DataFrame,
             By_nt=drivers.By,
             n_cm3=drivers.n,
             Pdyn_npa=drivers.Pdyn,
+            Bsouth_nt=features.Bsouth_nt,
+            VBsouth_mvm=features.VBsouth_mvm,
+            Bperp_nt=features.Bperp_nt,
+            clock_angle_sin2=features.clock_angle_sin2,
+            sqrt_Pdyn_npa=features.sqrt_Pdyn_npa,
             replay_note="causal_replay_previous_complete_hour_driver_persistence",
         ))
     end
@@ -820,6 +859,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
     burton_dst = _dst_from_dst_star(burton_star, used_drivers.Pdyn)
     burton_full_dst = _dst_from_dst_star(burton_full_star, used_drivers.Pdyn)
     obrien_dst = _dst_from_dst_star(obrien_star, used_drivers.Pdyn)
+    features = _v2_features(latest_dst, used_drivers)
     baseline_predictions = (
         persistence=persistence_dst,
         burton=burton_dst,
@@ -859,6 +899,11 @@ function issue_forecast(cfg::LiveVerifyConfig)
         By_nt=[used_drivers.By],
         n_cm3=[used_drivers.n],
         Pdyn_npa=[used_drivers.Pdyn],
+        Bsouth_nt=[features.Bsouth_nt],
+        VBsouth_mvm=[features.VBsouth_mvm],
+        Bperp_nt=[features.Bperp_nt],
+        clock_angle_sin2=[features.clock_angle_sin2],
+        sqrt_Pdyn_npa=[features.sqrt_Pdyn_npa],
         pred_dst_star_nt=[result.dst_predicted],
         pred_dst_nt=[pred_dst],
         pred_dst_ci05_nt=[ci05_dst],
@@ -893,11 +938,12 @@ function issue_forecast(cfg::LiveVerifyConfig)
     println("Latest SWPC solar wind: $latest_common_sw")
     println("Latest observed Kyoto Dst: $latest_dst_time = $latest_dst nT")
     println("Target observation UTC: $target_time")
-    println("Selected model: $(selected.model_version)")
+    model_label = selected.model_version == "v2" ? "Operational v2" : "SINDy v1"
+    println("Forecast model: $model_label")
     println("Lead time: $(round(wall_horizon; digits=3)) hr wall-clock, $model_steps model steps")
     println("Forecast Dst*: $(round(result.dst_predicted; digits=2)) nT")
     println(
-        "Selected Dst: $(round(pred_dst; digits=2)) nT; 90% CI " *
+        "$model_label Dst: $(round(pred_dst; digits=2)) nT; 90% CI " *
         "[$(round(ci05_dst; digits=2)), $(round(ci95_dst; digits=2))]"
     )
     if selected.model_version == "v2"
@@ -1011,6 +1057,93 @@ function wait_for_observation(cfg::LiveVerifyConfig, forecast)
         )
         sleep(cfg.poll_seconds)
     end
+end
+
+function _copy_config(cfg::LiveVerifyConfig; kwargs...)
+    values = Dict{Symbol,Any}(
+        :mode => cfg.mode,
+        :model => cfg.model,
+        :poll_seconds => cfg.poll_seconds,
+        :timeout_hours => cfg.timeout_hours,
+        :horizon_hours => cfg.horizon_hours,
+        :campaign_horizons => copy(cfg.campaign_horizons),
+        :log_path => cfg.log_path,
+        :report_path => cfg.report_path,
+        :replay_hours => cfg.replay_hours,
+        :table_path => cfg.table_path,
+        :table_limit => cfg.table_limit,
+        :v2_calibration_path => cfg.v2_calibration_path,
+        :v2_train_fraction => cfg.v2_train_fraction,
+        :v2_ridge => cfg.v2_ridge,
+        :v2_interval_coverage => cfg.v2_interval_coverage,
+        :v2_selector_margin_nt => cfg.v2_selector_margin_nt,
+    )
+    for (key, value) in kwargs
+        values[key] = value
+    end
+    return LiveVerifyConfig(; values...)
+end
+
+function _rows_verified(log_path::String, row_indices::Vector{Int})
+    isfile(log_path) || return false
+    df = CSV.read(log_path, DataFrame)
+    String(:observation_dst_nt) in names(df) || return false
+    for row_idx in row_indices
+        if row_idx > nrow(df) || ismissing(df[row_idx, :observation_dst_nt])
+            return false
+        end
+    end
+    return true
+end
+
+function _pending_row_indices(log_path::String, row_indices::Vector{Int})
+    isfile(log_path) || return copy(row_indices)
+    df = CSV.read(log_path, DataFrame)
+    String(:observation_dst_nt) in names(df) || return copy(row_indices)
+    return [
+        row_idx for row_idx in row_indices
+        if row_idx > nrow(df) || ismissing(df[row_idx, :observation_dst_nt])
+    ]
+end
+
+function run_campaign(cfg::LiveVerifyConfig;
+                      issue_fn=issue_forecast,
+                      verify_fn=verify_pending!,
+                      report_fn=write_live_comparison_report,
+                      sleep_fn=sleep,
+                      clock_fn=() -> now(UTC))
+    forecasts = NamedTuple[]
+    row_indices = Int[]
+    println(
+        "Starting locked live campaign: model=$(cfg.model), " *
+        "horizons=$(join(cfg.campaign_horizons, ",")) hr"
+    )
+    for horizon in cfg.campaign_horizons
+        issue_cfg = _copy_config(cfg; mode=:issue, horizon_hours=horizon)
+        forecast = issue_fn(issue_cfg)
+        push!(forecasts, forecast)
+        push!(row_indices, Int(forecast.row_idx))
+    end
+
+    report_fn(cfg.log_path, cfg.report_path)
+    deadline = clock_fn() + Millisecond(round(Int, cfg.timeout_hours * 3600 * 1000))
+    while !_rows_verified(cfg.log_path, row_indices)
+        verified = verify_fn(cfg)
+        report_fn(cfg.log_path, cfg.report_path)
+        pending = _pending_row_indices(cfg.log_path, row_indices)
+        println(
+            "Campaign verification pass: newly_verified=$verified, " *
+            "campaign_pending=$(length(pending))"
+        )
+        isempty(pending) && break
+        clock_fn() >= deadline && error(
+            "Timed out waiting for campaign rows $(join(pending, ",")); " *
+            "report written to $(cfg.report_path)"
+        )
+        sleep_fn(cfg.poll_seconds)
+    end
+    println("Campaign complete: all $(length(row_indices)) issued forecast row(s) scored.")
+    return (; forecasts, rows=row_indices, report_path=cfg.report_path)
 end
 
 function _metric_rows(df::DataFrame, pred_col::Symbol)
@@ -1349,13 +1482,17 @@ function summarize_log(log_path::String)
     df = CSV.read(log_path, DataFrame)
     println("Live forecast log: $log_path")
     for (name, col) in (
-        ("SINDy", :pred_dst_nt),
+        ("Operational v2", :v2_pred_dst_nt),
+        ("SINDy v1", :v1_pred_dst_nt),
         ("Persistence", :persistence_dst_nt),
         ("Burton", :burton_dst_nt),
         ("BurtonFull", :burton_full_dst_nt),
-        ("OBrien", :obrien_dst_nt),
+        ("OBrienMcP", :obrien_dst_nt),
     )
         preds, obs = _metric_rows(df, col)
+        if isempty(preds) && col == :v1_pred_dst_nt
+            preds, obs = _metric_rows(df, :pred_dst_nt)
+        end
         _print_metric(name, preds, obs)
     end
     if String(:observed_in_90ci) in names(df)
@@ -1383,6 +1520,8 @@ function main(args=ARGS)
     elseif cfg.mode == :wait
         forecast = issue_forecast(cfg)
         wait_for_observation(cfg, forecast)
+    elseif cfg.mode == :campaign
+        run_campaign(cfg)
     elseif cfg.mode == :summary
         summarize_log(cfg.log_path)
     elseif cfg.mode == :comparison_report
