@@ -99,13 +99,17 @@ speed, IMF components, density, dynamic pressure, and derived causal coupling
 features such as southward IMF, `V Bs`, transverse IMF magnitude, IMF clock-angle
 coupling, and square-root dynamic pressure.
 
-Current v2 calibration is guarded and baseline-aware. When replay or live-log
-baseline columns are available, the calibration stores skill estimates for
-corrected SINDy-v2, persistence, Burton, BurtonFull, and O'Brien--McPherron. The
-issued operational v2 output is the upgraded forecast. The internal
-`v2_selected_component` field records whether v2 used corrected SINDy directly
-or an allowed guarded component for auditability; it should not be read as a
-second deployed model.
+Current v2 calibration is guarded, validation-selected, and baseline-aware. The
+fit command sorts replay/live-log rows chronologically, fits candidate
+calibrations on the earliest rows, selects the ridge/features/internal component
+on later validation rows, and reports the final untouched holdout rows. When
+baseline columns are available, the internal guard can choose corrected
+SINDy-v2, uncorrected SINDy v1, persistence, Burton, BurtonFull, or
+O'Brien--McPherron. The issued operational v2 output is still the single
+upgraded forecast. The internal `v2_selected_component` field is audit metadata,
+not a separate headline model. If the validation-selected candidate fails the
+final holdout gate against SINDy v1 on RMSE or MAE, the written calibration
+fails closed by deploying the internal SINDy v1 fallback.
 
 Fit the calibration from a prior replay or locked live log:
 
@@ -114,8 +118,14 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --fit-v2-calibration \
   --table=live_forecasts/live_replay_144h.csv \
   --v2-calibration=live_forecasts/operational_v2_calibration.csv \
+  --v2-ridge-grid=0,1,10,100,1000 \
+  --v2-validation-fraction=0.15 \
   --v2-selector-margin=0.5
 ```
+
+This also writes `live_forecasts/operational_v2_calibration_selection.csv`,
+which records each tested v2 candidate, validation metrics, holdout metrics, and
+the chosen internal component.
 
 Then run a calibrated replay or live issue:
 

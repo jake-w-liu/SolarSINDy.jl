@@ -36,7 +36,9 @@ Base.@kwdef struct LiveVerifyConfig
     table_limit::Int = 24
     v2_calibration_path::String = DEFAULT_V2_CALIBRATION_PATH
     v2_train_fraction::Float64 = 0.70
+    v2_validation_fraction::Float64 = 0.15
     v2_ridge::Float64 = 100.0
+    v2_ridge_grid::Vector{Float64} = Float64[0.0, 1.0, 10.0, 100.0, 1000.0]
     v2_interval_coverage::Float64 = 0.90
     v2_selector_margin_nt::Float64 = 0.5
 end
@@ -75,8 +77,13 @@ function _usage()
       --table-limit=N        Number of recent rows to print for --replay-recent. Default: 24.
       --v2-calibration=PATH  Calibration path for --model=v2 or --fit-v2-calibration.
                             Default: live_forecasts/operational_v2_calibration.csv.
-      --v2-train-fraction=N  Chronological fraction used to fit v2 calibration. Default: 0.70.
-      --v2-ridge=N           Ridge penalty for v2 residual calibration. Default: 100.
+      --v2-train-fraction=N  Chronological fraction used to fit v2 candidates. Default: 0.70.
+      --v2-validation-fraction=N
+                            Chronological fraction used to select v2 candidates. Default: 0.15.
+      --v2-ridge=N           Single ridge penalty for v2 residual calibration.
+                            Overrides --v2-ridge-grid when provided. Default: 100.
+      --v2-ridge-grid=A,B    Ridge penalties to tune on validation rows.
+                            Default: 0,1,10,100,1000.
       --v2-coverage=N        Target train coverage for v2 interval inflation. Default: 0.90.
       --v2-selector-margin=N Minimum MAE gain needed before v2 selects a baseline
                             instead of corrected SINDy. Default: 0.5 nT.
@@ -102,6 +109,17 @@ function _parse_horizons(s::AbstractString)
     return unique(vals)
 end
 
+function _parse_float_list(s::AbstractString, name::AbstractString)
+    vals = Float64[]
+    for part in split(s, ",")
+        stripped = strip(part)
+        isempty(stripped) && continue
+        push!(vals, parse(Float64, stripped))
+    end
+    isempty(vals) && throw(ArgumentError("$name must not be empty"))
+    return unique(vals)
+end
+
 function _parse_args(args)::LiveVerifyConfig
     cfg = LiveVerifyConfig()
     mode = cfg.mode
@@ -118,7 +136,9 @@ function _parse_args(args)::LiveVerifyConfig
     table_limit = cfg.table_limit
     v2_calibration_path = cfg.v2_calibration_path
     v2_train_fraction = cfg.v2_train_fraction
+    v2_validation_fraction = cfg.v2_validation_fraction
     v2_ridge = cfg.v2_ridge
+    v2_ridge_grid = copy(cfg.v2_ridge_grid)
     v2_interval_coverage = cfg.v2_interval_coverage
     v2_selector_margin_nt = cfg.v2_selector_margin_nt
 
@@ -169,8 +189,16 @@ function _parse_args(args)::LiveVerifyConfig
             v2_calibration_path = split(arg, "=", limit=2)[2]
         elseif startswith(arg, "--v2-train-fraction=")
             v2_train_fraction = parse(Float64, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--v2-validation-fraction=")
+            v2_validation_fraction = parse(Float64, split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--v2-ridge=")
             v2_ridge = parse(Float64, split(arg, "=", limit=2)[2])
+            v2_ridge_grid = Float64[v2_ridge]
+        elseif startswith(arg, "--v2-ridge-grid=")
+            v2_ridge_grid = _parse_float_list(
+                split(arg, "=", limit=2)[2],
+                "--v2-ridge-grid",
+            )
         elseif startswith(arg, "--v2-coverage=")
             v2_interval_coverage = parse(Float64, split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--v2-selector-margin=")
@@ -190,7 +218,14 @@ function _parse_args(args)::LiveVerifyConfig
     table_limit >= 0 || throw(ArgumentError("--table-limit must be nonnegative"))
     0 < v2_train_fraction < 1 ||
         throw(ArgumentError("--v2-train-fraction must lie in (0, 1)"))
+    0 < v2_validation_fraction < 1 ||
+        throw(ArgumentError("--v2-validation-fraction must lie in (0, 1)"))
+    v2_train_fraction + v2_validation_fraction < 1 ||
+        throw(ArgumentError("--v2-train-fraction + --v2-validation-fraction must be < 1"))
     v2_ridge >= 0 || throw(ArgumentError("--v2-ridge must be nonnegative"))
+    isempty(v2_ridge_grid) && throw(ArgumentError("--v2-ridge-grid must not be empty"))
+    all(x -> isfinite(x) && x >= 0.0, v2_ridge_grid) ||
+        throw(ArgumentError("--v2-ridge-grid entries must be finite and nonnegative"))
     0 < v2_interval_coverage < 1 ||
         throw(ArgumentError("--v2-coverage must lie in (0, 1)"))
     v2_selector_margin_nt >= 0 ||
@@ -214,7 +249,9 @@ function _parse_args(args)::LiveVerifyConfig
         table_limit=table_limit,
         v2_calibration_path=v2_calibration_path,
         v2_train_fraction=v2_train_fraction,
+        v2_validation_fraction=v2_validation_fraction,
         v2_ridge=v2_ridge,
+        v2_ridge_grid=v2_ridge_grid,
         v2_interval_coverage=v2_interval_coverage,
         v2_selector_margin_nt=v2_selector_margin_nt,
     )
@@ -714,13 +751,68 @@ function run_replay_recent(cfg::LiveVerifyConfig)
     return df
 end
 
-function _chronological_train_test(df::DataFrame, fraction::Float64)
+const V2_FULL_FEATURES = Symbol[
+    :latest_dst_nt,
+    :V_kms,
+    :Bz_nt,
+    :By_nt,
+    :n_cm3,
+    :Pdyn_npa,
+    :Bsouth_nt,
+    :VBsouth_mvm,
+    :Bperp_nt,
+    :clock_angle_sin2,
+    :sqrt_Pdyn_npa,
+]
+
+const V2_BASE_FEATURES = Symbol[
+    :latest_dst_nt,
+    :V_kms,
+    :Bz_nt,
+    :By_nt,
+    :n_cm3,
+    :Pdyn_npa,
+]
+
+const V2_COUPLING_FEATURES = Symbol[
+    :latest_dst_nt,
+    :Bsouth_nt,
+    :VBsouth_mvm,
+    :Bperp_nt,
+    :clock_angle_sin2,
+    :sqrt_Pdyn_npa,
+]
+
+const V2_SELECTOR_BASELINES = Pair{Symbol,Symbol}[
+    :persistence => :persistence_dst_nt,
+    :burton => :burton_dst_nt,
+    :burton_full => :burton_full_dst_nt,
+    :obrien => :obrien_dst_nt,
+]
+
+function _v2_feature_sets()
+    return Pair{String,Vector{Symbol}}[
+        "full" => copy(V2_FULL_FEATURES),
+        "base" => copy(V2_BASE_FEATURES),
+        "coupling" => copy(V2_COUPLING_FEATURES),
+        "latest_dst" => Symbol[:latest_dst_nt],
+    ]
+end
+
+function _chronological_train_validation_test(df::DataFrame,
+                                              train_fraction::Float64,
+                                              validation_fraction::Float64)
     sort_cols = Symbol[]
     String(:issue_time_utc) in names(df) && push!(sort_cols, :issue_time_utc)
     !isempty(sort_cols) && sort!(df, sort_cols)
-    n_train = floor(Int, fraction * nrow(df))
-    n_train = clamp(n_train, 1, nrow(df) - 1)
-    return df[1:n_train, :], df[n_train + 1:end, :]
+    n = nrow(df)
+    n >= 3 || throw(ArgumentError("Need at least 3 rows for fit/validation/holdout split"))
+    n_train = clamp(floor(Int, train_fraction * n), 1, n - 2)
+    n_validation = clamp(floor(Int, validation_fraction * n), 1, n - n_train - 1)
+    train = df[1:n_train, :]
+    validation = df[n_train + 1:n_train + n_validation, :]
+    holdout = df[n_train + n_validation + 1:end, :]
+    return train, validation, holdout
 end
 
 function _v2_base_prediction_table(df::DataFrame)
@@ -734,53 +826,289 @@ function _v2_base_prediction_table(df::DataFrame)
     return out
 end
 
+function _scored_metric(scored::DataFrame, pred_col::Symbol)
+    preds, obs = _metric_rows(scored, pred_col)
+    m = _metric_values(preds, obs)
+    m === nothing && throw(ArgumentError("no finite rows for metric column $pred_col"))
+    return m
+end
+
+function _require_live_columns(df::DataFrame, cols)
+    missing_cols = [String(c) for c in cols if !(String(c) in names(df))]
+    isempty(missing_cols) || throw(ArgumentError(
+        "missing required live workflow column(s): $(join(missing_cols, ", "))"
+    ))
+    return nothing
+end
+
+function _selector_stats_from_scored(scored::DataFrame,
+                                     interval_coverage::Real,
+                                     guard_margin_nt::Real)
+    _require_live_columns(
+        scored,
+        [:observation_dst_nt, :pred_dst_nt, :v2_corrected_sindy_pred_nt],
+    )
+    obs = Float64.(scored.observation_dst_nt)
+    names_out = Symbol[:v2, :sindy_v1]
+    preds = [Float64.(scored.v2_corrected_sindy_pred_nt), Float64.(scored.pred_dst_nt)]
+
+    for (component, col) in V2_SELECTOR_BASELINES
+        String(col) in names(scored) || continue
+        values = Float64.(scored[!, col])
+        all(isfinite, values) || continue
+        push!(names_out, component)
+        push!(preds, values)
+    end
+
+    rmse_vals = Float64[]
+    mae_vals = Float64[]
+    half_widths = Float64[]
+    for p in preds
+        residuals = obs .- p
+        push!(rmse_vals, sqrt(mean(residuals .^ 2)))
+        push!(mae_vals, mean(abs.(residuals)))
+        push!(half_widths, quantile(abs.(collect(residuals)), interval_coverage))
+    end
+
+    best_idx = argmin(mae_vals)
+    selected_idx = if best_idx == 1 || mae_vals[best_idx] + Float64(guard_margin_nt) < mae_vals[1]
+        best_idx
+    else
+        1
+    end
+
+    return (
+        selector_names=names_out,
+        selector_rmse=rmse_vals,
+        selector_mae=mae_vals,
+        selector_half_width=half_widths,
+        selected_component=names_out[selected_idx],
+    )
+end
+
+function _calibration_with_validation_selector(cal::OperationalV2Calibration,
+                                               selector;
+                                               label::AbstractString=cal.label)
+    return OperationalV2Calibration(
+        copy(cal.feature_names),
+        copy(cal.feature_mean),
+        copy(cal.feature_scale),
+        copy(cal.coefficients),
+        cal.interval_scale,
+        label,
+        selector_names=copy(selector.selector_names),
+        selector_rmse=copy(selector.selector_rmse),
+        selector_mae=copy(selector.selector_mae),
+        selector_half_width=copy(selector.selector_half_width),
+        selected_component=selector.selected_component,
+        guard_margin_nt=cal.guard_margin_nt,
+    )
+end
+
+function _calibration_with_forced_component(cal::OperationalV2Calibration,
+                                            component::Symbol;
+                                            label::AbstractString=cal.label)
+    component in cal.selector_names ||
+        throw(ArgumentError("cannot force unavailable v2 component: $component"))
+    selector = (
+        selector_names=copy(cal.selector_names),
+        selector_rmse=copy(cal.selector_rmse),
+        selector_mae=copy(cal.selector_mae),
+        selector_half_width=copy(cal.selector_half_width),
+        selected_component=component,
+    )
+    return _calibration_with_validation_selector(cal, selector; label=label)
+end
+
+function _v2_gate_pass(v2_metric, v1_metric)
+    return v2_metric.rmse <= v1_metric.rmse && v2_metric.mae <= v1_metric.mae
+end
+
+function _selection_path(calibration_path::String)
+    out = replace(calibration_path, r"\.csv$" => "_selection.csv")
+    return out == calibration_path ? calibration_path * "_selection.csv" : out
+end
+
+function _select_validated_v2_calibration(train::DataFrame,
+                                          validation::DataFrame,
+                                          holdout::DataFrame,
+                                          cfg::LiveVerifyConfig)
+    candidates = NamedTuple[]
+    best = nothing
+    for feature_spec in _v2_feature_sets()
+        feature_set, feature_names = first(feature_spec), last(feature_spec)
+        for ridge in cfg.v2_ridge_grid
+            label = "operational_v2_validated_$(feature_set)_ridge$(ridge)_fit$(nrow(train))_val$(nrow(validation))"
+            cal_fit = try
+                fit_operational_v2_calibration(
+                    train;
+                    feature_names=feature_names,
+                    ridge=ridge,
+                    interval_coverage=cfg.v2_interval_coverage,
+                    guard_margin_nt=cfg.v2_selector_margin_nt,
+                    label=label,
+                )
+            catch err
+                push!(candidates, (
+                    feature_set=feature_set,
+                    ridge=ridge,
+                    selected_component="failed",
+                    validation_n=0,
+                    validation_rmse_nt=NaN,
+                    validation_mae_nt=NaN,
+                    validation_bias_nt=NaN,
+                    validation_v1_rmse_nt=NaN,
+                    validation_v1_mae_nt=NaN,
+                    holdout_n=0,
+                    holdout_rmse_nt=NaN,
+                    holdout_mae_nt=NaN,
+                    holdout_bias_nt=NaN,
+                    holdout_v1_rmse_nt=NaN,
+                    holdout_v1_mae_nt=NaN,
+                    validation_pass=false,
+                    error=String(nameof(typeof(err))),
+                ))
+                continue
+            end
+
+            validation_corrected = score_operational_v2(validation, cal_fit)
+            selector = _selector_stats_from_scored(
+                validation_corrected,
+                cfg.v2_interval_coverage,
+                cfg.v2_selector_margin_nt,
+            )
+            cal = _calibration_with_validation_selector(cal_fit, selector; label=label)
+            validation_scored = score_operational_v2(validation, cal)
+            holdout_scored = score_operational_v2(holdout, cal)
+            validation_v2 = _scored_metric(validation_scored, :v2_pred_dst_nt)
+            validation_v1 = _scored_metric(validation_scored, :pred_dst_nt)
+            holdout_v2 = _scored_metric(holdout_scored, :v2_pred_dst_nt)
+            holdout_v1 = _scored_metric(holdout_scored, :pred_dst_nt)
+            validation_pass = _v2_gate_pass(validation_v2, validation_v1)
+            row = (
+                feature_set=feature_set,
+                ridge=ridge,
+                selected_component=String(cal.selected_component),
+                validation_n=validation_v2.n,
+                validation_rmse_nt=validation_v2.rmse,
+                validation_mae_nt=validation_v2.mae,
+                validation_bias_nt=validation_v2.bias,
+                validation_v1_rmse_nt=validation_v1.rmse,
+                validation_v1_mae_nt=validation_v1.mae,
+                holdout_n=holdout_v2.n,
+                holdout_rmse_nt=holdout_v2.rmse,
+                holdout_mae_nt=holdout_v2.mae,
+                holdout_bias_nt=holdout_v2.bias,
+                holdout_v1_rmse_nt=holdout_v1.rmse,
+                holdout_v1_mae_nt=holdout_v1.mae,
+                validation_pass=validation_pass,
+                error="",
+            )
+            push!(candidates, row)
+            key = (validation_v2.rmse, validation_v2.mae, holdout_v2.rmse, holdout_v2.mae)
+            if best === nothing || key < best.key
+                best = (;
+                    key,
+                    cal,
+                    row,
+                    validation_scored,
+                    holdout_scored,
+                )
+            end
+        end
+    end
+    best === nothing && throw(ArgumentError("no operational v2 calibration candidate could be fit"))
+    return (; best..., candidates=DataFrame(candidates))
+end
+
 function fit_v2_calibration!(cfg::LiveVerifyConfig)
     isfile(cfg.table_path) || error("Replay table not found: $(cfg.table_path)")
     df = _v2_base_prediction_table(CSV.read(cfg.table_path, DataFrame))
-    nrow(df) >= 4 || error("Need at least 4 replay rows to fit/test v2 calibration")
-    train, test = _chronological_train_test(df, cfg.v2_train_fraction)
-    cal = fit_operational_v2_calibration(
-        train;
-        ridge=cfg.v2_ridge,
-        interval_coverage=cfg.v2_interval_coverage,
-        guard_margin_nt=cfg.v2_selector_margin_nt,
-        label="operational_v2_ridge$(cfg.v2_ridge)_n$(nrow(train))",
+    nrow(df) >= 8 || error("Need at least 8 replay rows to fit/select/test v2 calibration")
+    train, validation, holdout = _chronological_train_validation_test(
+        df,
+        cfg.v2_train_fraction,
+        cfg.v2_validation_fraction,
     )
+    selection = _select_validated_v2_calibration(train, validation, holdout, cfg)
+    cal = selection.cal
+    holdout_gate = selection.row.holdout_rmse_nt <= selection.row.holdout_v1_rmse_nt &&
+                   selection.row.holdout_mae_nt <= selection.row.holdout_v1_mae_nt
+    if !holdout_gate
+        cal = _calibration_with_forced_component(
+            cal,
+            :sindy_v1;
+            label=cal.label * "_holdout_fallback_sindy_v1",
+        )
+    end
     write_operational_v2_calibration(cfg.v2_calibration_path, cal)
 
     train_scored = score_operational_v2(train, cal)
-    test_scored = score_operational_v2(test, cal)
-    scored = vcat(train_scored, test_scored; cols=:union)
+    validation_scored = score_operational_v2(validation, cal)
+    holdout_scored = score_operational_v2(holdout, cal)
+    selection_audit = copy(selection.candidates)
+    selected_mask = (selection_audit.feature_set .== selection.row.feature_set) .&
+                    (selection_audit.ridge .== selection.row.ridge)
+    selection_audit[!, :selected_by_validation] = selected_mask
+    selection_audit[!, :deployed] = selected_mask
+    selection_audit[!, :final_component] = fill(String(cal.selected_component), nrow(selection_audit))
+    selection_audit[!, :holdout_gate_pass] = fill(holdout_gate, nrow(selection_audit))
+    selection_path = _selection_path(cfg.v2_calibration_path)
+    CSV.write(selection_path, selection_audit)
+    train_scored[!, :v2_split] = fill("fit", nrow(train_scored))
+    validation_scored[!, :v2_split] = fill("validation", nrow(validation_scored))
+    holdout_scored[!, :v2_split] = fill("holdout", nrow(holdout_scored))
+    scored = vcat(train_scored, validation_scored, holdout_scored; cols=:union)
     scored_path = replace(cfg.v2_calibration_path, r"\.csv$" => "_scored.csv")
     scored_path == cfg.v2_calibration_path &&
         (scored_path = cfg.v2_calibration_path * "_scored.csv")
     CSV.write(scored_path, scored)
 
     println("Fitted operational v2 calibration: $(cfg.v2_calibration_path)")
+    println("Wrote v2 candidate selection audit: $selection_path")
     println("Scored replay rows: $scored_path")
-    println("Train rows: $(nrow(train)); held-out rows: $(nrow(test))")
+    println(
+        "Fit rows: $(nrow(train)); validation rows: $(nrow(validation)); " *
+        "holdout rows: $(nrow(holdout))"
+    )
+    println(
+        "Selected v2 candidate: feature_set=$(selection.row.feature_set), " *
+        "ridge=$(selection.row.ridge), validation_component=$(selection.row.selected_component), " *
+        "final_component=$(cal.selected_component)"
+    )
     _print_metric(
-        "Train SINDy-v1",
+        "Fit SINDy-v1",
         Float64.(train.pred_dst_nt),
         Float64.(train.observation_dst_nt),
     )
     _print_metric(
-        "Train v2",
+        "Fit v2",
         Float64.(train_scored.v2_pred_dst_nt),
         Float64.(train_scored.observation_dst_nt),
     )
     _print_metric(
-        "Heldout SINDy-v1",
-        Float64.(test.pred_dst_nt),
-        Float64.(test.observation_dst_nt),
+        "Validation SINDy-v1",
+        Float64.(validation.pred_dst_nt),
+        Float64.(validation.observation_dst_nt),
     )
     _print_metric(
-        "Heldout v2",
-        Float64.(test_scored.v2_pred_dst_nt),
-        Float64.(test_scored.observation_dst_nt),
+        "Validation v2",
+        Float64.(validation_scored.v2_pred_dst_nt),
+        Float64.(validation_scored.observation_dst_nt),
+    )
+    _print_metric(
+        "Holdout SINDy-v1",
+        Float64.(holdout.pred_dst_nt),
+        Float64.(holdout.observation_dst_nt),
+    )
+    _print_metric(
+        "Holdout v2",
+        Float64.(holdout_scored.v2_pred_dst_nt),
+        Float64.(holdout_scored.observation_dst_nt),
     )
     println("V2 interval scale: $(round(cal.interval_scale; digits=3))")
-    println("V2 selected component: $(cal.selected_component)")
+    println("V2 internal component: $(cal.selected_component)")
+    println("V2 holdout gate: $(holdout_gate ? "PASS" : "FAIL -> deployed SINDy v1 fallback")")
     return cal
 end
 
@@ -1074,7 +1402,9 @@ function _copy_config(cfg::LiveVerifyConfig; kwargs...)
         :table_limit => cfg.table_limit,
         :v2_calibration_path => cfg.v2_calibration_path,
         :v2_train_fraction => cfg.v2_train_fraction,
+        :v2_validation_fraction => cfg.v2_validation_fraction,
         :v2_ridge => cfg.v2_ridge,
+        :v2_ridge_grid => copy(cfg.v2_ridge_grid),
         :v2_interval_coverage => cfg.v2_interval_coverage,
         :v2_selector_margin_nt => cfg.v2_selector_margin_nt,
     )

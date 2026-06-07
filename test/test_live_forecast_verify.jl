@@ -27,6 +27,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             "--report=/tmp/live_report.md",
             "--v2-calibration=/tmp/v2.csv",
             "--v2-train-fraction=0.6",
+            "--v2-validation-fraction=0.2",
             "--v2-ridge=10",
             "--v2-coverage=0.8",
             "--v2-selector-margin=1.25",
@@ -37,9 +38,14 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         @test cfg.report_path == "/tmp/live_report.md"
         @test cfg.v2_calibration_path == "/tmp/v2.csv"
         @test cfg.v2_train_fraction == 0.6
+        @test cfg.v2_validation_fraction == 0.2
         @test cfg.v2_ridge == 10.0
+        @test cfg.v2_ridge_grid == [10.0]
         @test cfg.v2_interval_coverage == 0.8
         @test cfg.v2_selector_margin_nt == 1.25
+
+        grid_cfg = _parse_args(["--fit-v2-calibration", "--v2-ridge-grid=0,10,100"])
+        @test grid_cfg.v2_ridge_grid == [0.0, 10.0, 100.0]
 
         campaign = _parse_args([
             "--campaign",
@@ -338,18 +344,25 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
                 table_path=table_path,
                 v2_calibration_path=cal_path,
                 v2_train_fraction=0.8,
+                v2_ridge_grid=[0.0],
                 v2_ridge=0.0,
             )
             cal = fit_v2_calibration!(cfg)
             @test isfile(cal_path)
             scored_path = replace(cal_path, r"\.csv$" => "_scored.csv")
+            selection_path = replace(cal_path, r"\.csv$" => "_selection.csv")
             @test isfile(scored_path)
-            @test cal.label == "operational_v2_ridge0.0_n16"
+            @test isfile(selection_path)
+            @test cal.label == "operational_v2_validated_full_ridge0.0_fit16_val3"
             @test cal.selected_component == :v2
             reread = read_operational_v2_calibration(cal_path)
             scored = CSV.read(scored_path, DataFrame)
+            selection = CSV.read(selection_path, DataFrame)
             @test maximum(abs.(scored.v2_residual_dst_nt)) < 1e-8
             @test all(scored.v2_selected_component .== "v2")
+            @test Set(scored.v2_split) == Set(["fit", "validation", "holdout"])
+            @test nrow(selection) == 4
+            @test all(selection.validation_pass)
             pred_v2 = operational_v2_predict(
                 reread,
                 pred[end],
@@ -358,6 +371,101 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
                 operational_v2_feature_tuple(pred[end] - 1.0, 420.0, bz[end], 1.0, 5.0, 1.5),
             )
             @test pred_v2.pred_dst ≈ observed[end]
+        end
+    end
+
+    @testset "A/D: validated v2 falls back to SINDy v1 when correction fails validation" begin
+        mktempdir() do tmp
+            table_path = joinpath(tmp, "replay.csv")
+            cal_path = joinpath(tmp, "v2_calibration.csv")
+            n = 24
+            pred = collect(-50.0:1.0:-27.0)
+            observed = copy(pred)
+            observed[1:14] .= pred[1:14] .+ 4.0
+            replay = DataFrame(
+                issue_time_utc=[string(DateTime(2026, 1, 1) + Hour(i)) for i in 1:n],
+                pred_dst_nt=pred,
+                pred_dst_ci05_nt=pred .- 3.0,
+                pred_dst_ci95_nt=pred .+ 3.0,
+                observation_dst_nt=observed,
+                v1_pred_dst_nt=pred,
+                v1_pred_dst_ci05_nt=pred .- 3.0,
+                v1_pred_dst_ci95_nt=pred .+ 3.0,
+                latest_dst_nt=fill(-40.0, n),
+                V_kms=fill(420.0, n),
+                Bz_nt=fill(-2.0, n),
+                By_nt=fill(1.0, n),
+                n_cm3=fill(5.0, n),
+                Pdyn_npa=fill(1.5, n),
+            )
+            CSV.write(table_path, replay)
+
+            cfg = LiveVerifyConfig(;
+                mode=:fit_v2_calibration,
+                table_path=table_path,
+                v2_calibration_path=cal_path,
+                v2_train_fraction=0.6,
+                v2_validation_fraction=0.2,
+                v2_ridge_grid=[0.0],
+                v2_ridge=0.0,
+            )
+            cal = fit_v2_calibration!(cfg)
+            scored = CSV.read(replace(cal_path, r"\.csv$" => "_scored.csv"), DataFrame)
+            selection = CSV.read(replace(cal_path, r"\.csv$" => "_selection.csv"), DataFrame)
+            @test cal.selected_component == :sindy_v1
+            @test all(scored.v2_selected_component .== "sindy_v1")
+            @test scored.v2_pred_dst_nt == scored.pred_dst_nt
+            @test selection.selected_component[1] == "sindy_v1"
+            @test selection.validation_rmse_nt[1] == 0.0
+            @test selection.validation_v1_rmse_nt[1] == 0.0
+        end
+    end
+
+    @testset "A/D: validated v2 fails closed to SINDy v1 when holdout gate fails" begin
+        mktempdir() do tmp
+            table_path = joinpath(tmp, "replay.csv")
+            cal_path = joinpath(tmp, "v2_calibration.csv")
+            n = 30
+            pred = collect(-60.0:1.0:-31.0)
+            observed = copy(pred)
+            observed[1:21] .= pred[1:21] .+ 4.0
+            replay = DataFrame(
+                issue_time_utc=[string(DateTime(2026, 1, 1) + Hour(i)) for i in 1:n],
+                pred_dst_nt=pred,
+                pred_dst_ci05_nt=pred .- 3.0,
+                pred_dst_ci95_nt=pred .+ 3.0,
+                observation_dst_nt=observed,
+                v1_pred_dst_nt=pred,
+                v1_pred_dst_ci05_nt=pred .- 3.0,
+                v1_pred_dst_ci95_nt=pred .+ 3.0,
+                latest_dst_nt=fill(-40.0, n),
+                V_kms=fill(420.0, n),
+                Bz_nt=fill(-2.0, n),
+                By_nt=fill(1.0, n),
+                n_cm3=fill(5.0, n),
+                Pdyn_npa=fill(1.5, n),
+            )
+            CSV.write(table_path, replay)
+
+            cfg = LiveVerifyConfig(;
+                mode=:fit_v2_calibration,
+                table_path=table_path,
+                v2_calibration_path=cal_path,
+                v2_train_fraction=0.5,
+                v2_validation_fraction=0.2,
+                v2_ridge_grid=[0.0],
+                v2_ridge=0.0,
+            )
+            cal = fit_v2_calibration!(cfg)
+            scored = CSV.read(replace(cal_path, r"\.csv$" => "_scored.csv"), DataFrame)
+            selection = CSV.read(replace(cal_path, r"\.csv$" => "_selection.csv"), DataFrame)
+            holdout = scored[scored.v2_split .== "holdout", :]
+            @test cal.selected_component == :sindy_v1
+            @test occursin("holdout_fallback_sindy_v1", cal.label)
+            @test all(selection.final_component .== "sindy_v1")
+            @test all(selection.holdout_gate_pass .== false)
+            @test any(selection.selected_by_validation)
+            @test holdout.v2_pred_dst_nt == holdout.pred_dst_nt
         end
     end
 

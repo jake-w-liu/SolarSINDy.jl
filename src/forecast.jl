@@ -46,9 +46,10 @@ v1 ensemble interval from calibration residuals. This type deliberately does
 not alter `ForecastState` or v1 SINDy coefficients.
 
 When mandatory baseline columns are present during calibration, v2 also stores
-a guarded selector over corrected SINDy, persistence, Burton, BurtonFull, and
-O'Brien--McPherron. A baseline is selected only when its calibration-window MAE
-beats corrected SINDy by the configured margin.
+a guarded selector over corrected SINDy, uncorrected SINDy v1, persistence,
+Burton, BurtonFull, and O'Brien--McPherron. A fallback component is selected
+only when its calibration-window MAE beats corrected SINDy by the configured
+margin.
 """
 struct OperationalV2Calibration
     feature_names::Vector{Symbol}
@@ -266,8 +267,8 @@ function _candidate_selector_stats(clean::DataFrame, corrected::Vector{Float64},
                                    interval_coverage::Real,
                                    guard_margin_nt::Real)
     obs = Float64.(clean.observation_dst_nt)
-    names_out = Symbol[:v2]
-    preds = [corrected]
+    names_out = Symbol[:v2, :sindy_v1]
+    preds = [corrected, Float64.(clean.pred_dst_nt)]
 
     for (component, col) in _selector_metric_columns(clean)
         values = Float64.(clean[!, col])
@@ -319,8 +320,10 @@ function _component_value(baselines, component::Symbol)
 end
 
 function _selected_component_prediction(component::Symbol, corrected_center::Float64,
+                                        original_center::Float64,
                                         baselines)
     component == :v2 && return corrected_center
+    component == :sindy_v1 && return original_center
     value = _component_value(baselines, component)
     isfinite(value) || throw(ArgumentError("v2 selector baseline $component is not finite"))
     return value
@@ -449,9 +452,11 @@ function operational_v2_predict(cal::OperationalV2Calibration,
                                 baselines=nothing)
     correction = operational_v2_correction(cal, features)
     corrected_center = Float64(pred_dst) + correction
+    original_center = Float64(pred_dst)
     center = _selected_component_prediction(
         cal.selected_component,
         corrected_center,
+        original_center,
         baselines,
     )
     half_width = abs(Float64(ci95) - Float64(ci05)) / 2
@@ -493,6 +498,7 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
     v2_ci05 = Vector{Float64}(undef, nrow(out))
     v2_ci95 = Vector{Float64}(undef, nrow(out))
     v2_corr = Vector{Float64}(undef, nrow(out))
+    v2_corrected = Vector{Float64}(undef, nrow(out))
     v2_residual = Vector{Float64}(undef, nrow(out))
     v2_in_ci = Vector{Bool}(undef, nrow(out))
     v2_component = Vector{String}(undef, nrow(out))
@@ -515,6 +521,7 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
         v2_ci05[i] = pred.ci05_dst
         v2_ci95[i] = pred.ci95_dst
         v2_corr[i] = pred.correction
+        v2_corrected[i] = pred.corrected_sindy_pred
         v2_residual[i] = obs - pred.pred_dst
         v2_in_ci[i] = min(pred.ci05_dst, pred.ci95_dst) <= obs <=
                       max(pred.ci05_dst, pred.ci95_dst)
@@ -526,6 +533,7 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
     out[!, :v2_pred_dst_ci05_nt] = v2_ci05
     out[!, :v2_pred_dst_ci95_nt] = v2_ci95
     out[!, :v2_correction_dst_nt] = v2_corr
+    out[!, :v2_corrected_sindy_pred_nt] = v2_corrected
     out[!, :v2_residual_dst_nt] = v2_residual
     out[!, :v2_observed_in_90ci] = v2_in_ci
     out[!, :v2_calibration_label] = fill(cal.label, nrow(out))
