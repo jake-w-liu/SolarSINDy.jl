@@ -45,6 +45,7 @@ Available modes:
 ```bash
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --issue
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --verify-pending
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --refresh-observations
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --backfill-baselines
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --replay-recent
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --replay-omni
@@ -65,6 +66,12 @@ defaults to `--model=v2` if no model is specified.
 Use `--backfill-baselines` after schema changes to fill baseline forecasts and
 residuals for older rows that already contain locked SINDy predictions and live
 driver values.
+
+Use `--refresh-observations` before final reporting to reconcile logged
+observations with the current Dst feed. The live Dst product can revise recent
+hours after first publication. Refreshing updates only observation, residual,
+and interval-hit fields; locked predictions, drivers, target times, and model
+metadata are not recomputed.
 
 Use `--replay-recent --replay-hours=N` to build a longer predicted-versus-
 observed comparison table from the recent live feeds. The replay is causal: each

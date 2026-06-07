@@ -57,6 +57,7 @@ function _usage()
     Modes:
       --issue                Issue and lock one future forecast row. This is the default.
       --verify-pending       Score all pending rows whose target Dst is now available.
+      --refresh-observations Reconcile logged observations with the current Dst feed.
       --backfill-baselines   Fill baseline forecasts/residuals for existing rows.
       --replay-recent        Build a recent causal replay table from live feeds.
       --replay-omni          Build a longer causal replay table from local OMNI CSV.
@@ -164,6 +165,8 @@ function _parse_args(args)::LiveVerifyConfig
             mode = :issue
         elseif arg == "--verify-pending"
             mode = :verify_pending
+        elseif arg == "--refresh-observations"
+            mode = :refresh_observations
         elseif arg == "--backfill-baselines"
             mode = :backfill_baselines
         elseif arg == "--replay-recent"
@@ -382,6 +385,21 @@ function _score_row!(df::DataFrame, row_idx::Int, observed_dst::Float64)
     _set_value!(df, row_idx, :observation_dst_nt, observed_dst)
     _set_value!(df, row_idx, :residual_dst_nt, observed_dst - pred)
     _set_value!(df, row_idx, :observed_in_90ci, min(ci05, ci95) <= observed_dst <= max(ci05, ci95))
+
+    v2_pred = _optional_float(df, row_idx, :v2_pred_dst_nt)
+    if !ismissing(v2_pred)
+        _set_value!(df, row_idx, :v2_residual_dst_nt, observed_dst - v2_pred)
+        v2_ci05 = _optional_float(df, row_idx, :v2_pred_dst_ci05_nt)
+        v2_ci95 = _optional_float(df, row_idx, :v2_pred_dst_ci95_nt)
+        if !ismissing(v2_ci05) && !ismissing(v2_ci95)
+            _set_value!(
+                df,
+                row_idx,
+                :v2_observed_in_90ci,
+                min(v2_ci05, v2_ci95) <= observed_dst <= max(v2_ci05, v2_ci95),
+            )
+        end
+    end
 
     for (pred_col, residual_col) in (
         (:persistence_dst_nt, :persistence_residual_dst_nt),
@@ -1731,6 +1749,37 @@ function verify_pending!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=noth
     return verified
 end
 
+function refresh_observations!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=nothing)
+    isfile(cfg.log_path) || error("No forecast log exists at $(cfg.log_path)")
+    df = CSV.read(cfg.log_path, DataFrame)
+    if dst_times === nothing || dst_vals === nothing
+        dst_times, dst_vals = _fetch_dst()
+    end
+    dst_map = _dst_lookup(dst_times, dst_vals)
+
+    updated = 0
+    changed = 0
+    for row_idx in 1:nrow(df)
+        String(:target_time_utc) in names(df) || continue
+        target = _parse_dt(df[row_idx, :target_time_utc])
+        haskey(dst_map, target) || continue
+        observed = Float64(dst_map[target])
+        old_observed = _optional_float(df, row_idx, :observation_dst_nt)
+        if ismissing(old_observed) || Float64(old_observed) != observed
+            !ismissing(old_observed) && (changed += 1)
+            _score_row!(df, row_idx, observed)
+            updated += 1
+        end
+    end
+
+    updated > 0 && CSV.write(cfg.log_path, df)
+    println(
+        "Refreshed $updated observation row(s); " *
+        "$changed previously scored row(s) changed."
+    )
+    return updated
+end
+
 function backfill_baselines!(log_path::String)
     isfile(log_path) || error("No forecast log exists at $log_path")
     df = CSV.read(log_path, DataFrame)
@@ -2248,6 +2297,8 @@ function main(args=ARGS)
         issue_forecast(cfg)
     elseif cfg.mode == :verify_pending
         verify_pending!(cfg)
+    elseif cfg.mode == :refresh_observations
+        refresh_observations!(cfg)
     elseif cfg.mode == :backfill_baselines
         backfill_baselines!(cfg.log_path)
     elseif cfg.mode == :replay_recent

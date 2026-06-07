@@ -47,6 +47,10 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         grid_cfg = _parse_args(["--fit-v2-calibration", "--v2-ridge-grid=0,10,100"])
         @test grid_cfg.v2_ridge_grid == [0.0, 10.0, 100.0]
 
+        refresh_cfg = _parse_args(["--refresh-observations", "--log=/tmp/live.csv"])
+        @test refresh_cfg.mode == :refresh_observations
+        @test refresh_cfg.log_path == "/tmp/live.csv"
+
         omni_cfg = _parse_args([
             "--replay-omni",
             "--omni=/tmp/omni.csv",
@@ -151,6 +155,49 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test :obrien_dst_nt in propertynames(df)
             @test ismissing(df.obrien_dst_nt[1])
             @test df.obrien_dst_nt[2] == -46.0
+        end
+    end
+
+    @testset "A/D: refresh_observations! reconciles revised Dst without changing predictions" begin
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "live_forecast_log.csv")
+            target = DateTime(2026, 6, 7, 16)
+            log = DataFrame(
+                issue_time_utc=["2026-06-07T15:26:39.864"],
+                latest_dst_time_utc=["2026-06-07T14:00:00"],
+                target_time_utc=[string(target)],
+                model_version=["v2"],
+                pred_dst_nt=[-23.4],
+                pred_dst_ci05_nt=[-45.0],
+                pred_dst_ci95_nt=[-1.0],
+                observation_dst_nt=[-22.0],
+                residual_dst_nt=[1.4],
+                observed_in_90ci=[true],
+                v2_pred_dst_nt=[-23.4],
+                v2_pred_dst_ci05_nt=[-45.0],
+                v2_pred_dst_ci95_nt=[-1.0],
+                persistence_dst_nt=[-25.0],
+                burton_dst_nt=[-30.0],
+                burton_full_dst_nt=[-30.0],
+                obrien_dst_nt=[-28.0],
+            )
+            CSV.write(log_path, log)
+
+            cfg = LiveVerifyConfig(; mode=:refresh_observations, log_path=log_path)
+            updated = refresh_observations!(
+                cfg;
+                dst_times=[target],
+                dst_vals=[-21.0],
+            )
+            df = CSV.read(log_path, DataFrame)
+
+            @test updated == 1
+            @test df.pred_dst_nt[1] == -23.4
+            @test df.observation_dst_nt[1] == -21.0
+            @test df.residual_dst_nt[1] ≈ 2.4 atol=1e-12
+            @test df.v2_residual_dst_nt[1] ≈ 2.4 atol=1e-12
+            @test df.v2_observed_in_90ci[1] == true
+            @test df.persistence_residual_dst_nt[1] == 4.0
         end
     end
 
