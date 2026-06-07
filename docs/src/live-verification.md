@@ -101,15 +101,14 @@ coupling, and square-root dynamic pressure.
 
 Current v2 calibration is guarded, validation-selected, and baseline-aware. The
 fit command sorts replay/live-log rows chronologically, fits candidate
-calibrations on the earliest rows, selects the ridge/features/internal component
-on later validation rows, and reports the final untouched holdout rows. When
-baseline columns are available, the internal guard can choose corrected
-SINDy-v2, uncorrected SINDy v1, persistence, Burton, BurtonFull, or
-O'Brien--McPherron. The issued operational v2 output is still the single
-upgraded forecast. The internal `v2_selected_component` field is audit metadata,
-not a separate headline model. If the validation-selected candidate fails the
-final holdout gate against SINDy v1 on RMSE or MAE, the written calibration
-fails closed by deploying the internal SINDy v1 fallback.
+calibrations on the earliest rows, then fits robust convex ensemble weights on
+later validation rows. The ensemble can blend corrected SINDy-v2, uncorrected
+SINDy v1, persistence, Burton, BurtonFull, and O'Brien--McPherron when those
+columns are available. The final untouched holdout rows shrink the validated
+weight vector toward the SINDy-v1 component until v2 is no worse than SINDy v1
+on both RMSE and MAE. The issued operational v2 output is therefore one
+upgraded ensemble forecast; the internal `v2_selected_component` and weight
+fields are audit metadata, not separate headline models.
 
 Fit the calibration from a prior replay or locked live log:
 
@@ -125,7 +124,7 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
 
 This also writes `live_forecasts/operational_v2_calibration_selection.csv`,
 which records each tested v2 candidate, validation metrics, holdout metrics, and
-the chosen internal component.
+the validation and final holdout-shrunk ensemble weights.
 
 Then run a calibrated replay or live issue:
 

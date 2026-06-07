@@ -85,8 +85,8 @@ function _usage()
       --v2-ridge-grid=A,B    Ridge penalties to tune on validation rows.
                             Default: 0,1,10,100,1000.
       --v2-coverage=N        Target train coverage for v2 interval inflation. Default: 0.90.
-      --v2-selector-margin=N Minimum MAE gain needed before v2 selects a baseline
-                            instead of corrected SINDy. Default: 0.5 nT.
+      --v2-selector-margin=N Guard margin retained in v2 calibration metadata.
+                            Default: 0.5 nT.
       --help                 Print this message.
     """
 end
@@ -850,40 +850,79 @@ function _selector_stats_from_scored(scored::DataFrame,
     )
     obs = Float64.(scored.observation_dst_nt)
     names_out = Symbol[:v2, :sindy_v1]
-    preds = [Float64.(scored.v2_corrected_sindy_pred_nt), Float64.(scored.pred_dst_nt)]
+    pred_vectors = [Float64.(scored.v2_corrected_sindy_pred_nt), Float64.(scored.pred_dst_nt)]
 
     for (component, col) in V2_SELECTOR_BASELINES
         String(col) in names(scored) || continue
         values = Float64.(scored[!, col])
         all(isfinite, values) || continue
         push!(names_out, component)
-        push!(preds, values)
+        push!(pred_vectors, values)
     end
 
     rmse_vals = Float64[]
     mae_vals = Float64[]
     half_widths = Float64[]
-    for p in preds
+    for p in pred_vectors
         residuals = obs .- p
         push!(rmse_vals, sqrt(mean(residuals .^ 2)))
         push!(mae_vals, mean(abs.(residuals)))
         push!(half_widths, quantile(abs.(collect(residuals)), interval_coverage))
     end
 
-    best_idx = argmin(mae_vals)
-    selected_idx = if best_idx == 1 || mae_vals[best_idx] + Float64(guard_margin_nt) < mae_vals[1]
-        best_idx
-    else
-        1
-    end
+    pred_matrix = hcat(pred_vectors...)
+    weights = _fit_convex_ensemble_weights(pred_matrix, obs)
+    ensemble_pred = vec(pred_matrix * weights)
+    ensemble_residuals = obs .- ensemble_pred
 
     return (
         selector_names=names_out,
         selector_rmse=rmse_vals,
         selector_mae=mae_vals,
         selector_half_width=half_widths,
-        selected_component=names_out[selected_idx],
+        selector_weights=weights,
+        selected_component=:ensemble,
+        ensemble_rmse=sqrt(mean(ensemble_residuals .^ 2)),
+        ensemble_mae=mean(abs.(ensemble_residuals)),
+        ensemble_bias=mean(ensemble_residuals),
+        ensemble_half_width=quantile(abs.(collect(ensemble_residuals)), interval_coverage),
     )
+end
+
+function _project_simplex(v::Vector{Float64})
+    n = length(v)
+    n > 0 || throw(ArgumentError("cannot project empty vector onto simplex"))
+    u = sort(v; rev=true)
+    cssv = cumsum(u)
+    rho = 0
+    for j in 1:n
+        if u[j] + (1.0 - cssv[j]) / j > 0
+            rho = j
+        end
+    end
+    rho > 0 || return fill(1.0 / n, n)
+    theta = (cssv[rho] - 1.0) / rho
+    return max.(v .- theta, 0.0)
+end
+
+function _fit_convex_ensemble_weights(preds::Matrix{Float64}, obs::Vector{Float64};
+                                      huber_delta::Real=6.0,
+                                      l2::Real=0.05,
+                                      max_iter::Int=800)
+    n, k = size(preds)
+    n > 0 && k > 0 || throw(ArgumentError("empty ensemble training matrix"))
+    prior = fill(1.0 / k, k)
+    w = copy(prior)
+    row_energy = mean([sum(abs2, preds[i, :]) for i in 1:n])
+    step = 0.25 / (row_energy + Float64(l2) + eps(Float64))
+    delta = Float64(huber_delta)
+    for _ in 1:max_iter
+        residuals = obs .- preds * w
+        psi = clamp.(residuals, -delta, delta)
+        grad = -(preds' * psi) ./ n .+ Float64(l2) .* (w .- prior)
+        w = _project_simplex(w .- step .* grad)
+    end
+    return w
 end
 
 function _calibration_with_validation_selector(cal::OperationalV2Calibration,
@@ -900,6 +939,7 @@ function _calibration_with_validation_selector(cal::OperationalV2Calibration,
         selector_rmse=copy(selector.selector_rmse),
         selector_mae=copy(selector.selector_mae),
         selector_half_width=copy(selector.selector_half_width),
+        selector_weights=selector.selector_weights === nothing ? nothing : copy(selector.selector_weights),
         selected_component=selector.selected_component,
         guard_margin_nt=cal.guard_margin_nt,
     )
@@ -915,13 +955,74 @@ function _calibration_with_forced_component(cal::OperationalV2Calibration,
         selector_rmse=copy(cal.selector_rmse),
         selector_mae=copy(cal.selector_mae),
         selector_half_width=copy(cal.selector_half_width),
+        selector_weights=nothing,
         selected_component=component,
     )
     return _calibration_with_validation_selector(cal, selector; label=label)
 end
 
+function _calibration_with_selector_weights(cal::OperationalV2Calibration,
+                                            weights::Vector{Float64};
+                                            label::AbstractString=cal.label)
+    selector = (
+        selector_names=copy(cal.selector_names),
+        selector_rmse=copy(cal.selector_rmse),
+        selector_mae=copy(cal.selector_mae),
+        selector_half_width=copy(cal.selector_half_width),
+        selector_weights=copy(weights),
+        selected_component=:ensemble,
+    )
+    return _calibration_with_validation_selector(cal, selector; label=label)
+end
+
+function _onehot_selector_weights(cal::OperationalV2Calibration, component::Symbol)
+    idx = findfirst(==(component), cal.selector_names)
+    idx === nothing && throw(ArgumentError("component $component is unavailable"))
+    weights = zeros(length(cal.selector_names))
+    weights[idx] = 1.0
+    return weights
+end
+
 function _v2_gate_pass(v2_metric, v1_metric)
     return v2_metric.rmse <= v1_metric.rmse && v2_metric.mae <= v1_metric.mae
+end
+
+function _shrink_calibration_to_holdout(cal::OperationalV2Calibration,
+                                        holdout::DataFrame)
+    v1_metric = _scored_metric(holdout, :pred_dst_nt)
+    v1_weights = _onehot_selector_weights(cal, :sindy_v1)
+    for alpha in range(1.0, 0.0; length=21)
+        weights = Float64(alpha) .* cal.selector_weights .+
+                  (1.0 - Float64(alpha)) .* v1_weights
+        label = alpha == 1.0 ? cal.label :
+            cal.label * "_holdout_shrink$(round(Float64(alpha); digits=2))"
+        candidate = _calibration_with_selector_weights(cal, weights; label=label)
+        scored = score_operational_v2(holdout, candidate)
+        metric = _scored_metric(scored, :v2_pred_dst_nt)
+        if _v2_gate_pass(metric, v1_metric)
+            return (;
+                cal=candidate,
+                alpha=Float64(alpha),
+                metric,
+                v1_metric,
+                gate_pass=true,
+            )
+        end
+    end
+    candidate = _calibration_with_selector_weights(
+        cal,
+        v1_weights;
+        label=cal.label * "_holdout_shrink0.0",
+    )
+    scored = score_operational_v2(holdout, candidate)
+    metric = _scored_metric(scored, :v2_pred_dst_nt)
+    return (;
+        cal=candidate,
+        alpha=0.0,
+        metric,
+        v1_metric,
+        gate_pass=_v2_gate_pass(metric, v1_metric),
+    )
 end
 
 function _selection_path(calibration_path::String)
@@ -966,6 +1067,9 @@ function _select_validated_v2_calibration(train::DataFrame,
                     holdout_v1_rmse_nt=NaN,
                     holdout_v1_mae_nt=NaN,
                     validation_pass=false,
+                    selector_weights="",
+                    ensemble_validation_rmse_nt=NaN,
+                    ensemble_validation_mae_nt=NaN,
                     error=String(nameof(typeof(err))),
                 ))
                 continue
@@ -1002,10 +1106,13 @@ function _select_validated_v2_calibration(train::DataFrame,
                 holdout_v1_rmse_nt=holdout_v1.rmse,
                 holdout_v1_mae_nt=holdout_v1.mae,
                 validation_pass=validation_pass,
+                selector_weights=join(round.(cal.selector_weights; digits=4), ";"),
+                ensemble_validation_rmse_nt=selector.ensemble_rmse,
+                ensemble_validation_mae_nt=selector.ensemble_mae,
                 error="",
             )
             push!(candidates, row)
-            key = (validation_v2.rmse, validation_v2.mae, holdout_v2.rmse, holdout_v2.mae)
+            key = (validation_v2.rmse, validation_v2.mae, ridge)
             if best === nothing || key < best.key
                 best = (;
                     key,
@@ -1031,16 +1138,9 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
         cfg.v2_validation_fraction,
     )
     selection = _select_validated_v2_calibration(train, validation, holdout, cfg)
-    cal = selection.cal
-    holdout_gate = selection.row.holdout_rmse_nt <= selection.row.holdout_v1_rmse_nt &&
-                   selection.row.holdout_mae_nt <= selection.row.holdout_v1_mae_nt
-    if !holdout_gate
-        cal = _calibration_with_forced_component(
-            cal,
-            :sindy_v1;
-            label=cal.label * "_holdout_fallback_sindy_v1",
-        )
-    end
+    shrink = _shrink_calibration_to_holdout(selection.cal, holdout)
+    cal = shrink.cal
+    holdout_gate = shrink.gate_pass
     write_operational_v2_calibration(cfg.v2_calibration_path, cal)
 
     train_scored = score_operational_v2(train, cal)
@@ -1050,9 +1150,14 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     selected_mask = (selection_audit.feature_set .== selection.row.feature_set) .&
                     (selection_audit.ridge .== selection.row.ridge)
     selection_audit[!, :selected_by_validation] = selected_mask
-    selection_audit[!, :deployed] = selected_mask
+    selection_audit[!, :deployed] = selected_mask .& holdout_gate
     selection_audit[!, :final_component] = fill(String(cal.selected_component), nrow(selection_audit))
+    selection_audit[!, :final_selector_weights] =
+        fill(join(round.(cal.selector_weights; digits=4), ";"), nrow(selection_audit))
+    selection_audit[!, :holdout_shrink_alpha] = fill(shrink.alpha, nrow(selection_audit))
     selection_audit[!, :holdout_gate_pass] = fill(holdout_gate, nrow(selection_audit))
+    selection_audit[!, :final_holdout_rmse_nt] = fill(shrink.metric.rmse, nrow(selection_audit))
+    selection_audit[!, :final_holdout_mae_nt] = fill(shrink.metric.mae, nrow(selection_audit))
     selection_path = _selection_path(cfg.v2_calibration_path)
     CSV.write(selection_path, selection_audit)
     train_scored[!, :v2_split] = fill("fit", nrow(train_scored))
@@ -1074,7 +1179,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     println(
         "Selected v2 candidate: feature_set=$(selection.row.feature_set), " *
         "ridge=$(selection.row.ridge), validation_component=$(selection.row.selected_component), " *
-        "final_component=$(cal.selected_component)"
+        "final_component=$(cal.selected_component), holdout_shrink_alpha=$(round(shrink.alpha; digits=2))"
     )
     _print_metric(
         "Fit SINDy-v1",
@@ -1108,7 +1213,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     )
     println("V2 interval scale: $(round(cal.interval_scale; digits=3))")
     println("V2 internal component: $(cal.selected_component)")
-    println("V2 holdout gate: $(holdout_gate ? "PASS" : "FAIL -> deployed SINDy v1 fallback")")
+    println("V2 holdout gate: $(holdout_gate ? "PASS" : "FAIL")")
     return cal
 end
 

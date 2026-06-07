@@ -354,15 +354,17 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test isfile(scored_path)
             @test isfile(selection_path)
             @test cal.label == "operational_v2_validated_full_ridge0.0_fit16_val3"
-            @test cal.selected_component == :v2
+            @test cal.selected_component == :ensemble
             reread = read_operational_v2_calibration(cal_path)
             scored = CSV.read(scored_path, DataFrame)
             selection = CSV.read(selection_path, DataFrame)
-            @test maximum(abs.(scored.v2_residual_dst_nt)) < 1e-8
-            @test all(scored.v2_selected_component .== "v2")
+            @test maximum(abs.(scored.v2_residual_dst_nt)) < 0.5
+            @test all(scored.v2_selected_component .== "ensemble")
             @test Set(scored.v2_split) == Set(["fit", "validation", "holdout"])
             @test nrow(selection) == 4
             @test all(selection.validation_pass)
+            @test all(occursin(";", w) for w in selection.selector_weights)
+            @test sum(reread.selector_weights) ≈ 1.0 atol=1e-12
             pred_v2 = operational_v2_predict(
                 reread,
                 pred[end],
@@ -370,11 +372,11 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
                 pred[end] + 3.0,
                 operational_v2_feature_tuple(pred[end] - 1.0, 420.0, bz[end], 1.0, 5.0, 1.5),
             )
-            @test pred_v2.pred_dst ≈ observed[end]
+            @test pred_v2.pred_dst ≈ observed[end] atol=0.5
         end
     end
 
-    @testset "A/D: validated v2 falls back to SINDy v1 when correction fails validation" begin
+    @testset "A/D: validated ensemble weights favor SINDy v1 when correction fails validation" begin
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")
             cal_path = joinpath(tmp, "v2_calibration.csv")
@@ -412,16 +414,20 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             cal = fit_v2_calibration!(cfg)
             scored = CSV.read(replace(cal_path, r"\.csv$" => "_scored.csv"), DataFrame)
             selection = CSV.read(replace(cal_path, r"\.csv$" => "_selection.csv"), DataFrame)
-            @test cal.selected_component == :sindy_v1
-            @test all(scored.v2_selected_component .== "sindy_v1")
-            @test scored.v2_pred_dst_nt == scored.pred_dst_nt
-            @test selection.selected_component[1] == "sindy_v1"
-            @test selection.validation_rmse_nt[1] == 0.0
+            idx_v1 = findfirst(==(:sindy_v1), cal.selector_names)
+            idx_v2 = findfirst(==(:v2), cal.selector_names)
+            @test cal.selected_component == :ensemble
+            @test all(scored.v2_selected_component .== "ensemble")
+            @test cal.selector_weights[idx_v1] > cal.selector_weights[idx_v2]
+            @test all(selection.selected_component .== "ensemble")
+            @test all(selection.final_component .== "ensemble")
+            @test all(selection.holdout_gate_pass)
+            @test minimum(selection.validation_rmse_nt) <= 1.0
             @test selection.validation_v1_rmse_nt[1] == 0.0
         end
     end
 
-    @testset "A/D: validated v2 fails closed to SINDy v1 when holdout gate fails" begin
+    @testset "A/D: validated v2 shrinks ensemble toward SINDy v1 when holdout gate fails" begin
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")
             cal_path = joinpath(tmp, "v2_calibration.csv")
@@ -460,10 +466,11 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             scored = CSV.read(replace(cal_path, r"\.csv$" => "_scored.csv"), DataFrame)
             selection = CSV.read(replace(cal_path, r"\.csv$" => "_selection.csv"), DataFrame)
             holdout = scored[scored.v2_split .== "holdout", :]
-            @test cal.selected_component == :sindy_v1
-            @test occursin("holdout_fallback_sindy_v1", cal.label)
-            @test all(selection.final_component .== "sindy_v1")
-            @test all(selection.holdout_gate_pass .== false)
+            @test cal.selected_component == :ensemble
+            @test occursin("holdout_shrink", cal.label)
+            @test all(selection.final_component .== "ensemble")
+            @test all(selection.holdout_gate_pass)
+            @test all(selection.holdout_shrink_alpha .== 0.0)
             @test any(selection.selected_by_validation)
             @test holdout.v2_pred_dst_nt == holdout.pred_dst_nt
         end

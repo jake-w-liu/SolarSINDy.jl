@@ -46,10 +46,10 @@ v1 ensemble interval from calibration residuals. This type deliberately does
 not alter `ForecastState` or v1 SINDy coefficients.
 
 When mandatory baseline columns are present during calibration, v2 also stores
-a guarded selector over corrected SINDy, uncorrected SINDy v1, persistence,
-Burton, BurtonFull, and O'Brien--McPherron. A fallback component is selected
-only when its calibration-window MAE beats corrected SINDy by the configured
-margin.
+guarded component metrics and optional convex ensemble weights over corrected
+SINDy, uncorrected SINDy v1, persistence, Burton, BurtonFull, and
+O'Brien--McPherron. A fallback component or ensemble is deployed only after
+chronological validation in the operational workflow.
 """
 struct OperationalV2Calibration
     feature_names::Vector{Symbol}
@@ -62,6 +62,7 @@ struct OperationalV2Calibration
     selector_rmse::Vector{Float64}
     selector_mae::Vector{Float64}
     selector_half_width::Vector{Float64}
+    selector_weights::Vector{Float64}
     selected_component::Symbol
     guard_margin_nt::Float64
 
@@ -76,6 +77,7 @@ struct OperationalV2Calibration
                                       selector_rmse::Vector{Float64}=Float64[NaN],
                                       selector_mae::Vector{Float64}=Float64[NaN],
                                       selector_half_width::Vector{Float64}=Float64[0.0],
+                                      selector_weights::Union{Nothing,Vector{Float64}}=nothing,
                                       selected_component::Symbol=:v2,
                                       guard_margin_nt::Real=0.0)
         n = length(feature_names)
@@ -107,13 +109,31 @@ struct OperationalV2Calibration
             throw(ArgumentError("selector interval half-widths must be finite"))
         all(>=(0.0), selector_half_width) ||
             throw(ArgumentError("selector interval half-widths must be nonnegative"))
-        selected_component in selector_names ||
-            throw(ArgumentError("selected_component must appear in selector_names"))
+        selected_component == :ensemble || selected_component in selector_names ||
+            throw(ArgumentError("selected_component must be :ensemble or appear in selector_names"))
+        weights = if selector_weights === nothing
+            w = zeros(n_selector)
+            if selected_component == :ensemble
+                w .= 1.0 / n_selector
+            else
+                w[findfirst(==(selected_component), selector_names)] = 1.0
+            end
+            w
+        else
+            copy(selector_weights)
+        end
+        length(weights) == n_selector ||
+            throw(DimensionMismatch("selector_weights length $(length(weights)) != $n_selector"))
+        all(isfinite, weights) || throw(ArgumentError("selector weights must be finite"))
+        all(>=(0.0), weights) || throw(ArgumentError("selector weights must be nonnegative"))
+        weight_sum = sum(weights)
+        weight_sum > 0 || throw(ArgumentError("selector weights must have positive sum"))
+        weights ./= weight_sum
         isfinite(Float64(guard_margin_nt)) && Float64(guard_margin_nt) >= 0 ||
             throw(ArgumentError("guard_margin_nt must be finite and nonnegative"))
         return new(feature_names, feature_mean, feature_scale, coefficients,
                    interval_scale, String(label), selector_names, selector_rmse,
-                   selector_mae, selector_half_width, selected_component,
+                   selector_mae, selector_half_width, weights, selected_component,
                    Float64(guard_margin_nt))
     end
 end
@@ -319,11 +339,33 @@ function _component_value(baselines, component::Symbol)
     return Float64(baselines[component])
 end
 
+function _component_predictions(cal::OperationalV2Calibration,
+                                corrected_center::Float64,
+                                original_center::Float64,
+                                baselines)
+    values = Float64[]
+    for component in cal.selector_names
+        if component == :v2
+            push!(values, corrected_center)
+        elseif component == :sindy_v1
+            push!(values, original_center)
+        else
+            push!(values, _component_value(baselines, component))
+        end
+    end
+    return values
+end
+
 function _selected_component_prediction(component::Symbol, corrected_center::Float64,
                                         original_center::Float64,
+                                        cal::OperationalV2Calibration,
                                         baselines)
     component == :v2 && return corrected_center
     component == :sindy_v1 && return original_center
+    if component == :ensemble
+        values = _component_predictions(cal, corrected_center, original_center, baselines)
+        return sum(cal.selector_weights .* values)
+    end
     value = _component_value(baselines, component)
     isfinite(value) || throw(ArgumentError("v2 selector baseline $component is not finite"))
     return value
@@ -457,10 +499,15 @@ function operational_v2_predict(cal::OperationalV2Calibration,
         cal.selected_component,
         corrected_center,
         original_center,
+        cal,
         baselines,
     )
     half_width = abs(Float64(ci95) - Float64(ci05)) / 2
-    selector_half_width = cal.selector_half_width[_component_index(cal, cal.selected_component)]
+    selector_half_width = if cal.selected_component == :ensemble
+        sum(cal.selector_weights .* cal.selector_half_width)
+    else
+        cal.selector_half_width[_component_index(cal, cal.selected_component)]
+    end
     inflated = max(cal.interval_scale * half_width, selector_half_width)
     return (
         pred_dst=center,
@@ -551,6 +598,7 @@ function write_operational_v2_calibration(path::String,
     selector_rmse = _join_floats(cal.selector_rmse)
     selector_mae = _join_floats(cal.selector_mae)
     selector_half_width = _join_floats(cal.selector_half_width)
+    selector_weights = _join_floats(cal.selector_weights)
     push!(rows, (
         feature="intercept",
         feature_mean=0.0,
@@ -564,6 +612,7 @@ function write_operational_v2_calibration(path::String,
         selector_rmse_nt=selector_rmse,
         selector_mae_nt=selector_mae,
         selector_half_width_nt=selector_half_width,
+        selector_weights=selector_weights,
     ))
     for (j, name) in enumerate(cal.feature_names)
         push!(rows, (
@@ -579,6 +628,7 @@ function write_operational_v2_calibration(path::String,
             selector_rmse_nt=selector_rmse,
             selector_mae_nt=selector_mae,
             selector_half_width_nt=selector_half_width,
+            selector_weights=selector_weights,
         ))
     end
     CSV.write(path, DataFrame(rows))
@@ -606,6 +656,8 @@ function read_operational_v2_calibration(path::String)
         _split_floats(df[1, :selector_mae_nt]) : fill(NaN, length(selector_names))
     selector_half_width = String(:selector_half_width_nt) in names(df) ?
         _split_floats(df[1, :selector_half_width_nt]) : zeros(length(selector_names))
+    selector_weights = String(:selector_weights) in names(df) ?
+        _split_floats(df[1, :selector_weights]) : nothing
     selected_component = String(:selected_component) in names(df) ?
         Symbol(String(df[1, :selected_component])) : :v2
     guard_margin_nt = String(:guard_margin_nt) in names(df) ?
@@ -621,6 +673,7 @@ function read_operational_v2_calibration(path::String)
         selector_rmse=collect(selector_rmse),
         selector_mae=collect(selector_mae),
         selector_half_width=collect(selector_half_width),
+        selector_weights=selector_weights === nothing ? nothing : collect(selector_weights),
         selected_component=selected_component,
         guard_margin_nt=guard_margin_nt,
     )

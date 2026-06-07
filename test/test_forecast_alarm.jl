@@ -189,6 +189,7 @@ using Dates
             @test reread.selector_rmse ≈ cal.selector_rmse
             @test reread.selector_mae ≈ cal.selector_mae
             @test reread.selector_half_width ≈ cal.selector_half_width
+            @test reread.selector_weights ≈ cal.selector_weights
             @test reread.selected_component == cal.selected_component
             @test reread.guard_margin_nt == cal.guard_margin_nt
         end
