@@ -3,6 +3,8 @@ using SolarSINDy
 using LinearAlgebra
 using Statistics
 using Random
+using CSV
+using DataFrames
 
 @testset verbose=true "SolarSINDy.jl" begin
 
@@ -213,7 +215,42 @@ using Random
         @test ξphys[2] == 0.0
     end
 
+    @testset "Wilcoxon signed-rank significance" begin
+        # Textbook case: d = 1..10 all positive → W = min(55,0) = 0, n = 10,
+        # μ = 27.5, σ² = 96.25; z = (0 − 27.5 + 0.5)/√96.25; p two-sided.
+        t = wilcoxon_signed_rank_p(collect(1.0:10.0))
+        @test t.n == 10
+        @test t.w == 0.0
+        @test isapprox(t.z, -27.0 / sqrt(96.25); atol=1e-9)
+        @test isapprox(t.p, 0.0059215; atol=1e-6)
+        # Zeros dropped; a symmetric set is non-significant.
+        @test wilcoxon_signed_rank_p([0.0, 0.0]).n == 0
+        @test wilcoxon_signed_rank_p([1.0, -1.0, 2.0, -2.0]).p > 0.5
+
+        # Reproducibility: the per-storm SINDy−O'Brien RMSE pairs reproduce the
+        # manuscript's reported p-values exactly (M10 reproducibility gate).
+        d = get_data_dir()
+        cc = CSV.read(joinpath(d, "cross_cycle_metrics.csv"), DataFrame)
+        ho = CSV.read(joinpath(d, "real_holdout_metrics.csv"), DataFrame)
+        function _sindy_minus_obrien(df, e)
+            sub = e === nothing ? df : df[df.experiment .== e, :]
+            s = sort(sub[sub.model .== "SINDy", :], :storm_id)
+            o = sort(sub[sub.model .== "OBrienMcP", :], :storm_id)
+            @test s.storm_id == o.storm_id
+            return Float64.(s.rmse) .- Float64.(o.rmse)
+        end
+        @test isapprox(wilcoxon_signed_rank_p(_sindy_minus_obrien(cc, "C20-22->C23")).p,
+                       1.43e-5; rtol=0.02)
+        @test isapprox(wilcoxon_signed_rank_p(_sindy_minus_obrien(cc, "even->odd")).p,
+                       1.61e-12; rtol=0.05)
+        @test isapprox(wilcoxon_signed_rank_p(_sindy_minus_obrien(cc, "C20-23->C25")).p,
+                       0.78; atol=0.01)
+        @test isapprox(wilcoxon_signed_rank_p(_sindy_minus_obrien(ho, nothing)).p,
+                       0.046; atol=0.002)
+    end
+
     include("test_conformal.jl")
+    include("test_assimilation.jl")
     include("test_forecast_alarm.jl")
     include("test_data_pipeline_cleaning.jl")
     include("test_realtime_monitor.jl")

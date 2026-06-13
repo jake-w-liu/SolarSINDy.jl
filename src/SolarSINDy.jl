@@ -23,6 +23,7 @@ include("data_cleaning.jl")
 include("metrics.jl")
 include("forecast.jl")
 include("conformal.jl")
+include("assimilation.jl")
 include("alarm.jl")
 include("realtime.jl")
 include("monitor.jl")
@@ -51,7 +52,7 @@ export # Utils
        save_storm_catalog, load_storm_catalog,
        # Metrics
        rmse, correlation, skill_score, prediction_efficiency,
-       metrics_summary,
+       metrics_summary, wilcoxon_signed_rank_p,
        # Forecast
        ForecastState, ForecastResult, init_forecast,
        step_forecast!, forecast_ahead,
@@ -64,6 +65,10 @@ export # Utils
        ConformalCalibration, ConformalStratum, fit_conformal,
        conformal_stratum, conformal_halfwidth, conformal_interval,
        conformal_coverage, write_conformal_calibration, read_conformal_calibration,
+       # Online assimilation
+       AssimilationFilter, init_assimilation, assimilation_predict!,
+       assimilation_update!, run_assimilation, current_dst, current_coeffs,
+       dst_variance,
        # Alarm
        StormSeverity, QUIET, MODERATE, INTENSE, SUPERINTENSE,
        Alarm, AlarmConfig, default_alarm_config,

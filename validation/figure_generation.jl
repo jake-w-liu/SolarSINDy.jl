@@ -59,7 +59,10 @@ end
 # Generate multi-storm dataset
 # ============================================================
 # Use FIXED Burton parameters (α=4.559e-3, τ=7.7) so SINDy can recover them.
-# Vary solar wind drivers across storms for diversity.
+# NOTE: generate_synthetic_storm prescribes deterministic V and Bz, so these
+# storms differ only by the noise seed (By/density/measurement noise). The
+# noise-free min Dst is therefore identical across storms; the range printed
+# below reflects measurement-noise spread, not distinct storm intensities.
 println("=== Generating multi-storm dataset ===")
 
 n_storms = 10
@@ -181,7 +184,11 @@ println("  Burton RMSE=$(round(ms_b_ho.rmse, digits=2)), PE=$(round(ms_b_ho.pe, 
 println("  O'Brien RMSE=$(round(ms_o_ho.rmse, digits=2)), PE=$(round(ms_o_ho.pe, digits=4))")
 
 # Save holdout metrics for multiple storms
-holdout_storms = [3, 5, 8]  # weak, moderate, strong (by seed variation)
+# Three noise realizations of one prescribed-driver synthetic storm profile.
+# The velocity/Bz drivers are deterministic, so the noise-free min Dst is
+# identical across these seeds; only By/density/measurement noise differ. These
+# are NOT distinct weak/moderate/strong intensities.
+holdout_storms = [3, 5, 8]
 holdout_labels_out = String[]
 holdout_min_dst = Float64[]
 holdout_rmse_sindy = Float64[]
