@@ -109,6 +109,9 @@ function _usage()
       --v2-coverage=N        Target train coverage for v2 interval inflation. Default: 0.90.
       --v2-selector-margin=N Guard margin retained in v2 calibration metadata.
                             Default: 0.5 nT.
+      --v2-coverage-floor=N  Minimum validation 90% interval coverage a v2
+                            candidate must meet to deploy; otherwise a
+                            v1-equivalent fallback is used. Default: 0.85.
       --help                 Print this message.
     """
 end

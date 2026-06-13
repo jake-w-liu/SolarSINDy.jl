@@ -56,7 +56,9 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --c
 ```
 
 Use `--poll-seconds=N`, `--timeout-hours=N`, `--horizon-hours=N`, and
-`--log=PATH` to adjust the run.
+`--log=PATH` to adjust the run. Use `--replay-horizons=1,2,3,6` to emit multiple
+lead times per anchor when building a replay/calibration table, and
+`--v2-coverage-floor=N` to set the deployment coverage floor for v2.
 
 Use `--campaign --campaign-horizons=1,2,3,6 --model=v2` to issue multiple
 future operational-v2 forecasts, poll the observation feed, verify the locked
@@ -126,20 +128,26 @@ speed, IMF components, density, dynamic pressure, and derived causal coupling
 features such as southward IMF, `V Bs`, transverse IMF magnitude, IMF clock-angle
 coupling, and square-root dynamic pressure.
 
-Current v2 calibration is guarded, validation-selected, memory-aware, and
-baseline-aware. The fit command sorts replay/live-log rows chronologically,
-fits candidate calibrations on the earliest rows, then fits robust convex
-ensemble weights on later validation rows. Validation-gate-passing candidates
-are preferred before ranking by validation RMSE and MAE. Candidate feature sets
+Current v2 calibration uses a leakage-free chronological split. The fit command
+sorts replay/live-log rows by issue time into train, validation, and holdout
+sets. The ridge residual correction and the component selector are fit on the
+train rows only; the feature set, ridge penalty, and component are chosen on the
+validation rows, which fit neither. The holdout is scored exactly once for an
+honest out-of-sample number and is never used for any selection or tuning
+decision.
+
+Deployment is decided by an acceptance gate evaluated on the validation rows: a
+v2 candidate is deployed only if it beats persistence and O'Brien--McPherron on
+both RMSE and MAE and its 90% interval coverage is at least the coverage floor
+(`--v2-coverage-floor`, default 0.85). If no candidate passes, a v1-equivalent
+(zero-correction) fallback is deployed instead, so a candidate that cannot be
+shown to beat the strong baselines is never shipped. Candidate feature sets
 include instantaneous coupling terms, causal Dst and solar-wind memory terms,
-and expert disagreement terms when baseline predictions are available. The ensemble can
-blend corrected SINDy-v2, uncorrected SINDy v1, persistence, Burton,
-BurtonFull, and O'Brien--McPherron. The final safety window first tries a
-robust safety-window blend and then falls back to the best available expert
-when needed, so the deployed v2 is no worse than that expert on RMSE and MAE.
-The issued operational v2 output is one upgraded ensemble forecast; the
-internal `v2_selected_component` and weight fields are audit metadata, not
-separate headline models.
+and expert-disagreement terms when baseline predictions are available. On small
+fit sets the selector is held to the corrected SINDy center to avoid choosing a
+baseline component on noise. The issued operational v2 output is one upgraded
+forecast; the internal `v2_selected_component` field is audit metadata, not a
+separate headline model.
 
 Fit the calibration from a prior replay or locked live log:
 
@@ -166,9 +174,12 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --v2-selector-margin=0.5
 ```
 
-This also writes `live_forecasts/operational_v2_calibration_selection.csv`,
-which records each tested v2 candidate, validation metrics, holdout metrics, and
-the validation and final safety-shrunk ensemble weights.
+This also writes `operational_v2_calibration_selection.csv` (each tested
+candidate with its validation metrics, whether it passed the acceptance gate,
+which candidate was deployed, and the once-scored holdout RMSE/MAE/coverage),
+`operational_v2_calibration_scored.csv` (the fit/validation/holdout rows scored
+by the deployed calibration), and `operational_v2_calibration_conformal.csv`
+(the conformal interval calibration; see below).
 
 Then run a calibrated replay or live issue:
 
@@ -184,6 +195,51 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
 The v2 calibration is not evidence of industrial readiness by itself. It must be
 scored chronologically against held-out rows and then accumulated through locked
 live forecasts exactly like v1.
+
+## Conformal Predictive Intervals
+
+`--fit-v2-calibration` also fits a split-conformal interval calibration from the
+deployed model's validation residuals (out-of-sample for the ridge fit) and
+writes it to a `*_conformal.csv` sidecar next to the v2 calibration. The
+conformal half-width is stratified by forecast horizon and by activity regime
+(quiet versus disturbed, set from the issue-time Dst), with a finite-sample
+correction so the reported coverage is never overstated and a pooled fallback
+when a stratum is sparse. The fit prints the honest holdout coverage under both
+the conformal interval and the legacy interval-scale band.
+
+When the sidecar is present, `--model=v2` issuance sources the logged 90%
+interval from the conformal half-width for the row's horizon and activity
+regime, instead of the v1-ensemble-spread interval scale. Each row records an
+`interval_source` column (`conformal` or `interval_scale`) for audit. The point
+forecast is unchanged; only the uncertainty band changes.
+
+To populate the horizon strata, build the conformal calibration table with
+multiple lead times via `--replay-horizons`:
+
+```bash
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
+  --replay-omni \
+  --omni=paper/data/omni_extracted.csv \
+  --omni-year-start=2024 --omni-year-end=2025 \
+  --replay-hours=4000 --replay-horizons=1,2,3,6 \
+  --table=/private/tmp/solar_v2_omni_replay_multi.csv --table-limit=0
+```
+
+Then fit the calibration on that multi-horizon table (`--fit-v2-calibration
+--table=...`), and validate empirical coverage by horizon and regime from the
+`_scored.csv` / comparison report. This is the run that establishes whether the
+operational 90% interval actually covers at the nominal rate; it requires live
+or archived OMNI data and is the data-dependent step, not a code step.
+
+## Online Assimilation (Research)
+
+The package also provides an Extended Kalman Filter (`init_assimilation`,
+`assimilation_predict!`, `assimilation_update!`, `run_assimilation`) that adapts
+a small physically-motivated subset of the discovered ODE coefficients (for
+example the injection scale and decay rate) online from each observed Dst while
+keeping the sparse equation structure fixed. It is a verified library primitive
+used for research comparison against the static v1/v2 paths; it is not yet wired
+into the live CLI issuance loop.
 
 ## Interpretation
 
