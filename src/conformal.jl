@@ -190,6 +190,125 @@ function conformal_interval(cal::ConformalCalibration, point::Real,
     return (Float64(point) - hw, Float64(point) + hw)
 end
 
+# ---------------------------------------------------------------------------
+# Adaptive Conformal Inference (ACI; Gibbs & Candès, 2021)
+#
+# Split conformal assumes calibration and test residuals are exchangeable. Under
+# distribution shift (e.g. rising solar activity across a chronological split)
+# that assumption fails and static intervals drift off nominal. ACI restores
+# long-run coverage by adapting the effective miscoverage rate online:
+#
+#   half-width_t = empirical (1 - α_t) quantile of the residual history
+#   α_{t+1}      = α_t + γ (α* - err_t),   err_t = 1 if y_t fell outside, else 0
+#
+# with target miscoverage α* = 1 - coverage. A miss lowers α_t (widening the next
+# interval); a hit raises it (tightening). The realized time-average miscoverage
+# satisfies |mean(err) - α*| ≤ (α_1 + γ)/(γ T) → α*, regardless of how the
+# residual distribution drifts.
+# ---------------------------------------------------------------------------
+
+"""
+    AdaptiveConformal
+
+Online ACI state for a single forecast stream: target coverage `1-α*`, learning
+rate `gamma`, current miscoverage `alpha_t`, the trailing absolute-residual
+`window`, the residual `history`, and a `warmup` count of initial steps that use
+the widest available band before adaptation is trusted.
+"""
+mutable struct AdaptiveConformal
+    target_coverage::Float64
+    gamma::Float64
+    alpha_t::Float64
+    window::Int
+    history::Vector{Float64}
+    warmup::Int
+end
+
+"""
+    init_adaptive_conformal(; target_coverage=0.90, gamma=0.02, window=typemax(Int), warmup=20)
+
+Construct an [`AdaptiveConformal`](@ref) stream with miscoverage initialised to
+`1 - target_coverage`.
+"""
+function init_adaptive_conformal(; target_coverage::Real=0.90, gamma::Real=0.02,
+                                 window::Integer=typemax(Int), warmup::Integer=20)
+    0 < target_coverage < 1 || throw(ArgumentError("target_coverage must lie in (0, 1)"))
+    gamma > 0 || throw(ArgumentError("gamma must be positive"))
+    window >= 1 || throw(ArgumentError("window must be ≥ 1"))
+    warmup >= 0 || throw(ArgumentError("warmup must be ≥ 0"))
+    return AdaptiveConformal(Float64(target_coverage), Float64(gamma),
+                             1.0 - Float64(target_coverage), Int(window),
+                             Float64[], Int(warmup))
+end
+
+# Finite-sample empirical half-width at coverage `level` (0 if level ≤ 0; the
+# sample max — the widest the sample supports — when level is too high for n).
+function _empirical_halfwidth(history::AbstractVector{<:Real}, level::Real)
+    n = length(history)
+    n == 0 && return Inf
+    level <= 0 && return 0.0
+    sorted = sort(collect(Float64, history))
+    k = ceil(Int, (n + 1) * level)
+    k > n && return sorted[n]
+    return sorted[clamp(k, 1, n)]
+end
+
+"""
+    adaptive_conformal_step!(ac, point, observed)
+
+Process one online step: form the interval around `point` from the current
+residual history at level `1 - α_t`, score coverage against `observed`, then
+append the new absolute residual (respecting the trailing window) and update
+`α_t`. Returns `(lo, hi, half_width, covered, alpha)`. The interval is formed
+BEFORE the observation enters the history (causal).
+"""
+function adaptive_conformal_step!(ac::AdaptiveConformal, point::Real, observed::Real)
+    n = length(ac.history)
+    level = clamp(1.0 - ac.alpha_t, 0.0, 1.0)
+    hw = n < ac.warmup ? (n == 0 ? Inf : maximum(ac.history)) :
+         _empirical_halfwidth(ac.history, level)
+    lo = Float64(point) - hw
+    hi = Float64(point) + hw
+    r = abs(Float64(observed) - Float64(point))
+    covered = r <= hw
+    err = covered ? 0.0 : 1.0
+    α_target = 1.0 - ac.target_coverage
+    ac.alpha_t = clamp(ac.alpha_t + ac.gamma * (α_target - err), 0.0, 1.0)
+    push!(ac.history, r)
+    length(ac.history) > ac.window && popfirst!(ac.history)
+    return (lo=lo, hi=hi, half_width=hw, covered=covered, alpha=ac.alpha_t)
+end
+
+"""
+    run_adaptive_conformal(points, observations; kwargs...)
+
+Run ACI over a time-ordered stream. Returns `(lo, hi, covered, alpha,
+coverage)` where the per-step vectors span all steps and `coverage` is the
+realized coverage over post-warmup steps only (the operationally meaningful
+figure). Keyword arguments are forwarded to [`init_adaptive_conformal`](@ref).
+"""
+function run_adaptive_conformal(points::AbstractVector{<:Real},
+                                observations::AbstractVector{<:Real}; kwargs...)
+    length(points) == length(observations) ||
+        throw(DimensionMismatch("points and observations must have equal length"))
+    ac = init_adaptive_conformal(; kwargs...)
+    n = length(points)
+    lo = Vector{Float64}(undef, n); hi = Vector{Float64}(undef, n)
+    covered = Vector{Bool}(undef, n); alpha = Vector{Float64}(undef, n)
+    post_hits = 0; post_total = 0
+    for t in 1:n
+        warm = length(ac.history) < ac.warmup
+        s = adaptive_conformal_step!(ac, points[t], observations[t])
+        lo[t] = s.lo; hi[t] = s.hi; covered[t] = s.covered; alpha[t] = s.alpha
+        if !warm
+            post_total += 1
+            s.covered && (post_hits += 1)
+        end
+    end
+    coverage = post_total == 0 ? NaN : post_hits / post_total
+    return (; lo, hi, covered, alpha, coverage)
+end
+
 """
     write_conformal_calibration(path, cal)
 

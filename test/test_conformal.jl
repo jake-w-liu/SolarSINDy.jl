@@ -109,6 +109,70 @@ using Statistics
         end
     end
 
+    @testset "ACI: alpha-update mechanics (hand-checked)" begin
+        ac = init_adaptive_conformal(; target_coverage=0.90, gamma=0.1, warmup=0)
+        # Seed history so the first step is not the empty/Inf warmup case.
+        append!(ac.history, fill(5.0, 30))
+        a0 = ac.alpha_t
+        @test a0 ≈ 0.10 atol = 1e-12
+        # A miss (obs far outside) lowers α by γ(1-α*): 0.10 + 0.1(0.10-1) = 0.01.
+        s_miss = adaptive_conformal_step!(ac, 0.0, 1000.0)
+        @test s_miss.covered == false
+        @test ac.alpha_t ≈ 0.01 atol = 1e-9
+        # A hit raises α by γ·α*: 0.01 + 0.1(0.10) = 0.02.
+        s_hit = adaptive_conformal_step!(ac, 0.0, 0.0)
+        @test s_hit.covered == true
+        @test ac.alpha_t ≈ 0.02 atol = 1e-9
+    end
+
+    @testset "ACI: stationary stream tracks nominal coverage" begin
+        rng = MersenneTwister(31)
+        n = 3000; σ = 7.0
+        pts = zeros(n); obs = σ .* randn(rng, n)
+        r = run_adaptive_conformal(pts, obs; target_coverage=0.90, gamma=0.02, warmup=50)
+        @test r.coverage >= 0.87
+        @test r.coverage <= 0.93
+    end
+
+    @testset "ACI closes the gap under distribution shift (the fix)" begin
+        _in(iv, y) = min(iv[1], iv[2]) <= y <= max(iv[1], iv[2])
+        rng = MersenneTwister(20260613)
+        n = 1500
+        # Residual scale TRIPLES at the midpoint (non-exchangeable stream).
+        σ = [k < n ÷ 2 ? 4.0 : 12.0 for k in 1:n]
+        pts = zeros(n)
+        obs = [σ[k] * randn(rng) for k in 1:n]
+        late = (n ÷ 2 + 1):n
+
+        # Static split conformal calibrated on the early (low-σ) regime.
+        cal_early = fit_conformal(pts[1:n÷4], obs[1:n÷4], fill(1.0, n÷4),
+                                  fill(0.0, n÷4); coverage=0.90, min_stratum_n=10)
+        static_late = mean(_in(conformal_interval(cal_early, pts[k], 1.0, 0.0), obs[k])
+                           for k in late)
+
+        # ACI over the full stream; coverage on the shifted (late) window.
+        ac = init_adaptive_conformal(; target_coverage=0.90, gamma=0.03, warmup=50)
+        aci_hits = 0; aci_tot = 0
+        for k in 1:n
+            s = adaptive_conformal_step!(ac, pts[k], obs[k])
+            if k in late
+                aci_tot += 1; s.covered && (aci_hits += 1)
+            end
+        end
+        aci_late = aci_hits / aci_tot
+
+        # Static under-covers badly on the shifted regime; ACI recovers ~nominal.
+        @test static_late < 0.80
+        @test aci_late >= 0.86
+        @test aci_late > static_late + 0.05
+    end
+
+    @testset "ACI input validation" begin
+        @test_throws ArgumentError init_adaptive_conformal(; target_coverage=1.0)
+        @test_throws ArgumentError init_adaptive_conformal(; gamma=0.0)
+        @test_throws DimensionMismatch run_adaptive_conformal([1.0, 2.0], [1.0])
+    end
+
     @testset "input validation and degenerate cases" begin
         @test_throws ArgumentError fit_conformal([1.0], [1.0], [1.0], [0.0]; coverage=0.0)
         @test_throws DimensionMismatch fit_conformal([1.0, 2.0], [1.0], [1.0], [0.0])

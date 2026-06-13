@@ -65,6 +65,8 @@ export # Utils
        ConformalCalibration, ConformalStratum, fit_conformal,
        conformal_stratum, conformal_halfwidth, conformal_interval,
        conformal_coverage, write_conformal_calibration, read_conformal_calibration,
+       AdaptiveConformal, init_adaptive_conformal, adaptive_conformal_step!,
+       run_adaptive_conformal,
        # Online assimilation
        AssimilationFilter, init_assimilation, assimilation_predict!,
        assimilation_update!, run_assimilation, current_dst, current_coeffs,
