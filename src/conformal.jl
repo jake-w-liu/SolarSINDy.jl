@@ -45,9 +45,12 @@ struct ConformalCalibration
 end
 
 # Defaults are operational choices, justified rather than arbitrary:
-# - horizon edges target the 1 h / 2–3 h / ≥4 h operational regimes (L1 advection
-#   gives true skill near 1 h; longer leads are dynamics extrapolation).
-const CONFORMAL_HORIZON_EDGES = [0.0, 1.5, 3.5, Inf]
+# - horizon edges separate the common operational lead times 1, 2, 3, and >=6 h
+#   into distinct bins ([0,1.5), [1.5,2.5), [2.5,4.5), [4.5,Inf)). An earlier
+#   [0,1.5,3.5,Inf) default merged the 2 h and 3 h leads, which under-covered the
+#   3 h stratum (it borrowed the narrower 2 h half-width); offline OMNI replay
+#   coverage testing surfaced this, hence the finer binning.
+const CONFORMAL_HORIZON_EDGES = [0.0, 1.5, 2.5, 4.5, Inf]
 # - activity split at −30 nT: below quiet baseline, capturing pre-storm/active
 #   conditions where residuals fatten, but above the −50 nT storm threshold.
 const CONFORMAL_ACTIVITY_THRESHOLD_NT = -30.0
