@@ -5,7 +5,7 @@ using JSON3
 
 const SWPC_PLASMA_URL = "https://services.swpc.noaa.gov/products/solar-wind/plasma-7-day.json"
 const SWPC_MAG_URL = "https://services.swpc.noaa.gov/products/solar-wind/mag-7-day.json"
-const KYOTO_DST_URL = "https://wdc.kugi.kyoto-u.ac.jp/dst_realtime/"
+const KYOTO_DST_JSON_URL = "https://services.swpc.noaa.gov/products/kyoto-dst.json"
 
 const DEFAULT_SWPC_MAX_RETRIES = 3
 const DEFAULT_SWPC_RETRY_DELAY_SEC = 1.0
@@ -105,6 +105,45 @@ function _parse_swpc_float(v)
 end
 
 """
+    fetch_swpc_dst(; url=KYOTO_DST_JSON_URL, max_retries=3)
+
+Fetch the hourly Kyoto Dst index (provisional/quicklook, served by NOAA SWPC).
+Returns `(times::Vector{DateTime}, dst::Vector{Float64})`. This is the observed
+geomagnetic state used to anchor the real-time forecaster, so the monitor does
+not free-run from an arbitrary Dst*=0 initial condition.
+"""
+function fetch_swpc_dst(; url::String=KYOTO_DST_JSON_URL,
+                          max_retries::Int=DEFAULT_SWPC_MAX_RETRIES,
+                          retry_delay_sec::Real=DEFAULT_SWPC_RETRY_DELAY_SEC,
+                          http_get::Function=HTTP.get)
+    raw = _fetch_swpc_json(url;
+        max_retries=max_retries,
+        retry_delay_sec=retry_delay_sec,
+        http_get=http_get,
+    )
+    rows = raw[2:end]  # skip header row
+    times = DateTime[DateTime(String(r[1]), dateformat"yyyy-mm-dd HH:MM:SS") for r in rows]
+    dst = Float64[_parse_swpc_float(r[2]) for r in rows]
+    return times, dst
+end
+
+"""
+    _hourly_dst_lookup(dst_times, dst_vals)
+
+Build a Dict mapping each observed Dst timestamp (floored to the hour) to its
+value, dropping non-finite entries. Used to anchor hourly forecast bins.
+"""
+function _hourly_dst_lookup(dst_times, dst_vals)
+    lookup = Dict{DateTime,Float64}()
+    for (t, v) in zip(dst_times, dst_vals)
+        dt = t isa DateTime ? t : DateTime(String(t))
+        val = Float64(v)
+        isfinite(val) && (lookup[DateTime(year(dt), month(dt), day(dt), hour(dt))] = val)
+    end
+    return lookup
+end
+
+"""
     fetch_realtime_solar_wind(; hours=168)
 
 Fetch and merge real-time solar wind data from SWPC, averaged to hourly cadence.
@@ -115,6 +154,7 @@ Data covers the last `hours` hours (default 7 days).
 function fetch_realtime_solar_wind(; hours::Int=168,
                                     plasma::Union{Nothing,DataFrame}=nothing,
                                     mag::Union{Nothing,DataFrame}=nothing,
+                                    dst::Union{Nothing,Tuple}=nothing,
                                     max_retries::Int=DEFAULT_SWPC_MAX_RETRIES,
                                     retry_delay_sec::Real=DEFAULT_SWPC_RETRY_DELAY_SEC,
                                     http_get::Function=HTTP.get)
@@ -128,6 +168,10 @@ function fetch_realtime_solar_wind(; hours::Int=168,
         retry_delay_sec=retry_delay_sec,
         http_get=http_get,
     ) : mag
+    # Observed Dst lookup for anchoring (hour-keyed). When absent, the
+    # forecaster runs unanchored (Dst* stays NaN) — but the monitor supplies it.
+    dst_lookup = dst === nothing ? Dict{DateTime,Float64}() :
+        _hourly_dst_lookup(dst[1], dst[2])
 
     # Determine common time range
     t_start = max(minimum(plasma_data.time_tag), minimum(mag_data.time_tag))
@@ -170,20 +214,27 @@ function fetch_realtime_solar_wind(; hours::Int=168,
             !isempty(vals_bz) && (Bz_hr[i] = mean(vals_bz))
             !isempty(vals_by) && (By_hr[i] = mean(vals_by))
         end
+
+        # Observed Dst for this hour bin (anchoring)
+        haskey(dst_lookup, t0) && (Dst_hr[i] = dst_lookup[t0])
     end
 
-    # Compute derived quantities
+    # Fill short gaps (≤3 hours) in measured quantities first.
+    for arr in [V_hr, n_hr, Bz_hr, By_hr]
+        _interp_short_gaps!(arr, 3)
+    end
+
+    # Dynamic pressure recomputed from interpolated n, V so it keeps the
+    # n*V^2 identity (do not interpolate Pdyn independently).
     Pdyn_hr = [isnan(n_hr[i]) || isnan(V_hr[i]) ? NaN :
                1.6726e-6 * n_hr[i] * V_hr[i]^2 for i in 1:n_bins]
 
-    # Pressure-corrected Dst* (Dst not available from SWPC in real-time;
-    # use NaN — the forecaster will run in prediction mode without anchoring)
-    Dst_star_hr = fill(NaN, n_bins)
-
-    # Fill short gaps (≤3 hours) via linear interpolation
-    for arr in [V_hr, n_hr, Bz_hr, By_hr, Pdyn_hr]
-        _interp_short_gaps!(arr, 3)
-    end
+    # Pressure-corrected Dst* where an observed Dst and Pdyn are both available;
+    # NaN bins leave the forecaster unanchored for that step.
+    Dst_star_hr = [isnan(Dst_hr[i]) ? NaN :
+                   (isnan(Pdyn_hr[i]) ? Dst_hr[i] :
+                    Dst_hr[i] - 7.26 * sqrt(max(Pdyn_hr[i], 0.0)) + 11.0)
+                   for i in 1:n_bins]
 
     # Convert to hours from first timestamp
     t_hours = Float64[(t_hr[i] - t_hr[1]) / Hour(1) for i in 1:n_bins]

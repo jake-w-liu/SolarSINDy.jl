@@ -35,6 +35,7 @@ Base.@kwdef struct LiveVerifyConfig
     log_path::String = DEFAULT_LOG_PATH
     report_path::String = DEFAULT_REPORT_PATH
     replay_hours::Int = 48
+    replay_horizons::Vector{Int} = Int[1]
     table_path::String = joinpath("live_forecasts", "live_replay_table.csv")
     table_limit::Int = 24
     omni_path::String = DEFAULT_OMNI_EXTRACTED_PATH
@@ -47,7 +48,13 @@ Base.@kwdef struct LiveVerifyConfig
     v2_ridge_grid::Vector{Float64} = Float64[0.0, 1.0, 10.0, 100.0, 1000.0]
     v2_interval_coverage::Float64 = 0.90
     v2_selector_margin_nt::Float64 = 0.5
+    v2_coverage_floor::Float64 = 0.85
 end
+
+# Below this many fit rows, do not let a baseline component win the selector on
+# noise — serve the corrected v2 center (robustness guard against tiny-sample
+# selection).
+const V2_MIN_COMPONENT_ROWS = 12
 
 function _usage()
     return """
@@ -80,6 +87,9 @@ function _usage()
       --report=PATH          Markdown output path for --comparison-report.
                             Default: live_forecasts/live_comparison_report.md.
       --replay-hours=N       Recent hourly anchors for --replay-recent. Default: 48.
+      --replay-horizons=A,B  Lead times [hr] emitted per anchor in replay tables.
+                            Default: 1. Use e.g. 1,2,3,6 to build a multi-horizon
+                            conformal calibration table.
       --table=PATH           CSV output path for --replay-recent.
                             Default: live_forecasts/live_replay_table.csv.
       --table-limit=N        Number of recent rows to print for --replay-recent. Default: 24.
@@ -144,6 +154,7 @@ function _parse_args(args)::LiveVerifyConfig
     log_path = cfg.log_path
     report_path = cfg.report_path
     replay_hours = cfg.replay_hours
+    replay_horizons = copy(cfg.replay_horizons)
     table_path = cfg.table_path
     table_limit = cfg.table_limit
     omni_path = cfg.omni_path
@@ -156,6 +167,7 @@ function _parse_args(args)::LiveVerifyConfig
     v2_ridge_grid = copy(cfg.v2_ridge_grid)
     v2_interval_coverage = cfg.v2_interval_coverage
     v2_selector_margin_nt = cfg.v2_selector_margin_nt
+    v2_coverage_floor = cfg.v2_coverage_floor
 
     for arg in args
         if arg == "--help"
@@ -200,6 +212,8 @@ function _parse_args(args)::LiveVerifyConfig
             report_path = split(arg, "=", limit=2)[2]
         elseif startswith(arg, "--replay-hours=")
             replay_hours = parse(Int, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--replay-horizons=")
+            replay_horizons = _parse_horizons(split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--table=")
             table_path = split(arg, "=", limit=2)[2]
         elseif startswith(arg, "--table-limit=")
@@ -228,6 +242,8 @@ function _parse_args(args)::LiveVerifyConfig
             v2_interval_coverage = parse(Float64, split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--v2-selector-margin=")
             v2_selector_margin_nt = parse(Float64, split(arg, "=", limit=2)[2])
+        elseif startswith(arg, "--v2-coverage-floor=")
+            v2_coverage_floor = parse(Float64, split(arg, "=", limit=2)[2])
         else
             error("Unknown argument: $arg\n$(_usage())")
         end
@@ -240,6 +256,8 @@ function _parse_args(args)::LiveVerifyConfig
     any(<=(0), campaign_horizons) &&
         throw(ArgumentError("--campaign-horizons must be positive integers"))
     replay_hours > 0 || throw(ArgumentError("--replay-hours must be positive"))
+    (isempty(replay_horizons) || any(<=(0), replay_horizons)) &&
+        throw(ArgumentError("--replay-horizons must be positive integers"))
     table_limit >= 0 || throw(ArgumentError("--table-limit must be nonnegative"))
     omni_year_start <= omni_year_end ||
         throw(ArgumentError("--omni-year-start must be <= --omni-year-end"))
@@ -257,6 +275,8 @@ function _parse_args(args)::LiveVerifyConfig
         throw(ArgumentError("--v2-coverage must lie in (0, 1)"))
     v2_selector_margin_nt >= 0 ||
         throw(ArgumentError("--v2-selector-margin must be nonnegative"))
+    0 < v2_coverage_floor < 1 ||
+        throw(ArgumentError("--v2-coverage-floor must lie in (0, 1)"))
 
     if mode == :campaign && !model_explicit
         model = :v2
@@ -272,6 +292,7 @@ function _parse_args(args)::LiveVerifyConfig
         log_path=log_path,
         report_path=report_path,
         replay_hours=replay_hours,
+        replay_horizons=replay_horizons,
         table_path=table_path,
         table_limit=table_limit,
         omni_path=omni_path,
@@ -284,6 +305,7 @@ function _parse_args(args)::LiveVerifyConfig
         v2_ridge_grid=v2_ridge_grid,
         v2_interval_coverage=v2_interval_coverage,
         v2_selector_margin_nt=v2_selector_margin_nt,
+        v2_coverage_floor=v2_coverage_floor,
     )
 end
 
@@ -343,6 +365,26 @@ function _drivers_for_window(plasma::DataFrame, mag::DataFrame,
     By = _finite_mean(m.by_gsm, by0)
     Pdyn = 1.6726e-6 * n * V^2
     return (; V, n, Bz, By, Pdyn)
+end
+
+function _window_finite_count(df::DataFrame, col::Symbol, t0::DateTime, t1::DateTime)
+    w = _window(df, t0, t1)
+    String(col) in names(w) || return 0
+    return count(x -> !ismissing(x) && isfinite(Float64(x)), w[!, col])
+end
+
+"""
+    _driver_gap_status(n_speed_finite, n_bz_finite)
+
+Classify solar-wind coverage of the trailing forecast window:
+`:hard` (no finite speed AND no finite Bz — refuse to issue),
+`:partial` (one of the two is empty — issue but flag), `:ok` otherwise.
+Pure function so the data-gap decision is unit-testable without the live feeds.
+"""
+function _driver_gap_status(n_speed_finite::Int, n_bz_finite::Int)
+    (n_speed_finite == 0 && n_bz_finite == 0) && return :hard
+    (n_speed_finite == 0 || n_bz_finite == 0) && return :partial
+    return :ok
 end
 
 function _append_forecast!(log_path::String, row::DataFrame)
@@ -575,6 +617,32 @@ function _load_calibration_for_model(cfg::LiveVerifyConfig)
     return read_operational_v2_calibration(cfg.v2_calibration_path)
 end
 
+# Load the conformal interval calibration sidecar if present (v2 only). Returns
+# nothing when absent, so the workflow stays backward compatible with logs that
+# predate conformal intervals.
+function _load_conformal_for_model(cfg::LiveVerifyConfig)
+    cfg.model == :v2 || return nothing
+    path = _conformal_path(cfg.v2_calibration_path)
+    isfile(path) || return nothing
+    return read_conformal_calibration(path)
+end
+
+"""
+    _resolve_interval(conformal, center, model_steps, latest_dst, ci05, ci95)
+
+Choose the logged 90% interval. With a deployed conformal calibration, return the
+stratified conformal interval around `center` and the tag `"conformal"`;
+otherwise pass through the supplied `(ci05, ci95)` and the tag
+`"interval_scale"`. Pure, so the interval-source decision is unit-testable
+without the network-bound issuance path.
+"""
+function _resolve_interval(conformal, center::Real, model_steps::Integer,
+                           latest_dst::Real, ci05::Real, ci95::Real)
+    conformal === nothing && return (Float64(ci05), Float64(ci95), "interval_scale")
+    lo, hi = conformal_interval(conformal, center, Float64(model_steps), latest_dst)
+    return (lo, hi, "conformal")
+end
+
 function _select_model_prediction(model::Symbol, calibration,
                                   latest_dst::Real, drivers,
                                   v1_pred_dst::Real,
@@ -651,7 +719,8 @@ end
 
 function _forecast_one_replay(anchor_time::DateTime, target_time::DateTime,
                               anchor_dst::Float64, drivers;
-                              model::Symbol=:v1, calibration=nothing)
+                              n_steps::Int=1, model::Symbol=:v1, calibration=nothing)
+    n_steps >= 1 || throw(ArgumentError("n_steps must be ≥ 1"))
     anchor_dst_star = pressure_correct_dst([anchor_dst], [drivers.Pdyn])[1]
     coef_csv = joinpath(get_data_dir(), "real_sindy_discovery_coefficients.csv")
     ens_csv = joinpath(get_data_dir(), "real_ensemble_inclusion.csv")
@@ -661,16 +730,23 @@ function _forecast_one_replay(anchor_time::DateTime, target_time::DateTime,
         t0=anchor_time,
         dst0=anchor_dst_star,
     )
-    result = step_forecast!(
-        state,
-        target_time,
-        drivers.V,
-        drivers.Bz,
-        drivers.By,
-        drivers.n,
-        drivers.Pdyn,
-    )
-    baselines = _advance_baselines(anchor_dst_star, drivers)
+    # Integrate n_steps hours forward holding the anchor drivers (persistence of
+    # drivers), matching the issuance assumption beyond the last complete hour.
+    # forecast_ahead does not mutate state and propagates the ensemble per member;
+    # for n_steps=1 it is numerically identical to a single step_forecast! call.
+    fc = forecast_ahead(state, drivers.V, drivers.Bz, drivers.By,
+                        drivers.n, drivers.Pdyn, n_steps)
+    result = fc[n_steps]
+    # Advance the baseline ring-current state the same number of steps.
+    burton_star = anchor_dst_star
+    burton_full_star = anchor_dst_star
+    obrien_star = anchor_dst_star
+    for _ in 1:n_steps
+        burton_star = _advance_baselines(burton_star, drivers).burton
+        burton_full_star = _advance_baselines(burton_full_star, drivers).burton_full
+        obrien_star = _advance_baselines(obrien_star, drivers).obrien
+    end
+    baselines = (burton=burton_star, burton_full=burton_full_star, obrien=obrien_star)
     v1_pred = _dst_from_dst_star(result.dst_predicted, drivers.Pdyn)
     v1_ci05 = _dst_from_dst_star(result.dst_ci_05, drivers.Pdyn)
     v1_ci95 = _dst_from_dst_star(result.dst_ci_95, drivers.Pdyn)
@@ -718,15 +794,16 @@ end
 
 function replay_recent_table(plasma::DataFrame, mag::DataFrame,
                              dst_times, dst_vals; replay_hours::Int=48,
+                             horizons::Vector{Int}=[1],
                              model::Symbol=:v1, calibration=nothing)
+    isempty(horizons) && throw(ArgumentError("horizons must not be empty"))
+    any(<=(0), horizons) && throw(ArgumentError("horizons must be positive"))
     dst_map = _dst_lookup(dst_times, dst_vals)
     anchors = _replay_anchor_hours(plasma, mag, dst_times, replay_hours)
     rows = NamedTuple[]
 
     for anchor_time in anchors
-        target_time = anchor_time + Hour(1)
         haskey(dst_map, anchor_time) || continue
-        haskey(dst_map, target_time) || continue
 
         source_start = anchor_time - Hour(1)
         source_end = anchor_time
@@ -736,63 +813,70 @@ function replay_recent_table(plasma::DataFrame, mag::DataFrame,
         end
         features = _v2_features(dst_map[anchor_time], drivers)
 
-        forecast = _forecast_one_replay(
-            anchor_time,
-            target_time,
-            dst_map[anchor_time],
-            drivers,
-            model=:v1,
-            calibration=nothing,
-        )
-        observed = dst_map[target_time]
-        in_ci = min(forecast.ci05_dst, forecast.ci95_dst) <= observed <=
-                max(forecast.ci05_dst, forecast.ci95_dst)
+        for h in horizons
+            target_time = anchor_time + Hour(h)
+            haskey(dst_map, target_time) || continue
 
-        push!(rows, (
-            issue_time_utc=string(anchor_time),
-            source_driver_start_utc=string(source_start),
-            source_driver_end_utc=string(source_end),
-            latest_dst_time_utc=string(anchor_time),
-            target_time_utc=string(target_time),
-            model_version=forecast.model_version,
-            latest_dst_nt=dst_map[anchor_time],
-            observation_dst_nt=observed,
-            pred_dst_nt=forecast.pred_dst,
-            residual_dst_nt=observed - forecast.pred_dst,
-            pred_dst_ci05_nt=forecast.ci05_dst,
-            pred_dst_ci95_nt=forecast.ci95_dst,
-            observed_in_90ci=in_ci,
-            v1_pred_dst_nt=forecast.v1_pred_dst,
-            v1_pred_dst_ci05_nt=forecast.v1_ci05_dst,
-            v1_pred_dst_ci95_nt=forecast.v1_ci95_dst,
-            v2_pred_dst_nt=forecast.v2_pred_dst,
-            v2_pred_dst_ci05_nt=forecast.v2_ci05_dst,
-            v2_pred_dst_ci95_nt=forecast.v2_ci95_dst,
-            v2_correction_dst_nt=forecast.v2_correction,
-            v2_interval_scale=forecast.v2_interval_scale,
-            v2_calibration_label=forecast.v2_label,
-            v2_selected_component=forecast.v2_selected_component,
-            v2_selected_component_pred_nt=forecast.v2_selected_component_pred,
-            persistence_dst_nt=forecast.persistence_dst,
-            persistence_residual_dst_nt=observed - forecast.persistence_dst,
-            burton_dst_nt=forecast.burton_dst,
-            burton_residual_dst_nt=observed - forecast.burton_dst,
-            burton_full_dst_nt=forecast.burton_full_dst,
-            burton_full_residual_dst_nt=observed - forecast.burton_full_dst,
-            obrien_dst_nt=forecast.obrien_dst,
-            obrien_residual_dst_nt=observed - forecast.obrien_dst,
-            V_kms=drivers.V,
-            Bz_nt=drivers.Bz,
-            By_nt=drivers.By,
-            n_cm3=drivers.n,
-            Pdyn_npa=drivers.Pdyn,
-            Bsouth_nt=features.Bsouth_nt,
-            VBsouth_mvm=features.VBsouth_mvm,
-            Bperp_nt=features.Bperp_nt,
-            clock_angle_sin2=features.clock_angle_sin2,
-            sqrt_Pdyn_npa=features.sqrt_Pdyn_npa,
-            replay_note="causal_replay_previous_complete_hour_driver_persistence",
-        ))
+            forecast = _forecast_one_replay(
+                anchor_time,
+                target_time,
+                dst_map[anchor_time],
+                drivers,
+                n_steps=h,
+                model=:v1,
+                calibration=nothing,
+            )
+            observed = dst_map[target_time]
+            in_ci = min(forecast.ci05_dst, forecast.ci95_dst) <= observed <=
+                    max(forecast.ci05_dst, forecast.ci95_dst)
+
+            push!(rows, (
+                issue_time_utc=string(anchor_time),
+                source_driver_start_utc=string(source_start),
+                source_driver_end_utc=string(source_end),
+                latest_dst_time_utc=string(anchor_time),
+                target_time_utc=string(target_time),
+                model_step_hours=h,
+                model_version=forecast.model_version,
+                latest_dst_nt=dst_map[anchor_time],
+                observation_dst_nt=observed,
+                pred_dst_nt=forecast.pred_dst,
+                residual_dst_nt=observed - forecast.pred_dst,
+                pred_dst_ci05_nt=forecast.ci05_dst,
+                pred_dst_ci95_nt=forecast.ci95_dst,
+                observed_in_90ci=in_ci,
+                v1_pred_dst_nt=forecast.v1_pred_dst,
+                v1_pred_dst_ci05_nt=forecast.v1_ci05_dst,
+                v1_pred_dst_ci95_nt=forecast.v1_ci95_dst,
+                v2_pred_dst_nt=forecast.v2_pred_dst,
+                v2_pred_dst_ci05_nt=forecast.v2_ci05_dst,
+                v2_pred_dst_ci95_nt=forecast.v2_ci95_dst,
+                v2_correction_dst_nt=forecast.v2_correction,
+                v2_interval_scale=forecast.v2_interval_scale,
+                v2_calibration_label=forecast.v2_label,
+                v2_selected_component=forecast.v2_selected_component,
+                v2_selected_component_pred_nt=forecast.v2_selected_component_pred,
+                persistence_dst_nt=forecast.persistence_dst,
+                persistence_residual_dst_nt=observed - forecast.persistence_dst,
+                burton_dst_nt=forecast.burton_dst,
+                burton_residual_dst_nt=observed - forecast.burton_dst,
+                burton_full_dst_nt=forecast.burton_full_dst,
+                burton_full_residual_dst_nt=observed - forecast.burton_full_dst,
+                obrien_dst_nt=forecast.obrien_dst,
+                obrien_residual_dst_nt=observed - forecast.obrien_dst,
+                V_kms=drivers.V,
+                Bz_nt=drivers.Bz,
+                By_nt=drivers.By,
+                n_cm3=drivers.n,
+                Pdyn_npa=drivers.Pdyn,
+                Bsouth_nt=features.Bsouth_nt,
+                VBsouth_mvm=features.VBsouth_mvm,
+                Bperp_nt=features.Bperp_nt,
+                clock_angle_sin2=features.clock_angle_sin2,
+                sqrt_Pdyn_npa=features.sqrt_Pdyn_npa,
+                replay_note="causal_replay_previous_complete_hour_driver_persistence",
+            ))
+        end
     end
 
     isempty(rows) && error("No replay rows could be scored from the available feeds")
@@ -884,6 +968,7 @@ function run_replay_recent(cfg::LiveVerifyConfig)
     calibration = _load_calibration_for_model(cfg)
     df = replay_recent_table(plasma, mag, dst_times, dst_vals;
         replay_hours=cfg.replay_hours,
+        horizons=cfg.replay_horizons,
         model=cfg.model,
         calibration=calibration,
     )
@@ -935,6 +1020,7 @@ function run_replay_omni(cfg::LiveVerifyConfig)
     calibration = _load_calibration_for_model(cfg)
     df = replay_recent_table(plasma, mag, dst_times, dst_vals;
         replay_hours=cfg.replay_hours,
+        horizons=cfg.replay_horizons,
         model=cfg.model,
         calibration=calibration,
     )
@@ -1003,13 +1089,6 @@ const V2_COUPLING_FEATURES = Symbol[
     :sqrt_Pdyn_npa,
 ]
 
-const V2_SELECTOR_BASELINES = Pair{Symbol,Symbol}[
-    :persistence => :persistence_dst_nt,
-    :burton => :burton_dst_nt,
-    :burton_full => :burton_full_dst_nt,
-    :obrien => :obrien_dst_nt,
-]
-
 function _v2_feature_sets()
     return Pair{String,Vector{Symbol}}[
         "memory_expert" => copy(V2_MEMORY_EXPERT_FEATURES),
@@ -1063,90 +1142,6 @@ function _require_live_columns(df::DataFrame, cols)
     return nothing
 end
 
-function _selector_stats_from_scored(scored::DataFrame,
-                                     interval_coverage::Real,
-                                     guard_margin_nt::Real)
-    _require_live_columns(
-        scored,
-        [:observation_dst_nt, :pred_dst_nt, :v2_corrected_sindy_pred_nt],
-    )
-    obs = Float64.(scored.observation_dst_nt)
-    names_out = Symbol[:v2, :sindy_v1]
-    pred_vectors = [Float64.(scored.v2_corrected_sindy_pred_nt), Float64.(scored.pred_dst_nt)]
-
-    for (component, col) in V2_SELECTOR_BASELINES
-        String(col) in names(scored) || continue
-        values = Float64.(scored[!, col])
-        all(isfinite, values) || continue
-        push!(names_out, component)
-        push!(pred_vectors, values)
-    end
-
-    rmse_vals = Float64[]
-    mae_vals = Float64[]
-    half_widths = Float64[]
-    for p in pred_vectors
-        residuals = obs .- p
-        push!(rmse_vals, sqrt(mean(residuals .^ 2)))
-        push!(mae_vals, mean(abs.(residuals)))
-        push!(half_widths, quantile(abs.(collect(residuals)), interval_coverage))
-    end
-
-    pred_matrix = hcat(pred_vectors...)
-    weights = _fit_convex_ensemble_weights(pred_matrix, obs)
-    ensemble_pred = vec(pred_matrix * weights)
-    ensemble_residuals = obs .- ensemble_pred
-
-    return (
-        selector_names=names_out,
-        selector_rmse=rmse_vals,
-        selector_mae=mae_vals,
-        selector_half_width=half_widths,
-        selector_weights=weights,
-        selected_component=:ensemble,
-        ensemble_rmse=sqrt(mean(ensemble_residuals .^ 2)),
-        ensemble_mae=mean(abs.(ensemble_residuals)),
-        ensemble_bias=mean(ensemble_residuals),
-        ensemble_half_width=quantile(abs.(collect(ensemble_residuals)), interval_coverage),
-    )
-end
-
-function _project_simplex(v::Vector{Float64})
-    n = length(v)
-    n > 0 || throw(ArgumentError("cannot project empty vector onto simplex"))
-    u = sort(v; rev=true)
-    cssv = cumsum(u)
-    rho = 0
-    for j in 1:n
-        if u[j] + (1.0 - cssv[j]) / j > 0
-            rho = j
-        end
-    end
-    rho > 0 || return fill(1.0 / n, n)
-    theta = (cssv[rho] - 1.0) / rho
-    return max.(v .- theta, 0.0)
-end
-
-function _fit_convex_ensemble_weights(preds::Matrix{Float64}, obs::Vector{Float64};
-                                      huber_delta::Real=6.0,
-                                      l2::Real=0.05,
-                                      max_iter::Int=800)
-    n, k = size(preds)
-    n > 0 && k > 0 || throw(ArgumentError("empty ensemble training matrix"))
-    prior = fill(1.0 / k, k)
-    w = copy(prior)
-    row_energy = mean([sum(abs2, preds[i, :]) for i in 1:n])
-    step = 0.25 / (row_energy + Float64(l2) + eps(Float64))
-    delta = Float64(huber_delta)
-    for _ in 1:max_iter
-        residuals = obs .- preds * w
-        psi = clamp.(residuals, -delta, delta)
-        grad = -(preds' * psi) ./ n .+ Float64(l2) .* (w .- prior)
-        w = _project_simplex(w .- step .* grad)
-    end
-    return w
-end
-
 function _calibration_with_validation_selector(cal::OperationalV2Calibration,
                                                selector;
                                                label::AbstractString=cal.label)
@@ -1183,107 +1178,8 @@ function _calibration_with_forced_component(cal::OperationalV2Calibration,
     return _calibration_with_validation_selector(cal, selector; label=label)
 end
 
-function _calibration_with_selector_weights(cal::OperationalV2Calibration,
-                                            weights::Vector{Float64};
-                                            label::AbstractString=cal.label)
-    selector = (
-        selector_names=copy(cal.selector_names),
-        selector_rmse=copy(cal.selector_rmse),
-        selector_mae=copy(cal.selector_mae),
-        selector_half_width=copy(cal.selector_half_width),
-        selector_weights=copy(weights),
-        selected_component=:ensemble,
-    )
-    return _calibration_with_validation_selector(cal, selector; label=label)
-end
-
-function _onehot_selector_weights(cal::OperationalV2Calibration, component::Symbol)
-    idx = findfirst(==(component), cal.selector_names)
-    idx === nothing && throw(ArgumentError("component $component is unavailable"))
-    weights = zeros(length(cal.selector_names))
-    weights[idx] = 1.0
-    return weights
-end
-
 function _v2_gate_pass(v2_metric, v1_metric)
     return v2_metric.rmse <= v1_metric.rmse && v2_metric.mae <= v1_metric.mae
-end
-
-function _best_component_metric(cal::OperationalV2Calibration, df::DataFrame)
-    best = nothing
-    for component in cal.selector_names
-        candidate = _calibration_with_forced_component(cal, component)
-        scored = score_operational_v2(df, candidate)
-        metric = _scored_metric(scored, :v2_pred_dst_nt)
-        key = (metric.rmse, metric.mae)
-        if best === nothing || key < best.key
-            best = (; component, metric, key)
-        end
-    end
-    best === nothing && throw(ArgumentError("no v2 components available for benchmark"))
-    return best
-end
-
-function _safety_target_weights(cal::OperationalV2Calibration,
-                                holdout::DataFrame,
-                                interval_coverage::Real,
-                                guard_margin_nt::Real)
-    corrected = score_operational_v2(holdout, _calibration_with_forced_component(cal, :v2))
-    selector = _selector_stats_from_scored(corrected, interval_coverage, guard_margin_nt)
-    if selector.selector_names == cal.selector_names
-        return (weights=selector.selector_weights, source=:safety_ensemble)
-    end
-    benchmark = _best_component_metric(cal, holdout)
-    return (
-        weights=_onehot_selector_weights(cal, benchmark.component),
-        source=Symbol("safety_", benchmark.component),
-    )
-end
-
-function _shrink_calibration_to_holdout(cal::OperationalV2Calibration,
-                                        holdout::DataFrame,
-                                        interval_coverage::Real,
-                                        guard_margin_nt::Real)
-    benchmark = _best_component_metric(cal, holdout)
-    target = _safety_target_weights(cal, holdout, interval_coverage, guard_margin_nt)
-    target_weights = target.weights
-    for alpha in range(1.0, 0.0; length=21)
-        weights = Float64(alpha) .* cal.selector_weights .+
-                  (1.0 - Float64(alpha)) .* target_weights
-        label = alpha == 1.0 ? cal.label :
-            cal.label * "_holdout_shrink$(round(Float64(alpha); digits=2))"
-        candidate = _calibration_with_selector_weights(cal, weights; label=label)
-        scored = score_operational_v2(holdout, candidate)
-        metric = _scored_metric(scored, :v2_pred_dst_nt)
-        if _v2_gate_pass(metric, benchmark.metric)
-            return (;
-                cal=candidate,
-                alpha=Float64(alpha),
-                metric,
-                benchmark_component=benchmark.component,
-                benchmark_metric=benchmark.metric,
-                target_source=target.source,
-                gate_pass=true,
-            )
-        end
-    end
-    target_weights = _onehot_selector_weights(cal, benchmark.component)
-    candidate = _calibration_with_selector_weights(
-        cal,
-        target_weights;
-        label=cal.label * "_holdout_shrink0.0",
-    )
-    scored = score_operational_v2(holdout, candidate)
-    metric = _scored_metric(scored, :v2_pred_dst_nt)
-    return (;
-        cal=candidate,
-        alpha=0.0,
-        metric,
-        benchmark_component=benchmark.component,
-        benchmark_metric=benchmark.metric,
-        target_source=Symbol("safety_", benchmark.component),
-        gate_pass=_v2_gate_pass(metric, benchmark.metric),
-    )
 end
 
 function _selection_path(calibration_path::String)
@@ -1291,10 +1187,44 @@ function _selection_path(calibration_path::String)
     return out == calibration_path ? calibration_path * "_selection.csv" : out
 end
 
+function _conformal_path(calibration_path::String)
+    out = replace(calibration_path, r"\.csv$" => "_conformal.csv")
+    return out == calibration_path ? calibration_path * "_conformal.csv" : out
+end
+
+# Lead time [hr] for each scored row: prefer model_step_hours, else 1.0 (the
+# replay calibration table is 1-step; multi-horizon stratification needs the
+# multi-horizon replay).
+function _scored_horizons(scored::DataFrame)
+    String(:model_step_hours) in names(scored) || return fill(1.0, nrow(scored))
+    return Float64[ismissing(x) ? 1.0 : Float64(x) for x in scored.model_step_hours]
+end
+
+"""
+    _fit_deployed_conformal(scored, cfg)
+
+Fit a stratified conformal calibration from the DEPLOYED model's residuals on
+`scored` (the validation split — out-of-sample for the ridge β, model frozen),
+using the v2 point forecast, horizon, and issue-time Dst. Returns `nothing` if
+there are no finite calibration rows.
+"""
+function _fit_deployed_conformal(scored::DataFrame, cfg::LiveVerifyConfig)
+    nrow(scored) >= 1 || return nothing
+    pts = Float64.(scored.v2_pred_dst_nt)
+    obs = Float64.(scored.observation_dst_nt)
+    hor = _scored_horizons(scored)
+    latest = Float64.(scored.latest_dst_nt)
+    any(i -> isfinite(pts[i]) && isfinite(obs[i]), eachindex(pts)) || return nothing
+    return fit_conformal(pts, obs, hor, latest; coverage=cfg.v2_interval_coverage)
+end
+
 function _select_validated_v2_calibration(train::DataFrame,
                                           validation::DataFrame,
-                                          holdout::DataFrame,
                                           cfg::LiveVerifyConfig)
+    # Leakage-free selection: the ridge coefficients AND the component selector
+    # are fit on `train` only (inside fit_operational_v2_calibration). The
+    # feature set / ridge / component are then chosen by performance on
+    # `validation` — rows used to fit neither. The holdout is never seen here.
     candidates = NamedTuple[]
     best = nothing
     for feature_spec in _v2_feature_sets()
@@ -1302,9 +1232,9 @@ function _select_validated_v2_calibration(train::DataFrame,
         all(String(c) in names(train) for c in feature_names) || continue
         nrow(train) > length(feature_names) + 1 || continue
         for ridge in cfg.v2_ridge_grid
-            label = "operational_v2_validated_$(feature_set)_ridge$(ridge)_fit$(nrow(train))_val$(nrow(validation))"
-            cal_fit = try
-                fit_operational_v2_calibration(
+            label = "operational_v2_$(feature_set)_ridge$(ridge)_fit$(nrow(train))"
+            cal = try
+                cal0 = fit_operational_v2_calibration(
                     train;
                     feature_names=feature_names,
                     ridge=ridge,
@@ -1312,6 +1242,11 @@ function _select_validated_v2_calibration(train::DataFrame,
                     guard_margin_nt=cfg.v2_selector_margin_nt,
                     label=label,
                 )
+                # Robustness guard: on a small fit set a baseline component can
+                # win on noise. Force the corrected v2 center instead.
+                (nrow(train) < V2_MIN_COMPONENT_ROWS && cal0.selected_component != :v2) ?
+                    _calibration_with_forced_component(cal0, :v2; label=label * "_minsample_v2") :
+                    cal0
             catch err
                 push!(candidates, (
                     feature_set=feature_set,
@@ -1321,82 +1256,56 @@ function _select_validated_v2_calibration(train::DataFrame,
                     validation_rmse_nt=NaN,
                     validation_mae_nt=NaN,
                     validation_bias_nt=NaN,
-                    validation_v1_rmse_nt=NaN,
-                    validation_v1_mae_nt=NaN,
-                    holdout_n=0,
-                    holdout_rmse_nt=NaN,
-                    holdout_mae_nt=NaN,
-                    holdout_bias_nt=NaN,
-                    holdout_v1_rmse_nt=NaN,
-                    holdout_v1_mae_nt=NaN,
-                    validation_benchmark_component="",
-                    validation_benchmark_rmse_nt=NaN,
-                    validation_benchmark_mae_nt=NaN,
-                    holdout_benchmark_component="",
-                    holdout_benchmark_rmse_nt=NaN,
-                    holdout_benchmark_mae_nt=NaN,
-                    validation_pass=false,
-                    selector_weights="",
-                    ensemble_validation_rmse_nt=NaN,
-                    ensemble_validation_mae_nt=NaN,
+                    validation_persistence_rmse_nt=NaN,
+                    validation_obrien_rmse_nt=NaN,
+                    validation_coverage=NaN,
+                    beats_persistence=false,
+                    beats_obrien=false,
+                    coverage_ok=false,
+                    gate_pass=false,
                     error=String(nameof(typeof(err))),
                 ))
                 continue
             end
 
-            validation_corrected = score_operational_v2(validation, cal_fit)
-            selector = _selector_stats_from_scored(
-                validation_corrected,
-                cfg.v2_interval_coverage,
-                cfg.v2_selector_margin_nt,
-            )
-            cal = _calibration_with_validation_selector(cal_fit, selector; label=label)
-            validation_scored = score_operational_v2(validation, cal)
-            holdout_scored = score_operational_v2(holdout, cal)
-            validation_v2 = _scored_metric(validation_scored, :v2_pred_dst_nt)
-            validation_v1 = _scored_metric(validation_scored, :pred_dst_nt)
-            holdout_v2 = _scored_metric(holdout_scored, :v2_pred_dst_nt)
-            holdout_v1 = _scored_metric(holdout_scored, :pred_dst_nt)
-            validation_benchmark = _best_component_metric(cal, validation)
-            holdout_benchmark = _best_component_metric(cal, holdout)
-            validation_pass = _v2_gate_pass(validation_v2, validation_benchmark.metric)
+            # Evaluate purely on the held-out validation split.
+            vs = score_operational_v2(validation, cal)
+            v2m = _scored_metric(vs, :v2_pred_dst_nt)
+            # Persistence forecast = latest observed Dst at issue time.
+            persm = _scored_metric(vs, :latest_dst_nt)
+            obrm = String(:obrien_dst_nt) in names(vs) ?
+                _scored_metric(vs, :obrien_dst_nt) : nothing
+            cov = nrow(vs) == 0 ? NaN : mean(Bool.(vs.v2_observed_in_90ci))
+            beats_pers = _v2_gate_pass(v2m, persm)
+            beats_obr = obrm === nothing ? true : _v2_gate_pass(v2m, obrm)
+            cov_ok = isfinite(cov) && cov >= cfg.v2_coverage_floor
+            gate = beats_pers && beats_obr && cov_ok
             row = (
                 feature_set=feature_set,
                 ridge=ridge,
                 selected_component=String(cal.selected_component),
-                validation_n=validation_v2.n,
-                validation_rmse_nt=validation_v2.rmse,
-                validation_mae_nt=validation_v2.mae,
-                validation_bias_nt=validation_v2.bias,
-                validation_v1_rmse_nt=validation_v1.rmse,
-                validation_v1_mae_nt=validation_v1.mae,
-                holdout_n=holdout_v2.n,
-                holdout_rmse_nt=holdout_v2.rmse,
-                holdout_mae_nt=holdout_v2.mae,
-                holdout_bias_nt=holdout_v2.bias,
-                holdout_v1_rmse_nt=holdout_v1.rmse,
-                holdout_v1_mae_nt=holdout_v1.mae,
-                validation_benchmark_component=String(validation_benchmark.component),
-                validation_benchmark_rmse_nt=validation_benchmark.metric.rmse,
-                validation_benchmark_mae_nt=validation_benchmark.metric.mae,
-                holdout_benchmark_component=String(holdout_benchmark.component),
-                holdout_benchmark_rmse_nt=holdout_benchmark.metric.rmse,
-                holdout_benchmark_mae_nt=holdout_benchmark.metric.mae,
-                validation_pass=validation_pass,
-                selector_weights=join(round.(cal.selector_weights; digits=4), ";"),
-                ensemble_validation_rmse_nt=selector.ensemble_rmse,
-                ensemble_validation_mae_nt=selector.ensemble_mae,
+                validation_n=v2m.n,
+                validation_rmse_nt=v2m.rmse,
+                validation_mae_nt=v2m.mae,
+                validation_bias_nt=v2m.bias,
+                validation_persistence_rmse_nt=persm.rmse,
+                validation_obrien_rmse_nt=(obrm === nothing ? NaN : obrm.rmse),
+                validation_coverage=cov,
+                beats_persistence=beats_pers,
+                beats_obrien=beats_obr,
+                coverage_ok=cov_ok,
+                gate_pass=gate,
                 error="",
             )
             push!(candidates, row)
-            key = (validation_pass ? 0 : 1, validation_v2.rmse, validation_v2.mae, ridge)
+            # Rank gate-passers first, then by validation RMSE/MAE.
+            key = (gate ? 0 : 1, v2m.rmse, v2m.mae, ridge)
             if best === nothing || key < best.key
                 best = (;
-                    key,
-                    cal,
-                    row,
-                    validation_scored,
-                    holdout_scored,
+                    key, cal, row, gate_pass=gate,
+                    validation_rmse=v2m.rmse,
+                    validation_mae=v2m.mae,
+                    validation_coverage=cov,
                 )
             end
         end
@@ -1416,41 +1325,46 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
         cfg.v2_train_fraction,
         cfg.v2_validation_fraction,
     )
-    selection = _select_validated_v2_calibration(train, validation, holdout, cfg)
-    shrink = _shrink_calibration_to_holdout(
-        selection.cal,
-        holdout,
-        cfg.v2_interval_coverage,
-        cfg.v2_selector_margin_nt,
-    )
-    cal = shrink.cal
-    holdout_gate = shrink.gate_pass
+    selection = _select_validated_v2_calibration(train, validation, cfg)
+    candidate_cal = selection.cal
+    deploy = selection.gate_pass
+
+    # Acceptance gate decides deployment. A v2 candidate that does not beat
+    # persistence and O'Brien on validation and meet the coverage floor is NOT
+    # shipped; a v1-equivalent (zero-correction) fallback is deployed instead.
+    cal = if deploy
+        candidate_cal
+    else
+        default_operational_v2_calibration(
+            feature_names=copy(candidate_cal.feature_names),
+            label="operational_v2_fallback_v1_equiv",
+        )
+    end
     write_operational_v2_calibration(cfg.v2_calibration_path, cal)
 
     train_scored = score_operational_v2(train, cal)
     validation_scored = score_operational_v2(validation, cal)
+    # Holdout scored EXACTLY ONCE for honest out-of-sample reporting; it is never
+    # used to select feature set, ridge, component, or any tuning parameter.
     holdout_scored = score_operational_v2(holdout, cal)
+    holdout_v2 = _scored_metric(holdout_scored, :v2_pred_dst_nt)
+    holdout_coverage = nrow(holdout_scored) == 0 ? NaN :
+        mean(Bool.(holdout_scored.v2_observed_in_90ci))
+
     selection_audit = copy(selection.candidates)
     selected_mask = (selection_audit.feature_set .== selection.row.feature_set) .&
                     (selection_audit.ridge .== selection.row.ridge)
     selection_audit[!, :selected_by_validation] = selected_mask
-    selection_audit[!, :deployed] = selected_mask .& holdout_gate
+    selection_audit[!, :deployed] = selected_mask .& deploy
     selection_audit[!, :final_component] = fill(String(cal.selected_component), nrow(selection_audit))
-    selection_audit[!, :final_selector_weights] =
-        fill(join(round.(cal.selector_weights; digits=4), ";"), nrow(selection_audit))
-    selection_audit[!, :holdout_shrink_alpha] = fill(shrink.alpha, nrow(selection_audit))
-    selection_audit[!, :holdout_gate_pass] = fill(holdout_gate, nrow(selection_audit))
-    selection_audit[!, :final_holdout_rmse_nt] = fill(shrink.metric.rmse, nrow(selection_audit))
-    selection_audit[!, :final_holdout_mae_nt] = fill(shrink.metric.mae, nrow(selection_audit))
-    selection_audit[!, :final_benchmark_component] =
-        fill(String(shrink.benchmark_component), nrow(selection_audit))
-    selection_audit[!, :final_benchmark_rmse_nt] =
-        fill(shrink.benchmark_metric.rmse, nrow(selection_audit))
-    selection_audit[!, :final_benchmark_mae_nt] =
-        fill(shrink.benchmark_metric.mae, nrow(selection_audit))
-    selection_audit[!, :final_target_source] = fill(String(shrink.target_source), nrow(selection_audit))
+    selection_audit[!, :acceptance_gate_pass] = fill(deploy, nrow(selection_audit))
+    selection_audit[!, :holdout_n] = fill(holdout_v2.n, nrow(selection_audit))
+    selection_audit[!, :holdout_rmse_nt] = fill(holdout_v2.rmse, nrow(selection_audit))
+    selection_audit[!, :holdout_mae_nt] = fill(holdout_v2.mae, nrow(selection_audit))
+    selection_audit[!, :holdout_coverage] = fill(holdout_coverage, nrow(selection_audit))
     selection_path = _selection_path(cfg.v2_calibration_path)
     CSV.write(selection_path, selection_audit)
+
     train_scored[!, :v2_split] = fill("fit", nrow(train_scored))
     validation_scored[!, :v2_split] = fill("validation", nrow(validation_scored))
     holdout_scored[!, :v2_split] = fill("holdout", nrow(holdout_scored))
@@ -1460,55 +1374,70 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
         (scored_path = cfg.v2_calibration_path * "_scored.csv")
     CSV.write(scored_path, scored)
 
+    # Conformal predictive-interval calibration (N1). Fit from the deployed
+    # model's validation residuals (out-of-sample for β), persist a sidecar, and
+    # report coverage on the untouched holdout — the honest out-of-sample check.
+    conformal = _fit_deployed_conformal(validation_scored, cfg)
+    conformal_path = _conformal_path(cfg.v2_calibration_path)
+    holdout_conformal_coverage = NaN
+    if conformal === nothing
+        @warn "No finite validation rows for conformal calibration; conformal sidecar not written."
+    else
+        write_conformal_calibration(conformal_path, conformal)
+        if nrow(holdout_scored) >= 1
+            holdout_conformal_coverage = conformal_coverage(
+                conformal,
+                Float64.(holdout_scored.v2_pred_dst_nt),
+                Float64.(holdout_scored.observation_dst_nt),
+                _scored_horizons(holdout_scored),
+                Float64.(holdout_scored.latest_dst_nt),
+            )
+        end
+    end
+
     println("Fitted operational v2 calibration: $(cfg.v2_calibration_path)")
     println("Wrote v2 candidate selection audit: $selection_path")
+    conformal === nothing || println("Wrote conformal calibration: $conformal_path")
     println("Scored replay rows: $scored_path")
     println(
         "Fit rows: $(nrow(train)); validation rows: $(nrow(validation)); " *
-        "holdout rows: $(nrow(holdout))"
+        "holdout rows: $(nrow(holdout)) (holdout scored once, never used for selection)"
     )
-    println(
-        "Selected v2 candidate: feature_set=$(selection.row.feature_set), " *
-        "ridge=$(selection.row.ridge), validation_component=$(selection.row.selected_component), " *
-        "final_component=$(cal.selected_component), holdout_shrink_alpha=$(round(shrink.alpha; digits=2)), " *
-        "safety_benchmark=$(shrink.benchmark_component), target=$(shrink.target_source)"
-    )
-    _print_metric(
-        "Fit SINDy-v1",
-        Float64.(train.pred_dst_nt),
-        Float64.(train.observation_dst_nt),
-    )
-    _print_metric(
-        "Fit v2",
-        Float64.(train_scored.v2_pred_dst_nt),
-        Float64.(train_scored.observation_dst_nt),
-    )
-    _print_metric(
-        "Validation SINDy-v1",
-        Float64.(validation.pred_dst_nt),
-        Float64.(validation.observation_dst_nt),
-    )
+    if deploy
+        println(
+            "Deployed v2 candidate: feature_set=$(selection.row.feature_set), " *
+            "ridge=$(selection.row.ridge), component=$(cal.selected_component) " *
+            "(passed validation acceptance gate)"
+        )
+    else
+        @warn(
+            "Best v2 candidate failed the validation acceptance gate " *
+            "(beat persistence & O'Brien + coverage ≥ floor); deployed v1-equivalent fallback.",
+            best_validation_rmse=selection.validation_rmse,
+            best_validation_coverage=selection.validation_coverage,
+            coverage_floor=cfg.v2_coverage_floor,
+        )
+    end
     _print_metric(
         "Validation v2",
         Float64.(validation_scored.v2_pred_dst_nt),
         Float64.(validation_scored.observation_dst_nt),
     )
     _print_metric(
-        "Holdout SINDy-v1",
-        Float64.(holdout.pred_dst_nt),
-        Float64.(holdout.observation_dst_nt),
+        "Validation persistence",
+        Float64.(validation_scored.latest_dst_nt),
+        Float64.(validation_scored.observation_dst_nt),
     )
     _print_metric(
-        "Holdout v2",
+        "Holdout v2 (honest; unused for selection)",
         Float64.(holdout_scored.v2_pred_dst_nt),
         Float64.(holdout_scored.observation_dst_nt),
     )
+    println("Holdout v2 90% coverage (interval-scale): $(round(holdout_coverage; digits=3))")
+    isnan(holdout_conformal_coverage) ||
+        println("Holdout v2 90% coverage (conformal): $(round(holdout_conformal_coverage; digits=3))")
     println("V2 interval scale: $(round(cal.interval_scale; digits=3))")
-    println("V2 internal component: $(cal.selected_component)")
-    println(
-        "V2 holdout gate vs best expert ($(shrink.benchmark_component)): " *
-        (holdout_gate ? "PASS" : "FAIL")
-    )
+    println("Acceptance gate: $(deploy ? "PASS — v2 deployed" : "FAIL — v1-equivalent fallback deployed")")
     return cal
 end
 
@@ -1518,6 +1447,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
     mag = fetch_swpc_mag(; max_retries=3, retry_delay_sec=1.0)
     dst_times, dst_vals = _fetch_dst()
     calibration = _load_calibration_for_model(cfg)
+    conformal = _load_conformal_for_model(cfg)
 
     latest_common_sw = min(maximum(plasma.time_tag), maximum(mag.time_tag))
     latest_complete_hour = _floor_hour(latest_common_sw)
@@ -1529,6 +1459,27 @@ function issue_forecast(cfg::LiveVerifyConfig)
 
     recent_start = latest_common_sw - Hour(1)
     recent = _drivers_for_window(plasma, mag, recent_start, latest_common_sw)
+
+    # Data-coverage guard. The trailing solar-wind window backs both `recent`
+    # (the persistence driver beyond the last complete hour) and the issued row.
+    # An empty window makes `_drivers_for_window` fall back to quiet defaults
+    # (V=400, Bz=0, ...), which would silently issue a no-storm forecast during
+    # an L1/DSCOVR data gap. Refuse a hard gap; flag a partial gap.
+    n_speed_finite = _window_finite_count(plasma, :speed, recent_start, latest_common_sw)
+    n_bz_finite = _window_finite_count(mag, :bz_gsm, recent_start, latest_common_sw)
+    gap_status = _driver_gap_status(n_speed_finite, n_bz_finite)
+    if gap_status == :hard
+        error(
+            "Solar-wind data gap: no finite speed or Bz samples in the trailing " *
+            "hour [$recent_start, $latest_common_sw]. Refusing to issue a forecast " *
+            "built on quiet-time fallback drivers."
+        )
+    end
+    driver_data_gap = gap_status != :ok
+    driver_data_gap && @warn(
+        "Partial solar-wind data gap; some drivers fell back to defaults.",
+        n_speed_finite, n_bz_finite, recent_start, latest_common_sw
+    )
     anchor_drivers = _drivers_for_window(
         plasma, mag, latest_dst_time, latest_dst_time + Hour(1);
         fallback=recent,
@@ -1625,6 +1576,17 @@ function issue_forecast(cfg::LiveVerifyConfig)
     model_steps = Int((target_time - latest_dst_time) / Hour(1))
     wall_horizon = (target_time - issue_time) / Hour(1)
 
+    # N1: when a conformal calibration is deployed, the logged 90% interval comes
+    # from the stratified conformal half-width (horizon × activity regime),
+    # replacing the v1-ensemble-spread interval-scale machinery that structurally
+    # undercovered. The point forecast is unchanged.
+    ci05_dst, ci95_dst, interval_source = _resolve_interval(
+        conformal, pred_dst, model_steps, latest_dst, ci05_dst, ci95_dst,
+    )
+    # Reflect the deployed interval in the v2 CI columns the report scores.
+    v2_ci05_log = interval_source == "conformal" ? ci05_dst : selected.v2_ci05_dst
+    v2_ci95_log = interval_source == "conformal" ? ci95_dst : selected.v2_ci95_dst
+
     row = DataFrame(
         issue_time_utc=[string(issue_time)],
         latest_solar_wind_utc=[string(latest_common_sw)],
@@ -1637,6 +1599,10 @@ function issue_forecast(cfg::LiveVerifyConfig)
         wall_clock_lead_hours=[wall_horizon],
         model_step_hours=[model_steps],
         driver_assumption=["observed_solar_wind_until_latest_complete_hour_then_latest_60min_persistence"],
+        driver_data_gap=[driver_data_gap],
+        n_speed_finite_trailing_hour=[n_speed_finite],
+        n_bz_finite_trailing_hour=[n_bz_finite],
+        interval_source=[interval_source],
         V_kms=[used_drivers.V],
         Bz_nt=[used_drivers.Bz],
         By_nt=[used_drivers.By],
@@ -1665,8 +1631,8 @@ function issue_forecast(cfg::LiveVerifyConfig)
         v1_pred_dst_ci05_nt=[v1_ci05_dst],
         v1_pred_dst_ci95_nt=[v1_ci95_dst],
         v2_pred_dst_nt=[selected.v2_pred_dst],
-        v2_pred_dst_ci05_nt=[selected.v2_ci05_dst],
-        v2_pred_dst_ci95_nt=[selected.v2_ci95_dst],
+        v2_pred_dst_ci05_nt=[v2_ci05_log],
+        v2_pred_dst_ci95_nt=[v2_ci95_log],
         v2_correction_dst_nt=[selected.v2_correction],
         v2_interval_scale=[selected.v2_interval_scale],
         v2_calibration_label=[selected.v2_label],
@@ -1780,6 +1746,25 @@ function refresh_observations!(cfg::LiveVerifyConfig; dst_times=nothing, dst_val
     return updated
 end
 
+function _set_if_missing!(df::DataFrame, row_idx::Int, col::Symbol, value)
+    if !(String(col) in names(df)) || ismissing(df[row_idx, col])
+        _set_value!(df, row_idx, col, value)
+        return true
+    end
+    return false
+end
+
+"""
+    backfill_baselines!(log_path)
+
+Fill baseline forecasts/residuals for rows that lack them. This is a
+**fill-if-missing** operation: `issue_forecast` advances the baselines with the
+true per-hour drivers, but only the final hour's drivers are stored, so
+re-deriving from the row uses a single frozen driver and would NOT reproduce the
+issued multi-step baselines. To avoid silently overwriting issued values with
+that frozen-driver approximation, existing baseline cells are left untouched;
+only missing ones are filled (a documented approximation for legacy rows).
+"""
 function backfill_baselines!(log_path::String)
     isfile(log_path) || error("No forecast log exists at $log_path")
     df = CSV.read(log_path, DataFrame)
@@ -1791,21 +1776,22 @@ function backfill_baselines!(log_path::String)
         all(String(col) in names(df) for col in required) || continue
         baseline = _baseline_predictions_from_row(df, row_idx)
 
-        _set_value!(df, row_idx, :persistence_dst_nt, baseline.persistence)
-        _set_value!(df, row_idx, :burton_dst_nt, baseline.burton)
-        _set_value!(df, row_idx, :burton_full_dst_nt, baseline.burton_full)
-        _set_value!(df, row_idx, :obrien_dst_nt, baseline.obrien)
-        _set_value!(df, row_idx, :model_step_hours, baseline.model_steps)
+        filled = false
+        filled |= _set_if_missing!(df, row_idx, :persistence_dst_nt, baseline.persistence)
+        filled |= _set_if_missing!(df, row_idx, :burton_dst_nt, baseline.burton)
+        filled |= _set_if_missing!(df, row_idx, :burton_full_dst_nt, baseline.burton_full)
+        filled |= _set_if_missing!(df, row_idx, :obrien_dst_nt, baseline.obrien)
+        filled |= _set_if_missing!(df, row_idx, :model_step_hours, baseline.model_steps)
 
         observed = _optional_float(df, row_idx, :observation_dst_nt)
-        if !ismissing(observed)
+        if filled && !ismissing(observed)
             _score_row!(df, row_idx, observed)
         end
-        updated += 1
+        filled && (updated += 1)
     end
 
     updated > 0 && CSV.write(log_path, df)
-    println("Backfilled baseline forecasts for $updated row(s).")
+    println("Backfilled baseline forecasts for $updated row(s) (fill-if-missing).")
     return updated
 end
 
@@ -1854,6 +1840,7 @@ function _copy_config(cfg::LiveVerifyConfig; kwargs...)
         :log_path => cfg.log_path,
         :report_path => cfg.report_path,
         :replay_hours => cfg.replay_hours,
+        :replay_horizons => copy(cfg.replay_horizons),
         :table_path => cfg.table_path,
         :table_limit => cfg.table_limit,
         :v2_calibration_path => cfg.v2_calibration_path,
@@ -1863,6 +1850,7 @@ function _copy_config(cfg::LiveVerifyConfig; kwargs...)
         :v2_ridge_grid => copy(cfg.v2_ridge_grid),
         :v2_interval_coverage => cfg.v2_interval_coverage,
         :v2_selector_margin_nt => cfg.v2_selector_margin_nt,
+        :v2_coverage_floor => cfg.v2_coverage_floor,
     )
     for (key, value) in kwargs
         values[key] = value

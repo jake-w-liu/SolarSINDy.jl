@@ -12,9 +12,12 @@ end
 """
     correlation(predicted, observed)
 
-Pearson correlation coefficient.
+Pearson correlation coefficient. Returns `NaN` for a degenerate (zero-variance)
+input rather than letting `cor` emit a warning/`NaN` implicitly, so callers can
+filter undefined correlations explicitly.
 """
 function correlation(predicted::AbstractVector, observed::AbstractVector)
+    (std(predicted) == 0 || std(observed) == 0) && return NaN
     return cor(predicted, observed)
 end
 

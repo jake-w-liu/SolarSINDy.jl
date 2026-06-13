@@ -340,6 +340,51 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         end
     end
 
+    @testset "M9: multi-step backfill baselines match an independent Euler oracle" begin
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "live_forecast_log.csv")
+            V, Bz, Pdyn, anchor = 500.0, -8.0, 2.5, -60.0
+            Bs = max(-Bz, 0.0)
+            row = DataFrame(
+                issue_time_utc = ["2026-06-06T00:10:00"],
+                latest_dst_time_utc = ["2026-06-06T00:00:00"],
+                latest_dst_nt = [-50.0],
+                anchor_dst_star_nt = [anchor],
+                target_time_utc = ["2026-06-06T03:00:00"],   # 3 model steps
+                V_kms = [V], Bz_nt = [Bz], By_nt = [2.0], n_cm3 = [6.0], Pdyn_npa = [Pdyn],
+                pred_dst_nt = [-55.0],
+                pred_dst_ci05_nt = [-60.0],
+                pred_dst_ci95_nt = [-50.0],
+                observation_dst_nt = [-58.0],
+            )
+            CSV.write(log_path, row)
+            @test backfill_baselines!(log_path) == 1
+            df = CSV.read(log_path, DataFrame)
+            @test df.model_step_hours[1] == 3
+
+            # Independent forward-Euler oracle (dt = 1 hr, same clamps as _advance_baselines).
+            n_steps = 3
+            advance(model, star) = begin
+                for _ in 1:n_steps
+                    d = clamp(model([V], [Bs], [star])[1], -200.0, 200.0)
+                    star = clamp(star + d, -2000.0, 50.0)
+                end
+                star
+            end
+            to_dst(star) = star + 7.26 * sqrt(max(Pdyn, 0.0)) - 11.0
+            @test df.persistence_dst_nt[1] == -50.0
+            @test df.burton_dst_nt[1] ≈ to_dst(advance(burton_model, anchor)) atol = 1e-9
+            @test df.burton_full_dst_nt[1] ≈ to_dst(advance(burton_model_full, anchor)) atol = 1e-9
+            @test df.obrien_dst_nt[1] ≈ to_dst(advance(obrien_mcpherron_model, anchor)) atol = 1e-9
+
+            # Fill-if-missing (M6): a second backfill must NOT change issued values.
+            burton_before = df.burton_dst_nt[1]
+            @test backfill_baselines!(log_path) == 0
+            df2 = CSV.read(log_path, DataFrame)
+            @test df2.burton_dst_nt[1] == burton_before
+        end
+    end
+
     @testset "A/D: replay_recent_table builds causal predicted-vs-observed rows" begin
         t0 = DateTime(2026, 6, 6, 0)
         times = collect(t0:Hour(1):t0 + Hour(4))
@@ -401,6 +446,25 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test occursin("target_time_utc", text)
             @test count(==('\n'), text) == 4
         end
+
+        # 1b-iii / M7: multi-horizon replay emits one row per (anchor, horizon)
+        # whose target observation exists, tags model_step_hours, and leaves the
+        # h=1 forecast numerically identical to the single-horizon table (the
+        # forecast_ahead refactor is equivalent for one step).
+        df_mh = replay_recent_table(plasma, mag, times, dst_vals;
+                                    replay_hours=24, horizons=[1, 2])
+        @test Set(unique(df_mh.model_step_hours)) == Set([1, 2])
+        h1 = df_mh[df_mh.model_step_hours .== 1, :]
+        h2 = df_mh[df_mh.model_step_hours .== 2, :]
+        @test nrow(h1) == 3                       # anchors t0+1..t0+3, target +1 present
+        @test nrow(h2) == 2                       # anchors t0+1..t0+2, target +2 present
+        @test sort(h1.pred_dst_nt) ≈ sort(df.pred_dst_nt) atol = 1e-9
+        # Longer lead departs further from the anchor persistence value.
+        for r in eachrow(h2)
+            @test isfinite(r.pred_dst_nt)
+        end
+        @test_throws ArgumentError replay_recent_table(plasma, mag, times, dst_vals;
+                                                       replay_hours=24, horizons=Int[])
 
         mktempdir() do tmp
             omni_path = joinpath(tmp, "omni.csv")
@@ -472,20 +536,23 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             selection_path = replace(cal_path, r"\.csv$" => "_selection.csv")
             @test isfile(scored_path)
             @test isfile(selection_path)
-            @test startswith(cal.label, "operational_v2_validated_")
-            @test cal.selected_component == :ensemble
+            # A constant +2 correction generalizes, so v2 is selected and deployed.
+            @test startswith(cal.label, "operational_v2_")
+            @test cal.selected_component == :v2
             reread = read_operational_v2_calibration(cal_path)
             scored = CSV.read(scored_path, DataFrame)
             selection = CSV.read(selection_path, DataFrame)
             @test maximum(abs.(scored.v2_residual_dst_nt)) < 0.5
-            @test all(scored.v2_selected_component .== "ensemble")
             @test Set(scored.v2_split) == Set(["fit", "validation", "holdout"])
-            @test nrow(selection) == 4
+            # Leakage-free audit schema: no ensemble/holdout-shrink columns.
+            @test :gate_pass in propertynames(selection)
+            @test :acceptance_gate_pass in propertynames(selection)
+            @test :holdout_coverage in propertynames(selection)
+            @test :beats_persistence in propertynames(selection)
+            @test :holdout_shrink_alpha ∉ propertynames(selection)
             @test any(selection.selected_by_validation)
-            @test all(selection.holdout_gate_pass)
-            @test :final_benchmark_component in propertynames(selection)
-            @test all(occursin(";", w) for w in selection.selector_weights)
-            @test sum(reread.selector_weights) ≈ 1.0 atol=1e-12
+            @test any(selection.deployed)          # passed the gate → deployed
+            @test all(selection.acceptance_gate_pass)
             pred_v2 = operational_v2_predict(
                 reread,
                 pred[end],
@@ -494,16 +561,50 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
                 _v2_features(pred[end] - 1.0, (; V=420.0, Bz=bz[end], By=1.0, n=5.0, Pdyn=1.5)),
             )
             @test pred_v2.pred_dst ≈ observed[end] atol=0.5
+
+            # N1: a conformal calibration sidecar is written and round-trips.
+            conformal_path = replace(cal_path, r"\.csv$" => "_conformal.csv")
+            @test isfile(conformal_path)
+            cc = read_conformal_calibration(conformal_path)
+            @test cc.coverage == cfg.v2_interval_coverage
+            @test cc.global_stratum.n >= 1
+            # Half-width is a nonnegative finite interval radius.
+            hw = conformal_halfwidth(cc, 1.0, pred[end] - 1.0)
+            @test isfinite(hw) && hw >= 0.0
+
+            # 1b-ii: the issue-time interval resolver uses conformal when present.
+            center, latest = -45.0, -47.0
+            lo, hi, src = _resolve_interval(cc, center, 1, latest, -999.0, 999.0)
+            @test src == "conformal"
+            @test (lo, hi) == conformal_interval(cc, center, 1.0, latest)
+            # Interval is centered on the point (width ≥ 0; this toy has an exact
+            # +2 correction, so residuals ≈ 0 → a valid degenerate zero-width band).
+            @test lo <= center <= hi
+            @test isapprox((lo + hi) / 2, center; atol=1e-9)
+            # Without conformal, it passes through the supplied interval unchanged.
+            lo0, hi0, src0 = _resolve_interval(nothing, center, 1, latest, -50.0, -40.0)
+            @test src0 == "interval_scale"
+            @test (lo0, hi0) == (-50.0, -40.0)
+
+            # Non-degenerate check: a conformal calibration with a known 6 nT
+            # half-width yields a ±6 nT interval around the center.
+            cc6 = fit_conformal(zeros(40), vcat(fill(6.0, 38), [6.0, 6.0]),
+                                fill(1.0, 40), fill(0.0, 40); coverage=0.90, min_stratum_n=5)
+            lo6, hi6, _ = _resolve_interval(cc6, -20.0, 1, 0.0, NaN, NaN)
+            @test hi6 - lo6 ≈ 12.0 atol = 1e-9
+            @test isapprox((lo6 + hi6) / 2, -20.0; atol=1e-9)
         end
     end
 
-    @testset "A/D: validated ensemble weights favor SINDy v1 when correction fails validation" begin
+    @testset "A/D: acceptance gate deploys v1-equivalent fallback when correction fails validation" begin
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")
             cal_path = joinpath(tmp, "v2_calibration.csv")
             n = 24
             pred = collect(-50.0:1.0:-27.0)
             observed = copy(pred)
+            # +4 correction on the training portion only; it does NOT generalize
+            # to the later validation rows, so v2 must fail the acceptance gate.
             observed[1:14] .= pred[1:14] .+ 4.0
             replay = DataFrame(
                 issue_time_utc=[string(DateTime(2026, 1, 1) + Hour(i)) for i in 1:n],
@@ -535,26 +636,27 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             cal = fit_v2_calibration!(cfg)
             scored = CSV.read(replace(cal_path, r"\.csv$" => "_scored.csv"), DataFrame)
             selection = CSV.read(replace(cal_path, r"\.csv$" => "_selection.csv"), DataFrame)
-            idx_v1 = findfirst(==(:sindy_v1), cal.selector_names)
-            idx_v2 = findfirst(==(:v2), cal.selector_names)
-            @test cal.selected_component == :ensemble
-            @test all(scored.v2_selected_component .== "ensemble")
-            @test cal.selector_weights[idx_v1] > cal.selector_weights[idx_v2]
-            @test all(selection.selected_component .== "ensemble")
-            @test all(selection.final_component .== "ensemble")
-            @test all(selection.holdout_gate_pass)
-            @test minimum(selection.validation_rmse_nt) <= 1.0
-            @test selection.validation_v1_rmse_nt[1] == 0.0
+            # Gate failed → a v1-equivalent (zero-correction) fallback is deployed.
+            @test cal.label == "operational_v2_fallback_v1_equiv"
+            @test all(cal.coefficients .== 0.0)            # no correction applied
+            @test !any(selection.deployed)                 # nothing passed the gate
+            @test all(.!selection.acceptance_gate_pass)
+            @test !any(selection.gate_pass)
+            # Deployed v2 reduces exactly to v1 (the correction was rejected).
+            @test scored.v2_pred_dst_nt == scored.pred_dst_nt
         end
     end
 
-    @testset "A/D: validated v2 shrinks ensemble toward SINDy v1 when holdout gate fails" begin
+    @testset "A/D: holdout is scored once and honestly reveals poor generalization" begin
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")
             cal_path = joinpath(tmp, "v2_calibration.csv")
             n = 30
             pred = collect(-60.0:1.0:-31.0)
             observed = copy(pred)
+            # +4 holds through train AND validation, but not the holdout. The gate
+            # passes on validation (so v2 deploys), yet the untouched holdout —
+            # scored exactly once — exposes that the correction does not generalize.
             observed[1:21] .= pred[1:21] .+ 4.0
             replay = DataFrame(
                 issue_time_utc=[string(DateTime(2026, 1, 1) + Hour(i)) for i in 1:n],
@@ -587,13 +689,17 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             scored = CSV.read(replace(cal_path, r"\.csv$" => "_scored.csv"), DataFrame)
             selection = CSV.read(replace(cal_path, r"\.csv$" => "_selection.csv"), DataFrame)
             holdout = scored[scored.v2_split .== "holdout", :]
-            @test cal.selected_component == :ensemble
-            @test occursin("holdout_shrink", cal.label)
-            @test all(selection.final_component .== "ensemble")
-            @test all(selection.holdout_gate_pass)
-            @test all(selection.holdout_shrink_alpha .== 0.0)
-            @test any(selection.selected_by_validation)
-            @test holdout.v2_pred_dst_nt == holdout.pred_dst_nt
+            # Validation looked good → v2 deployed with a real (+4) correction.
+            @test cal.selected_component == :v2
+            @test startswith(cal.label, "operational_v2_")
+            @test any(selection.deployed)
+            @test mean(holdout.v2_pred_dst_nt .- holdout.pred_dst_nt) ≈ 4.0 atol = 1.0
+            # Honest holdout (scored once, never used for selection) is much worse
+            # than validation and undercovers — exactly what leakage would hide.
+            @test selection.holdout_rmse_nt[1] > 3.0
+            @test selection.holdout_coverage[1] < 0.5
+            @test minimum(filter(isfinite, selection.validation_rmse_nt)) <
+                  selection.holdout_rmse_nt[1]
         end
     end
 
@@ -670,5 +776,30 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test occursin("Same-row v2 comparison rows: 2", text)
             @test occursin("Operational v2 is the upgraded method", text)
         end
+    end
+
+    @testset "C1: _window_finite_count detects solar-wind data gaps" begin
+        plasma = DataFrame(
+            time_tag = [DateTime(2026, 6, 6, 0, 5), DateTime(2026, 6, 6, 0, 35),
+                        DateTime(2026, 6, 6, 1, 5)],
+            speed = [400.0, NaN, 420.0],
+            density = [5.0, 5.0, 5.0],
+        )
+        t0 = DateTime(2026, 6, 6, 0)
+        t1 = DateTime(2026, 6, 6, 1)
+        # One finite speed sample in [00:00, 01:00) (the NaN does not count).
+        @test _window_finite_count(plasma, :speed, t0, t1) == 1
+        # Empty window → zero finite samples (the data-gap signal that makes
+        # issue_forecast refuse rather than fabricate quiet drivers).
+        @test _window_finite_count(plasma, :speed, DateTime(2026, 6, 6, 3),
+                                   DateTime(2026, 6, 6, 4)) == 0
+        # Missing column → zero, never an error.
+        @test _window_finite_count(plasma, :bz_gsm, t0, t1) == 0
+
+        # Gap classification (the issue/refuse decision, isolated for testing).
+        @test _driver_gap_status(3, 2) == :ok
+        @test _driver_gap_status(0, 2) == :partial
+        @test _driver_gap_status(3, 0) == :partial
+        @test _driver_gap_status(0, 0) == :hard
     end
 end

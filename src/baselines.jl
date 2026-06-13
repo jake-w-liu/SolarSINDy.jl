@@ -1,20 +1,22 @@
 # Baseline coupling function models
 
 """
-    burton_model(V, Bs, Pdyn, Dst; a=-4.4, b=3.6e-5, c=-3.6e-2, τ=7.7)
+    burton_model(V, Bs, Dst_star; α=4.559e-3, τ=7.7)
 
-Burton et al. (1975) Dst model:
-  dDst*/dt = a - b·V·Bs - c·Dst*
+Burton et al. (1975) ring-current model in the simplified injection/decay form:
 
-where Dst* = Dst - 7.26√Pdyn + 11 (pressure-corrected).
+  dDst*/dt = -α·V·Bs - Dst*/τ
 
-Parameters (original):
-- a ≈ -4.4 nT/hr (quiet-time decay offset — often set to 0 for simplicity)
-- b ≈ 3.6e-5 nT/(km/s · nT · hr) (injection efficiency, converted units)
-- c ≈ 1/τ ≈ 0.13/hr (decay rate, τ ≈ 7.7 hr)
+where `Dst* = Dst - 7.26√Pdyn + 11` is the pressure-corrected index and `V·Bs`
+is the rectified solar-wind driving (V in km/s, Bs in nT).
 
-Note: We use the simplified form: dDst*/dt = -α·V·Bs - Dst*/τ
-with α capturing injection and τ capturing recovery.
+Parameters:
+- `α = 4.559e-3` nT/hr per (km/s·nT): injection efficiency.
+- `τ = 7.7` hr: ring-current decay timescale, so the decay rate is
+  `1/τ ≈ 0.13` hr⁻¹.
+
+`Dst*` is supplied directly (already pressure-corrected); `Pdyn` is not an
+argument here. See `burton_model_full` for the injection-threshold variant.
 """
 function burton_model(V::AbstractVector, Bs::AbstractVector,
                       Dst_star::AbstractVector;

@@ -185,6 +185,35 @@ using Random
         @test ms.n_points == 5
     end
 
+    @testset "Phase-0 bugfix regressions" begin
+        # m3: numerical_derivative must reject length < 2 instead of BoundsError.
+        @test_throws ArgumentError numerical_derivative([5.0], 1.0)
+        d = numerical_derivative([1.0, 3.0], 1.0)
+        @test d == [2.0, 2.0]
+
+        # m1: correlation on a zero-variance input returns NaN (no error/warning).
+        @test isnan(correlation([1.0, 1.0, 1.0], [1.0, 2.0, 3.0]))
+        @test correlation([1.0, 2.0, 3.0], [2.0, 4.0, 6.0]) ≈ 1.0
+
+        # M1: with normalize=true the threshold acts on the NORMALIZED coefficient
+        # (term contribution), so a tiny physical coefficient on a large-scale
+        # column survives a λ far above its physical magnitude.
+        rng = MersenneTwister(7)
+        n = 400
+        x_small = randn(rng, n)                 # O(1) column
+        x_big   = 1.0e5 .* randn(rng, n)        # O(1e5) column
+        Θ = hcat(x_small, x_big)
+        ξtrue = [3.0, 2.0e-5]                    # big-column physical coef ≪ λ
+        y = Θ * ξtrue
+        ξ = stlsq(Θ, y; λ=10.0, normalize=true)
+        @test abs(ξ[2] - 2.0e-5) < 1e-7          # survives despite |ξ_phys| ≪ λ
+        @test abs(ξ[1] - 3.0) < 1e-6
+        # With normalize=false the same λ would kill the tiny physical coefficient.
+        ξphys = stlsq(Θ, y; λ=10.0, normalize=false)
+        @test ξphys[2] == 0.0
+    end
+
+    include("test_conformal.jl")
     include("test_forecast_alarm.jl")
     include("test_data_pipeline_cleaning.jl")
     include("test_realtime_monitor.jl")

@@ -76,7 +76,7 @@ function parse_omni2_csv(filepath::String; year_start::Int=1963, year_end::Int=2
     Dst  = _fill_to_nan(Float64.(raw.Dst),  99999.0, abscheck=true)
     AE   = _fill_to_nan(Float64.(raw.AE),   9999.0)
     AL   = _fill_to_nan(Float64.(raw.AL),   99999.0, abscheck=true)
-    AU   = _fill_to_nan(Float64.(raw.AU),   9999.0)
+    AU   = _fill_to_nan(Float64.(raw.AU),   99999.0, abscheck=true)  # OMNI2 word-54 fill is 99999, not 9999
 
     println("  Parsed $(length(datetimes)) records")
 

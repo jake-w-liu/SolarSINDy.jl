@@ -22,6 +22,7 @@ include("data_pipeline.jl")
 include("data_cleaning.jl")
 include("metrics.jl")
 include("forecast.jl")
+include("conformal.jl")
 include("alarm.jl")
 include("realtime.jl")
 include("monitor.jl")
@@ -59,12 +60,16 @@ export # Utils
        fit_operational_v2_calibration, operational_v2_predict,
        score_operational_v2, write_operational_v2_calibration,
        read_operational_v2_calibration,
+       # Conformal UQ
+       ConformalCalibration, ConformalStratum, fit_conformal,
+       conformal_stratum, conformal_halfwidth, conformal_interval,
+       conformal_coverage, write_conformal_calibration, read_conformal_calibration,
        # Alarm
        StormSeverity, QUIET, MODERATE, INTENSE, SUPERINTENSE,
        Alarm, AlarmConfig, default_alarm_config,
        check_alarm, classify_severity, alarm_print, alarm_log,
        # Real-time
-       fetch_swpc_plasma, fetch_swpc_mag, fetch_realtime_solar_wind,
+       fetch_swpc_plasma, fetch_swpc_mag, fetch_swpc_dst, fetch_realtime_solar_wind,
        # Monitor
        run_monitor
 

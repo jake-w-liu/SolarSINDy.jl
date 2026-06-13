@@ -14,7 +14,15 @@ Algorithm (Brunton et al., 2016):
 3. Re-solve least squares on remaining terms
 4. Repeat until convergence
 
-Returns coefficient vector ξ.
+Threshold semantics: when `normalize=true` (the default), the columns of Θ are
+scaled to unit norm before the fit, so the threshold `λ` is applied to the
+*normalized* coefficient `ξ̃_j = ξ_j · ‖Θ_j‖` — i.e. each term's contribution
+magnitude — not to the physical coefficient `ξ_j`. The returned ξ is rescaled
+back to physical units. To reproduce a sparsity pattern exactly, the column
+norms ‖Θ_j‖ (or λ expressed in normalized units) must be reported alongside λ.
+With `normalize=false`, λ thresholds the physical coefficient directly.
+
+Returns coefficient vector ξ (in physical units).
 """
 function stlsq(Θ::AbstractMatrix, dx::AbstractVector;
                 λ::Real=0.1, max_iter::Int=25, normalize::Bool=true)

@@ -40,17 +40,31 @@ function run_monitor(; poll_interval_min::Int=5,
                        ensemble_csv::String,
                        log_file::String="monitor.log",
                        display::Bool=true)
-    # Initial data fetch with retry
-    swd, t_tags = _fetch_with_retry(; hours=48, max_retries=3)
+    # Observed Dst for anchoring (best-effort; monitor still runs if the feed fails)
+    dst_feed = try
+        fetch_swpc_dst()
+    catch e
+        println("  [WARN] Dst feed unavailable; forecaster will run unanchored: $(sprint(showerror, e))")
+        nothing
+    end
 
-    # Find last valid Dst* or use 0.0
+    # Initial data fetch with retry
+    swd, t_tags = _fetch_with_retry(; hours=48, max_retries=3, dst=dst_feed)
+
+    # Anchor the initial state on the most recent observed Dst*. If none is
+    # available the forecaster free-runs from 0.0, and we say so loudly rather
+    # than silently presenting a quiet-time state during an active storm.
     dst0 = 0.0
+    anchored = false
     for i in length(t_tags):-1:1
         if !isnan(swd.Dst_star[i])
             dst0 = swd.Dst_star[i]
+            anchored = true
             break
         end
     end
+    anchored ||
+        println("  [WARN] No observed Dst* available to anchor; initial Dst*=0 (unanchored free-run).")
 
     state = init_forecast(;
         coefficients_csv=coefficients_csv,
@@ -78,9 +92,17 @@ function run_monitor(; poll_interval_min::Int=5,
 
     try
         while true
-            # Fetch latest data with error handling
+            # Fetch latest data with error handling (refresh observed Dst too)
             swd_new, t_new = try
-                data = fetch_realtime_solar_wind(; hours=3)
+                dst_now = try
+                    fetch_swpc_dst()
+                catch
+                    dst_feed
+                end
+                # 6 h trailing window: wide enough to contain at least one
+                # published Kyoto Dst hour (the feed lags ~1-3 h) so re-anchoring
+                # has an observation to lock onto.
+                data = fetch_realtime_solar_wind(; hours=6, dst=dst_now)
                 consecutive_failures = 0
                 data
             catch e
@@ -114,6 +136,13 @@ function run_monitor(; poll_interval_min::Int=5,
             By = _safe_val(swd_new.By[latest_idx], 0.0)
             n_val = _safe_val(swd_new.n[latest_idx], 5.0)
             Pdyn = _safe_val(swd_new.Pdyn[latest_idx], 1.6726e-6 * n_val * V^2)
+
+            # Re-anchor the forecaster to the most recent observed Dst* before
+            # projecting forward, so the displayed state tracks observations
+            # rather than drifting on a free-run.
+            obs_idx = findlast(i -> !isnan(swd_new.Dst_star[i]),
+                               eachindex(swd_new.Dst_star))
+            obs_idx === nothing || (state.dst_current = swd_new.Dst_star[obs_idx])
 
             # Step forecast
             result = step_forecast!(state, t_new[latest_idx],
@@ -171,10 +200,11 @@ _safe_val(x::Float64, default::Float64) = (isnan(x) || isinf(x)) ? default : x
 
 Fetch solar wind data with retries on failure.
 """
-function _fetch_with_retry(; hours::Int, max_retries::Int=3, delay_sec::Int=10)
+function _fetch_with_retry(; hours::Int, max_retries::Int=3, delay_sec::Int=10,
+                            dst::Union{Nothing,Tuple}=nothing)
     for attempt in 1:max_retries
         try
-            return fetch_realtime_solar_wind(; hours=hours)
+            return fetch_realtime_solar_wind(; hours=hours, dst=dst)
         catch e
             if attempt == max_retries
                 error("Failed to fetch solar wind data after $max_retries attempts: $(sprint(showerror, e))")

@@ -1,8 +1,8 @@
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.12.5"
+julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "4eedb826245e66221fa0b6d651c455691d05cec3"
+project_hash = "0ca963d9fcc6cda39842095c01850788417a2d12"
 
 [[deps.ATK_jll]]
 deps = ["Artifacts", "Glib_jll", "JLLWrappers", "Libdl"]

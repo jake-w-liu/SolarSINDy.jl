@@ -155,10 +155,13 @@ const DEFAULT_OPERATIONAL_V2_FEATURES = [
 const OPERATIONAL_V2_MEMORY_FEATURES = [
     :dst_delta_1h_nt,
     :dst_delta_3h_nt,
+    :dst_delta_6h_nt,
     :Bz_delta_1h_nt,
     :VBsouth_delta_1h_mvm,
     :VBsouth_mean_3h_mvm,
+    :VBsouth_mean_6h_mvm,
     :Bsouth_mean_3h_nt,
+    :Bsouth_mean_6h_nt,
 ]
 
 const OPERATIONAL_V2_EXPERT_FEATURES = [
@@ -168,11 +171,24 @@ const OPERATIONAL_V2_EXPERT_FEATURES = [
     :burton_minus_v1_nt,
 ]
 
+const OPERATIONAL_V2_STORM_PHASE_FEATURES = [
+    :main_phase_pressure_nt,
+    :main_phase_pressure_6h_nt,
+    :coupling_active_mvm,
+    :coupling_active_6h_mvm,
+    :recovery_pressure_nt,
+    :main_phase_recovery_pressure,
+    :horizon_coupling_pressure,
+    :storm_guard_active,
+    :storm_guard_minus_v1_nt,
+]
+
 const OPERATIONAL_V2_BASELINE_COLUMNS = Pair{Symbol,Symbol}[
     :persistence => :persistence_dst_nt,
     :burton => :burton_dst_nt,
     :burton_full => :burton_full_dst_nt,
     :obrien => :obrien_dst_nt,
+    :storm_guard => :storm_guard_dst_nt,
 ]
 
 function default_operational_v2_calibration(;
@@ -266,6 +282,25 @@ function _rolling_mean(values::Vector{Float64}, order::Vector{Int}, width::Int)
     return out
 end
 
+function _column_float_or_default(df::DataFrame, col::Symbol, fallback::Vector{Float64})
+    length(fallback) == nrow(df) ||
+        throw(DimensionMismatch("fallback length $(length(fallback)) != $(nrow(df))"))
+    String(col) in names(df) || return copy(fallback)
+    return Float64[
+        ismissing(df[i, col]) ? fallback[i] : Float64(df[i, col])
+        for i in 1:nrow(df)
+    ]
+end
+
+function _storm_guard_prediction(latest_dst::Real, pred_dst::Real, guard_drop::Real)
+    latest = Float64(latest_dst)
+    pred = Float64(pred_dst)
+    isfinite(latest) || return pred
+    isfinite(pred) || return latest
+    drop = isfinite(Float64(guard_drop)) ? max(Float64(guard_drop), 0.0) : 0.0
+    return clamp(min(pred, latest - drop), -2000.0, 50.0)
+end
+
 function _maybe_add_column!(df::DataFrame, col::Symbol, values::Vector{Float64})
     String(col) in names(df) && return df
     df[!, col] = values
@@ -296,6 +331,7 @@ function add_operational_v2_features!(df::DataFrame)
     order = _chronological_order(df)
     _maybe_add_column!(df, :dst_delta_1h_nt, _lagged_difference(latest, order, 1))
     _maybe_add_column!(df, :dst_delta_3h_nt, _lagged_difference(latest, order, 3))
+    _maybe_add_column!(df, :dst_delta_6h_nt, _lagged_difference(latest, order, 6))
     _maybe_add_column!(df, :Bz_delta_1h_nt, _lagged_difference(bz, order, 1))
     _maybe_add_column!(
         df,
@@ -309,8 +345,18 @@ function add_operational_v2_features!(df::DataFrame)
     )
     _maybe_add_column!(
         df,
+        :VBsouth_mean_6h_mvm,
+        _rolling_mean(Float64.(df.VBsouth_mvm), order, 6),
+    )
+    _maybe_add_column!(
+        df,
         :Bsouth_mean_3h_nt,
         _rolling_mean(Float64.(df.Bsouth_nt), order, 3),
+    )
+    _maybe_add_column!(
+        df,
+        :Bsouth_mean_6h_nt,
+        _rolling_mean(Float64.(df.Bsouth_nt), order, 6),
     )
     if all(String(c) in names(df) for c in (:pred_dst_nt, :persistence_dst_nt))
         v1 = _column_float_or_nan(df, :pred_dst_nt)
@@ -344,6 +390,47 @@ function add_operational_v2_features!(df::DataFrame)
             :burton_minus_v1_nt,
             _column_float_or_nan(df, :burton_dst_nt) .- _column_float_or_nan(df, :pred_dst_nt),
         )
+    end
+    dst_delta_1h = _column_float_or_nan(df, :dst_delta_1h_nt)
+    dst_delta_3h = _column_float_or_nan(df, :dst_delta_3h_nt)
+    dst_delta_6h = _column_float_or_nan(df, :dst_delta_6h_nt)
+    vb = Float64.(df.VBsouth_mvm)
+    vb6 = Float64.(df.VBsouth_mean_6h_mvm)
+    sqrt_pdyn = Float64.(df.sqrt_Pdyn_npa)
+    horizon = _column_float_or_default(df, :model_step_hours, ones(nrow(df)))
+    horizon = max.(horizon, 1.0)
+    main_phase_pressure = max.(-dst_delta_1h, 0.0) .* sqrt_pdyn
+    main_phase_pressure_6h = max.(-dst_delta_6h, 0.0) .* sqrt_pdyn
+    coupling_active = [
+        (vb[i] > 0.0 || dst_delta_1h[i] < 0.0) ? max(vb[i], 0.0) : 0.0
+        for i in 1:nrow(df)
+    ]
+    coupling_active_6h = [
+        (vb6[i] > 0.0 || dst_delta_6h[i] < 0.0) ? max(vb6[i], 0.0) : 0.0
+        for i in 1:nrow(df)
+    ]
+    recovery_pressure = max.(dst_delta_3h, 0.0) .* sqrt_pdyn
+    main_phase_recovery_pressure = main_phase_pressure_6h .- recovery_pressure
+    horizon_coupling_pressure = horizon .* coupling_active .* sqrt_pdyn
+    storm_guard_active = Float64.((coupling_active .> 0.0) .| (main_phase_pressure .> 0.0))
+    _maybe_add_column!(df, :main_phase_pressure_nt, main_phase_pressure)
+    _maybe_add_column!(df, :main_phase_pressure_6h_nt, main_phase_pressure_6h)
+    _maybe_add_column!(df, :coupling_active_mvm, coupling_active)
+    _maybe_add_column!(df, :coupling_active_6h_mvm, coupling_active_6h)
+    _maybe_add_column!(df, :recovery_pressure_nt, recovery_pressure)
+    _maybe_add_column!(df, :main_phase_recovery_pressure, main_phase_recovery_pressure)
+    _maybe_add_column!(df, :horizon_coupling_pressure, horizon_coupling_pressure)
+    _maybe_add_column!(df, :storm_guard_active, storm_guard_active)
+    if String(:pred_dst_nt) in names(df)
+        pred = _column_float_or_default(df, :pred_dst_nt, latest)
+        if !(String(:storm_guard_dst_nt) in names(df))
+            df[!, :storm_guard_dst_nt] = [
+                _storm_guard_prediction(latest[i], pred[i], horizon_coupling_pressure[i])
+                for i in 1:nrow(df)
+            ]
+        end
+        storm_guard = _column_float_or_default(df, :storm_guard_dst_nt, pred)
+        _maybe_add_column!(df, :storm_guard_minus_v1_nt, storm_guard .- pred)
     end
     return df
 end
@@ -821,24 +908,35 @@ function init_forecast(; coefficients_csv::String,
         end
     end
 
-    # Load ensemble coefficients — build matrix from median_coef for each ensemble member
-    # The ensemble CSV has per-term statistics; we reconstruct ensemble spread
-    # by sampling from [ci_025, ci_975] for terms with π > 0.9
+    # Build the uncertainty ensemble AROUND the deployed point coefficients
+    # (ξ_primary), so the ensemble describes the model that is actually issued.
+    # Per-term spread comes from the bootstrap CI half-width in the ensemble CSV,
+    # read as an approximately 95% interval (±z·σ, z=1.96 → σ = width/(2z)).
+    # Every active primary term is perturbed (terms with no CI / zero width keep
+    # ξ_primary exactly); terms absent from ξ_primary stay zero. This fixes the
+    # prior defects where the ensemble was centered on a different fit (the
+    # ensemble CSV medians) and silently dropped active terms with π<0.9.
     ens_df = CSV.read(ensemble_csv, DataFrame)
     n_ensemble = 500
     n_terms = length(lib)
     ξ_ensemble = zeros(n_ensemble, n_terms)
     rng = MersenneTwister(42)
+    z95 = 1.959963984540054   # standard normal 97.5th percentile
 
+    # Per-term standard deviation from the bootstrap CI width.
+    σ_term = zeros(n_terms)
     for row in eachrow(ens_df)
         idx = findfirst(==(row.term), term_names)
         idx === nothing && continue
-        if row.inclusion_prob >= 0.9
-            # Sample uniformly within CI for ensemble diversity
-            lo, hi = row.ci_025, row.ci_975
-            for i in 1:n_ensemble
-                ξ_ensemble[i, idx] = lo + (hi - lo) * rand(rng)
-            end
+        width = Float64(row.ci_975) - Float64(row.ci_025)
+        σ_term[idx] = width > 0 ? width / (2 * z95) : 0.0
+    end
+
+    for idx in 1:n_terms
+        ξ_primary[idx] == 0.0 && continue   # only active (deployed) terms get spread
+        σ = σ_term[idx]
+        for i in 1:n_ensemble
+            ξ_ensemble[i, idx] = ξ_primary[idx] + (σ > 0 ? σ * randn(rng) : 0.0)
         end
     end
 

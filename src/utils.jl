@@ -7,6 +7,7 @@ Central finite difference derivative with forward/backward at boundaries.
 """
 function numerical_derivative(x::AbstractVector, dt::Real)
     n = length(x)
+    n >= 2 || throw(ArgumentError("numerical_derivative requires length ≥ 2, got $n"))
     dx = similar(x)
     # Forward difference at start
     dx[1] = (x[2] - x[1]) / dt
