@@ -45,7 +45,7 @@ export # Utils
        generate_multistorm_dataset, identify_storm_phases,
        prepare_sindy_data,
        # Real data pipeline
-       download_omni2, extract_omni2_columns, parse_omni2, load_omni2_csv,
+       download_omni2, prepare_omni_data, extract_omni2_columns, parse_omni2, load_omni2_csv,
        # Data cleaning & storm catalog
        clean_omni_data!, StormCatalogEntry,
        build_storm_catalog, extract_storm_data, extract_all_storms,

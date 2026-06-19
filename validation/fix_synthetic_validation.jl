@@ -14,6 +14,11 @@ using Statistics, Random, LinearAlgebra
 PlotlyKaleido.start()
 const savefig = PlotlyKaleido.savefig
 
+const DATA_DIR = joinpath(@__DIR__, "..", "data")
+const FIGS_DIR = joinpath(@__DIR__, "..", "figs")
+mkpath(DATA_DIR); mkpath(FIGS_DIR)
+
+
 const COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7"]
 const DASHES = ["solid", "dash", "dashdot", "dot"]
 const SINGLE_W = 504
@@ -74,8 +79,8 @@ df_sweep = DataFrame(
     n_terms = [s.n_terms for s in sweep_results],
     rmse = [s.rmse for s in sweep_results]
 )
-CSV.write("paper/data/lambda_sweep.csv", df_sweep)
-println("  Saved paper/data/lambda_sweep.csv")
+CSV.write(joinpath(DATA_DIR, "lambda_sweep.csv"), df_sweep)
+println("  Saved data/lambda_sweep.csv")
 
 # ============================================================
 # 3. Ensemble SINDy at high lambda (targeting 2-term model)
@@ -110,8 +115,8 @@ df_ens_high = DataFrame(
     median_coefficient = median_ξ_high,
     inclusion_probability = inclusion_prob_high
 )
-CSV.write("paper/data/ensemble_inclusion_high_lambda.csv", df_ens_high)
-println("  Saved paper/data/ensemble_inclusion_high_lambda.csv")
+CSV.write(joinpath(DATA_DIR, "ensemble_inclusion_high_lambda.csv"), df_ens_high)
+println("  Saved data/ensemble_inclusion_high_lambda.csv")
 
 # ============================================================
 # 4. Also keep original ensemble at λ=5.0 for reference
@@ -126,8 +131,8 @@ df_ens_orig = DataFrame(
     median_coefficient = median_ξ_orig,
     inclusion_probability = inclusion_prob_orig
 )
-CSV.write("paper/data/ensemble_inclusion.csv", df_ens_orig)
-println("  Saved paper/data/ensemble_inclusion.csv")
+CSV.write(joinpath(DATA_DIR, "ensemble_inclusion.csv"), df_ens_orig)
+println("  Saved data/ensemble_inclusion.csv")
 
 # ============================================================
 # 5. Regenerate Pareto figure with extended sweep
@@ -155,7 +160,7 @@ fig = plot_scatter(Float64.(pareto_terms), pareto_rmse;
     mode="lines+markers", color=COLORS[1], dash=DASHES[1],
     linewidth=2, marker_size=8)
 set_legend!(fig; position=:topright)
-savefig(fig, "paper/figs/fig_results_pareto_front.pdf";
+savefig(fig, joinpath(FIGS_DIR, "fig_results_pareto_front.pdf");
         width=SINGLE_W, height=SINGLE_H)
 println("  Saved fig_results_pareto_front.pdf")
 

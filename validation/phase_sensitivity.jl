@@ -2,12 +2,12 @@
 # phase_sensitivity.jl — Phase threshold sensitivity analysis
 #
 # Sweeps D_thresh and R_thresh to assess stability of phase-dependent coefficients.
-# Output: paper/data/phase_threshold_sensitivity.csv
+# Output: data/phase_threshold_sensitivity.csv
 
 using SolarSINDy
 using CSV, DataFrames, Dates, Statistics, Random
 
-const DATA_DIR = joinpath(@__DIR__, "..", "..", "paper", "data")
+const DATA_DIR = joinpath(@__DIR__, "..", "data")
 
 println("=" ^ 60)
 println("Phase Threshold Sensitivity Analysis")

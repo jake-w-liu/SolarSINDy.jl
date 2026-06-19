@@ -18,8 +18,8 @@ end
 
 using CSV, DataFrames, Statistics
 
-const DATA_DIR = joinpath(@__DIR__, "..", "..", "paper", "data")
-const FIGS_DIR = joinpath(@__DIR__, "..", "..", "paper", "figs")
+const DATA_DIR = joinpath(@__DIR__, "..", "data")
+const FIGS_DIR = joinpath(@__DIR__, "..", "figs")
 mkpath(FIGS_DIR)
 
 # Publication constants

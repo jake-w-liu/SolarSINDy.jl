@@ -2,15 +2,15 @@
 # figure_generation.jl — Phase 3: Generate all results figures and CSV data
 #
 # Generates:
-#   paper/figs/fig_results_multistorm_coefficients.pdf
-#   paper/figs/fig_results_storm_reconstruction.pdf
-#   paper/figs/fig_results_pareto_front.pdf
-#   paper/figs/fig_results_ensemble_inclusion.pdf
-#   paper/figs/fig_results_noise_sweep.pdf
-#   paper/figs/fig_results_ablation.pdf
-#   paper/figs/fig_results_phase_dependent.pdf
-#   paper/figs/fig_results_scalability.pdf
-#   paper/data/multistorm_*.csv, holdout_metrics.csv, noise_sweep.csv,
+#   figs/fig_results_multistorm_coefficients.pdf
+#   figs/fig_results_storm_reconstruction.pdf
+#   figs/fig_results_pareto_front.pdf
+#   figs/fig_results_ensemble_inclusion.pdf
+#   figs/fig_results_noise_sweep.pdf
+#   figs/fig_results_ablation.pdf
+#   figs/fig_results_phase_dependent.pdf
+#   figs/fig_results_scalability.pdf
+#   data/multistorm_*.csv, holdout_metrics.csv, noise_sweep.csv,
 #   ablation_metrics.csv, phase_dependent_coefficients.csv, scalability_sweep.csv
 
 using SolarSINDy
@@ -26,6 +26,11 @@ let _warmup = plot_scatter([0.0], [0.0])
 end
 
 const savefig = PlotlyKaleido.savefig
+
+const DATA_DIR = joinpath(@__DIR__, "..", "data")
+const FIGS_DIR = joinpath(@__DIR__, "..", "figs")
+mkpath(DATA_DIR); mkpath(FIGS_DIR)
+
 
 const COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7"]
 const DASHES = ["solid", "dash", "dashdot", "dot"]
@@ -109,8 +114,8 @@ df_multi_coeff = DataFrame(
     coefficient = ξ_multi,
     active = abs.(ξ_multi) .> 0
 )
-CSV.write("paper/data/multistorm_coefficients.csv", df_multi_coeff)
-println("  Saved paper/data/multistorm_coefficients.csv")
+CSV.write(joinpath(DATA_DIR, "multistorm_coefficients.csv"), df_multi_coeff)
+println("  Saved data/multistorm_coefficients.csv")
 
 # Metrics on concatenated data
 dDst_sindy_multi = Θ_multi * ξ_multi
@@ -133,8 +138,8 @@ df_multi_metrics = DataFrame(
     prediction_efficiency = [ms_s.pe, ms_b.pe, ms_o.pe],
     n_active_terms = [n_active_multi, 2, 3]
 )
-CSV.write("paper/data/multistorm_metrics.csv", df_multi_metrics)
-println("  Saved paper/data/multistorm_metrics.csv")
+CSV.write(joinpath(DATA_DIR, "multistorm_metrics.csv"), df_multi_metrics)
+println("  Saved data/multistorm_metrics.csv")
 
 # Figure 1: Discovered coefficients bar chart
 active_idx = findall(abs.(ξ_multi) .> 0)
@@ -149,7 +154,7 @@ fig1 = plot_bar(act_names, act_vals;
     ylabel=raw"Coefficient $\xi$",
     color=COLORS[1])
 set_legend!(fig1; position=:topright)
-savefig(fig1, "paper/figs/fig_results_multistorm_coefficients.pdf";
+savefig(fig1, joinpath(FIGS_DIR, "fig_results_multistorm_coefficients.pdf");
         width=SINGLE_W, height=SINGLE_H)
 println("  Saved fig_results_multistorm_coefficients.pdf")
 
@@ -231,8 +236,8 @@ df_holdout = DataFrame(
     burton_pe = holdout_pe_burton,
     obrien_pe = holdout_pe_obrien
 )
-CSV.write("paper/data/holdout_metrics.csv", df_holdout)
-println("  Saved paper/data/holdout_metrics.csv")
+CSV.write(joinpath(DATA_DIR, "holdout_metrics.csv"), df_holdout)
+println("  Saved data/holdout_metrics.csv")
 
 # Hero Figure: storm reconstruction (single panel, held-out storm 5)
 fig2 = plot_scatter(test_swd.t, test_swd.Dst_star;
@@ -249,7 +254,7 @@ plot_scatter!(fig2, test_swd.t, Dst_obrien_ho;
     color=COLORS[4], dash=DASHES[4], mode="lines",
     legend="O'Brien-McP.", linewidth=2)
 set_legend!(fig2; position=:bottomleft)
-savefig(fig2, "paper/figs/fig_results_storm_reconstruction.pdf";
+savefig(fig2, joinpath(FIGS_DIR, "fig_results_storm_reconstruction.pdf");
         width=DOUBLE_W, height=SINGLE_H)
 println("  Saved fig_results_storm_reconstruction.pdf")
 
@@ -269,8 +274,8 @@ df_sweep = DataFrame(
     n_terms = n_terms_sweep,
     rmse = rmse_sweep
 )
-CSV.write("paper/data/multistorm_lambda_sweep.csv", df_sweep)
-println("  Saved paper/data/multistorm_lambda_sweep.csv")
+CSV.write(joinpath(DATA_DIR, "multistorm_lambda_sweep.csv"), df_sweep)
+println("  Saved data/multistorm_lambda_sweep.csv")
 
 # Pareto front: unique (n_terms, best rmse) pairs
 pareto_dict = Dict{Int,Float64}()
@@ -290,7 +295,7 @@ fig3 = plot_scatter(Float64.(pareto_terms), pareto_rmse;
     mode="lines+markers", color=COLORS[1], dash=DASHES[1],
     linewidth=2, marker_size=8)
 set_legend!(fig3; position=:topright)
-savefig(fig3, "paper/figs/fig_results_pareto_front.pdf";
+savefig(fig3, joinpath(FIGS_DIR, "fig_results_pareto_front.pdf");
         width=SINGLE_W, height=SINGLE_H)
 println("  Saved fig_results_pareto_front.pdf")
 
@@ -308,8 +313,8 @@ df_ensemble = DataFrame(
     median_coefficient = median_ξ_multi,
     inclusion_probability = incl_prob_multi
 )
-CSV.write("paper/data/multistorm_ensemble.csv", df_ensemble)
-println("  Saved paper/data/multistorm_ensemble.csv")
+CSV.write(joinpath(DATA_DIR, "multistorm_ensemble.csv"), df_ensemble)
+println("  Saved data/multistorm_ensemble.csv")
 
 # Sort by inclusion probability
 sort_idx = sortperm(incl_prob_multi, rev=true)
@@ -321,7 +326,7 @@ fig4 = plot_bar(sorted_names, sorted_probs;
     ylabel="Inclusion Probability",
     color=COLORS[1])
 set_legend!(fig4; position=:topright)
-savefig(fig4, "paper/figs/fig_results_ensemble_inclusion.pdf";
+savefig(fig4, joinpath(FIGS_DIR, "fig_results_ensemble_inclusion.pdf");
         width=DOUBLE_W, height=SINGLE_H)
 println("  Saved fig_results_ensemble_inclusion.pdf")
 
@@ -367,8 +372,8 @@ df_noise = DataFrame(
     n_active_terms = noise_n_terms,
     core_terms_recovered = noise_core_recovered
 )
-CSV.write("paper/data/noise_sweep.csv", df_noise)
-println("  Saved paper/data/noise_sweep.csv")
+CSV.write(joinpath(DATA_DIR, "noise_sweep.csv"), df_noise)
+println("  Saved data/noise_sweep.csv")
 
 fig5 = plot_scatter(noise_levels .* 100, noise_rmse;
     xlabel="Noise Level [% of signal std]",
@@ -379,7 +384,7 @@ plot_scatter!(fig5, noise_levels .* 100, noise_burton_rmse;
     color=COLORS[2], dash=DASHES[2], mode="lines+markers",
     legend="Burton", linewidth=2, marker_size=8)
 set_legend!(fig5; position=:topleft)
-savefig(fig5, "paper/figs/fig_results_noise_sweep.pdf";
+savefig(fig5, joinpath(FIGS_DIR, "fig_results_noise_sweep.pdf");
         width=SINGLE_W, height=SINGLE_H)
 println("  Saved fig_results_noise_sweep.pdf")
 
@@ -427,15 +432,15 @@ df_ablation = DataFrame(
     n_active_terms = ablation_n_terms,
     prediction_efficiency = ablation_pe
 )
-CSV.write("paper/data/ablation_metrics.csv", df_ablation)
-println("  Saved paper/data/ablation_metrics.csv")
+CSV.write(joinpath(DATA_DIR, "ablation_metrics.csv"), df_ablation)
+println("  Saved data/ablation_metrics.csv")
 
 fig6 = plot_bar(ablation_names, ablation_rmse;
     xlabel="Library Variant",
     ylabel="RMSE [nT/hr]",
     color=COLORS[1])
 set_legend!(fig6; position=:topright)
-savefig(fig6, "paper/figs/fig_results_ablation.pdf";
+savefig(fig6, joinpath(FIGS_DIR, "fig_results_ablation.pdf");
         width=SINGLE_W, height=SINGLE_H)
 println("  Saved fig_results_ablation.pdf")
 
@@ -474,8 +479,8 @@ df_phase = DataFrame(term = term_names)
 for p_label in phase_labels
     df_phase[!, Symbol(p_label)] = phase_coeff_dict[p_label]
 end
-CSV.write("paper/data/phase_dependent_coefficients.csv", df_phase)
-println("  Saved paper/data/phase_dependent_coefficients.csv")
+CSV.write(joinpath(DATA_DIR, "phase_dependent_coefficients.csv"), df_phase)
+println("  Saved data/phase_dependent_coefficients.csv")
 
 # Figure 7: Phase-dependent — scatter of |ξ| for top terms per phase
 # Select terms active in at least one phase
@@ -512,7 +517,7 @@ if !isempty(active_term_idx)
         color=COLORS[3], mode="markers", marker_size=10,
         marker_symbol="diamond", legend="Recovery")
     set_legend!(fig7; position=:topright)
-    savefig(fig7, "paper/figs/fig_results_phase_dependent.pdf";
+    savefig(fig7, joinpath(FIGS_DIR, "fig_results_phase_dependent.pdf");
             width=DOUBLE_W, height=SINGLE_H)
     println("  Saved fig_results_phase_dependent.pdf")
     println("  Terms: $(join(x_labels, ", "))")
@@ -556,8 +561,8 @@ df_scale = DataFrame(
     n_active_terms = scale_n_terms,
     prediction_efficiency = scale_pe
 )
-CSV.write("paper/data/scalability_sweep.csv", df_scale)
-println("  Saved paper/data/scalability_sweep.csv")
+CSV.write(joinpath(DATA_DIR, "scalability_sweep.csv"), df_scale)
+println("  Saved data/scalability_sweep.csv")
 println("  Burton reference RMSE: $(round(burton_rmse_sc, digits=2))")
 
 fig8 = plot_scatter(Float64.(n_storm_vals), scale_rmse;
@@ -570,10 +575,10 @@ plot_scatter!(fig8, Float64.([1, 10]), [burton_rmse_sc, burton_rmse_sc];
     color=COLORS[2], dash=DASHES[2], mode="lines",
     legend="Burton", linewidth=2)
 set_legend!(fig8; position=:topright)
-savefig(fig8, "paper/figs/fig_results_scalability.pdf";
+savefig(fig8, joinpath(FIGS_DIR, "fig_results_scalability.pdf");
         width=SINGLE_W, height=SINGLE_H)
 println("  Saved fig_results_scalability.pdf")
 
 println("\n=== All figures and data generated ===")
-println("Figures: paper/figs/fig_results_*.pdf")
-println("Data:    paper/data/*.csv")
+println("Figures: figs/fig_results_*.pdf")
+println("Data:    data/*.csv")

@@ -40,7 +40,34 @@ The package includes pre-computed SINDy coefficients and validation datasets in 
   coef_csv = joinpath(data_dir, "real_sindy_discovery_coefficients.csv")
   ```
 
-- Data is bundled with the package (~830 KB) and available automatically via both `Pkg.add` and cloned repos.
+- The pre-computed coefficients and result CSVs are bundled with the package (~830 KB) and available automatically via both `Pkg.add` and cloned repos.
+
+### Fetching the OMNI2 dataset
+
+The large NASA OMNI2 hourly archive used for real-data discovery and backtests is
+**not** committed (it is hundreds of MB and is gitignored). Fetch and prepare it
+from the public NASA SPDF source with one API call:
+
+```julia
+using SolarSINDy
+
+df = prepare_omni_data()                 # download → extract → parse → clean ⇒ DataFrame
+df = prepare_omni_data(year_start=2010, year_end=2019)   # restrict the year range
+```
+
+Or step by step with the lower-level API:
+
+```julia
+raw       = download_omni2(joinpath(get_data_dir(), "omni_hourly_raw.dat"))   # public NASA SPDF
+extracted = extract_omni2_columns(raw, joinpath(get_data_dir(), "omni_extracted.csv"))
+df        = parse_omni2(extracted; year_start=2010, year_end=2019)
+clean_omni_data!(df)
+```
+
+The downloaded `omni_hourly_raw.dat` / `omni_extracted.csv` are written under `data/`
+and stay gitignored — they are never committed; rerun `prepare_omni_data()` anytime to
+regenerate them. Every script under `validation/` reads and writes within the package,
+so a fresh clone reproduces all results end to end (no external paths).
 
 ## Quick Start
 

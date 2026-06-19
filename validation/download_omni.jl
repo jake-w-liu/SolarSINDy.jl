@@ -2,13 +2,13 @@
 # download_omni.jl — Phase A: Download, clean, and catalog real OMNI2 data
 #
 # Outputs:
-#   paper/data/omni_hourly_raw.dat    — raw OMNI2 ASCII (cached)
-#   paper/data/storm_catalog.csv      — storm catalog with splits
+#   data/omni_hourly_raw.dat    — raw OMNI2 ASCII (cached)
+#   data/storm_catalog.csv      — storm catalog with splits
 
 using SolarSINDy
 using CSV, DataFrames, Dates
 
-const DATA_DIR = joinpath(@__DIR__, "..", "..", "paper", "data")
+const DATA_DIR = joinpath(@__DIR__, "..", "data")
 mkpath(DATA_DIR)
 
 # ============================================================

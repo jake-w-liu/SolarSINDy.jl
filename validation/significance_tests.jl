@@ -12,7 +12,7 @@ using CSV
 using DataFrames
 
 const DATA_DIR = SolarSINDy.get_data_dir()
-const PAPER_DATA_DIR = normpath(joinpath(@__DIR__, "..", "..", "paper", "data"))
+const PAPER_DATA_DIR = normpath(joinpath(@__DIR__, "..", "data"))
 
 function _sindy_minus_obrien(df::DataFrame, experiment)
     sub = experiment === nothing ? df : df[df.experiment .== experiment, :]

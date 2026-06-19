@@ -6,8 +6,8 @@ import PlotlyKaleido
 
 PlotlyKaleido.start()
 
-const DATA_DIR = joinpath(@__DIR__, "..", "..", "paper", "data")
-const FIGS_DIR = joinpath(@__DIR__, "..", "..", "paper", "figs")
+const DATA_DIR = joinpath(@__DIR__, "..", "data")
+const FIGS_DIR = joinpath(@__DIR__, "..", "figs")
 
 const COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00"]
 

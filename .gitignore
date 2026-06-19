@@ -5,3 +5,5 @@ storm_monitor.log
 
 data/omni_hourly_raw.dat
 data/omni_extracted.csv
+# generated figures (regenerable from validation scripts)
+figs/

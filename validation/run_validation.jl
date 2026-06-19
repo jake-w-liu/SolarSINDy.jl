@@ -2,16 +2,16 @@
 # run_validation.jl — Phase 1 heuristic validation of SINDy for solar wind coupling
 #
 # Generates:
-#   paper/figs/heuristic_sindy_recovery.pdf   — SINDy recovers Burton equation from synthetic data
-#   paper/figs/heuristic_model_comparison.pdf  — SINDy vs Burton vs O'Brien prediction comparison
-#   paper/figs/heuristic_pareto_front.pdf      — Parsimony vs accuracy (lambda sweep)
-#   paper/figs/heuristic_ensemble_inclusion.pdf — Ensemble SINDy term inclusion probabilities
-#   paper/figs/heuristic_phase_dependent.pdf   — Phase-dependent SINDy discovery
-#   paper/data/validation_data.csv             — Synthetic storm time series
-#   paper/data/sindy_coefficients.csv          — Discovered SINDy coefficients
-#   paper/data/model_metrics.csv               — Model comparison metrics
-#   paper/data/lambda_sweep.csv                — Lambda sweep results
-#   paper/data/ensemble_inclusion.csv          — Ensemble inclusion probabilities
+#   figs/heuristic_sindy_recovery.pdf   — SINDy recovers Burton equation from synthetic data
+#   figs/heuristic_model_comparison.pdf  — SINDy vs Burton vs O'Brien prediction comparison
+#   figs/heuristic_pareto_front.pdf      — Parsimony vs accuracy (lambda sweep)
+#   figs/heuristic_ensemble_inclusion.pdf — Ensemble SINDy term inclusion probabilities
+#   figs/heuristic_phase_dependent.pdf   — Phase-dependent SINDy discovery
+#   data/validation_data.csv             — Synthetic storm time series
+#   data/sindy_coefficients.csv          — Discovered SINDy coefficients
+#   data/model_metrics.csv               — Model comparison metrics
+#   data/lambda_sweep.csv                — Lambda sweep results
+#   data/ensemble_inclusion.csv          — Ensemble inclusion probabilities
 
 using SolarSINDy
 using CSV, DataFrames
@@ -23,6 +23,11 @@ PlotlyKaleido.start()
 
 # Resolve savefig ambiguity
 const savefig = PlotlyKaleido.savefig
+
+const DATA_DIR = joinpath(@__DIR__, "..", "data")
+const FIGS_DIR = joinpath(@__DIR__, "..", "figs")
+mkpath(DATA_DIR); mkpath(FIGS_DIR)
+
 
 const COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7"]
 const DASHES = ["solid", "dash", "dashdot", "dot"]
@@ -49,8 +54,8 @@ df_data = DataFrame(
     Dst_star_nT = swd.Dst_star,
     dDst_star_dt_nThr = dDst
 )
-CSV.write("paper/data/validation_data.csv", df_data)
-println("  Saved paper/data/validation_data.csv")
+CSV.write(joinpath(DATA_DIR, "validation_data.csv"), df_data)
+println("  Saved data/validation_data.csv")
 
 # ============================================================
 # 2. SINDy Discovery — recover Burton from synthetic data
@@ -74,8 +79,8 @@ df_coeff = DataFrame(
     coefficient = ξ,
     active = abs.(ξ) .> 0
 )
-CSV.write("paper/data/sindy_coefficients.csv", df_coeff)
-println("  Saved paper/data/sindy_coefficients.csv")
+CSV.write(joinpath(DATA_DIR, "sindy_coefficients.csv"), df_coeff)
+println("  Saved data/sindy_coefficients.csv")
 
 # ============================================================
 # 3. Model predictions — SINDy vs Burton vs O'Brien
@@ -142,8 +147,8 @@ df_metrics = DataFrame(
     n_points = [ms_sindy.n_points, ms_burton.n_points, ms_obrien.n_points,
                 ms_sindy_fwd.n_points, ms_burton_fwd.n_points, ms_obrien_fwd.n_points]
 )
-CSV.write("paper/data/model_metrics.csv", df_metrics)
-println("  Saved paper/data/model_metrics.csv")
+CSV.write(joinpath(DATA_DIR, "model_metrics.csv"), df_metrics)
+println("  Saved data/model_metrics.csv")
 
 # ============================================================
 # 4. Lambda sweep — Pareto front
@@ -160,8 +165,8 @@ df_sweep = DataFrame(
     n_terms = n_terms_sweep,
     rmse = rmse_sweep
 )
-CSV.write("paper/data/lambda_sweep.csv", df_sweep)
-println("  Saved paper/data/lambda_sweep.csv")
+CSV.write(joinpath(DATA_DIR, "lambda_sweep.csv"), df_sweep)
+println("  Saved data/lambda_sweep.csv")
 
 # ============================================================
 # 5. Ensemble SINDy
@@ -175,8 +180,8 @@ df_ensemble = DataFrame(
     median_coefficient = median_ξ,
     inclusion_probability = inclusion_prob
 )
-CSV.write("paper/data/ensemble_inclusion.csv", df_ensemble)
-println("  Saved paper/data/ensemble_inclusion.csv")
+CSV.write(joinpath(DATA_DIR, "ensemble_inclusion.csv"), df_ensemble)
+println("  Saved data/ensemble_inclusion.csv")
 
 # ============================================================
 # 6. Phase-dependent SINDy
@@ -219,7 +224,7 @@ plot_scatter!(fig1, swd.t, dDst_burton;
     color=COLORS[3], dash=DASHES[3], mode="lines",
     legend="Burton", linewidth=2)
 set_legend!(fig1; position=:bottomleft)
-savefig(fig1, "paper/figs/heuristic_sindy_recovery.pdf";
+savefig(fig1, joinpath(FIGS_DIR, "heuristic_sindy_recovery.pdf");
         width=DOUBLE_W, height=SINGLE_H)
 println("  Saved heuristic_sindy_recovery.pdf")
 
@@ -238,7 +243,7 @@ plot_scatter!(fig2, swd.t, Dst_obrien_sim;
     color=COLORS[4], dash=DASHES[4], mode="lines",
     legend="O'Brien-McPherron", linewidth=2)
 set_legend!(fig2; position=:bottomleft)
-savefig(fig2, "paper/figs/heuristic_model_comparison.pdf";
+savefig(fig2, joinpath(FIGS_DIR, "heuristic_model_comparison.pdf");
         width=DOUBLE_W, height=SINGLE_H)
 println("  Saved heuristic_model_comparison.pdf")
 
@@ -261,7 +266,7 @@ fig3 = plot_scatter(Float64.(pareto_terms), pareto_rmse;
     mode="lines+markers", color=COLORS[1], dash=DASHES[1],
     linewidth=2, marker_size=8)
 set_legend!(fig3; position=:topright)
-savefig(fig3, "paper/figs/heuristic_pareto_front.pdf";
+savefig(fig3, joinpath(FIGS_DIR, "heuristic_pareto_front.pdf");
         width=SINGLE_W, height=SINGLE_H)
 println("  Saved heuristic_pareto_front.pdf")
 
@@ -276,7 +281,7 @@ fig4 = plot_bar(term_names[top_idx_ens], inclusion_prob[top_idx_ens];
     ylabel="Inclusion Probability",
     color=COLORS[1])
 set_legend!(fig4; position=:topright)
-savefig(fig4, "paper/figs/heuristic_ensemble_inclusion.pdf";
+savefig(fig4, joinpath(FIGS_DIR, "heuristic_ensemble_inclusion.pdf");
         width=DOUBLE_W, height=SINGLE_H)
 println("  Saved heuristic_ensemble_inclusion.pdf")
 
@@ -311,11 +316,11 @@ plot_scatter!(fig5, x_pos .+ 0.15,
     color=COLORS[3], mode="markers", marker_size=10,
     marker_symbol="diamond", legend="Recovery")
 set_legend!(fig5; position=:topright)
-savefig(fig5, "paper/figs/heuristic_phase_dependent.pdf";
+savefig(fig5, joinpath(FIGS_DIR, "heuristic_phase_dependent.pdf");
         width=DOUBLE_W, height=SINGLE_H)
 println("  Saved heuristic_phase_dependent.pdf")
 println("  Phase terms plotted: ", join(top_terms, ", "))
 
 println("\n=== Validation complete ===")
-println("Figures: paper/figs/heuristic_*.pdf")
-println("Data:    paper/data/*.csv")
+println("Figures: figs/heuristic_*.pdf")
+println("Data:    data/*.csv")

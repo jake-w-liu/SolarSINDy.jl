@@ -8,18 +8,18 @@
 #   B4: Cross-solar-cycle generalization
 #
 # Outputs:
-#   paper/data/real_sindy_coefficients.csv
-#   paper/data/real_ensemble_inclusion.csv
-#   paper/data/real_lambda_sweep.csv
-#   paper/data/real_holdout_metrics.csv
-#   paper/data/may2024_reconstruction.csv
-#   paper/data/cross_cycle_metrics.csv
+#   data/real_sindy_coefficients.csv
+#   data/real_ensemble_inclusion.csv
+#   data/real_lambda_sweep.csv
+#   data/real_holdout_metrics.csv
+#   data/may2024_reconstruction.csv
+#   data/cross_cycle_metrics.csv
 
 using SolarSINDy
 using CSV, DataFrames, Dates, Statistics, Random
 
-const DATA_DIR = joinpath(@__DIR__, "..", "..", "paper", "data")
-const FIGS_DIR = joinpath(@__DIR__, "..", "..", "paper", "figs")
+const DATA_DIR = joinpath(@__DIR__, "..", "data")
+const FIGS_DIR = joinpath(@__DIR__, "..", "figs")
 mkpath(DATA_DIR)
 mkpath(FIGS_DIR)
 

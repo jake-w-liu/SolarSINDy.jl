@@ -22,7 +22,7 @@ const DEFAULT_V2_CALIBRATION_PATH = joinpath(
     "live_forecasts", "operational_v2_calibration.csv"
 )
 const DEFAULT_OMNI_EXTRACTED_PATH = normpath(joinpath(
-    @__DIR__, "..", "..", "paper", "data", "omni_extracted.csv"
+    @__DIR__, "..", "data", "omni_extracted.csv"
 ))
 
 Base.@kwdef struct LiveVerifyConfig
@@ -103,7 +103,7 @@ function _usage()
                             Default: live_forecasts/live_replay_table.csv.
       --table-limit=N        Number of recent rows to print for --replay-recent. Default: 24.
       --omni=PATH            Extracted OMNI CSV for --replay-omni.
-                            Default: paper/data/omni_extracted.csv.
+                            Default: data/omni_extracted.csv.
       --omni-year-start=N    First OMNI year loaded for --replay-omni. Default: 2024.
       --omni-year-end=N      Last OMNI year loaded for --replay-omni. Default: 2025.
       --v2-calibration=PATH  Calibration path for --model=v2 or --fit-v2-calibration.

@@ -7,13 +7,13 @@
 #   D3: Validation (coupled vs single-index predictions)
 #
 # Outputs:
-#   paper/data/coupled_coefficients.csv
-#   paper/data/coupled_metrics.csv
+#   data/coupled_coefficients.csv
+#   data/coupled_metrics.csv
 
 using SolarSINDy
 using CSV, DataFrames, Dates, Statistics, Random, LinearAlgebra
 
-const DATA_DIR = joinpath(@__DIR__, "..", "..", "paper", "data")
+const DATA_DIR = joinpath(@__DIR__, "..", "data")
 mkpath(DATA_DIR)
 
 # ============================================================

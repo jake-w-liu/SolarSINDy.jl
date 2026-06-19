@@ -8,13 +8,13 @@
 #   C4: Physical interpretation
 #
 # Outputs:
-#   paper/data/phase_dependent_real_coefficients.csv
-#   paper/data/switching_model_metrics.csv
+#   data/phase_dependent_real_coefficients.csv
+#   data/switching_model_metrics.csv
 
 using SolarSINDy
 using CSV, DataFrames, Dates, Statistics, Random
 
-const DATA_DIR = joinpath(@__DIR__, "..", "..", "paper", "data")
+const DATA_DIR = joinpath(@__DIR__, "..", "data")
 mkpath(DATA_DIR)
 
 # ============================================================

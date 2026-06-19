@@ -113,3 +113,28 @@ function load_omni2_csv(filepath::String)
     end
     return df
 end
+
+"""
+    prepare_omni_data(; data_dir=get_data_dir(), year_start=1963, year_end=2025, force=false)
+
+End-to-end fetch + prep of the NASA OMNI2 hourly dataset so the package is
+self-contained: download the raw archive from the public NASA SPDF source (if
+absent), extract the needed columns, parse, and clean. Returns the cleaned
+`DataFrame`. The large raw/extracted files are written under `data_dir` (the
+package `data/` directory by default) and are intentionally gitignored — they are
+never committed; this function regenerates them on demand.
+"""
+function prepare_omni_data(; data_dir::String=get_data_dir(), year_start::Int=1963,
+                           year_end::Int=2025, force::Bool=false)
+    mkpath(data_dir)
+    raw = joinpath(data_dir, "omni_hourly_raw.dat")
+    extracted = joinpath(data_dir, "omni_extracted.csv")
+    if force
+        rm(raw, force=true); rm(extracted, force=true)
+    end
+    download_omni2(raw)
+    extract_omni2_columns(raw, extracted)
+    df = parse_omni2(extracted; year_start=year_start, year_end=year_end)
+    clean_omni_data!(df)
+    return df
+end
