@@ -127,6 +127,151 @@ using HTTP
         @test dst0 != 0.0
     end
 
+    @testset "NEW-1/NEW-2: non-hour-aligned feed start still anchors observed Dst*" begin
+        # Live SWPC feeds are 1-min cadence, so the earliest time_tag is
+        # generically NOT on the hour (here :17:30). Before flooring the binning
+        # grid, the bin starts straddled hour boundaries and never matched the
+        # hour-floored Kyoto Dst keys, leaving Dst_star all-NaN. With the floor,
+        # at least one bin coincides with a top-of-hour Dst observation.
+        plasma = DataFrame(
+            time_tag = [
+                DateTime(2026, 1, 1, 0, 17, 30),
+                DateTime(2026, 1, 1, 0, 47, 30),
+                DateTime(2026, 1, 1, 1, 17, 30),
+                DateTime(2026, 1, 1, 1, 47, 30),
+                DateTime(2026, 1, 1, 2, 17, 30),
+            ],
+            density = [5.0, 7.0, 9.0, 11.0, 12.0],
+            speed = [400.0, 420.0, 440.0, 460.0, 470.0],
+            temperature = [1.0e5, 1.1e5, 1.2e5, 1.3e5, 1.35e5],
+        )
+        mag = DataFrame(
+            time_tag = [
+                DateTime(2026, 1, 1, 0, 17, 30),
+                DateTime(2026, 1, 1, 0, 47, 30),
+                DateTime(2026, 1, 1, 1, 17, 30),
+                DateTime(2026, 1, 1, 1, 47, 30),
+                DateTime(2026, 1, 1, 2, 17, 30),
+            ],
+            bx_gsm = [1.0, 1.0, 1.0, 1.0, 1.0],
+            by_gsm = [2.0, 4.0, 8.0, 10.0, 11.0],
+            bz_gsm = [-3.0, -5.0, -7.0, -9.0, -10.0],
+            bt = [3.7, 6.4, 10.7, 13.5, 14.9],
+        )
+        # Top-of-hour Kyoto Dst (the published cadence).
+        dst_times = [DateTime(2026, 1, 1, 1), DateTime(2026, 1, 1, 2)]
+        dst_vals = [-40.0, -55.0]
+
+        swd, _ = fetch_realtime_solar_wind(hours=3; plasma=plasma, mag=mag,
+                                           dst=(dst_times, dst_vals))
+
+        # Mutation guard for NEW-1: without flooring the grid, the hour-floored
+        # Dst keys never match any bin start and Dst_star is all-NaN.
+        @test count(!isnan, swd.Dst_star) >= 1
+    end
+
+    @testset "NF-DATA-02: NaN-Pdyn Dst* fallback keeps the +11 baseline" begin
+        # Density is missing for the whole window, so Pdyn is NaN and the
+        # pressure term is dropped — but the additive +11 baseline must remain,
+        # matching the train-time data_cleaning Dst* definition.
+        plasma = DataFrame(
+            time_tag = [DateTime(2026, 1, 1, 0, 0, 0), DateTime(2026, 1, 1, 0, 30, 0),
+                        DateTime(2026, 1, 1, 1, 0, 0)],
+            density = [NaN, NaN, NaN],
+            speed = [400.0, 420.0, 440.0],
+            temperature = [1.0e5, 1.1e5, 1.2e5],
+        )
+        mag = DataFrame(
+            time_tag = [DateTime(2026, 1, 1, 0, 0, 0), DateTime(2026, 1, 1, 0, 30, 0),
+                        DateTime(2026, 1, 1, 1, 0, 0)],
+            bx_gsm = [1.0, 1.0, 1.0],
+            by_gsm = [2.0, 4.0, 6.0],
+            bz_gsm = [-3.0, -5.0, -7.0],
+            bt = [3.7, 6.4, 9.2],
+        )
+        dst_times = [DateTime(2026, 1, 1, 0)]
+        dst_vals = [-40.0]
+
+        swd, _ = fetch_realtime_solar_wind(hours=1; plasma=plasma, mag=mag,
+                                           dst=(dst_times, dst_vals))
+        @test isnan(swd.Pdyn[1])           # confirm we exercise the NaN-Pdyn branch
+        @test swd.Dst[1] == -40.0
+        # Mutation guard: the old fallback set Dst* = Dst (no +11); the fix adds it.
+        @test swd.Dst_star[1] ≈ -40.0 + 11.0 atol=1e-12
+    end
+
+    @testset "NEW-3: live-loop index selection requires finite V AND Bz" begin
+        # A window with finite V in the trailing bin but NaN Bz there: selecting
+        # on V alone would land on the trailing NaN-Bz bin (forcing Bz=0, a
+        # suppressed/under-alarmed storm). The fix selects the last bin where
+        # BOTH are finite.
+        V = [400.0, 450.0, 500.0]
+        Bz = [-15.0, -18.0, NaN]   # strong southward driving, then a mag gap
+        idx = SolarSINDy._latest_finite_VBz_idx(V, Bz)
+        @test idx == 2                     # not 3 (Bz is NaN there)
+        @test !isnan(Bz[idx])
+
+        # All-Bz-NaN window must be skipped (return nothing), as warm-up does.
+        @test SolarSINDy._latest_finite_VBz_idx([400.0, 450.0], [NaN, NaN]) === nothing
+
+        # Behavioural consequence: stepping from the last finite-Bz bin keeps the
+        # southward-driving signal, whereas the old Bz=0 substitution (what the
+        # V-only selection would feed via _safe_val) produces a less-alarmed
+        # forecast. Verify the two differ in the alarming direction.
+        mktempdir() do tmp
+            coef_path = joinpath(tmp, "coefficients.csv")
+            ens_path = joinpath(tmp, "ensemble.csv")
+            # Active Bs (southward) driver pushes Dst* down.
+            CSV.write(coef_path, DataFrame(
+                term = ["Bs", "Dst_star"],
+                coefficient = [-2.0, -0.05],
+            ))
+            CSV.write(ens_path, DataFrame(
+                term = ["Bs", "Dst_star"],
+                inclusion_prob = [0.95, 0.99],
+                ci_025 = [-2.2, -0.06],
+                ci_975 = [-1.8, -0.04],
+            ))
+            state_true = init_forecast(coefficients_csv=coef_path,
+                                       ensemble_csv=ens_path,
+                                       t0=DateTime(2026, 1, 1, 0), dst0=-50.0)
+            state_bz0 = init_forecast(coefficients_csv=coef_path,
+                                      ensemble_csv=ens_path,
+                                      t0=DateTime(2026, 1, 1, 0), dst0=-50.0)
+            Pd = 1.6726e-6 * 5.0 * 500.0^2
+            r_true = step_forecast!(state_true, DateTime(2026, 1, 1, 1),
+                                    500.0, Bz[idx], 0.0, 5.0, Pd)
+            r_bz0 = step_forecast!(state_bz0, DateTime(2026, 1, 1, 1),
+                                   500.0, 0.0, 0.0, 5.0, Pd)
+            # True (southward) forecast must be more storm-like (lower Dst*) than
+            # the spurious Bz=0 forecast the buggy selection would have produced.
+            @test r_true.dst_predicted < r_bz0.dst_predicted
+        end
+    end
+
+    @testset "NEW-4: print_status flags a stale feed and not a fresh one" begin
+        fr = ForecastResult(DateTime(2026, 1, 1, 0), -30.0, -30.0, -45.0, -15.0, NaN)
+        forecast = ForecastResult[]
+
+        # Capture terminal output by redirecting stdout through a temp file.
+        capture_status(; data_age, stale) = mktemp() do path, io
+            redirect_stdout(io) do
+                SolarSINDy.print_status(fr, forecast, nothing, 450.0, -5.0, 5.0;
+                                        data_age=data_age, stale=stale)
+            end
+            flush(io)
+            read(path, String)
+        end
+
+        # >= 6 h old newest hour: staleness banner present.
+        stale_out = capture_status(data_age=Hour(6), stale=true)
+        @test occursin("STALE", stale_out)
+
+        # Fresh window: no staleness banner.
+        fresh_out = capture_status(data_age=Minute(20), stale=false)
+        @test !occursin("STALE", fresh_out)
+    end
+
     @testset "A/D: init_forecast maps coefficient CSVs into deterministic state" begin
         mktempdir() do tmp
             coef_path = joinpath(tmp, "coefficients.csv")

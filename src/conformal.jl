@@ -40,6 +40,8 @@ struct ConformalCalibration
     horizon_edges::Vector{Float64}         # ascending lead-time bin edges [hr]
     activity_threshold_nt::Float64         # latest Dst ≤ threshold ⇒ :disturbed
     min_stratum_n::Int                     # below this, use the global fallback
+    max_horizon::Float64                   # largest calibrated lead time [hr]; queries
+                                           # beyond it fall back to the global band
     strata::Dict{Symbol,ConformalStratum}
     global_stratum::ConformalStratum
 end
@@ -110,8 +112,10 @@ _stratum_key(hbin::Int, regime::Symbol) = Symbol("h", hbin, "_", regime)
 
 Fit a stratified split-conformal calibration from paired point forecasts and
 observations. `horizons` are lead times [hr]; `latest_dsts` are the issue-time
-observed Dst values used to assign the activity regime. Rows with any non-finite
-entry are dropped.
+observed Dst values used to assign the activity regime. A row is dropped only
+when its point, observation, or horizon is non-finite; a non-finite
+`latest_dst` is retained and assigned the wider `:disturbed` regime (the safe
+default, since the activity label is then unknown).
 
 Keyword arguments: `coverage` (default 0.90), `horizon_edges`,
 `activity_threshold_nt`, `min_stratum_n`.
@@ -132,14 +136,17 @@ function fit_conformal(points::AbstractVector{<:Real},
     min_stratum_n >= 1 || throw(ArgumentError("min_stratum_n must be ≥ 1"))
 
     edges = collect(Float64, horizon_edges)
-    # Collect residuals per stratum and globally.
+    # Collect residuals per stratum and globally, and track the largest calibrated
+    # lead time so out-of-support queries can be detected later.
     by_key = Dict{Symbol,Vector{Float64}}()
     global_res = Float64[]
+    max_horizon = 0.0
     for i in 1:n
         p, o, h, d = points[i], observations[i], horizons[i], latest_dsts[i]
         (isfinite(p) && isfinite(o) && isfinite(h)) || continue
         r = abs(o - p)
         push!(global_res, r)
+        max_horizon = max(max_horizon, Float64(h))
         key = _stratum_key(_horizon_bin(h, edges), _activity_regime(d, activity_threshold_nt))
         push!(get!(by_key, key, Float64[]), r)
     end
@@ -154,7 +161,7 @@ function fit_conformal(points::AbstractVector{<:Real},
         strata[key] = ConformalStratum(key, length(res), qw, cf)
     end
     return ConformalCalibration(Float64(coverage), edges, Float64(activity_threshold_nt),
-                                min_stratum_n, strata, global_stratum)
+                                min_stratum_n, max_horizon, strata, global_stratum)
 end
 
 """
@@ -163,8 +170,18 @@ end
 Resolve the [`ConformalStratum`](@ref) used for a `(horizon, latest_dst)` query:
 the matching cell when it has `≥ min_stratum_n` calibration points, otherwise the
 pooled global fallback.
+
+A query horizon beyond the largest calibrated lead time (`max_horizon`) is
+out-of-support: the top horizon bin `[edges[end-1], Inf)` was only ever fit on
+horizons up to `max_horizon`, so reusing its half-width for, e.g., a 24 h query
+calibrated only to 6 h would silently understate the interval. Such queries fall
+back to the wider global band instead.
 """
 function conformal_stratum(cal::ConformalCalibration, horizon::Real, latest_dst::Real)
+    # Out-of-support horizon → widest available (global) band, not the top-bin
+    # half-width fit on shorter leads. Defaults harmlessly when max_horizon=Inf
+    # (e.g. a legacy sidecar with no recorded max), preserving prior behavior.
+    (isfinite(horizon) && horizon > cal.max_horizon) && return cal.global_stratum
     key = _stratum_key(_horizon_bin(horizon, cal.horizon_edges),
                        _activity_regime(latest_dst, cal.activity_threshold_nt))
     s = get(cal.strata, key, nothing)
@@ -243,11 +260,15 @@ end
 
 # Finite-sample empirical half-width at coverage `level` (0 if level ≤ 0; the
 # sample max — the widest the sample supports — when level is too high for n).
+# Non-finite history entries are filtered out so a stray NaN/Inf residual cannot
+# poison the quantile; with no finite entry the band falls back to the widest
+# possible (Inf), mirroring the empty-history case.
 function _empirical_halfwidth(history::AbstractVector{<:Real}, level::Real)
-    n = length(history)
+    finite = Float64[h for h in history if isfinite(h)]
+    n = length(finite)
     n == 0 && return Inf
     level <= 0 && return 0.0
-    sorted = sort(collect(Float64, history))
+    sorted = sort(finite)
     k = ceil(Int, (n + 1) * level)
     k > n && return sorted[n]
     return sorted[clamp(k, 1, n)]
@@ -261,15 +282,28 @@ residual history at level `1 - α_t`, score coverage against `observed`, then
 append the new absolute residual (respecting the trailing window) and update
 `α_t`. Returns `(lo, hi, half_width, covered, alpha)`. The interval is formed
 BEFORE the observation enters the history (causal).
+
+A non-finite `point`/`observed` (or a non-finite residual) is treated as a
+missing/gap step, mirroring the split-path contract that drops non-finite rows:
+the interval is still reported from the current finite history, but the residual
+is NOT pushed and `α_t` is NOT updated, so a single NaN cannot poison the stream.
 """
 function adaptive_conformal_step!(ac::AdaptiveConformal, point::Real, observed::Real)
-    n = length(ac.history)
+    # Warm-up uses the widest finite residual seen so far; filter so a stray
+    # non-finite history entry cannot turn the warm-up band into NaN.
+    finite_hist = Float64[h for h in ac.history if isfinite(h)]
     level = clamp(1.0 - ac.alpha_t, 0.0, 1.0)
-    hw = n < ac.warmup ? (n == 0 ? Inf : maximum(ac.history)) :
+    hw = length(ac.history) < ac.warmup ?
+         (isempty(finite_hist) ? Inf : maximum(finite_hist)) :
          _empirical_halfwidth(ac.history, level)
     lo = Float64(point) - hw
     hi = Float64(point) + hw
     r = abs(Float64(observed) - Float64(point))
+    # Gap step: a non-finite residual carries no coverage information. Report the
+    # interval from existing history but skip the history push and α_t update.
+    if !isfinite(r)
+        return (lo=lo, hi=hi, half_width=hw, covered=false, alpha=ac.alpha_t)
+    end
     covered = r <= hw
     err = covered ? 0.0 : 1.0
     α_target = 1.0 - ac.target_coverage
@@ -298,9 +332,12 @@ function run_adaptive_conformal(points::AbstractVector{<:Real},
     post_hits = 0; post_total = 0
     for t in 1:n
         warm = length(ac.history) < ac.warmup
+        # A non-finite point/obs is a gap step (no residual pushed); it carries no
+        # coverage information and must not be scored as a miss.
+        gap = !(isfinite(points[t]) && isfinite(observations[t]))
         s = adaptive_conformal_step!(ac, points[t], observations[t])
         lo[t] = s.lo; hi[t] = s.hi; covered[t] = s.covered; alpha[t] = s.alpha
-        if !warm
+        if !warm && !gap
             post_total += 1
             s.covered && (post_hits += 1)
         end
@@ -313,8 +350,10 @@ end
     write_conformal_calibration(path, cal)
 
 Persist a [`ConformalCalibration`](@ref) to CSV. Row 1 is a `__meta__` record
-holding the nominal coverage, horizon edges, activity threshold, and
-`min_stratum_n`; the remaining rows are one per stratum (including `global`).
+holding the nominal coverage, horizon edges, activity threshold, `min_stratum_n`,
+and the largest calibrated horizon; the remaining rows are one per stratum
+(including `global`). The `max_horizon` column is new; readers default it to
+`Inf` when absent so older sidecars still load.
 """
 function write_conformal_calibration(path::String, cal::ConformalCalibration)
     dir = dirname(path)
@@ -327,6 +366,7 @@ function write_conformal_calibration(path::String, cal::ConformalCalibration)
         coverage_floor=cal.activity_threshold_nt,
         horizon_edges=join(string.(cal.horizon_edges), ";"),
         min_stratum_n=cal.min_stratum_n,
+        max_horizon=cal.max_horizon,
     ))
     function _push_stratum(s::ConformalStratum)
         push!(rows, (
@@ -336,6 +376,7 @@ function write_conformal_calibration(path::String, cal::ConformalCalibration)
             coverage_floor=s.coverage_floor,
             horizon_edges="",
             min_stratum_n=cal.min_stratum_n,
+            max_horizon=cal.max_horizon,
         ))
     end
     _push_stratum(cal.global_stratum)
@@ -361,6 +402,9 @@ function read_conformal_calibration(path::String)
     activity_threshold = Float64(df.coverage_floor[1])
     edges = parse.(Float64, split(String(df.horizon_edges[1]), ";"))
     min_stratum_n = Int(df.min_stratum_n[1])
+    # max_horizon is a newer field; legacy sidecars without the column default to
+    # Inf, which disables the out-of-support guard and preserves prior behavior.
+    max_horizon = hasproperty(df, :max_horizon) ? Float64(df.max_horizon[1]) : Inf
 
     strata = Dict{Symbol,ConformalStratum}()
     global_stratum = nothing
@@ -376,8 +420,13 @@ function read_conformal_calibration(path::String)
     end
     global_stratum === nothing &&
         throw(ArgumentError("conformal calibration missing :global stratum: $path"))
+    # Re-assert the same invariants fit_conformal enforces, so a corrupt or
+    # hand-edited sidecar cannot load into an inconsistent calibration.
+    0 < coverage < 1 || throw(ArgumentError("corrupt conformal calibration: coverage must lie in (0, 1): $path"))
+    issorted(edges) || throw(ArgumentError("corrupt conformal calibration: horizon_edges must be ascending: $path"))
+    min_stratum_n >= 1 || throw(ArgumentError("corrupt conformal calibration: min_stratum_n must be ≥ 1: $path"))
     return ConformalCalibration(coverage, edges, activity_threshold,
-                                min_stratum_n, strata, global_stratum)
+                                min_stratum_n, max_horizon, strata, global_stratum)
 end
 
 """

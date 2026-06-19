@@ -8,6 +8,8 @@ using SpecialFunctions: erf
 Root Mean Square Error.
 """
 function rmse(predicted::AbstractVector, observed::AbstractVector)
+    length(predicted) == length(observed) ||
+        throw(DimensionMismatch("rmse: predicted ($(length(predicted))) and observed ($(length(observed))) lengths differ"))
     return sqrt(mean((predicted .- observed).^2))
 end
 
@@ -32,9 +34,15 @@ SS > 0 means predicted is better than reference.
 """
 function skill_score(predicted::AbstractVector, observed::AbstractVector,
                      reference::AbstractVector)
+    (length(predicted) == length(observed) == length(reference)) ||
+        throw(DimensionMismatch("skill_score: predicted ($(length(predicted))), observed ($(length(observed))), reference ($(length(reference))) lengths differ"))
     mse_pred = mean((predicted .- observed).^2)
     mse_ref = mean((reference .- observed).^2)
-    return 1.0 - mse_pred / max(mse_ref, 1e-20)
+    # A zero-variance reference (reference == observed) leaves the skill score
+    # undefined; flag it as NaN rather than dividing by a 1e-20 floor that would
+    # return huge finite garbage. Matches the explicit NaN guard in correlation().
+    mse_ref == 0 && return NaN
+    return 1.0 - mse_pred / mse_ref
 end
 
 """
@@ -46,9 +54,15 @@ PE = 1 is perfect, PE = 0 is no better than mean, PE < 0 is worse.
 """
 function prediction_efficiency(predicted::AbstractVector,
                                observed::AbstractVector)
+    length(predicted) == length(observed) ||
+        throw(DimensionMismatch("prediction_efficiency: predicted ($(length(predicted))) and observed ($(length(observed))) lengths differ"))
     ss_res = sum((predicted .- observed).^2)
     ss_tot = sum((observed .- mean(observed)).^2)
-    return 1.0 - ss_res / max(ss_tot, 1e-20)
+    # A zero-variance observation (constant target) leaves PE undefined; flag it
+    # as NaN rather than dividing by a 1e-20 floor that would return huge finite
+    # garbage. Matches the explicit NaN guard in correlation().
+    ss_tot == 0 && return NaN
+    return 1.0 - ss_res / ss_tot
 end
 
 """

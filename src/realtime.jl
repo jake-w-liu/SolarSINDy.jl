@@ -180,6 +180,13 @@ function fetch_realtime_solar_wind(; hours::Int=168,
     # Truncate to requested hours
     t_start = max(t_start, t_end - Hour(hours))
 
+    # Floor the binning grid to the hour so bin starts (t_edges[i], used as the
+    # Dst lookup key below) coincide with the hour-floored keys produced by
+    # _hourly_dst_lookup. Live SWPC feeds are 1-min cadence, so the earliest
+    # t_start is generically not on :00; without this floor the [t0,t1) bins
+    # straddle hour boundaries and the observed-Dst anchor never matches.
+    t_start = floor(t_start, Hour(1))
+
     # Create hourly bins
     t_edges = collect(t_start:Hour(1):t_end)
     n_bins = length(t_edges) - 1
@@ -232,7 +239,7 @@ function fetch_realtime_solar_wind(; hours::Int=168,
     # Pressure-corrected Dst* where an observed Dst and Pdyn are both available;
     # NaN bins leave the forecaster unanchored for that step.
     Dst_star_hr = [isnan(Dst_hr[i]) ? NaN :
-                   (isnan(Pdyn_hr[i]) ? Dst_hr[i] :
+                   (isnan(Pdyn_hr[i]) ? Dst_hr[i] + 11.0 :
                     Dst_hr[i] - 7.26 * sqrt(max(Pdyn_hr[i], 0.0)) + 11.0)
                    for i in 1:n_bins]
 

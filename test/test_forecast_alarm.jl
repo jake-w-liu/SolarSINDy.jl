@@ -195,6 +195,42 @@ using Dates
         end
     end
 
+    @testset "D: Operational v2 center clamped to physical Dst range" begin
+        # Mutation-sensitive guard for the operational-v2 center clamp. A
+        # pathological positive residual correction must not push the issued
+        # Dst* above the physical ceiling (+50 nT) used by every other forecast
+        # path. Build a calibration whose residual is a constant +140 nT so the
+        # fitted intercept is ~+140 and the :v2 component is selected (zero
+        # residual), then issue a forecast from a moderately negative prediction
+        # whose uncorrected center (-10 + 140 = +130 nT) is unphysical.
+        bz = collect(-2.0:1.0:3.0)
+        base_pred = collect(-25.0:1.0:-20.0)
+        observed = base_pred .+ 140.0  # constant residual → intercept-only law
+        df_hot = DataFrame(
+            pred_dst_nt=base_pred,
+            pred_dst_ci05_nt=base_pred .- 5.0,
+            pred_dst_ci95_nt=base_pred .+ 5.0,
+            observation_dst_nt=observed,
+            Bz_nt=bz,
+        )
+        cal_hot = fit_operational_v2_calibration(
+            df_hot;
+            feature_names=[:Bz_nt],
+            ridge=0.0,
+            interval_coverage=0.90,
+            label="clamp_unit_test",
+        )
+        @test cal_hot.selected_component == :v2  # perfect-fit v2 wins selector
+        pred_hot = operational_v2_predict(cal_hot, -10.0, -15.0, -5.0, (; Bz_nt=0.0))
+        # Without the clamp this would be ~ -10 + 140 = +130 nT (unphysical).
+        @test pred_hot.pred_dst <= 50.0
+        @test pred_hot.pred_dst >= -2000.0
+        @test pred_hot.selected_component_pred <= 50.0
+        @test pred_hot.corrected_sindy_pred <= 50.0
+        # The interval is centered on the clamped value, so its center matches.
+        @test (pred_hot.ci05_dst + pred_hot.ci95_dst) / 2 ≈ pred_hot.pred_dst atol=1e-9
+    end
+
     @testset "A/D: Operational v2 guarded baseline selector" begin
         n = 16
         v1_pred = fill(-40.0, n)

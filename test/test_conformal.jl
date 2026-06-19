@@ -173,6 +173,144 @@ using Statistics
         @test_throws DimensionMismatch run_adaptive_conformal([1.0, 2.0], [1.0])
     end
 
+    @testset "CF-1: conformal quantile uses finite-sample (n+1) index exactly" begin
+        # Discriminating operating point: residuals 1..10, coverage 0.90.
+        # k = ceil((10+1)*0.90) = ceil(9.9) = 10 → 10th smallest = 10.0, floor 10/11.
+        # A floor() index gives 9.0 and the uncorrected n·coverage index gives 9.0;
+        # both fail this exact check, so the assertion pins the (n+1)·ceil scheme.
+        hw, cf = SolarSINDy._conformal_quantile(collect(1.0:10.0), 0.90)
+        @test hw == 10.0
+        @test cf ≈ 10 / 11 atol = 1e-12
+    end
+
+    @testset "CF-2: non-finite latest_dst row is retained as :disturbed" begin
+        # Doc contract: a NaN latest_dst is NOT dropped; it is assigned :disturbed.
+        # Build a fit where every row has NaN latest_dst, so the only occupied
+        # stratum is the disturbed cell — proving the rows survived the filter.
+        n = 40
+        pts = zeros(n); obs = 3.0 .* ones(n); hor = fill(1.0, n)
+        dst = fill(NaN, n)
+        cc = fit_conformal(pts, obs, hor, dst; coverage=0.90, min_stratum_n=5)
+        # h-bin for horizon 1.0 with default edges is bin 1 → key :h1_disturbed.
+        @test haskey(cc.strata, :h1_disturbed)
+        @test !haskey(cc.strata, :h1_quiet)
+        @test cc.strata[:h1_disturbed].n == n   # all NaN-dst rows retained
+    end
+
+    @testset "CF-3: corrupt calibration artifact is rejected on read" begin
+        rng = MersenneTwister(515)
+        n = 100
+        cc = fit_conformal(zeros(n), 5.0 .* randn(rng, n), fill(1.0, n), fill(0.0, n);
+                           coverage=0.90, min_stratum_n=20)
+        mktempdir() do tmp
+            # Valid round-trip still succeeds (guard does not reject good files).
+            good = joinpath(tmp, "good.csv")
+            write_conformal_calibration(good, cc)
+            @test read_conformal_calibration(good) isa ConformalCalibration
+
+            # Corrupt coverage (meta half_width column holds coverage).
+            bad_cov = joinpath(tmp, "bad_cov.csv")
+            df = CSV.read(good, DataFrame)
+            df.half_width[1] = 1.5                       # coverage > 1
+            CSV.write(bad_cov, df)
+            @test_throws ArgumentError read_conformal_calibration(bad_cov)
+
+            # Corrupt (descending) horizon edges.
+            bad_edges = joinpath(tmp, "bad_edges.csv")
+            df2 = CSV.read(good, DataFrame)
+            df2.horizon_edges[1] = "0.0;3.0;1.0;Inf"     # not ascending
+            CSV.write(bad_edges, df2)
+            @test_throws ArgumentError read_conformal_calibration(bad_edges)
+
+            # Corrupt min_stratum_n (< 1).
+            bad_min = joinpath(tmp, "bad_min.csv")
+            df3 = CSV.read(good, DataFrame)
+            df3.min_stratum_n .= 0
+            CSV.write(bad_min, df3)
+            @test_throws ArgumentError read_conformal_calibration(bad_min)
+        end
+    end
+
+    @testset "F4: out-of-support horizon falls back to global, not top-bin reuse" begin
+        rng = MersenneTwister(404)
+        # Fit only on leads {1,2,3,6}; the top bin [4.5,Inf) is calibrated at 6 h
+        # but with a much SMALLER residual scale than longer leads would have.
+        ngrp = 600
+        leads = [1.0, 2.0, 3.0, 6.0]
+        scales = [2.0, 3.0, 4.0, 6.0]
+        pts = Float64[]; obs = Float64[]; hor = Float64[]; dst = Float64[]
+        for (h, σ) in zip(leads, scales)
+            append!(pts, zeros(ngrp))
+            append!(obs, σ .* randn(rng, ngrp))
+            append!(hor, fill(h, ngrp))
+            append!(dst, zeros(ngrp))
+        end
+        # Inflate the global pool's tail so the global band is strictly wider than
+        # the 6 h top-bin half-width (operationally: longer leads are worse).
+        append!(pts, zeros(40)); append!(obs, fill(200.0, 40))
+        append!(hor, fill(6.0, 40)); append!(dst, zeros(40))
+        cc = fit_conformal(pts, obs, hor, dst; coverage=0.90, min_stratum_n=50)
+
+        @test cc.max_horizon == 6.0
+        hw_topbin = conformal_halfwidth(cc, 6.0, 0.0)          # in-support, top bin
+        hw_24h    = conformal_halfwidth(cc, 24.0, 0.0)         # out-of-support
+        # The guard must NOT silently reuse the 6 h half-width for 24 h.
+        @test hw_24h != hw_topbin
+        @test conformal_stratum(cc, 24.0, 0.0).key == :global
+        @test hw_24h == cc.global_stratum.half_width
+        # In-support queries are unchanged (no number drift): horizon 6.0 with the
+        # default edges [0,1.5,2.5,4.5,Inf] lands in bin 4 → :h4_quiet, which has
+        # ≥ min_stratum_n points and is therefore the resolved stratum.
+        @test conformal_stratum(cc, 6.0, 0.0).key == :h4_quiet
+        @test conformal_halfwidth(cc, 6.0, 0.0) == cc.strata[:h4_quiet].half_width
+    end
+
+    @testset "NEW-ACI-NAN-1: mid-stream NaN does not poison the ACI stream" begin
+        rng = MersenneTwister(20260619)
+        n = 600; σ = 6.0
+        pts = zeros(n)
+        obs = σ .* randn(rng, n)
+        # Inject a non-finite observation mid-stream (a data gap / dropout).
+        gap = 300
+        obs[gap] = NaN
+        r = run_adaptive_conformal(pts, obs; target_coverage=0.90, gamma=0.03, warmup=50)
+        # No interval, half-width, or alpha may be NaN despite the gap. (The very
+        # first warm-up step legitimately uses an Inf band from empty history, so
+        # the poison signature to exclude is NaN, not the intended Inf.)
+        @test !any(isnan, r.lo)
+        @test !any(isnan, r.hi)
+        @test !any(isnan, r.alpha)
+        @test !isnan(r.coverage)
+        # Post-warmup intervals are finite — a single NaN residual would otherwise
+        # propagate NaN half-widths for the entire remaining stream.
+        @test all(isfinite, r.lo[(gap + 1):n])
+        @test all(isfinite, r.hi[(gap + 1):n])
+        # Post-gap coverage recovers near nominal (the poisoned stream would NaN).
+        post = (gap + 50):n
+        post_cov = mean(r.covered[k] for k in post)
+        @test 0.80 <= post_cov <= 1.0
+
+        # Direct contract check: a NaN-observation step must not push history or
+        # move alpha_t (mirrors the split-path skip-non-finite contract).
+        ac = init_adaptive_conformal(; target_coverage=0.90, gamma=0.1, warmup=0)
+        append!(ac.history, fill(5.0, 20))
+        hlen0 = length(ac.history); a0 = ac.alpha_t
+        s = adaptive_conformal_step!(ac, 0.0, NaN)
+        @test isfinite(s.half_width)
+        @test length(ac.history) == hlen0     # residual NOT pushed
+        @test ac.alpha_t == a0                # alpha NOT updated
+
+        # Warm-up path guard: with a non-finite entry already in history, the
+        # warm-up band is max(finite history), not a NaN from maximum() over a
+        # poisoned vector. (Force the poison directly to also cover the case where
+        # the guard is partially reverted.)
+        ac2 = init_adaptive_conformal(; target_coverage=0.90, gamma=0.1, warmup=50)
+        append!(ac2.history, [3.0, NaN, 7.0])     # mid-warmup, one poisoned entry
+        s2 = adaptive_conformal_step!(ac2, 0.0, 1.0)
+        @test isfinite(s2.half_width)
+        @test s2.half_width == 7.0                # widest FINITE residual
+    end
+
     @testset "input validation and degenerate cases" begin
         @test_throws ArgumentError fit_conformal([1.0], [1.0], [1.0], [0.0]; coverage=0.0)
         @test_throws DimensionMismatch fit_conformal([1.0, 2.0], [1.0], [1.0], [0.0])

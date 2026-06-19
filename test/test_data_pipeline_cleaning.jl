@@ -176,4 +176,65 @@ using DataFrames
             @test loaded == [entry]
         end
     end
+
+    @testset "NF-DATA-01: gap-filled Pdyn keeps the n·V² identity (not independently interpolated)" begin
+        # n, V, and Pdyn share a 2-hour interior gap. After cleaning, n and V are
+        # interpolated and Pdyn is recomputed from them, so the n·V² identity must
+        # hold on the gap rows — it does NOT under an independent Pdyn interpolation
+        # (Pdyn is quadratic in V, so linear Pdyn interpolation drifts from n·V²).
+        df = DataFrame(
+            datetime = [DateTime(2021, 1, 1) + Hour(i - 1) for i in 1:5],
+            V   = [400.0, NaN, NaN, 700.0, 800.0],
+            Bz  = fill(-5.0, 5),
+            By  = fill(1.0, 5),
+            n   = [5.0, NaN, NaN, 11.0, 12.0],
+            Pdyn = [NaN, NaN, NaN, NaN, 13.0],   # row 5 native Pdyn is preserved
+            T   = fill(1.0e5, 5),
+            Dst = [-30.0, -32.0, -34.0, -36.0, -38.0],
+            AE  = fill(100.0, 5), AL = fill(-50.0, 5), AU = fill(80.0, 5),
+        )
+        clean_omni_data!(df)
+        for i in 1:4   # rows 1–4 had NaN Pdyn → recomputed from (interpolated) n, V
+            @test df.Pdyn[i] ≈ 1.6726e-6 * df.n[i] * df.V[i]^2 atol=1e-12
+        end
+        @test df.Pdyn[5] == 13.0   # native OMNI Pdyn untouched (alpha-inclusive)
+    end
+
+    @testset "NF-DATA-02: Pdyn=NaN Dst* fallback keeps the +11 baseline" begin
+        # Trailing n/V gap → not interpolated → Pdyn stays NaN → Dst* fallback drops
+        # only the pressure term, keeping the +11 baseline (level-continuous).
+        df = DataFrame(
+            datetime = [DateTime(2021, 2, 1) + Hour(i - 1) for i in 1:3],
+            V   = [400.0, NaN, NaN],
+            Bz  = fill(-5.0, 3),
+            By  = fill(1.0, 3),
+            n   = [5.0, NaN, NaN],
+            Pdyn = [2.0, NaN, NaN],
+            T   = fill(1.0e5, 3),
+            Dst = [-30.0, -40.0, -50.0],
+            AE  = fill(100.0, 3), AL = fill(-50.0, 3), AU = fill(80.0, 3),
+        )
+        clean_omni_data!(df)
+        @test isnan(df.Pdyn[2]); @test isnan(df.Pdyn[3])
+        @test df.Dst_star[2] ≈ df.Dst[2] + 11.0 atol=1e-12
+        @test df.Dst_star[3] ≈ df.Dst[3] + 11.0 atol=1e-12
+    end
+
+    @testset "NF-DATA-03: AU/AL fill threshold preserves real values in [9999,99999)" begin
+        mktempdir() do tmp
+            csv_path = joinpath(tmp, "omni_au.csv")
+            open(csv_path, "w") do io
+                println(io, "year,doy,hour,By,Bz,T,n,V,Pdyn,Dst,AE,AL,AU")
+                # Active hour: real AU=10000, AL=-12000 (magnitude >9999, below the
+                # 99999 fill value) must survive — a 9999 threshold would NaN them.
+                println(io, "1964,60,12,1.5,-2.5,500000,4.0,450,3.50,-40,120,-12000,10000")
+                println(io, "1964,61,0,1.0,-1.0,100000,5.0,500,2.00,-20,80,-99999,99999")
+            end
+            df = parse_omni2(csv_path; year_start=1964, year_end=1964)
+            @test df.AU[1] == 10000.0    # real value preserved (threshold is 99999, not 9999)
+            @test df.AL[1] == -12000.0
+            @test isnan(df.AU[2])        # 99999 fill → NaN
+            @test isnan(df.AL[2])        # -99999 fill → NaN (abscheck)
+        end
+    end
 end

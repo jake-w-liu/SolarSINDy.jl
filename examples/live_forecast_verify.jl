@@ -56,6 +56,15 @@ end
 # selection).
 const V2_MIN_COMPONENT_ROWS = 12
 
+# F5/M3: minimum validation rows before the coverage-floor acceptance gate is
+# trusted. With a 1–2 row validation split the empirical coverage collapses to a
+# degenerate 0/1 (or 0/0.5/1) estimate, so the gate cannot meaningfully enforce
+# the 0.85 floor; below this count the v2 candidate is rejected in favor of the
+# v1-equivalent fallback. Set to the smallest validation size already exercised
+# by the deployed-calibration regression fixtures so the guard rejects only the
+# genuinely degenerate splits and stays a no-op on valid multi-row calibrations.
+const V2_MIN_VALIDATION_ROWS = 3
+
 function _usage()
     return """
     Usage:
@@ -377,16 +386,37 @@ function _window_finite_count(df::DataFrame, col::Symbol, t0::DateTime, t1::Date
 end
 
 """
-    _driver_gap_status(n_speed_finite, n_bz_finite)
+    _step_driver_fallback(plasma, mag, source_hour)
 
-Classify solar-wind coverage of the trailing forecast window:
-`:hard` (no finite speed AND no finite Bz — refuse to issue),
-`:partial` (one of the two is empty — issue but flag), `:ok` otherwise.
+True when the intermediate forecast hour `[source_hour, source_hour+1h)` has no
+finite speed OR no finite Bz sample, so `_drivers_for_window` would carry frozen
+persistence drivers rather than observed solar wind into that step (P1-2). Pure,
+so the per-step fallback bookkeeping in the multi-step issuance loop is testable
+without the live feeds.
+"""
+function _step_driver_fallback(plasma::DataFrame, mag::DataFrame, source_hour::DateTime)
+    src_end = source_hour + Hour(1)
+    return _window_finite_count(plasma, :speed, source_hour, src_end) == 0 ||
+           _window_finite_count(mag, :bz_gsm, source_hour, src_end) == 0
+end
+
+"""
+    _driver_gap_status(n_speed_finite, n_bz_finite[, n_density_finite, n_by_finite])
+
+Classify solar-wind coverage of the trailing forecast window over all four
+drivers that `_drivers_for_window` would otherwise silently replace with quiet
+defaults (speed→400, density→5, Bz→0, By→0). `:hard` (no finite speed AND no
+finite Bz — refuse to issue), `:partial` (ANY of the four trailing counts is
+empty so at least one driver fell back to a default — issue but flag), `:ok`
+when all four have at least one finite sample. The density/By counts default to
+a nonzero sentinel so legacy two-argument callers keep their original meaning.
 Pure function so the data-gap decision is unit-testable without the live feeds.
 """
-function _driver_gap_status(n_speed_finite::Int, n_bz_finite::Int)
+function _driver_gap_status(n_speed_finite::Int, n_bz_finite::Int,
+                            n_density_finite::Int=1, n_by_finite::Int=1)
     (n_speed_finite == 0 && n_bz_finite == 0) && return :hard
-    (n_speed_finite == 0 || n_bz_finite == 0) && return :partial
+    (n_speed_finite == 0 || n_bz_finite == 0 ||
+     n_density_finite == 0 || n_by_finite == 0) && return :partial
     return :ok
 end
 
@@ -814,6 +844,19 @@ function replay_recent_table(plasma::DataFrame, mag::DataFrame,
         if !all(isfinite, (drivers.V, drivers.n, drivers.Bz, drivers.By, drivers.Pdyn))
             continue
         end
+        # Mirror the issuance C1 guard: `_drivers_for_window` (no fallback) fills an
+        # all-NaN window with finite quiet defaults, so the isfinite check above
+        # cannot see a fabricated driver. Drop the anchor whenever ANY of the four
+        # solar-wind drivers had no finite trailing sample. A no-op on valid data
+        # (every window has finite samples), it only rejects fabricated rows.
+        if _driver_gap_status(
+                _window_finite_count(plasma, :speed, source_start, source_end),
+                _window_finite_count(mag, :bz_gsm, source_start, source_end),
+                _window_finite_count(plasma, :density, source_start, source_end),
+                _window_finite_count(mag, :by_gsm, source_start, source_end),
+            ) != :ok
+            continue
+        end
         features = _v2_features(dst_map[anchor_time], drivers)
 
         for h in horizons
@@ -1111,6 +1154,28 @@ function _chronological_train_validation_test(df::DataFrame,
     !isempty(sort_cols) && sort!(df, sort_cols)
     n = nrow(df)
     n >= 3 || throw(ArgumentError("Need at least 3 rows for fit/validation/holdout split"))
+
+    # F3: split by ANCHOR (issue_time), not by raw row index. With multi-horizon
+    # replay an anchor contributes several rows (one per lead); a raw-index cut can
+    # straddle one anchor's rows across train/validation/holdout, leaking the same
+    # issue time into multiple splits. Partition the unique sorted anchors by
+    # fraction and assign each anchor's whole row block to one split, so the
+    # issue_time sets are pairwise disjoint. With one row per anchor (the
+    # single-horizon table) this reduces to the original index split.
+    if String(:issue_time_utc) in names(df)
+        anchors = unique(df.issue_time_utc)            # sorted: df is sorted above
+        na = length(anchors)
+        na >= 3 || throw(ArgumentError("Need at least 3 distinct anchors for fit/validation/holdout split"))
+        na_train = clamp(floor(Int, train_fraction * na), 1, na - 2)
+        na_validation = clamp(floor(Int, validation_fraction * na), 1, na - na_train - 1)
+        split_of = Dict{eltype(anchors),Int}()
+        for (i, a) in enumerate(anchors)
+            split_of[a] = i <= na_train ? 1 : (i <= na_train + na_validation ? 2 : 3)
+        end
+        s = [split_of[a] for a in df.issue_time_utc]
+        return df[s .== 1, :], df[s .== 2, :], df[s .== 3, :]
+    end
+
     n_train = clamp(floor(Int, train_fraction * n), 1, n - 2)
     n_validation = clamp(floor(Int, validation_fraction * n), 1, n - n_train - 1)
     train = df[1:n_train, :]
@@ -1135,6 +1200,42 @@ function _scored_metric(scored::DataFrame, pred_col::Symbol)
     m = _metric_values(preds, obs)
     m === nothing && throw(ArgumentError("no finite rows for metric column $pred_col"))
     return m
+end
+
+"""
+    _paired_gate_metrics(scored, pred_cols)
+
+Compute metrics for several predictor columns over a SINGLE common finite-row
+mask: a row counts only when its observation and EVERY listed prediction are
+present and finite (`isfinite`, not just `!ismissing`). F6: the validation gate
+compares v2 against persistence and O'Brien, so a missing/NaN baseline row must
+drop the whole comparison row from all metrics, otherwise the comparison is
+unpaired (different n per column) and a baseline can look artificially better or
+worse than v2. Returns a `Dict{Symbol,NamedTuple}` keyed by predictor column.
+"""
+function _paired_gate_metrics(scored::DataFrame, pred_cols::Vector{Symbol})
+    cols = Symbol[c for c in pred_cols if String(c) in names(scored)]
+    isempty(cols) && throw(ArgumentError("no listed predictor columns present in scored frame"))
+    finite(df, i, c) = begin
+        v = _optional_float(df, i, c)
+        !ismissing(v) && isfinite(Float64(v))
+    end
+    obs = Float64[]
+    series = Dict(c => Float64[] for c in cols)
+    for i in 1:nrow(scored)
+        (finite(scored, i, :observation_dst_nt) && all(finite(scored, i, c) for c in cols)) || continue
+        push!(obs, Float64(_optional_float(scored, i, :observation_dst_nt)))
+        for c in cols
+            push!(series[c], Float64(_optional_float(scored, i, c)))
+        end
+    end
+    out = Dict{Symbol,NamedTuple}()
+    for c in cols
+        m = _metric_values(series[c], obs)
+        m === nothing && throw(ArgumentError("no common finite rows for paired gate metric $c"))
+        out[c] = m
+    end
+    return out
 end
 
 function _require_live_columns(df::DataFrame, cols)
@@ -1271,13 +1372,20 @@ function _select_validated_v2_calibration(train::DataFrame,
                 continue
             end
 
-            # Evaluate purely on the held-out validation split.
+            # Evaluate purely on the held-out validation split. F6: v2,
+            # persistence, and O'Brien metrics share ONE common finite-row mask so
+            # the gate comparison is paired (equal n); a missing/NaN baseline row
+            # drops from all three rather than only its own column.
             vs = score_operational_v2(validation, cal)
-            v2m = _scored_metric(vs, :v2_pred_dst_nt)
+            has_obrien = String(:obrien_dst_nt) in names(vs)
+            gate_cols = has_obrien ?
+                Symbol[:v2_pred_dst_nt, :latest_dst_nt, :obrien_dst_nt] :
+                Symbol[:v2_pred_dst_nt, :latest_dst_nt]
+            gate_metrics = _paired_gate_metrics(vs, gate_cols)
+            v2m = gate_metrics[:v2_pred_dst_nt]
             # Persistence forecast = latest observed Dst at issue time.
-            persm = _scored_metric(vs, :latest_dst_nt)
-            obrm = String(:obrien_dst_nt) in names(vs) ?
-                _scored_metric(vs, :obrien_dst_nt) : nothing
+            persm = gate_metrics[:latest_dst_nt]
+            obrm = has_obrien ? gate_metrics[:obrien_dst_nt] : nothing
             cov = nrow(vs) == 0 ? NaN : mean(Bool.(vs.v2_observed_in_90ci))
             beats_pers = _v2_gate_pass(v2m, persm)
             beats_obr = obrm === nothing ? true : _v2_gate_pass(v2m, obrm)
@@ -1330,11 +1438,53 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     )
     selection = _select_validated_v2_calibration(train, validation, cfg)
     candidate_cal = selection.cal
-    deploy = selection.gate_pass
+
+    # F5: the coverage-floor gate is only trustworthy when the validation split is
+    # large enough to estimate coverage. With a single-row validation it degenerates
+    # into a 0/1 check, so refuse to trust the v2 acceptance gate below this count
+    # and deploy the v1-equivalent fallback instead (M3 minimum-validation guard).
+    validation_trusted = nrow(validation) >= V2_MIN_VALIDATION_ROWS
+
+    # F1+F2 (M8): the OPERATIONALLY-SERVED interval is the conformal sidecar, not
+    # the legacy interval_scale band the validation gate inspects. Fit the sidecar
+    # from the v2 CANDIDATE's validation residuals and require its holdout coverage
+    # to clear the floor as part of the deploy decision; otherwise the candidate is
+    # rejected even when the legacy band over-covered on validation. The candidate
+    # splits are scored here only to drive that served-interval gate.
+    candidate_validation_scored = score_operational_v2(validation, candidate_cal)
+    candidate_holdout_scored = score_operational_v2(holdout, candidate_cal)
+    candidate_conformal = _fit_deployed_conformal(candidate_validation_scored, cfg)
+    candidate_conformal_holdout_coverage = NaN
+    if candidate_conformal !== nothing && nrow(candidate_holdout_scored) >= 1
+        candidate_conformal_holdout_coverage = conformal_coverage(
+            candidate_conformal,
+            Float64.(candidate_holdout_scored.v2_pred_dst_nt),
+            Float64.(candidate_holdout_scored.observation_dst_nt),
+            _scored_horizons(candidate_holdout_scored),
+            Float64.(candidate_holdout_scored.latest_dst_nt),
+        )
+    end
+    # The served (conformal) interval must clear the floor on the held-out split.
+    # If it cannot be measured (no holdout rows / no conformal fit), treat it as
+    # not satisfied so the gate fails closed rather than shipping an unchecked band.
+    conformal_gate_ok = isfinite(candidate_conformal_holdout_coverage) &&
+        candidate_conformal_holdout_coverage >= cfg.v2_coverage_floor
+
+    deploy = selection.gate_pass && validation_trusted && conformal_gate_ok
+    deploy_block_reason = if !selection.gate_pass
+        "validation_acceptance_gate"
+    elseif !validation_trusted
+        "validation_split_too_thin"
+    elseif !conformal_gate_ok
+        "conformal_holdout_undercover"
+    else
+        ""
+    end
 
     # Acceptance gate decides deployment. A v2 candidate that does not beat
-    # persistence and O'Brien on validation and meet the coverage floor is NOT
-    # shipped; a v1-equivalent (zero-correction) fallback is deployed instead.
+    # persistence and O'Brien on validation, has too thin a validation split, or
+    # whose SERVED conformal interval under-covers the holdout is NOT shipped; a
+    # v1-equivalent (zero-correction) fallback is deployed instead.
     cal = if deploy
         candidate_cal
     else
@@ -1347,8 +1497,11 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
 
     train_scored = score_operational_v2(train, cal)
     validation_scored = score_operational_v2(validation, cal)
-    # Holdout scored EXACTLY ONCE for honest out-of-sample reporting; it is never
-    # used to select feature set, ridge, component, or any tuning parameter.
+    # Holdout is never used to select feature set, ridge, component, or any tuning
+    # parameter — those are chosen on validation only. It is read for honest
+    # out-of-sample reporting and, since F1+F2, as a single final go/no-go safety
+    # gate on the served conformal interval's coverage (M8); it does not feed back
+    # into model selection.
     holdout_scored = score_operational_v2(holdout, cal)
     holdout_v2 = _scored_metric(holdout_scored, :v2_pred_dst_nt)
     holdout_coverage = nrow(holdout_scored) == 0 ? NaN :
@@ -1361,6 +1514,11 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     selection_audit[!, :deployed] = selected_mask .& deploy
     selection_audit[!, :final_component] = fill(String(cal.selected_component), nrow(selection_audit))
     selection_audit[!, :acceptance_gate_pass] = fill(deploy, nrow(selection_audit))
+    selection_audit[!, :validation_trusted] = fill(validation_trusted, nrow(selection_audit))
+    selection_audit[!, :conformal_holdout_coverage] =
+        fill(candidate_conformal_holdout_coverage, nrow(selection_audit))
+    selection_audit[!, :conformal_gate_pass] = fill(conformal_gate_ok, nrow(selection_audit))
+    selection_audit[!, :deploy_block_reason] = fill(deploy_block_reason, nrow(selection_audit))
     selection_audit[!, :holdout_n] = fill(holdout_v2.n, nrow(selection_audit))
     selection_audit[!, :holdout_rmse_nt] = fill(holdout_v2.rmse, nrow(selection_audit))
     selection_audit[!, :holdout_mae_nt] = fill(holdout_v2.mae, nrow(selection_audit))
@@ -1377,9 +1535,10 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
         (scored_path = cfg.v2_calibration_path * "_scored.csv")
     CSV.write(scored_path, scored)
 
-    # Conformal predictive-interval calibration (N1). Fit from the deployed
-    # model's validation residuals (out-of-sample for β), persist a sidecar, and
-    # report coverage on the untouched holdout — the honest out-of-sample check.
+    # Conformal predictive-interval calibration (N1). Fit from the DEPLOYED model's
+    # validation residuals (out-of-sample for β), persist a sidecar, and report
+    # coverage on the untouched holdout — the honest out-of-sample check. When v2
+    # deploys, this reproduces the candidate sidecar already gated above.
     conformal = _fit_deployed_conformal(validation_scored, cfg)
     conformal_path = _conformal_path(cfg.v2_calibration_path)
     holdout_conformal_coverage = NaN
@@ -1414,10 +1573,14 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
         )
     else
         @warn(
-            "Best v2 candidate failed the validation acceptance gate " *
-            "(beat persistence & O'Brien + coverage ≥ floor); deployed v1-equivalent fallback.",
+            "Best v2 candidate failed the acceptance gate " *
+            "(validation beat + thick-enough validation split + served conformal " *
+            "interval holdout coverage ≥ floor); deployed v1-equivalent fallback.",
+            block_reason=deploy_block_reason,
             best_validation_rmse=selection.validation_rmse,
             best_validation_coverage=selection.validation_coverage,
+            conformal_holdout_coverage=candidate_conformal_holdout_coverage,
+            validation_rows=nrow(validation),
             coverage_floor=cfg.v2_coverage_floor,
         )
     end
@@ -1439,12 +1602,38 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     println("Holdout v2 90% coverage (interval-scale): $(round(holdout_coverage; digits=3))")
     isnan(holdout_conformal_coverage) ||
         println("Holdout v2 90% coverage (conformal): $(round(holdout_conformal_coverage; digits=3))")
+    isnan(candidate_conformal_holdout_coverage) ||
+        println(
+            "Served-interval (conformal) holdout coverage gated against floor " *
+            "$(cfg.v2_coverage_floor): $(round(candidate_conformal_holdout_coverage; digits=3)) " *
+            "($(conformal_gate_ok ? "PASS" : "FAIL"))"
+        )
     println("V2 interval scale: $(round(cal.interval_scale; digits=3))")
     println("Acceptance gate: $(deploy ? "PASS — v2 deployed" : "FAIL — v1-equivalent fallback deployed")")
     return cal
 end
 
+"""
+    _assert_issuable_model(model, horizon_hours)
+
+P1-3 guard: multi-step v1 issuance loops `step_forecast!`, whose per-step
+ensemble spread is ~5× narrower than the `forecast_ahead` propagation the
+calibration/replay path uses, so a v1 row at horizon > 1 would log a badly
+under-wide band. Deployment is v2 (which resolves its interval from the
+conformal sidecar), so multi-step v1 is latent; reject it explicitly rather
+than risk the core integrator. Pure, so the guard is testable without the feeds.
+"""
+function _assert_issuable_model(model::Symbol, horizon_hours::Integer)
+    (model == :v1 && horizon_hours > 1) && throw(ArgumentError(
+        "multi-step v1 issuance (horizon_hours=$horizon_hours) is unsupported: the " *
+        "per-step ensemble band is structurally too narrow at horizon > 1. Issue v2 " *
+        "(conformal interval) or use the forecast_ahead-based replay path instead."
+    ))
+    return nothing
+end
+
 function issue_forecast(cfg::LiveVerifyConfig)
+    _assert_issuable_model(cfg.model, cfg.horizon_hours)
     issue_time = now(UTC)
     plasma = fetch_swpc_plasma(; max_retries=3, retry_delay_sec=1.0)
     mag = fetch_swpc_mag(; max_retries=3, retry_delay_sec=1.0)
@@ -1470,7 +1659,13 @@ function issue_forecast(cfg::LiveVerifyConfig)
     # an L1/DSCOVR data gap. Refuse a hard gap; flag a partial gap.
     n_speed_finite = _window_finite_count(plasma, :speed, recent_start, latest_common_sw)
     n_bz_finite = _window_finite_count(mag, :bz_gsm, recent_start, latest_common_sw)
-    gap_status = _driver_gap_status(n_speed_finite, n_bz_finite)
+    # density and By back `n`/clock-angle terms; an all-NaN window for either one
+    # silently substitutes quiet defaults (n=5, By=0) via `_finite_mean`, which
+    # fabricates Pdyn and the clock-angle features. Count them so a fallback in
+    # ANY of the four drivers flags `driver_data_gap` rather than passing silently.
+    n_density_finite = _window_finite_count(plasma, :density, recent_start, latest_common_sw)
+    n_by_finite = _window_finite_count(mag, :by_gsm, recent_start, latest_common_sw)
+    gap_status = _driver_gap_status(n_speed_finite, n_bz_finite, n_density_finite, n_by_finite)
     if gap_status == :hard
         error(
             "Solar-wind data gap: no finite speed or Bz samples in the trailing " *
@@ -1481,7 +1676,8 @@ function issue_forecast(cfg::LiveVerifyConfig)
     driver_data_gap = gap_status != :ok
     driver_data_gap && @warn(
         "Partial solar-wind data gap; some drivers fell back to defaults.",
-        n_speed_finite, n_bz_finite, recent_start, latest_common_sw
+        n_speed_finite, n_bz_finite, n_density_finite, n_by_finite,
+        recent_start, latest_common_sw
     )
     anchor_drivers = _drivers_for_window(
         plasma, mag, latest_dst_time, latest_dst_time + Hour(1);
@@ -1504,10 +1700,17 @@ function issue_forecast(cfg::LiveVerifyConfig)
     burton_full_star = anchor_dst_star
     obrien_star = anchor_dst_star
 
+    # P1-2: count intermediate steps whose driver window had no finite speed or
+    # Bz and therefore fell back to frozen persistence drivers. Persisted so the
+    # logged row discloses how many multi-step hours were driven by carried-over
+    # rather than observed solar wind (silent before).
+    n_steps_driver_fallback = 0
     step_time = latest_dst_time + Hour(1)
     while step_time <= target_time
         source_hour = step_time - Hour(1)
         drivers = if source_hour < latest_complete_hour
+            n_steps_driver_fallback +=
+                _step_driver_fallback(plasma, mag, source_hour) ? 1 : 0
             _drivers_for_window(
                 plasma, mag, source_hour, source_hour + Hour(1);
                 fallback=recent,
@@ -1605,6 +1808,9 @@ function issue_forecast(cfg::LiveVerifyConfig)
         driver_data_gap=[driver_data_gap],
         n_speed_finite_trailing_hour=[n_speed_finite],
         n_bz_finite_trailing_hour=[n_bz_finite],
+        n_density_finite_trailing_hour=[n_density_finite],
+        n_by_finite_trailing_hour=[n_by_finite],
+        n_steps_driver_fallback=[n_steps_driver_fallback],
         interval_source=[interval_source],
         V_kms=[used_drivers.V],
         Bz_nt=[used_drivers.Bz],

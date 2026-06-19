@@ -16,16 +16,22 @@ Returns the modified DataFrame.
 function clean_omni_data!(df::DataFrame)
     n_raw = nrow(df)
 
-    # --- Compute Pdyn from n and V where Pdyn is missing but n, V available ---
-    for i in 1:nrow(df)
-        if isnan(df.Pdyn[i]) && !isnan(df.n[i]) && !isnan(df.V[i])
-            df.Pdyn[i] = 1.6726e-6 * df.n[i] * df.V[i]^2
-        end
+    # --- Interpolate short gaps (≤3 consecutive NaN) for the measured columns.
+    #     Pdyn is intentionally NOT interpolated as an independent column; it is
+    #     recomputed from the interpolated n, V below so it keeps the n·V² identity,
+    #     mirroring the real-time path (an independently interpolated Pdyn drifts
+    #     from n·V² at gap edges because Pdyn is quadratic in V). ---
+    for col in [:V, :Bz, :By, :n, :T, :Dst, :AE, :AL, :AU]
+        _interp_short_gaps!(df[!, col], 3)
     end
 
-    # --- Interpolate short gaps (≤3 consecutive NaN) for each column ---
-    for col in [:V, :Bz, :By, :n, :Pdyn, :T, :Dst, :AE, :AL, :AU]
-        _interp_short_gaps!(df[!, col], 3)
+    # --- Dynamic pressure: keep native OMNI Pdyn where present; for any row lacking
+    #     a native value, recompute proton-only from the (interpolated) n, V. ---
+    for i in 1:nrow(df)
+        if isnan(df.Pdyn[i])
+            df.Pdyn[i] = (isnan(df.n[i]) || isnan(df.V[i])) ? NaN :
+                         1.6726e-6 * df.n[i] * df.V[i]^2
+        end
     end
 
     # --- Quality flag: 1 = all critical vars present, 0 = any critical missing ---
@@ -47,7 +53,10 @@ function clean_omni_data!(df::DataFrame)
         if isnan(df.Dst[i])
             df.Dst_star[i] = NaN
         elseif isnan(df.Pdyn[i])
-            df.Dst_star[i] = df.Dst[i]  # fallback: uncorrected Dst
+            # Fallback when Pdyn is unavailable: drop only the pressure term, but
+            # keep the +11 baseline so fallback rows stay level-continuous with the
+            # pressure-corrected rows (matches the real-time serve path).
+            df.Dst_star[i] = df.Dst[i] + 11.0
         else
             df.Dst_star[i] = df.Dst[i] - 7.26 * sqrt(max(df.Pdyn[i], 0.0)) + 11.0
         end

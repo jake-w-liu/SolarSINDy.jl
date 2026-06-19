@@ -693,15 +693,22 @@ function operational_v2_predict(cal::OperationalV2Calibration,
                                 features::NamedTuple;
                                 baselines=nothing)
     correction = operational_v2_correction(cal, features)
-    corrected_center = Float64(pred_dst) + correction
+    # Clamp the corrected center to the physical Dst range used by every other
+    # forecast path (v1 single/multi-step, baselines, storm guard). On valid
+    # operational data the corrected center stays well inside [-2000, 50] (max
+    # observed prediction ~46 nT), so this is a no-op there; it only guards the
+    # selector :v2 path against a pathological positive correction.
+    corrected_center = clamp(Float64(pred_dst) + correction, -2000.0, 50.0)
     original_center = Float64(pred_dst)
-    center = _selected_component_prediction(
+    # Re-clamp the selected center: the :ensemble path is a weighted sum of
+    # components and could otherwise land outside the physical range.
+    center = clamp(_selected_component_prediction(
         cal.selected_component,
         corrected_center,
         original_center,
         cal,
         baselines,
-    )
+    ), -2000.0, 50.0)
     half_width = abs(Float64(ci95) - Float64(ci05)) / 2
     selector_half_width = if cal.selected_component == :ensemble
         sum(cal.selector_weights .* cal.selector_half_width)

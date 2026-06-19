@@ -39,7 +39,9 @@ function run_monitor(; poll_interval_min::Int=5,
                        coefficients_csv::String,
                        ensemble_csv::String,
                        log_file::String="monitor.log",
-                       display::Bool=true)
+                       display::Bool=true,
+                       clock::Function=() -> now(UTC),
+                       staleness_threshold_hr::Real=3.0)
     # Observed Dst for anchoring (best-effort; monitor still runs if the feed fails)
     dst_feed = try
         fetch_swpc_dst()
@@ -123,12 +125,26 @@ function run_monitor(; poll_interval_min::Int=5,
                 continue
             end
 
-            # Find last valid index
-            latest_idx = findlast(i -> !isnan(swd_new.V[i]), eachindex(swd_new.V))
+            # Find last bin where BOTH V and Bz are finite. Matching the warm-up
+            # policy (which skips NaN-Bz hours) is essential: selecting on V
+            # alone can land on a bin whose Bz is NaN, where _safe_val(Bz, 0.0)
+            # injects Bz=0 (no southward driving) and silently produces a quiet
+            # forecast during an active storm. If no bin has finite Bz in the
+            # window, skip this cycle rather than emit a Bz=0 quiet forecast.
+            latest_idx = _latest_finite_VBz_idx(swd_new.V, swd_new.Bz)
             if latest_idx === nothing
+                if display
+                    println("  [WARN] No bin with finite V and Bz (mag gap); skipping cycle.")
+                end
                 sleep(poll_interval_min * 60)
                 continue
             end
+
+            # Data-staleness guard: a frozen feed (old rows returned 200 OK) must
+            # not be displayed as current. Threshold allows Kyoto/SWPC publication
+            # lag (~2-3 h) before flagging.
+            data_age = clock() - t_new[latest_idx]
+            stale = data_age >= Hour(Int(round(staleness_threshold_hr)))
 
             # Safe solar wind values (replace NaN with defaults)
             V = _safe_val(swd_new.V[latest_idx], 400.0)
@@ -162,7 +178,8 @@ function run_monitor(; poll_interval_min::Int=5,
 
             # Display
             if display
-                print_status(result, forecast, alarm, V, Bz, n_val)
+                print_status(result, forecast, alarm, V, Bz, n_val;
+                             data_age=data_age, stale=stale)
             end
 
             # Log
@@ -196,6 +213,18 @@ Return x if finite, otherwise default.
 _safe_val(x::Float64, default::Float64) = (isnan(x) || isinf(x)) ? default : x
 
 """
+    _latest_finite_VBz_idx(V, Bz)
+
+Return the last index where BOTH `V` and `Bz` are finite, or `nothing` if no
+such index exists. The live monitor uses this so its issue-time bin selection
+matches the warm-up policy (which skips NaN-Bz hours): a bin with finite V but
+NaN Bz would otherwise force Bz=0 and suppress a southward-driving storm alarm.
+"""
+function _latest_finite_VBz_idx(V::AbstractVector, Bz::AbstractVector)
+    return findlast(i -> !isnan(V[i]) && !isnan(Bz[i]), eachindex(V))
+end
+
+"""
     _fetch_with_retry(; hours, max_retries=3, delay_sec=10)
 
 Fetch solar wind data with retries on failure.
@@ -223,7 +252,9 @@ Print formatted monitoring status to terminal.
 function print_status(result::ForecastResult,
                       forecast::Vector{ForecastResult},
                       alarm::Union{Nothing, Alarm},
-                      V::Float64, Bz::Float64, n_val::Float64)
+                      V::Float64, Bz::Float64, n_val::Float64;
+                      data_age::Union{Nothing,Period}=nothing,
+                      stale::Bool=false)
     severity = classify_severity(result.dst_ci_05,
                                  default_alarm_config().thresholds)
     status_str = severity == QUIET         ? "QUIET" :
@@ -253,10 +284,21 @@ function print_status(result::ForecastResult,
     # Clear terminal
     print("\033[2J\033[H")
 
+    # Header data-age annotation: report how old the newest data hour is, and
+    # flag a frozen/stale feed loudly so an old state is never read as current.
+    age_str = if data_age === nothing
+        ""
+    else
+        age_hr = data_age / Hour(1)
+        stale ? "  [STALE: data $(round(age_hr, digits=1)) h old]" :
+                "  (data $(round(age_hr, digits=1)) h old)"
+    end
+
     hline = repeat("─", BOX_W + 2)
     println("┌$(hline)┐")
     println(_boxline(""))
     println(_boxline("  SINDy Storm Monitor           $(time_str) UTC"))
+    isempty(age_str) || println(_boxline(age_str))
     println(_boxline(""))
     println("├$(hline)┤")
     # Build each line as a char buffer of exactly BOX_W characters.

@@ -197,6 +197,23 @@ using DataFrames
         @test isnan(correlation([1.0, 1.0, 1.0], [1.0, 2.0, 3.0]))
         @test correlation([1.0, 2.0, 3.0], [2.0, 4.0, 6.0]) ≈ 1.0
 
+        # N-PE-SS-NOGUARD: a zero-variance denominator must flag NaN, not return
+        # huge finite garbage from the 1e-20 floor. Constant observed ⇒ ss_tot=0
+        # for PE; reference==observed ⇒ mse_ref=0 for the skill score.
+        @test isnan(prediction_efficiency([1.0, 2.0, 3.0], fill(2.0, 3)))
+        @test isnan(skill_score([1.0, 2.0, 3.0], fill(2.0, 3), fill(2.0, 3)))
+
+        # N-RMSE-NODIMCHECK: paired metrics must reject mismatched lengths rather
+        # than silently broadcasting a length-1 input against a length-N input.
+        @test_throws DimensionMismatch rmse([1.0, 2.0], [1.0])
+        @test_throws DimensionMismatch prediction_efficiency([1.0, 2.0], [1.0])
+        @test_throws DimensionMismatch skill_score([1.0, 2.0], [1.0], [1.0])
+
+        # N-SMOOTH-NOGUARD: a window wider than the series silently collapses to a
+        # constant; it must throw instead. (Valid odd window ≤ length still works.)
+        @test_throws ArgumentError smooth_moving_average([1.0, 2.0, 3.0], 5)
+        @test smooth_moving_average([1.0, 2.0, 3.0], 3) ≈ [1.5, 2.0, 2.5]
+
         # M1: with normalize=true the threshold acts on the NORMALIZED coefficient
         # (term contribution), so a tiny physical coefficient on a large-scale
         # column survives a λ far above its physical magnitude.

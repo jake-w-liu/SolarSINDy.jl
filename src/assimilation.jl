@@ -112,7 +112,26 @@ function assimilation_predict!(f::AssimilationFilter, drivers)
     m = length(f.adapt_idx)
     dst = f.mean[1]
     ξ = _xi_with_adapted(f)
-    ddst, θ = _ddst(f, dst, ξ, drivers)
+
+    # Non-finite-driver guard (mirrors the NaN-observation gap policy in
+    # assimilation_update!): a single bad driver would otherwise propagate
+    # through ddst and the Jacobian and permanently corrupt the EKF state.
+    # Policy: predict-only coast — hold the mean and inflate the covariance by
+    # the process noise Q only, exactly as a missing observation grows variance.
+    drivers_finite = isfinite(drivers.V) && isfinite(drivers.Bz) &&
+                     isfinite(drivers.By) && isfinite(drivers.n) &&
+                     isfinite(drivers.Pdyn)
+    if drivers_finite
+        ddst, θ = _ddst(f, dst, ξ, drivers)
+    else
+        ddst = NaN
+        θ = Float64[]
+    end
+    if !(drivers_finite && isfinite(ddst))
+        f.cov = f.cov + f.Q          # coast: mean unchanged, covariance grows by Q
+        _symmetrize!(f.cov)
+        return f
+    end
 
     # Mean propagation.
     f.mean[1] = dst + f.dt * ddst

@@ -71,9 +71,13 @@ using Statistics
 
         assimilation_predict!(f, drivers)
         var_after_predict = dst_variance(f)
-        @test issymmetric(Symmetric(f.cov)) || true       # symmetrized internally
-        @test minimum(eigvals(Symmetric(f.cov))) >= -1e-10 # PSD
+        # Symmetry is enforced on the RAW stored matrix by _symmetrize!, so assert
+        # it directly (not on a Symmetric() view, which would ignore the stored
+        # lower triangle and pass even if symmetrization were a no-op).
+        @test issymmetric(f.cov)
+        @test minimum(eigvals(Symmetric(f.cov))) >= -1e-10 # PSD (after symmetry holds)
         assimilation_update!(f, -31.0)
+        @test issymmetric(f.cov)
         @test dst_variance(f) < var_after_predict          # observation shrinks variance
         @test minimum(eigvals(Symmetric(f.cov))) >= -1e-10
 
@@ -82,6 +86,55 @@ using Statistics
         assimilation_predict!(f, drivers)
         assimilation_update!(f, NaN)                        # no-op update
         @test dst_variance(f) > v0
+    end
+
+    @testset "raw stored covariance stays symmetric over a multi-coefficient path" begin
+        # Mutation-sensitivity guard for _symmetrize!: with two adapted
+        # coefficients the F·P·F' and K·row updates accumulate off-diagonal
+        # asymmetry that the symmetrizer must scrub on the RAW matrix every step.
+        # If _symmetrize! regressed to a no-op, issymmetric(f.cov) fails here.
+        rng = MersenneTwister(20260619)
+        lib = build_minimal_library()
+        ξ = [-1.5, -0.07, 0.02]
+        f = init_assimilation(lib, ξ, [2, 3], -25.0;
+                              dst_var0=9.0, coeff_var0=1e-3,
+                              q_dst=0.5, q_coeff=1e-6, R=1.0, dt=1.0)
+        drivers = (V=430.0, Bz=-7.0, By=2.0, n=6.0, Pdyn=2.5)
+        for k in 1:50
+            assimilation_predict!(f, drivers)
+            obs = current_dst(f) + 0.3 * randn(rng)
+            assimilation_update!(f, obs)
+            @test issymmetric(f.cov)                         # raw matrix exactly symmetric
+            @test minimum(eigvals(Symmetric(f.cov))) >= -1e-10
+        end
+    end
+
+    @testset "non-finite driver coasts without corrupting the filter (N2 robustness)" begin
+        lib = build_minimal_library()
+        ξ = [-1.0, -0.06, 0.0]
+        f = init_assimilation(lib, ξ, [2], -30.0;
+                              dst_var0=9.0, coeff_var0=1e-3, q_dst=0.5, q_coeff=1e-6,
+                              R=1.0, dt=1.0)
+        good = (V=420.0, Bz=-6.0, By=1.0, n=5.0, Pdyn=2.0)
+        assimilation_predict!(f, good)
+        assimilation_update!(f, -31.0)
+        mean_before = copy(f.mean)
+        var_before = dst_variance(f)
+
+        # A NaN in any driver triggers a predict-only coast: mean held, cov grows
+        # by Q, and nothing in the state goes non-finite. Without the guard the
+        # NaN propagates through ddst and the Jacobian into mean and cov.
+        bad = (V=NaN, Bz=-6.0, By=1.0, n=5.0, Pdyn=2.0)
+        assimilation_predict!(f, bad)
+        @test !any(isnan, f.cov)
+        @test isfinite(current_dst(f))
+        @test f.mean == mean_before                          # coast: mean unchanged
+        @test dst_variance(f) > var_before                   # cov advanced by Q only
+        # An Inf driver coasts the same way.
+        bad2 = (V=420.0, Bz=-6.0, By=1.0, n=5.0, Pdyn=Inf)
+        assimilation_predict!(f, bad2)
+        @test !any(isnan, f.cov) && all(isfinite, f.cov)
+        @test isfinite(current_dst(f))
     end
 
     @testset "input validation" begin

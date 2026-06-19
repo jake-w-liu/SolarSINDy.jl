@@ -27,6 +27,10 @@ Simple moving average smoothing with centered window. Window must be odd.
 """
 function smooth_moving_average(x::AbstractVector, window::Int)
     @assert isodd(window) "Window must be odd"
+    # A window wider than the series collapses every output to the global mean,
+    # silently destroying the signal; reject it rather than returning a constant.
+    length(x) >= window ||
+        throw(ArgumentError("smoothing window ($window) exceeds series length ($(length(x)))"))
     n = length(x)
     half = div(window, 2)
     xs = similar(x)

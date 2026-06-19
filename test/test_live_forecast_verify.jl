@@ -647,16 +647,19 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         end
     end
 
-    @testset "A/D: holdout is scored once and honestly reveals poor generalization" begin
+    @testset "F1+F2: served conformal interval undercoverage on holdout blocks v2 deploy" begin
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")
             cal_path = joinpath(tmp, "v2_calibration.csv")
             n = 30
             pred = collect(-60.0:1.0:-31.0)
             observed = copy(pred)
-            # +4 holds through train AND validation, but not the holdout. The gate
-            # passes on validation (so v2 deploys), yet the untouched holdout —
-            # scored exactly once — exposes that the correction does not generalize.
+            # +4 holds through train AND validation, but not the holdout. The legacy
+            # validation gate passes (the interval_scale band over-covers there), yet
+            # the OPERATIONALLY-SERVED conformal interval — fit on near-zero validation
+            # residuals — under-covers the untouched holdout where the +4 correction
+            # breaks down. F1+F2 gates the served-interval holdout coverage, so v2 must
+            # NOT deploy; the v1-equivalent fallback ships instead.
             observed[1:21] .= pred[1:21] .+ 4.0
             replay = DataFrame(
                 issue_time_utc=[string(DateTime(2026, 1, 1) + Hour(i)) for i in 1:n],
@@ -689,17 +692,22 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             scored = CSV.read(replace(cal_path, r"\.csv$" => "_scored.csv"), DataFrame)
             selection = CSV.read(replace(cal_path, r"\.csv$" => "_selection.csv"), DataFrame)
             holdout = scored[scored.v2_split .== "holdout", :]
-            # Validation looked good → v2 deployed with a real (+4) correction.
-            @test cal.selected_component == :v2
-            @test startswith(cal.label, "operational_v2_")
-            @test any(selection.deployed)
-            @test mean(holdout.v2_pred_dst_nt .- holdout.pred_dst_nt) ≈ 4.0 atol = 1.0
-            # Honest holdout (scored once, never used for selection) is much worse
-            # than validation and undercovers — exactly what leakage would hide.
-            @test selection.holdout_rmse_nt[1] > 3.0
-            @test selection.holdout_coverage[1] < 0.5
-            @test minimum(filter(isfinite, selection.validation_rmse_nt)) <
-                  selection.holdout_rmse_nt[1]
+            # Honest holdout (scored once for selection, gated once for the served
+            # interval) is much worse than validation and undercovers — the served
+            # conformal interval gate fires and the v1-equivalent fallback deploys.
+            @test cal.label == "operational_v2_fallback_v1_equiv"
+            @test all(cal.coefficients .== 0.0)            # no correction applied
+            @test !any(selection.deployed)                 # served-interval gate blocked deploy
+            @test all(.!selection.acceptance_gate_pass)
+            @test selection.deploy_block_reason[1] == "conformal_holdout_undercover"
+            @test selection.conformal_holdout_coverage[1] < cfg.v2_coverage_floor
+            @test !selection.conformal_gate_pass[1]
+            # The served conformal interval's holdout coverage drove the block: the
+            # candidate v2 (+4) under-covers the untouched holdout where the +4
+            # correction breaks down, so the gate refused it.
+            @test selection.conformal_holdout_coverage[1] == 0.0
+            # The deployed (fallback) v2 reduces exactly to v1.
+            @test scored.v2_pred_dst_nt == scored.pred_dst_nt
         end
     end
 
@@ -801,5 +809,177 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         @test _driver_gap_status(0, 2) == :partial
         @test _driver_gap_status(3, 0) == :partial
         @test _driver_gap_status(0, 0) == :hard
+    end
+
+    @testset "P1-1: an all-NaN density/By trailing window flags a driver gap" begin
+        # Trailing hour [00:00, 01:00): finite speed and Bz, but density and By are
+        # entirely NaN. Pre-fix, the gap classifier ignored density/By and reported
+        # :ok, so `_drivers_for_window` silently substituted n=5/By=0 quiet defaults
+        # and fabricated Pdyn/clock-angle terms with no flag. Post-fix the missing
+        # density/By trailing samples must classify the window as a (partial) gap.
+        t0 = DateTime(2026, 6, 6, 0)
+        t1 = DateTime(2026, 6, 6, 1)
+        times = [DateTime(2026, 6, 6, 0, 5), DateTime(2026, 6, 6, 0, 35)]
+        plasma = DataFrame(time_tag=times, speed=[410.0, 420.0], density=[NaN, NaN])
+        mag = DataFrame(time_tag=times, bz_gsm=[-2.0, -3.0], by_gsm=[NaN, NaN])
+
+        n_speed = _window_finite_count(plasma, :speed, t0, t1)
+        n_bz = _window_finite_count(mag, :bz_gsm, t0, t1)
+        n_density = _window_finite_count(plasma, :density, t0, t1)
+        n_by = _window_finite_count(mag, :by_gsm, t0, t1)
+        @test n_speed == 2 && n_bz == 2
+        # The logged finite-counts for the fabricated drivers are exactly zero.
+        @test n_density == 0
+        @test n_by == 0
+        # Speed+Bz present but density empty → flagged as a data gap (not :ok).
+        @test _driver_gap_status(n_speed, n_bz, n_density, n_by) != :ok
+        @test _driver_gap_status(2, 2, 0, 3) == :partial   # density-only gap
+        @test _driver_gap_status(2, 2, 3, 0) == :partial   # By-only gap
+        # No gap when all four drivers have finite trailing samples.
+        @test _driver_gap_status(2, 2, 3, 3) == :ok
+    end
+
+    @testset "P1-2: intermediate all-NaN driver hours increment the fallback counter" begin
+        # Mirror the issuance multi-step loop predicate: each intermediate hour whose
+        # window has no finite speed OR no finite Bz falls back to frozen persistence
+        # drivers and must be counted (silent pre-fix). n_steps = 3 with one all-NaN
+        # intermediate hour ⇒ count > 0; the same span with all hours finite ⇒ 0.
+        anchor = DateTime(2026, 6, 6, 0)
+        n_steps = 3
+        # Hours [0,1),[1,2),[2,3). Make hour [1,2) all-NaN for speed and Bz.
+        ptimes = [DateTime(2026, 6, 6, 0, 30), DateTime(2026, 6, 6, 1, 30),
+                  DateTime(2026, 6, 6, 2, 30)]
+        plasma_gap = DataFrame(time_tag=ptimes, speed=[410.0, NaN, 430.0],
+                               density=[5.0, 5.0, 5.0])
+        mag_gap = DataFrame(time_tag=ptimes, bz_gsm=[-1.0, NaN, -3.0],
+                            by_gsm=[1.0, 1.0, 1.0])
+
+        # Sum the source-of-truth per-step predicate the issuance loop uses.
+        count_fallback(plasma, mag) = sum(
+            _step_driver_fallback(plasma, mag, anchor + Hour(step - 1)) ? 1 : 0
+            for step in 1:n_steps
+        )
+        @test count_fallback(plasma_gap, mag_gap) > 0
+        @test count_fallback(plasma_gap, mag_gap) == 1   # exactly the one all-NaN hour
+        # The middle hour is exactly the flagged one; the finite hours are not.
+        @test _step_driver_fallback(plasma_gap, mag_gap, anchor + Hour(1))
+        @test !_step_driver_fallback(plasma_gap, mag_gap, anchor)
+
+        plasma_ok = DataFrame(time_tag=ptimes, speed=[410.0, 420.0, 430.0],
+                              density=[5.0, 5.0, 5.0])
+        mag_ok = DataFrame(time_tag=ptimes, bz_gsm=[-1.0, -2.0, -3.0],
+                           by_gsm=[1.0, 1.0, 1.0])
+        @test count_fallback(plasma_ok, mag_ok) == 0
+    end
+
+    @testset "P1-3: multi-step v1 issuance is rejected; v1 h=1 and any v2 are allowed" begin
+        # Multi-step v1 loops step_forecast!, whose band is ~5× too narrow vs the
+        # forecast_ahead propagation, so it must be refused at issuance.
+        @test_throws ArgumentError _assert_issuable_model(:v1, 2)
+        @test_throws ArgumentError _assert_issuable_model(:v1, 6)
+        @test _assert_issuable_model(:v1, 1) === nothing    # single-step v1 is fine
+        @test _assert_issuable_model(:v2, 6) === nothing    # v2 serves a conformal band
+        @test _assert_issuable_model(:v2, 1) === nothing
+    end
+
+    @testset "F3: anchor-aware split keeps issue_time sets pairwise disjoint" begin
+        # Small multi-horizon table: each anchor contributes two rows (h=1, h=2). A
+        # raw-index cut can straddle an anchor across splits (leakage); the anchor-
+        # aware split must assign each anchor's full block to a single split.
+        anchors = [string(DateTime(2026, 1, 1) + Hour(i)) for i in 1:6]
+        issue = vcat(anchors, anchors)                       # 12 rows, 6 anchors × 2
+        df = DataFrame(
+            issue_time_utc=issue,
+            model_step_hours=vcat(fill(1, 6), fill(2, 6)),
+            pred_dst_nt=collect(1.0:12.0),
+        )
+        train, validation, holdout = _chronological_train_validation_test(df, 0.5, 0.25)
+        train_a = Set(train.issue_time_utc)
+        val_a = Set(validation.issue_time_utc)
+        hold_a = Set(holdout.issue_time_utc)
+        @test isempty(intersect(train_a, val_a))
+        @test isempty(intersect(val_a, hold_a))
+        @test isempty(intersect(train_a, hold_a))
+        # Each split must carry whole anchor blocks (both horizons per anchor).
+        for split in (train, validation, holdout)
+            for a in unique(split.issue_time_utc)
+                @test count(==(a), split.issue_time_utc) == 2
+            end
+        end
+        # Every anchor and every row is placed exactly once.
+        @test union(train_a, val_a, hold_a) == Set(anchors)
+        @test nrow(train) + nrow(validation) + nrow(holdout) == 12
+    end
+
+    @testset "F5: a thin validation split deploys the fallback, not a v2 gate on one row" begin
+        mktempdir() do tmp
+            table_path = joinpath(tmp, "replay.csv")
+            cal_path = joinpath(tmp, "v2_calibration.csv")
+            # Tiny table whose 0.15 validation fraction yields a single validation
+            # row — a degenerate 0/1 coverage check. The gate must not be trusted;
+            # the v1-equivalent fallback must deploy regardless of that one row.
+            n = 8
+            pred = collect(-30.0:1.0:-23.0)
+            observed = pred .+ 2.0                            # a correction that would "pass"
+            replay = DataFrame(
+                issue_time_utc=[string(DateTime(2026, 1, 1) + Hour(i)) for i in 1:n],
+                pred_dst_nt=pred,
+                pred_dst_ci05_nt=pred .- 3.0,
+                pred_dst_ci95_nt=pred .+ 3.0,
+                observation_dst_nt=observed,
+                v1_pred_dst_nt=pred,
+                v1_pred_dst_ci05_nt=pred .- 3.0,
+                v1_pred_dst_ci95_nt=pred .+ 3.0,
+                latest_dst_nt=fill(-40.0, n),
+                V_kms=fill(420.0, n),
+                Bz_nt=fill(-2.0, n),
+                By_nt=fill(1.0, n),
+                n_cm3=fill(5.0, n),
+                Pdyn_npa=fill(1.5, n),
+            )
+            CSV.write(table_path, replay)
+
+            cfg = LiveVerifyConfig(;
+                mode=:fit_v2_calibration,
+                table_path=table_path,
+                v2_calibration_path=cal_path,
+                v2_train_fraction=0.7,
+                v2_validation_fraction=0.15,           # floor(0.15*8)=1 validation row
+                v2_ridge_grid=[0.0],
+                v2_ridge=0.0,
+            )
+            _, validation, _ = _chronological_train_validation_test(
+                SolarSINDy.add_operational_v2_features!(_v2_base_prediction_table(copy(replay))),
+                cfg.v2_train_fraction, cfg.v2_validation_fraction,
+            )
+            @test nrow(validation) < V2_MIN_VALIDATION_ROWS    # degenerate gate input
+            cal = fit_v2_calibration!(cfg)
+            selection = CSV.read(replace(cal_path, r"\.csv$" => "_selection.csv"), DataFrame)
+            @test cal.label == "operational_v2_fallback_v1_equiv"
+            @test !any(selection.deployed)
+            @test selection.deploy_block_reason[1] == "validation_split_too_thin"
+            @test !selection.validation_trusted[1]
+        end
+    end
+
+    @testset "F6: gate metrics share one finite-row mask across baselines" begin
+        # A scored validation frame with one `missing` and one `NaN` baseline row.
+        # Per-column finite filters would give v2 more rows than persistence/O'Brien
+        # (unpaired); the common-mask metrics must report equal n across all three.
+        scored = DataFrame(
+            observation_dst_nt=[-30.0, -31.0, -32.0, -33.0],
+            v2_pred_dst_nt=[-29.0, -30.0, -31.0, -32.0],
+            latest_dst_nt=Union{Missing,Float64}[-28.0, missing, -33.0, -34.0],
+            obrien_dst_nt=[-27.0, -29.0, NaN, -35.0],
+        )
+        metrics = _paired_gate_metrics(
+            scored, Symbol[:v2_pred_dst_nt, :latest_dst_nt, :obrien_dst_nt],
+        )
+        # Rows 2 (missing persistence) and 3 (NaN O'Brien) drop from ALL metrics.
+        @test metrics[:v2_pred_dst_nt].n == 2
+        @test metrics[:v2_pred_dst_nt].n == metrics[:latest_dst_nt].n ==
+              metrics[:obrien_dst_nt].n
+        # The surviving rows are exactly the fully finite ones (rows 1 and 4).
+        @test metrics[:v2_pred_dst_nt].rmse ≈ 1.0 atol = 1e-12
     end
 end
