@@ -660,6 +660,50 @@ function _load_conformal_for_model(cfg::LiveVerifyConfig)
     return read_conformal_calibration(path)
 end
 
+# N2: online adaptive-conformal (ACI) interval derived from the verified forecast
+# log. The log IS the ACI state (no separate state file): for the requested horizon
+# we replay the chronological verified (v2 point, observed) stream to bring the ACI
+# miscoverage level to its current value, then read the locked interval for the new
+# forecast via a predict-only (gap) step that does not mutate the state. Returns
+# (lo, hi), or `nothing` when there is too little verified history for this horizon
+# (the caller then keeps the static interval). Fail-safe: any error returns
+# `nothing`, so a malformed log can never break issuance.
+function _aci_interval_from_log(log_path::AbstractString, center::Real,
+                                horizon_steps::Integer;
+                                target_coverage::Float64=0.90, gamma::Float64=0.03,
+                                warmup::Int=30)
+    try
+        isfile(log_path) || return nothing
+        df = CSV.read(log_path, DataFrame)
+        cols = names(df)
+        all(c -> c in cols, ("horizon_hours", "v2_pred_dst_nt",
+                             "observation_dst_nt", "issue_time_utc")) || return nothing
+        h = Int(horizon_steps)
+        idx = Int[]
+        for i in 1:nrow(df)
+            hv = df[i, :horizon_hours]; pv = df[i, :v2_pred_dst_nt]
+            ov = df[i, :observation_dst_nt]
+            (ismissing(hv) || ismissing(pv) || ismissing(ov)) && continue
+            (round(Int, Float64(hv)) == h) || continue
+            (isfinite(Float64(pv)) && isfinite(Float64(ov))) || continue
+            push!(idx, i)
+        end
+        length(idx) < warmup + 5 && return nothing
+        idx = idx[sortperm([string(df[i, :issue_time_utc]) for i in idx])]
+        ac = init_adaptive_conformal(; target_coverage=target_coverage,
+                                     gamma=gamma, warmup=warmup)
+        for i in idx
+            adaptive_conformal_step!(ac, Float64(df[i, :v2_pred_dst_nt]),
+                                     Float64(df[i, :observation_dst_nt]))
+        end
+        s = adaptive_conformal_step!(ac, Float64(center), NaN)  # predict-only (gap path)
+        (isfinite(s.lo) && isfinite(s.hi)) || return nothing
+        return (s.lo, s.hi)
+    catch
+        return nothing
+    end
+end
+
 """
     _resolve_interval(conformal, center, model_steps, latest_dst, ci05, ci95)
 
@@ -1789,9 +1833,19 @@ function issue_forecast(cfg::LiveVerifyConfig)
     ci05_dst, ci95_dst, interval_source = _resolve_interval(
         conformal, pred_dst, model_steps, latest_dst, ci05_dst, ci95_dst,
     )
+    # N2: prefer the ONLINE adaptive-conformal (ACI) interval, which holds ~90%
+    # coverage under storm-driven distribution shift where the static stratified
+    # interval drops (≈0.84 on broad replay vs 0.89 for ACI). The ACI state is
+    # derived per horizon from the verified log. Fail-safe: insufficient history or
+    # any error keeps the static interval above; the point forecast is unchanged.
+    let aci = _aci_interval_from_log(cfg.log_path, pred_dst, model_steps)
+        if aci !== nothing
+            ci05_dst, ci95_dst, interval_source = aci[1], aci[2], "aci"
+        end
+    end
     # Reflect the deployed interval in the v2 CI columns the report scores.
-    v2_ci05_log = interval_source == "conformal" ? ci05_dst : selected.v2_ci05_dst
-    v2_ci95_log = interval_source == "conformal" ? ci95_dst : selected.v2_ci95_dst
+    v2_ci05_log = interval_source in ("conformal", "aci") ? ci05_dst : selected.v2_ci05_dst
+    v2_ci95_log = interval_source in ("conformal", "aci") ? ci95_dst : selected.v2_ci95_dst
 
     row = DataFrame(
         issue_time_utc=[string(issue_time)],
