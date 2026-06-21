@@ -26,11 +26,17 @@
 # hence out-of-sample for the cycle-25 storms tested) — and REVERSES the conclusion: online adaptation
 # of the decay coefficient robustly improves the one-step Dst* forecast on held-out storms (mean RMSE
 # 17.60 -> 15.98 nT, and EVERY process-noise q in the sweep beats fixed, so it is not cherry-picked).
-# So online adaptation has real value on the raw v1 forecast. It is still NOT deployed by default for
-# ONE honest reason: this gain is measured against fixed v1, while the operational path is v2, whose
-# residual-correction layer ALREADY adapts online — whether the EKF adds value ON TOP of v2 (vs being
-# redundant with it) is the remaining open question. Status: adaptation value DEMONSTRATED on v1,
-# v2-redundancy check pending — not "do not deploy", and not yet "deploy".
+# So online adaptation has real value on the raw v1 forecast. The remaining question — does it add value
+# ON TOP of the v2 residual-correction layer (which already adapts online), or is it redundant? — was
+# then tested directly (validation/assimilation_vs_v2_redundancy.jl, leave-one-storm-out on the same
+# cycle-25 storms, fitting the REAL v2 correction on EKF-vs-fixed predictions). Result: INCONCLUSIVE at
+# n=6. On top of v2 the EKF lowers mean one-step RMSE 16.68 -> 15.46 nT (+1.22), but that mean is within
+# ~1 SE (±1.19), strongly storm-dependent (per-storm range -3.1 .. +4.4), and it HURTS the flagship
+# May 2024 superstorm; the storms-only v2 correction is itself a noisy proxy for the operational broad
+# calibration. So the EKF is NOT redundant with v2 but also NOT a clean additive win.
+# Status: adaptation value DEMONSTRATED on raw v1; on-top-of-v2 value UNRESOLVED at this scale. Keep the
+# filter available and correctness-tested, do NOT deploy by default. A clean resolution needs the real
+# broad v2 calibration (not a storms-only fit), more storms for power, and a multi-step horizon.
 
 """
     AssimilationFilter
