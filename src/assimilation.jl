@@ -17,6 +17,14 @@
 # coefficient–state coupling is exact (dDst is linear in ξ, so ∂/∂ξ_j = Θ_j),
 # and the state self-derivative ∂(Θξ)/∂Dst* is obtained by a central difference
 # of the library evaluation (robust to the term set, no per-term hand Jacobian).
+#
+# OPERATIONAL DECISION (validation/assimilation_forecast_value.jl): online coefficient
+# adaptation does NOT improve the short-horizon operational Dst forecast and can hurt it —
+# on the held-out May 2024 storm the one-step RMSE is ~23.3 nT with fixed coefficients vs
+# ~27.8 (adapt injection) / ~32.8 (adapt injection+decay). The slow random-walk drift adds
+# noise at 1–3 h horizons, and the operational v2 correction layer already absorbs the
+# adaptable drift. This filter is therefore kept available and correctness-tested but is NOT
+# wired into the live forecast path, by evidence rather than omission.
 
 """
     AssimilationFilter
