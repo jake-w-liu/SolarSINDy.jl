@@ -8,16 +8,16 @@
 # Finding (run below): in THIS setup adaptation does not help — 1-step RMSE ~23.3 nT fixed vs ~27.8
 # (adapt injection) / ~32.8 (adapt both).
 #
-# ⚠ CAVEAT (added on reflection): this experiment is CONFOUNDED and BIASED toward "adaptation hurts":
+# ⚠ SUPERSEDED (reflection): this experiment is CONFOUNDED and BIASED toward "adaptation hurts":
 #   (1) it uses the minimal 3-term library (a poor base model), not the operational full library;
 #   (2) the initial coefficients are least-squares-fit on the May 2024 storm ITSELF, so the fixed
 #       baseline is already storm-optimal and adaptation can only drift away from it.
-# So this does NOT cleanly establish the operational value of the EKF. A FAIR test must use the full
-# library and OUT-OF-SAMPLE initial coefficients (fit on a prior period), then check whether adaptation
-# helps track the held-out storm — that requires OMNI (V,Bz,By,n) which this CSV lacks. Until then, the
-# honest position is: keep the EKF available (predict/update verified), do not deploy by DEFAULT
-# (the v2 correction layer already adapts to recent residuals), and treat its operational value as
-# OPEN pending the fair test — not as "shown to degrade the forecast."
+# The FAIR test that removes both confounds is validation/assimilation_fair_test.jl (full library +
+# out-of-sample discovery coefficients on cycle-25 held-out storms). It REVERSES this file's result:
+# online decay adaptation robustly IMPROVES the one-step forecast (mean RMSE 17.60 -> 15.98 nT, every q
+# beats fixed). Keep this script only as the documented confounded baseline; use the fair test for the
+# operational conclusion. The "adaptation does NOT improve" line printed below is the confounded result,
+# retained for the record — NOT the corrected finding.
 
 using SolarSINDy, Printf, CSV, DataFrames, Statistics, LinearAlgebra
 

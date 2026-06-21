@@ -18,13 +18,19 @@
 # and the state self-derivative ∂(Θξ)/∂Dst* is obtained by a central difference
 # of the library evaluation (robust to the term set, no per-term hand Jacobian).
 #
-# OPERATIONAL STATUS (validation/assimilation_forecast_value.jl): the EKF predict/update math is
-# verified, but whether online coefficient adaptation IMPROVES the operational forecast is OPEN.
-# A first check found adaptation not helping, but that test is confounded (minimal library +
-# storm-in-sample initial coefficients, biasing toward "no help") — see the caveat in that file.
-# Default: keep the filter available and correctness-tested, do NOT deploy by default (the v2
-# correction layer already adapts to recent residuals); a fair test (full library + out-of-sample
-# coefficients on OMNI) is the next step before any deploy/reject decision.
+# OPERATIONAL STATUS: the EKF predict/update math is verified. A first check
+# (validation/assimilation_forecast_value.jl) found adaptation NOT helping, but it was confounded
+# (minimal 3-term library + coefficients least-squares-fit on the test storm itself, both biasing
+# toward "no help"). The FAIR test (validation/assimilation_fair_test.jl) removes both confounds —
+# full operational library + the DEPLOYED discovery coefficients (fit on train-split cycles 20-23,
+# hence out-of-sample for the cycle-25 storms tested) — and REVERSES the conclusion: online adaptation
+# of the decay coefficient robustly improves the one-step Dst* forecast on held-out storms (mean RMSE
+# 17.60 -> 15.98 nT, and EVERY process-noise q in the sweep beats fixed, so it is not cherry-picked).
+# So online adaptation has real value on the raw v1 forecast. It is still NOT deployed by default for
+# ONE honest reason: this gain is measured against fixed v1, while the operational path is v2, whose
+# residual-correction layer ALREADY adapts online — whether the EKF adds value ON TOP of v2 (vs being
+# redundant with it) is the remaining open question. Status: adaptation value DEMONSTRATED on v1,
+# v2-redundancy check pending — not "do not deploy", and not yet "deploy".
 
 """
     AssimilationFilter
