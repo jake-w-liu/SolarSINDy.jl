@@ -18,13 +18,13 @@
 # and the state self-derivative ∂(Θξ)/∂Dst* is obtained by a central difference
 # of the library evaluation (robust to the term set, no per-term hand Jacobian).
 #
-# OPERATIONAL DECISION (validation/assimilation_forecast_value.jl): online coefficient
-# adaptation does NOT improve the short-horizon operational Dst forecast and can hurt it —
-# on the held-out May 2024 storm the one-step RMSE is ~23.3 nT with fixed coefficients vs
-# ~27.8 (adapt injection) / ~32.8 (adapt injection+decay). The slow random-walk drift adds
-# noise at 1–3 h horizons, and the operational v2 correction layer already absorbs the
-# adaptable drift. This filter is therefore kept available and correctness-tested but is NOT
-# wired into the live forecast path, by evidence rather than omission.
+# OPERATIONAL STATUS (validation/assimilation_forecast_value.jl): the EKF predict/update math is
+# verified, but whether online coefficient adaptation IMPROVES the operational forecast is OPEN.
+# A first check found adaptation not helping, but that test is confounded (minimal library +
+# storm-in-sample initial coefficients, biasing toward "no help") — see the caveat in that file.
+# Default: keep the filter available and correctness-tested, do NOT deploy by default (the v2
+# correction layer already adapts to recent residuals); a fair test (full library + out-of-sample
+# coefficients on OMNI) is the next step before any deploy/reject decision.
 
 """
     AssimilationFilter
