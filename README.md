@@ -149,6 +149,26 @@ after the target hour is observed — is in
 [`examples/live_forecast_verify.jl`](examples/live_forecast_verify.jl). The realtime data
 path depends on external NOAA SWPC availability.
 
+## Web dashboard
+
+A self-contained operational dashboard ships in [`app/`](app/): a minimal-dependency
+`HTTP.jl` backend serving a Plotly UI over the locked-live forecast log — current storm level,
+the Dst forecast with its calibrated 90% band, a **rolling forecast-vs-observed track** (every
+locked forecast plotted against the observation that later arrived), the verified track record,
+calibration/skill, ground d*B*/d*t* with a conformal exceedance forecast, and the Sun → grid
+warning chain.
+
+```bash
+cd SolarSINDy.jl/app
+./run.sh                 # → http://127.0.0.1:8723
+```
+
+It auto-discovers the live forecast log (or set `SOLARSINDY_LOG=/path/to/live_forecast_log.csv`),
+falls back to the Plotly CDN when no vendored copy is present, and POSTs webhook alerts on
+threat-level changes when `SWM_WEBHOOK_URL` is set. The dashboard has its own lightweight
+environment (`app/Project.toml`) and test suite (`app/test/runtests.jl`, also run by the package
+`Pkg.test()`); see [`app/README.md`](app/README.md) for endpoints and configuration.
+
 ## Data
 
 Pre-computed SINDy coefficients and validation datasets ship in `data/` (~830 KB), available

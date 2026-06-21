@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Space-Weather Threat Monitor</title>
+  <meta name="description" content="Open-source, calibrated geomagnetic-storm (Dst) threat monitor over a live forecaster." />
+  <link rel="stylesheet" href="/style.css" />
+  <!-- Plotly: prefer a locally vendored copy (offline); fall back to the official CDN. -->
+  <script src="/vendor/plotly.min.js"
+    onerror="(function(){var s=document.createElement('script');s.src='https://cdn.plot.ly/plotly-2.35.2.min.js';s.onerror=function(){window.__plotlyFailed=true;};document.head.appendChild(s);})();"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">⛬</span>
+      <div>
+        <h1>Space-Weather Threat Monitor</h1>
+        <p class="tagline">Calibrated geomagnetic-storm forecasting &mdash; open source, honest lead time</p>
+      </div>
+    </div>
+    <div class="status-meta">
+      <span id="health-dot" class="dot dot-unknown" title="server health"></span>
+      <span id="updated">connecting&hellip;</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Threat banner -->
+    <section id="threat" class="threat threat-unknown" aria-live="polite">
+      <div class="threat-left">
+        <div class="threat-level" id="threat-level">&mdash;</div>
+        <div class="threat-label" id="threat-label">awaiting data</div>
+      </div>
+      <div class="threat-right">
+        <div class="metric"><span class="metric-val" id="cur-dst">&mdash;</span><span class="metric-key">current Dst (nT)</span></div>
+        <div class="metric"><span class="metric-val" id="worst-dst">&mdash;</span><span class="metric-key">worst credible (90%)</span></div>
+        <div class="metric"><span class="metric-val" id="horizon">&mdash;</span><span class="metric-key">forecast horizon</span></div>
+      </div>
+      <div id="watch-flag" class="watch-flag hidden"></div>
+    </section>
+
+    <!-- Upstream conditions from NOAA SWPC (independent corroboration of our Dst forecast) -->
+    <section class="card" id="upstream-card">
+      <div class="card-head">
+        <h2>Upstream conditions &mdash; NOAA SWPC</h2>
+        <span class="src-badge" id="upstream-badge">&mdash;</span>
+      </div>
+      <div class="upstream" id="upstream-stats"></div>
+      <div class="swpc-alerts" id="swpc-alerts"></div>
+      <p class="caption" id="upstream-caption"></p>
+    </section>
+
+    <!-- Forecast: past observed Dst + forward forecast with calibrated band -->
+    <section class="card">
+      <div class="card-head">
+        <h2>Dst forecast &amp; calibrated uncertainty</h2>
+        <span class="src-badge" id="interval-badge">&mdash;</span>
+      </div>
+      <div id="forecast-plot" class="plot"></div>
+      <p class="caption" id="forecast-caption"></p>
+    </section>
+
+    <!-- Ground dB/dt — the actual GIC driver, live from USGS magnetometers -->
+    <section class="card" id="dbdt-card">
+      <div class="card-head">
+        <h2>Ground d<i>B</i>/d<i>t</i> &mdash; GIC driver <span id="dbdt-station" class="muted"></span></h2>
+        <span class="src-badge" id="dbdt-badge">&mdash;</span>
+      </div>
+      <div class="dbdt-stats" id="dbdt-stats"></div>
+      <div id="dbdt-forecast" class="forecast-strip"></div>
+      <div id="dbdt-plot" class="plot plot-sm"></div>
+      <p class="caption" id="dbdt-caption"></p>
+    </section>
+
+    <!-- Multi-station dB/dt alert map (spatial GIC-driver view across the US/Alaska network) -->
+    <section class="card" id="network-card">
+      <div class="card-head">
+        <h2>d<i>B</i>/d<i>t</i> network — GIC alert map</h2>
+        <span class="src-badge" id="network-badge">&mdash;</span>
+      </div>
+      <div id="network-plot" class="plot"></div>
+      <p class="caption" id="network-caption"></p>
+    </section>
+
+    <div class="grid-2">
+      <!-- Verified track record -->
+      <section class="card">
+        <div class="card-head"><h2>Verified track record</h2><span class="src-badge" id="cov-badge">&mdash;</span></div>
+        <div id="history-plot" class="plot plot-sm"></div>
+        <p class="caption" id="history-caption"></p>
+      </section>
+
+      <!-- Calibration / skill -->
+      <section class="card">
+        <div class="card-head"><h2>Calibration &amp; skill</h2></div>
+        <div id="calib" class="calib"></div>
+      </section>
+    </div>
+
+    <!-- Sun -> GIC pipeline -->
+    <section class="card">
+      <div class="card-head"><h2>Warning chain: Sun &rarr; grid</h2></div>
+      <div class="pipeline" id="pipeline"></div>
+      <p class="caption">Severity is set by the CME's southward field (Bz), known with confidence only at L1
+        (~30&ndash;60&nbsp;min upstream). This system nowcasts <strong>Dst</strong>; multi-day confident-severity
+        lead requires CME models not yet included.</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>
+      100% open source (MIT). Data: NASA OMNI (L1 solar wind), Kyoto WDC (Dst), USGS/INTERMAGNET (ground dB/dt).
+      Forecasts are <strong>locked when issued and scored only after the target is observed</strong>.
+      This is a research tool, not an operational authority &mdash; for official alerts see NOAA SWPC.
+    </p>
+    <p class="muted" id="model-line"></p>
+  </footer>
+
+  <div id="banner-error" class="error-banner hidden"></div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

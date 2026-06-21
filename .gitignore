@@ -7,3 +7,6 @@ data/omni_hourly_raw.dat
 data/omni_extracted.csv
 # generated figures (regenerable from validation scripts)
 figs/
+
+# bundled dashboard: vendored Plotly is large + regenerable (app/vendor-plotly.sh)
+app/public/vendor/plotly.min.js

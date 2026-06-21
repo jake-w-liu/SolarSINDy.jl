@@ -1,0 +1,2 @@
+# Optional vendored assets. Run ../vendor-plotly.sh to place plotly.min.js here for offline use.
+# Without it, the dashboard loads Plotly from the official CDN automatically.

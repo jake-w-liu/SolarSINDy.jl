@@ -271,6 +271,13 @@ using DataFrames
     include("test_forecast_alarm.jl")
     include("test_data_pipeline_cleaning.jl")
     include("test_realtime_monitor.jl")
+
+    # Bundled operational dashboard (app/): golden-vector forecaster<->export contract,
+    # traversal guard, physical regimes. Network-free (local models + mocks).
+    let app_models = joinpath(@__DIR__, "..", "app", "models", "forecaster_FRD.json")
+        isfile(app_models) && include(joinpath(@__DIR__, "..", "app", "test", "runtests.jl"))
+    end
+
     include("test_live_forecast_verify.jl")
 
 end
