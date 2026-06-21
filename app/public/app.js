@@ -41,6 +41,15 @@ function relTime(iso) {
   return `${Math.round(sec/86400)} d ago`;
 }
 
+// Re-render every [data-reltime] element once a second so relative timestamps keep counting
+// ("updated 5s ago" → "6s ago" …) between the slower data refreshes — a visible live heartbeat.
+// This only re-renders text from stored timestamps; the data fetch still runs on REFRESH_MS.
+function tickRelTimes() {
+  document.querySelectorAll("[data-reltime]").forEach(el => {
+    el.textContent = (el.dataset.relprefix || "") + relTime(el.dataset.reltime);
+  });
+}
+
 function setError(msg) {
   const b = $("banner-error");
   if (!msg) { b.classList.add("hidden"); return; }
@@ -188,8 +197,8 @@ async function renderForecast(forecast, history, status) {
   await Plotly.react("forecast-plot", traces, layout, {displayModeBar:false, responsive:true});
 
   const src = forecast.interval_source || "—";
-  cap.innerHTML = `Solid blue: current forecast issued ${relTime(forecast.issue_time_utc)} from solar wind through `
-    + `${relTime(forecast.latest_solar_wind_utc)} (shaded = calibrated 90% interval, ${src}). `
+  cap.innerHTML = `Solid blue: current forecast issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
+    + `<span data-reltime="${forecast.latest_solar_wind_utc}">${relTime(forecast.latest_solar_wind_utc)}</span> (shaded = calibrated 90% interval, ${src}). `
     + `Dotted blue: forecasts already locked for past hours, plotted against the observed Dst (orange) that has since `
     + `arrived — the live, rolling record of prediction vs reality. `
     + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Horizons beyond `
@@ -305,7 +314,7 @@ function renderUpstream(status) {
         `<div class="arow"><span class="apid">${a.product_id || ""}</span><span class="atime">${relTime(a.issue_utc)}</span><span class="asum">${a.summary || ""}</span></div>`).join("")
     : "";
 
-  let c = `L1 solar wind ${relTime(sw.mag_time_utc)} (DSCOVR, ~30–60 min upstream of Earth). `;
+  let c = `L1 solar wind <span data-reltime="${sw.mag_time_utc}">${relTime(sw.mag_time_utc)}</span> (DSCOVR, ~30–60 min upstream of Earth). `;
   if (elevated) c += `<strong style="color:var(--t2)">Elevated:</strong> ${us.reasons.join("; ")}.`;
   else c += `Quiet by NOAA scales (G${g}, Kp ${fmt(kp, 1)}); strong southward Bz or high wind speed would raise this.`;
   cap.innerHTML = c;
@@ -316,7 +325,7 @@ async function renderDbdt(dbdt) {
   if (!dbdt || dbdt.available === false) {
     badge.textContent = "unavailable"; badge.style.color = "var(--ink-mute)";
     stats.innerHTML = ""; if (window.Plotly) Plotly.purge("dbdt-plot");
-    cap.textContent = "USGS ground-magnetometer feed currently unreachable; the Dst forecast above is unaffected.";
+    cap.textContent = "USGS ground-magnetometer feed currently unreachable — it throttles intermittently; this panel fills in automatically on the next refresh once the feed responds. The Dst forecast above is unaffected.";
     return;
   }
   stn.textContent = "· USGS " + dbdt.station;
@@ -394,7 +403,7 @@ async function renderNetwork(net) {
   if (!net || !net.stations || net.stations.length === 0) {
     badge.textContent = "unavailable"; badge.style.color = "var(--ink-mute)";
     if (window.Plotly) Plotly.purge("network-plot");
-    cap.textContent = "USGS network feed currently unreachable (the service throttles intermittently); single-station panel above is independent.";
+    cap.textContent = "USGS network feed currently unreachable — it throttles intermittently and the map fills in automatically on the next refresh once it responds; the single-station panel above is independent.";
     return;
   }
   if (!(await ensurePlotly())) return;
@@ -454,7 +463,9 @@ async function refresh() {
     ]);
     setError(null);
     $("health-dot").className = "dot " + (health && health.status === "ok" ? "dot-ok" : "dot-bad");
-    $("updated").textContent = "updated " + relTime(status.generated_utc);
+    const upd = $("updated");
+    upd.dataset.reltime = status.generated_utc; upd.dataset.relprefix = "updated ";
+    upd.textContent = "updated " + relTime(status.generated_utc);
     renderThreat(status);
     browserNotify(status);
     renderUpstream(status);
@@ -472,4 +483,5 @@ async function refresh() {
 }
 
 refresh();
-setInterval(refresh, REFRESH_MS);
+setInterval(refresh, REFRESH_MS);   // fetch fresh data
+setInterval(tickRelTimes, 1000);     // keep relative timestamps ticking between fetches
