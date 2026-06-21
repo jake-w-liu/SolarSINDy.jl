@@ -112,4 +112,21 @@ end
             @test haskey(m, :cap_note)              # cap convention documented in the artifact
         end
     end
+
+    @testset "geoelectric: layered-earth surface impedance (Wait recursion)" begin
+        mu0 = 4e-7 * pi; w = 2pi * 1e-3
+        ha(rho) = sqrt(im * w * mu0 * rho)                  # uniform half-space impedance
+        rho_app(Z, ww) = abs2(Z) / (ww * mu0)               # MT apparent resistivity
+        @test surface_impedance(w, [100.0], Float64[]) ≈ ha(100.0)                 # single = half-space
+        @test surface_impedance(w, [100.0, 100.0], [5e3]) ≈ ha(100.0)              # identical interface invisible
+        @test isapprox(surface_impedance(w, [100.0, 1.0], [1e7]), ha(100.0); rtol=1e-6)  # thick top → top
+        @test isapprox(surface_impedance(w, [100.0, 5.0], [1.0]), ha(5.0); rtol=1e-3)    # thin top → below
+        @test abs(rho_app(surface_impedance(2pi*1.0,  [10.0,1000.0], [5e3]), 2pi*1.0)  - 10.0)/10.0   < 0.25  # high f → top ρ
+        @test abs(rho_app(surface_impedance(2pi*1e-6, [10.0,1000.0], [5e3]), 2pi*1e-6) - 1000.0)/1000.0 < 0.25  # low f → bottom ρ
+        Bx = 50.0 .* sin.(2pi .* (1:120) ./ 30); By = 30.0 .* cos.(2pi .* (1:120) ./ 30)
+        exL, eyL = geoelectric_field(Bx, By, 60.0; layers=EARTH_RESISTIVE)
+        @test all(isfinite, exL) && all(isfinite, eyL) && maximum(abs, exL) > 0
+        exU, _ = geoelectric_field(Bx, By, 60.0; rho_ohm_m=100.0)
+        @test maximum(abs, exL) > maximum(abs, exU)         # resistive ground → larger geoelectric field
+    end
 end
