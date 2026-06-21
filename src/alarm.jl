@@ -58,6 +58,11 @@ Classify storm severity from Dst* value.
 """
 function classify_severity(dst::Float64,
                            thresholds::Dict{StormSeverity, Float64})
+    # A non-finite Dst is a data-quality condition, not a quiet state. The live monitor guards
+    # its drivers upstream so NaN should not reach here; treat it explicitly (rather than letting
+    # every `NaN <= t` silently fall through to QUIET) so the suppression is intentional and a
+    # caller can detect it via `isnan` on the classified input.
+    isnan(dst) && return QUIET
     if dst <= get(thresholds, SUPERINTENSE, -200.0)
         return SUPERINTENSE
     elseif dst <= get(thresholds, INTENSE, -100.0)

@@ -144,7 +144,10 @@ function run_monitor(; poll_interval_min::Int=5,
             # not be displayed as current. Threshold allows Kyoto/SWPC publication
             # lag (~2-3 h) before flagging.
             data_age = clock() - t_new[latest_idx]
-            stale = data_age >= Hour(Int(round(staleness_threshold_hr)))
+            # Use |age|: a future-dated latest timestamp (clock skew or a mislabeled feed) is
+            # anomalous too and must not read as "fresh". Threshold in minutes avoids the
+            # round-half-to-even surprise of Hour(Int(round(2.5))) == 2 h.
+            stale = abs(data_age) >= Minute(round(Int, staleness_threshold_hr * 60))
 
             # Safe solar wind values (replace NaN with defaults)
             V = _safe_val(swd_new.V[latest_idx], 400.0)

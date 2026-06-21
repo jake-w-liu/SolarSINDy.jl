@@ -81,16 +81,26 @@ using HTTP
     end
 
     @testset "C2: fetch_swpc_dst parses feed and Dst anchoring populates Dst*" begin
+        # The live Kyoto Dst product is an array of OBJECTS with ISO-8601 (`T`) timestamps
+        # and numeric dst — NOT the header + array-of-arrays format of the plasma/mag feeds.
+        # This mock matches the real feed so the parser is actually guarded against it.
         function dst_get(url; kwargs...)
             return (; status=200, body="""
-                [["time_tag","dst"],
-                 ["2026-01-01 00:00:00","-40"],
-                 ["2026-01-01 01:00:00","-55"]]
+                [{"time_tag":"2026-01-01T00:00:00","dst":-40},
+                 {"time_tag":"2026-01-01T01:00:00","dst":-55}]
                 """)
         end
         times, dst = fetch_swpc_dst(; http_get=dst_get)
         @test times == [DateTime(2026, 1, 1, 0), DateTime(2026, 1, 1, 1)]
         @test dst == [-40.0, -55.0]
+
+        # A legacy array-of-arrays form (with header, space-separated time) is still tolerated.
+        legacy_get(url; kwargs...) = (; status=200, body="""
+            [["time_tag","dst"], ["2026-01-01 00:00:00","-40"], ["2026-01-01 01:00:00","-55"]]
+            """)
+        times2, dst2 = fetch_swpc_dst(; http_get=legacy_get)
+        @test times2 == [DateTime(2026, 1, 1, 0), DateTime(2026, 1, 1, 1)]
+        @test dst2 == [-40.0, -55.0]
 
         plasma = DataFrame(
             time_tag = [DateTime(2026, 1, 1, 0, 0, 0), DateTime(2026, 1, 1, 0, 30, 0),

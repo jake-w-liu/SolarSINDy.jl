@@ -121,10 +121,47 @@ function fetch_swpc_dst(; url::String=KYOTO_DST_JSON_URL,
         retry_delay_sec=retry_delay_sec,
         http_get=http_get,
     )
-    rows = raw[2:end]  # skip header row
-    times = DateTime[DateTime(String(r[1]), dateformat"yyyy-mm-dd HH:MM:SS") for r in rows]
-    dst = Float64[_parse_swpc_float(r[2]) for r in rows]
+    # The Kyoto Dst product is served as an array of OBJECTS with ISO-8601 timestamps,
+    #   [{"time_tag":"2026-06-14T05:00:00","dst":-15}, ...],
+    # NOT the header + array-of-arrays format the plasma/mag feeds use. Parse the object
+    # form, while tolerating a legacy array-of-arrays form (with or without a header row)
+    # and both the ISO `T` and space timestamp separators.
+    times = DateTime[]
+    dst = Float64[]
+    for r in raw
+        tt = nothing; dv = nothing
+        if r isa AbstractVector
+            length(r) < 2 && continue
+            String(string(r[1])) == "time_tag" && continue   # skip a header row if present
+            tt = r[1]; dv = r[2]
+        else                                                  # object form (JSON3.Object/Dict)
+            tt = get(r, :time_tag, get(r, "time_tag", nothing))
+            dv = get(r, :dst, get(r, "dst", nothing))
+        end
+        tt === nothing && continue
+        t = _parse_swpc_time(String(string(tt)))
+        t === nothing && continue
+        push!(times, t)
+        push!(dst, _parse_swpc_float(dv))
+    end
     return times, dst
+end
+
+"""
+    _parse_swpc_time(s) -> Union{DateTime,Nothing}
+
+Parse an SWPC/Kyoto timestamp, tolerating the ISO-8601 `T` separator
+(`2026-06-14T05:00:00`), the space separator (`2026-06-14 05:00:00`), and an
+optional fractional-second suffix. Returns `nothing` if unparseable.
+"""
+function _parse_swpc_time(s::AbstractString)
+    str = String(s)
+    base = split(str, '.')[1]                # drop any fractional-second suffix
+    for fmt in (dateformat"yyyy-mm-ddTHH:MM:SS", dateformat"yyyy-mm-dd HH:MM:SS")
+        t = tryparse(DateTime, base, fmt)
+        t !== nothing && return t
+    end
+    return tryparse(DateTime, str)            # last resort: default ISO constructor
 end
 
 """

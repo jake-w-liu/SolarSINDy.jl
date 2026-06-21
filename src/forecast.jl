@@ -244,6 +244,10 @@ function _column_float_or_nan(df::DataFrame, col::Symbol)
     return Float64[ismissing(x) ? NaN : Float64(x) for x in df[!, col]]
 end
 
+# Scalar form: a `missing` cell (e.g. a not-yet-verified observation) becomes NaN, which
+# propagates harmlessly through scoring rather than throwing `MethodError(Float64, missing)`.
+_cell_float_or_nan(x) = ismissing(x) ? NaN : Float64(x)
+
 function _chronological_order(df::DataFrame)
     for col in (:issue_time_utc, :latest_dst_time_utc, :target_time_utc)
         String(col) in names(df) || continue
@@ -446,7 +450,9 @@ end
 function _finite_rows(df::DataFrame, cols)
     mask = trues(nrow(df))
     for c in cols
-        mask .&= isfinite.(Float64.(df[!, c]))
+        # Map `missing` → NaN BEFORE the finiteness test: a `missing` (e.g. a not-yet-verified
+        # observation row, normal in live replay) must be dropped here, not crash the conversion.
+        mask .&= isfinite.(_column_float_or_nan(df, Symbol(c)))
     end
     return df[mask, :]
 end
@@ -760,17 +766,17 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
 
     for i in 1:nrow(out)
         features = NamedTuple{Tuple(cal.feature_names)}(
-            Tuple(Float64(out[i, c]) for c in cal.feature_names)
+            Tuple(_cell_float_or_nan(out[i, c]) for c in cal.feature_names)
         )
         pred = operational_v2_predict(
             cal,
-            Float64(out[i, :pred_dst_nt]),
-            Float64(out[i, :pred_dst_ci05_nt]),
-            Float64(out[i, :pred_dst_ci95_nt]),
+            _cell_float_or_nan(out[i, :pred_dst_nt]),
+            _cell_float_or_nan(out[i, :pred_dst_ci05_nt]),
+            _cell_float_or_nan(out[i, :pred_dst_ci95_nt]),
             features,
             baselines=_row_baselines(out, i),
         )
-        obs = Float64(out[i, :observation_dst_nt])
+        obs = _cell_float_or_nan(out[i, :observation_dst_nt])
         v2_pred[i] = pred.pred_dst
         v2_ci05[i] = pred.ci05_dst
         v2_ci95[i] = pred.ci95_dst
@@ -1089,7 +1095,7 @@ function step_forecast!(state::ForecastState,
     result = ForecastResult(
         t,
         dst_next,
-        dst_ens[div(n_ens, 2)],           # median
+        dst_ens[max(1, div(n_ens, 2))],   # median (guard index 0 when n_ens==1)
         dst_ens[max(1, div(n_ens, 20))],   # 5th percentile
         dst_ens[min(n_ens, n_ens - div(n_ens, 20) + 1)],  # 95th percentile
         dst_observed,
@@ -1145,7 +1151,7 @@ function forecast_ahead(state::ForecastState,
 
         push!(results, ForecastResult(
             t_next, dst_next,
-            sorted_ens[div(n_ens, 2)],
+            sorted_ens[max(1, div(n_ens, 2))],
             sorted_ens[max(1, div(n_ens, 20))],
             sorted_ens[min(n_ens, n_ens - div(n_ens, 20) + 1)],
             NaN,
