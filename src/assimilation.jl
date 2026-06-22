@@ -40,9 +40,15 @@
 #   multi-step rollout diverges. Filter-optimal coefficients (re-anchored by each observation, which hides
 #   the instability) are NOT simulation-stable. The operational path is multi-step, so the EKF is
 #   redundant-or-harmful there.
-# Status: keep the filter available and correctness-tested; do NOT deploy. The only path that could earn the
-# 1-step gain without the multi-step blow-up is a CONSTRAINED EKF that holds the decay coefficient < 0
-# (stability), which is future work, not the current operational path.
+# Status: the UNCONSTRAINED filter is not deployable (above). The CONSTRAINED variant — supply
+# `coeff_bounds` so the adapted decay coefficient is held <= the discovered physical value -0.048 (free to
+# STRENGTHEN, never weaken) — IS validated (validation/assimilation_redundancy_constrained.jl): the box
+# binds (adapted decay range [-0.559, -0.048] vs the unconstrained [-0.51, +0.54]), which REMOVES the
+# multi-step divergence entirely (6 h B-D -35.56 -> +0.46; flagship -394 -> +7.6 nT) and adds a SIGNIFICANT
+# ~1 nT 1-step improvement on top of v2 (+0.99 ± 0.33 over 31 storms, 23/8), with multi-step NEUTRAL. So the
+# constrained EKF is deploy-worthy, its operational value concentrated at the 1 h horizon. Wiring it into the
+# live path (swap fixed v1 coefficients for constrained-EKF-adapted ones, coeff_bounds=[(-Inf,-0.048)]) is
+# the recommended deployment step; until wired, the operational forecast uses fixed v1 coefficients + v2.
 
 """
     AssimilationFilter
@@ -62,6 +68,7 @@ mutable struct AssimilationFilter
     Q::Matrix{Float64}
     R::Float64
     dt::Float64
+    bounds::Vector{Tuple{Float64,Float64}}   # per-adapted-coeff (lo,hi) box; (-Inf,Inf)=unconstrained
 end
 
 """
@@ -77,7 +84,7 @@ function init_assimilation(lib::CandidateLibrary, xi_full::AbstractVector{<:Real
                            adapt_idx::AbstractVector{<:Integer}, dst0::Real;
                            dst_var0::Real=25.0, coeff_var0::Real=1.0e-2,
                            q_dst::Real=1.0, q_coeff::Real=1.0e-6,
-                           R::Real=4.0, dt::Real=1.0)
+                           R::Real=4.0, dt::Real=1.0, coeff_bounds=nothing)
     length(xi_full) == length(lib) ||
         throw(DimensionMismatch("xi_full length $(length(xi_full)) != library length $(length(lib))"))
     all(i -> 1 <= i <= length(xi_full), adapt_idx) ||
@@ -91,7 +98,23 @@ function init_assimilation(lib::CandidateLibrary, xi_full::AbstractVector{<:Real
 
     idx = collect(Int, adapt_idx)
     m = length(idx)
+    # Optional inequality constraints on the adapted coefficients (stability box). Default
+    # unconstrained, so existing behaviour is byte-for-byte unchanged. When supplied,
+    # `coeff_bounds[j]=(lo,hi)` constrains adapted coefficient j (matching adapt_idx order); the
+    # mean is projected into the box after every measurement update (a projected/constrained KF).
+    bounds = if coeff_bounds === nothing
+        [(-Inf, Inf) for _ in 1:m]
+    else
+        length(coeff_bounds) == m ||
+            throw(ArgumentError("coeff_bounds length $(length(coeff_bounds)) != adapted-coefficient count $m"))
+        [(Float64(b[1]), Float64(b[2])) for b in coeff_bounds]
+    end
+    all(b -> b[1] <= b[2], bounds) || throw(ArgumentError("each coeff_bound must satisfy lo <= hi"))
+
     mean = vcat(Float64(dst0), Float64[xi_full[i] for i in idx])
+    for j in 1:m                                  # respect the box at initialisation too
+        mean[j + 1] = clamp(mean[j + 1], bounds[j][1], bounds[j][2])
+    end
     cov = Matrix{Float64}(I, m + 1, m + 1)
     cov[1, 1] = dst_var0
     for j in 1:m
@@ -103,7 +126,7 @@ function init_assimilation(lib::CandidateLibrary, xi_full::AbstractVector{<:Real
         Q[j + 1, j + 1] = q_coeff
     end
     return AssimilationFilter(lib, collect(Float64, xi_full), idx, mean, cov,
-                              Q, Float64(R), Float64(dt))
+                              Q, Float64(R), Float64(dt), bounds)
 end
 
 current_dst(f::AssimilationFilter) = f.mean[1]
@@ -195,6 +218,14 @@ function assimilation_update!(f::AssimilationFilter, observed_dst_star::Real)
     K = f.cov[:, 1] ./ S                      # Kalman gain (n-vector)
     innovation = Float64(observed_dst_star) - f.mean[1]
     f.mean .+= K .* innovation
+    # Project the adapted coefficients into their constraint box (no-op when unconstrained). This is a
+    # projected/constrained Kalman update: it keeps each adapted coefficient inside its stability range
+    # (e.g. the decay rate held < 0), preventing the filter from drifting into a dynamically unstable ODE
+    # that would diverge under free-running multi-step rollout.
+    @inbounds for j in 1:length(f.adapt_idx)
+        lo, hi = f.bounds[j]
+        (isfinite(lo) || isfinite(hi)) && (f.mean[j + 1] = clamp(f.mean[j + 1], lo, hi))
+    end
     # Joseph-free covariance update P = (I - K Hᵀ) P, then symmetrize.
     f.cov .-= K * f.cov[1, :]'
     _symmetrize!(f.cov)

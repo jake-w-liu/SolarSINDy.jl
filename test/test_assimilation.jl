@@ -137,6 +137,34 @@ using Statistics
         @test isfinite(current_dst(f))
     end
 
+    @testset "coefficient stability constraint (opt-in) clamps the adapted decay coefficient" begin
+        rng = MersenneTwister(20260622)
+        lib = build_minimal_library()                 # ["1","Dst_star","V*Bs"]
+        ξ0 = [0.0, -0.1, 0.0]                          # start at strong decay −0.1
+        drivers = [(V=400.0, Bz=-3.0, By=0.0, n=5.0, Pdyn=2.0) for _ in 1:200]
+        # Truth relaxes ~−0.005·Dst* (effective decay ABOVE the −0.01 cap), so the filter wants to push
+        # the adapted decay up past −0.01; the constraint must hold it at −0.01.
+        obs = Float64[]; d = -40.0
+        for _ in 1:200; d = 0.995 * d + 0.5 * randn(rng); push!(obs, d); end
+        cons = init_assimilation(lib, ξ0, [2], obs[1]; q_coeff=1e-3, coeff_bounds=[(-Inf, -0.01)])
+        unc  = init_assimilation(lib, ξ0, [2], obs[1]; q_coeff=1e-3)
+        cmax = -Inf; umax = -Inf
+        for k in 1:199
+            assimilation_predict!(cons, drivers[k]); assimilation_update!(cons, obs[k+1])
+            assimilation_predict!(unc,  drivers[k]); assimilation_update!(unc,  obs[k+1])
+            cmax = max(cmax, current_coeffs(cons)[1]); umax = max(umax, current_coeffs(unc)[1])
+        end
+        @test cmax <= -0.01 + 1e-9                     # constrained coefficient never leaves the box
+        @test umax > -0.01                             # unconstrained DOES exceed it → test is non-vacuous
+        @test isfinite(current_dst(cons))
+        # initial coefficient outside the box is projected in at construction
+        fc = init_assimilation(lib, [0.0, 0.5, 0.0], [2], -10.0; coeff_bounds=[(-Inf, -0.01)])
+        @test current_coeffs(fc)[1] <= -0.01 + 1e-12
+        # validation: wrong-length bounds and lo>hi are rejected
+        @test_throws ArgumentError init_assimilation(lib, ξ0, [2], -10.0; coeff_bounds=[(-1.0, 0.0), (0.0, 1.0)])
+        @test_throws ArgumentError init_assimilation(lib, ξ0, [2], -10.0; coeff_bounds=[(0.0, -1.0)])
+    end
+
     @testset "input validation" begin
         lib = build_minimal_library()
         ξ = [0.0, -0.1, 0.0]
