@@ -4,7 +4,7 @@
 // always shown with its 90% interval, lead time is stated against the physical L1 ceiling,
 // and calibration is reported with full baseline + per-method breakdown (no overclaiming).
 
-const WONG = { obs: "#e69f00", fcst: "#0072b2", band: "rgba(0,114,178,0.20)" };
+const WONG = { obs: "#e69f00", fcst: "#0072b2", band: "rgba(0,114,178,0.20)", ekf: "#009e73" };
 const TIER_COLORS = ["#2e9e6b", "#c9a227", "#d55e00", "#c0392b", "#8e44ad"];
 const PULK = [18, 42, 66, 90];   // Pulkkinen 2013 dB/dt thresholds [nT/min]
 const THREAT_CLASSES = ["threat-0","threat-1","threat-2","threat-3","threat-4"];
@@ -136,7 +136,7 @@ function forecastTrack(history, cutoffMs) {
   return { x: xs, y: xs.map(t => best.get(t).pred) };
 }
 
-async function renderForecast(forecast, history, status) {
+async function renderForecast(forecast, history, status, ekfShadow) {
   if (!(await ensurePlotly())) { setError("Could not load the Plotly library (offline and no vendored copy)."); return; }
   const cap = $("forecast-caption");
   $("interval-badge").textContent = forecast && forecast.interval_source ? `interval: ${forecast.interval_source}` : "—";
@@ -192,6 +192,15 @@ async function renderForecast(forecast, history, status) {
   // forward forecast for the current cycle (solid)
   traces.push({ x: px, y: py, mode:"lines+markers", name:"Forecast Dst (v2)",
     line:{color:WONG.fcst, width:2.6}, marker:{size:6} });
+  // SHADOW: experimental constrained-EKF 1 h forecast (separate log, never alters the locked record),
+  // over the same past hours so its live 1 h skill can be eyeballed against the locked v2 line.
+  if (ekfShadow && ekfShadow.available && ekfShadow.rows && ekfShadow.rows.length) {
+    const sr = ekfShadow.rows.filter(r => r.ekf_v2_pred_dst_nt != null && Date.parse(r.target_utc) >= cutoff);
+    if (sr.length) traces.push({ x: sr.map(r=>r.target_utc), y: sr.map(r=>r.ekf_v2_pred_dst_nt),
+      mode:"lines+markers", name:"EKF shadow (1 h, exp.)",
+      line:{color:WONG.ekf, width:1.6, dash:"dashdot"}, marker:{size:4}, opacity:0.9,
+      hovertemplate:"EKF shadow 1 h %{y:.0f} nT<extra></extra>" });
+  }
 
   const layout = Object.assign(PLOT_LAYOUT(), { shapes, annotations: anns });
   await Plotly.react("forecast-plot", traces, layout, {displayModeBar:false, responsive:true});
@@ -203,6 +212,14 @@ async function renderForecast(forecast, history, status) {
     + `arrived — the live, rolling record of prediction vs reality. `
     + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Horizons beyond `
     + `the last complete hour assume solar-wind persistence — genuine new-disturbance lead is the L1 transit (~30–60 min).`;
+  if (ekfShadow && ekfShadow.available && ekfShadow.rows && ekfShadow.rows.some(r => r.ekf_v2_pred_dst_nt != null)) {
+    const ld = ekfShadow.latest_decay, fd = ekfShadow.fixed_decay;
+    cap.innerHTML += ` <span style="color:${WONG.ekf}">Green dash-dot:</span> an experimental constrained-EKF 1-hour `
+      + `forecast running in shadow (separate log; it never alters the locked v2 record). It online-adapts the `
+      + `ring-current decay coefficient`
+      + (ld != null && fd != null ? ` (now ${ld.toFixed(3)} vs fixed ${fd.toFixed(3)})` : ``)
+      + ` and is validated to improve the 1-hour forecast ~1 nT; watch it track the orange observations against the locked blue line.`;
+  }
 }
 
 async function renderHistory(history) {
@@ -453,13 +470,14 @@ function browserNotify(status) {
 // ---- main refresh loop -----------------------------------------------------------------
 async function refresh() {
   try {
-    const [health, status, forecast, history, dbdt, network] = await Promise.all([
+    const [health, status, forecast, history, dbdt, network, ekfShadow] = await Promise.all([
       fetchJSON("/api/health").catch(() => null),
       fetchJSON("/api/status"),
       fetchJSON("/api/forecast"),
       fetchJSON("/api/history?hours=72"),
       fetchJSON("/api/dbdt").catch(() => null),
       fetchJSON("/api/network").catch(() => null),
+      fetchJSON("/api/ekf_shadow").catch(() => null),
     ]);
     setError(null);
     $("health-dot").className = "dot " + (health && health.status === "ok" ? "dot-ok" : "dot-bad");
@@ -471,7 +489,7 @@ async function refresh() {
     renderUpstream(status);
     renderCalib(status);
     renderPipeline(status, dbdt);
-    await renderForecast(forecast, history, status);
+    await renderForecast(forecast, history, status, ekfShadow);
     await renderHistory(history);
     await renderDbdt(dbdt);
     await renderNetwork(network);

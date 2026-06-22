@@ -193,6 +193,29 @@ function build_forecast(df::DataFrame)
             horizons=horizons)
 end
 
+# SHADOW: the validated constrained-EKF 1 h forecast, read from its OWN log. This is an experimental
+# parallel series (it never alters the locked v1/v2 record); the dashboard draws it as a separate line so
+# its live 1 h skill can be watched against the locked v2 forecast.
+function build_ekf_shadow(log_path::AbstractString)
+    shadow = joinpath(dirname(log_path), "ekf_shadow_log.csv")
+    isfile(shadow) || return (available=false, rows=NamedTuple[])
+    df = try CSV.read(shadow, DataFrame) catch; return (available=false, rows=NamedTuple[]) end
+    (nrow(df) == 0 || !("ekf_v2_pred_dst_nt" in names(df))) && return (available=false, rows=NamedTuple[])
+    n = nrow(df); lo = max(1, n - 71)                  # last ~72 cycles (≈3 days hourly)
+    _t(x) = x isa DateTime ? x : DateTime(first(split(string(x), ".")))
+    rows = NamedTuple[]
+    for r in eachrow(df[lo:n, :])
+        push!(rows, (target_utc=jdt(_t(r.target_time_utc)),
+                     ekf_v2_pred_dst_nt=jnum(r.ekf_v2_pred_dst_nt),
+                     locked_v2_pred_dst_nt=jnum(r.locked_v2_pred_dst_nt),
+                     fallback=(("fallback" in names(df)) && r.fallback === true)))
+    end
+    return (available=true,
+            fixed_decay=("fixed_decay" in names(df) ? jnum(df.fixed_decay[end]) : nothing),
+            latest_decay=("adapted_decay" in names(df) ? jnum(df.adapted_decay[end]) : nothing),
+            rows=rows)
+end
+
 """Threat status: current observation + worst credible storm over the latest cycle."""
 function build_status(df::DataFrame)
     cyc = latest_cycle(df)
