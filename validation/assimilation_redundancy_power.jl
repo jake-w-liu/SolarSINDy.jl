@@ -129,7 +129,7 @@ function main()
     end
 
     @printf("%-6s %4s | %6s %6s %6s %6s | %-22s\n", "horiz","n","A fix","B v2","C ekf","D e+c","B-D (EKF gain on v2)")
-    summary = Dict{Int,Float64}()
+    summary = Dict{Int,Float64}(); ses = Dict{Int,Float64}()
     for Nh in HORIZONS
         A=Float64[];B=Float64[];C=Float64[];D=Float64[];bd=Float64[]; fav=0;hurt=0; flag=NaN
         for s in storms
@@ -141,13 +141,13 @@ function main()
             push!(A,a);push!(B,b);push!(C,c);push!(D,d); push!(bd,b-d)
             (b-d)>0.05 && (fav+=1); (b-d)<-0.05 && (hurt+=1); s.storm_id==flagship && (flag=b-d)
         end
-        n=length(bd); se = n>1 ? std(bd)/sqrt(n) : NaN; summary[Nh]=mean(bd)
+        n=length(bd); se = n>1 ? std(bd)/sqrt(n) : NaN; summary[Nh]=mean(bd); ses[Nh]=se
         @printf("%-4dh  %4d | %6.2f %6.2f %6.2f %6.2f | %+.2f ± %.2f SE; fav %d/%d hurt %d; flagship %+.2f\n",
                 Nh, n, mean(A),mean(B),mean(C),mean(D), mean(bd), se, fav, n, hurt, flag)
     end
 
     println("\n--- verdict (B-D = EKF gain on top of v2; >0 favours EKF) ---")
-    one_step_neutral = abs(summary[1]) < 2 * (1.0)            # |B-D|@1h small (compare to its SE printed above)
+    one_step_neutral = abs(summary[1]) < 2 * ses[1]          # |B-D|@1h within 2·SE of 0 (the actual 1 h SE)
     worsens = summary[6] < summary[3] < summary[2] < summary[1]
     if one_step_neutral && worsens && summary[6] < -1.0
         println("RESOLVED — do NOT deploy the unconstrained EKF for the operational (multi-step) forecast:")

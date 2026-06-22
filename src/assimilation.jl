@@ -45,10 +45,12 @@
 # STRENGTHEN, never weaken) — IS validated (validation/assimilation_redundancy_constrained.jl): the box
 # binds (adapted decay range [-0.559, -0.048] vs the unconstrained [-0.51, +0.54]), which REMOVES the
 # multi-step divergence entirely (6 h B-D -35.56 -> +0.46; flagship -394 -> +7.6 nT) and adds a SIGNIFICANT
-# ~1 nT 1-step improvement on top of v2 (+0.99 ± 0.33 over 31 storms, 23/8), with multi-step NEUTRAL. So the
-# constrained EKF is deploy-worthy, its operational value concentrated at the 1 h horizon. Wiring it into the
-# live path (swap fixed v1 coefficients for constrained-EKF-adapted ones, coeff_bounds=[(-Inf,-0.048)]) is
-# the recommended deployment step; until wired, the operational forecast uses fixed v1 coefficients + v2.
+# ~1 nT 1-step improvement on top of v2 (+0.99 ± 0.33 over 31 storms, 23/8). The multi-step result is NEUTRAL
+# AT THIS CAP specifically: a cap sweep shows weaker caps reintroduce significant multi-step harm (6 h B-D
+# -2.67 ± 0.42 at -0.001, -1.29 ± 0.39 at -0.02), so the constraint must be exactly coeff_bounds=[(-Inf,-0.048)]
+# (the discovered physical decay) — a weaker cap is NOT safe. The 1 h gain is robust across caps. So the
+# constrained EKF is deploy-worthy at this cap, its operational value concentrated at the 1 h horizon. Wiring
+# it into the live path is the recommended step; until wired, the operational forecast uses fixed v1 + v2.
 
 """
     AssimilationFilter
@@ -107,6 +109,8 @@ function init_assimilation(lib::CandidateLibrary, xi_full::AbstractVector{<:Real
     else
         length(coeff_bounds) == m ||
             throw(ArgumentError("coeff_bounds length $(length(coeff_bounds)) != adapted-coefficient count $m"))
+        all(b -> length(b) == 2, coeff_bounds) ||
+            throw(ArgumentError("each coeff_bound must be a 2-tuple (lo, hi)"))
         [(Float64(b[1]), Float64(b[2])) for b in coeff_bounds]
     end
     all(b -> b[1] <= b[2], bounds) || throw(ArgumentError("each coeff_bound must satisfy lo <= hi"))

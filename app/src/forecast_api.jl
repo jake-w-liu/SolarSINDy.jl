@@ -201,11 +201,15 @@ function build_ekf_shadow(log_path::AbstractString)
     isfile(shadow) || return (available=false, rows=NamedTuple[])
     df = try CSV.read(shadow, DataFrame) catch; return (available=false, rows=NamedTuple[]) end
     (nrow(df) == 0 || !("ekf_v2_pred_dst_nt" in names(df))) && return (available=false, rows=NamedTuple[])
-    n = nrow(df); lo = max(1, n - 71)                  # last ~72 cycles (≈3 days hourly)
-    _t(x) = x isa DateTime ? x : DateTime(first(split(string(x), ".")))
+    try sort!(df, :target_time_utc) catch; end          # defensive: don't rely on append order for the tail
+    n = nrow(df); lo = max(1, n - 71)                   # last ~72 cycles (≈3 days hourly)
+    # total parser: tolerate a missing/malformed/Z-suffixed cell by skipping that row, never throwing
+    # (so the endpoint keeps its available=false / partial-rows contract instead of 500-ing).
+    _t(x) = x isa DateTime ? x : tryparse(DateTime, first(split(replace(string(x), "Z" => ""), ".")))
     rows = NamedTuple[]
     for r in eachrow(df[lo:n, :])
-        push!(rows, (target_utc=jdt(_t(r.target_time_utc)),
+        t = _t(r.target_time_utc); t === nothing && continue
+        push!(rows, (target_utc=jdt(t),
                      ekf_v2_pred_dst_nt=jnum(r.ekf_v2_pred_dst_nt),
                      locked_v2_pred_dst_nt=jnum(r.locked_v2_pred_dst_nt),
                      fallback=(("fallback" in names(df)) && r.fallback === true)))

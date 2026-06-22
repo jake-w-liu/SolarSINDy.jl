@@ -23,12 +23,15 @@
 #       6 h    26.57   27.97  26.22   27.52    +0.46 ± 0.44   (flagship +7.60)
 #   The decay box binds (range [-0.559, -0.048], vs [-0.51,+0.54] unconstrained), so the multi-step
 #   DIVERGENCE is gone: 6 h B-D goes -35.56 (unconstrained) -> +0.46 (constrained); flagship -394 -> +7.6.
-#   1-step gain is SIGNIFICANT (+0.99 ± 0.33, >2.5 SE); multi-step is NEUTRAL (B-D within ~1 SE of 0 — harm
-#   removed, not a further gain). The constrained EKF *raw* (C) beats fixed (A) at every horizon. Looser
-#   caps (-0.001, -0.02) also remove the blow-up but leave small residual multi-step harm; -0.048 is both
-#   principled (the discovered value) and best. VERDICT: deploy-worthy — wiring the constrained EKF
-#   (init_assimilation(...; coeff_bounds=[(-Inf,-0.048)])) under v2 improves the 1 h forecast ~1 nT with
-#   no multi-step harm. (Operational value concentrated at 1 h; multi-step neutral.)
+#   1-step gain is SIGNIFICANT (+0.99 ± 0.33, >2.5 SE). At the -0.048 cap multi-step is NEUTRAL (B-D within
+#   ~1 SE of 0). IMPORTANT — this multi-step safety is CAP-DEPENDENT, not general: the looser caps leave
+#   SIGNIFICANT residual multi-step harm (6 h B-D = -2.67 ± 0.42 at cap -0.001, -1.29 ± 0.39 at -0.02 —
+#   several SE below 0), so the constraint STRENGTH matters and only the -0.048 cap removes the harm. That
+#   cap is the principled choice (the discovered physical decay value) AND the one that works; it is not a
+#   free parameter tuned to win. The 1 h gain (~+1.0 nT) is robust across ALL caps. VERDICT: deploy-worthy
+#   AT cap=-0.048 — wiring the constrained EKF (init_assimilation(...; coeff_bounds=[(-Inf,-0.048)])) under
+#   v2 improves the 1 h forecast ~1 nT with no multi-step harm; a weaker cap must NOT be used (it reintroduces
+#   multi-step harm). Operational value concentrated at 1 h.
 
 using SolarSINDy, CSV, DataFrames, Statistics, LinearAlgebra, Printf, Dates
 
