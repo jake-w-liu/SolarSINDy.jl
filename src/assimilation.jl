@@ -26,17 +26,23 @@
 # hence out-of-sample for the cycle-25 storms tested) — and REVERSES the conclusion: online adaptation
 # of the decay coefficient robustly improves the one-step Dst* forecast on held-out storms (mean RMSE
 # 17.60 -> 15.98 nT, and EVERY process-noise q in the sweep beats fixed, so it is not cherry-picked).
-# So online adaptation has real value on the raw v1 forecast. The remaining question — does it add value
-# ON TOP of the v2 residual-correction layer (which already adapts online), or is it redundant? — was
-# then tested directly (validation/assimilation_vs_v2_redundancy.jl, leave-one-storm-out on the same
-# cycle-25 storms, fitting the REAL v2 correction on EKF-vs-fixed predictions). Result: INCONCLUSIVE at
-# n=6. On top of v2 the EKF lowers mean one-step RMSE 16.68 -> 15.46 nT (+1.22), but that mean is within
-# ~1 SE (±1.19), strongly storm-dependent (per-storm range -3.1 .. +4.4), and it HURTS the flagship
-# May 2024 superstorm; the storms-only v2 correction is itself a noisy proxy for the operational broad
-# calibration. So the EKF is NOT redundant with v2 but also NOT a clean additive win.
-# Status: adaptation value DEMONSTRATED on raw v1; on-top-of-v2 value UNRESOLVED at this scale. Keep the
-# filter available and correctness-tested, do NOT deploy by default. A clean resolution needs the real
-# broad v2 calibration (not a storms-only fit), more storms for power, and a multi-step horizon.
+# So online adaptation has real value on the raw v1 one-step forecast. The remaining question — does it
+# add value ON TOP of the v2 residual-correction layer (which already adapts online)? — is now RESOLVED
+# by the powered, multi-step test (validation/assimilation_redundancy_power.jl: n=31 cycle-25 test storms,
+# a BROAD leakage-free v2 calibration, horizons 1/2/3/6 h). Conclusion: do NOT deploy the unconstrained EKF
+# for the operational (multi-step) forecast.
+#   * 1-step: REDUNDANT. On top of v2 the EKF adds -0.01 ± 0.27 nT over 31 storms — the v2 correction already
+#     captures the 1-step drift. (The earlier n=6 "+1.22" was an artifact of a storms-only noisy calibration.)
+#   * multi-step: HARMFUL, worse with horizon, UNANIMOUS by 6 h (B-D = -3.2/-7.5/-35.6 nT at 2/3/6 h; 0/31
+#     storms favour the EKF at 6 h; the May 2024 flagship blows up by ~-394 nT at 6 h).
+#   VERIFIED cause: the online filter drives the decay coefficient across [-0.51, +0.54] (the fixed,
+#   stable value is -0.048); a POSITIVE decay coefficient is a dynamically unstable ODE, so the free-running
+#   multi-step rollout diverges. Filter-optimal coefficients (re-anchored by each observation, which hides
+#   the instability) are NOT simulation-stable. The operational path is multi-step, so the EKF is
+#   redundant-or-harmful there.
+# Status: keep the filter available and correctness-tested; do NOT deploy. The only path that could earn the
+# 1-step gain without the multi-step blow-up is a CONSTRAINED EKF that holds the decay coefficient < 0
+# (stability), which is future work, not the current operational path.
 
 """
     AssimilationFilter
