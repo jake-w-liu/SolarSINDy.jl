@@ -469,35 +469,34 @@ function browserNotify(status) {
 
 // ---- main refresh loop -----------------------------------------------------------------
 async function refresh() {
-  try {
-    const [health, status, forecast, history, dbdt, network, ekfShadow] = await Promise.all([
-      fetchJSON("/api/health").catch(() => null),
-      fetchJSON("/api/status"),
-      fetchJSON("/api/forecast"),
-      fetchJSON("/api/history?hours=72"),
-      fetchJSON("/api/dbdt").catch(() => null),
-      fetchJSON("/api/network").catch(() => null),
-      fetchJSON("/api/ekf_shadow").catch(() => null),
-    ]);
+  // Every endpoint is fetched independently (.catch → null) so a single failed/500 fetch can never reject
+  // the whole batch and blank the dashboard. Each panel then renders inside its own guard, so one panel's
+  // error does not stop the others. The header banner reflects only whether the core status loaded.
+  const [health, status, forecast, history, dbdt, network, ekfShadow] = await Promise.all([
+    fetchJSON("/api/health").catch(() => null),
+    fetchJSON("/api/status").catch(() => null),
+    fetchJSON("/api/forecast").catch(() => null),
+    fetchJSON("/api/history?hours=72").catch(() => null),
+    fetchJSON("/api/dbdt").catch(() => null),
+    fetchJSON("/api/network").catch(() => null),
+    fetchJSON("/api/ekf_shadow").catch(() => null),
+  ]);
+  $("health-dot").className = "dot " + (health && health.status === "ok" ? "dot-ok" : "dot-bad");
+  if (status) {
     setError(null);
-    $("health-dot").className = "dot " + (health && health.status === "ok" ? "dot-ok" : "dot-bad");
     const upd = $("updated");
     upd.dataset.reltime = status.generated_utc; upd.dataset.relprefix = "updated ";
     upd.textContent = "updated " + relTime(status.generated_utc);
-    renderThreat(status);
-    browserNotify(status);
-    renderUpstream(status);
-    renderCalib(status);
-    renderPipeline(status, dbdt);
-    await renderForecast(forecast, history, status, ekfShadow);
-    await renderHistory(history);
-    await renderDbdt(dbdt);
-    await renderNetwork(network);
-  } catch (e) {
-    console.error(e);
-    setError("Backend unreachable or returned an error: " + e.message);
+    try { renderThreat(status); browserNotify(status); renderUpstream(status); renderCalib(status); renderPipeline(status, dbdt); }
+    catch (e) { console.error(e); }
+  } else {
+    setError("Backend status unavailable; other panels may still update.");
     $("health-dot").className = "dot dot-bad";
   }
+  try { await renderForecast(forecast, history, status, ekfShadow); } catch (e) { console.error(e); }
+  try { await renderHistory(history); } catch (e) { console.error(e); }
+  try { await renderDbdt(dbdt); } catch (e) { console.error(e); }
+  try { await renderNetwork(network); } catch (e) { console.error(e); }
 }
 
 refresh();

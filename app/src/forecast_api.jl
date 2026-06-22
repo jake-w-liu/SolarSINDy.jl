@@ -44,7 +44,8 @@ function parse_dt(s)
     catch
         m = match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})", str)
         m === nothing && return missing
-        return DateTime(m.captures[1])            # fall back to whole-second precision
+        dt = tryparse(DateTime, m.captures[1])    # whole-second fallback; tryparse → nothing on a
+        return dt === nothing ? missing : dt      # format-valid but invalid date (e.g. month 13), never throws
     end
 end
 
@@ -88,10 +89,15 @@ function get_log(path::AbstractString)
     end
 end
 
-# Pick the v2 forecast column with a graceful fallback to the operational column.
-_pred(row)  = row.v2_pred_dst_nt      !== missing ? row.v2_pred_dst_nt      : row.pred_dst_nt
-_ci05(row)  = row.v2_pred_dst_ci05_nt !== missing ? row.v2_pred_dst_ci05_nt : row.pred_dst_ci05_nt
-_ci95(row)  = row.v2_pred_dst_ci95_nt !== missing ? row.v2_pred_dst_ci95_nt : row.pred_dst_ci95_nt
+# Pick the v2 forecast column with a graceful fallback to the operational column. hasproperty is checked
+# BEFORE access so a CSV schema without the v2_* columns falls back instead of throwing "column not found".
+function _col(row, a::Symbol, b::Symbol)
+    hasproperty(row, a) && getproperty(row, a) !== missing && return getproperty(row, a)
+    hasproperty(row, b) ? getproperty(row, b) : missing
+end
+_pred(row)  = _col(row, :v2_pred_dst_nt,      :pred_dst_nt)
+_ci05(row)  = _col(row, :v2_pred_dst_ci05_nt, :pred_dst_ci05_nt)
+_ci95(row)  = _col(row, :v2_pred_dst_ci95_nt, :pred_dst_ci95_nt)
 
 # Rows of the most recent forecast cycle = those sharing the freshest input-data vintage
 # (latest_solar_wind_utc). Returns a sub-DataFrame sorted by target time.
@@ -106,14 +112,22 @@ function latest_cycle(df::DataFrame)
     return cyc
 end
 
-# Verified rows: observation present and the v2 point + band finite.
+# Verified rows: a real forecast (target strictly AFTER both the issue time and the last observed Dst — a
+# 0-lead row is not a forecast and is what the locked comparison report excludes), with a FINITE observation
+# and a finite v2 point + band. jnum(obs) rejects NaN/Inf observations that would otherwise reach the
+# calibration summary and make JSON serialization throw.
 function verified_rows(df::DataFrame)
     nrow(df) == 0 && return df
+    has_issue  = hasproperty(df, :issue_time_utc_dt)
+    has_anchor = hasproperty(df, :latest_dst_time_utc_dt)
     keep = trues(nrow(df))
     for (i, r) in enumerate(eachrow(df))
-        ok = r.observation_dst_nt !== missing && jnum(_pred(r)) !== nothing &&
-             jnum(_ci05(r)) !== nothing && jnum(_ci95(r)) !== nothing
-        keep[i] = ok
+        tt = r.target_time_utc_dt
+        valid_lead = tt !== missing &&
+                     (!has_issue  || r.issue_time_utc_dt      === missing || tt > r.issue_time_utc_dt) &&
+                     (!has_anchor || r.latest_dst_time_utc_dt === missing || tt > r.latest_dst_time_utc_dt)
+        keep[i] = valid_lead && jnum(r.observation_dst_nt) !== nothing && jnum(_pred(r)) !== nothing &&
+                  jnum(_ci05(r)) !== nothing && jnum(_ci95(r)) !== nothing
     end
     return df[keep, :]
 end
@@ -159,13 +173,13 @@ function calibration_summary(df::DataFrame)
     n_live = count(srcs .== live_src)
 
     return (n_verified=n,
-            coverage_90=round(mean(inside); digits=3),
-            rmse_nt=round(rmse(pred); digits=2),
+            coverage_90=jnum(round(mean(inside); digits=3)),
+            rmse_nt=jnum(round(rmse(pred); digits=2)),
             rmse_persistence_nt=(x = rmse_opt(pers); x === nothing ? nothing : round(x; digits=2)),
             rmse_obrien_nt=(x = rmse_opt(obri); x === nothing ? nothing : round(x; digits=2)),
             current_interval_source=live_src,
             n_verified_current_source=n_live,
-            deepest_obs_dst_nt=round(minimum(obs); digits=1),
+            deepest_obs_dst_nt=jnum(round(minimum(obs); digits=1)),
             n_storm_verified=count(obs .< -50),
             by_source=by_source)
 end
@@ -201,11 +215,13 @@ function build_ekf_shadow(log_path::AbstractString)
     isfile(shadow) || return (available=false, rows=NamedTuple[])
     df = try CSV.read(shadow, DataFrame) catch; return (available=false, rows=NamedTuple[]) end
     (nrow(df) == 0 || !("ekf_v2_pred_dst_nt" in names(df))) && return (available=false, rows=NamedTuple[])
-    try sort!(df, :target_time_utc) catch; end          # defensive: don't rely on append order for the tail
-    n = nrow(df); lo = max(1, n - 71)                   # last ~72 cycles (≈3 days hourly)
     # total parser: tolerate a missing/malformed/Z-suffixed cell by skipping that row, never throwing
     # (so the endpoint keeps its available=false / partial-rows contract instead of 500-ing).
     _t(x) = x isa DateTime ? x : tryparse(DateTime, first(split(replace(string(x), "Z" => ""), ".")))
+    # Sort by PARSED time, not the raw string: string order ≠ chronological under mixed fractional-second
+    # precision / Z-suffix, which would corrupt which rows the tail slice selects.
+    try sort!(df, :target_time_utc; by = x -> something(_t(x), DateTime(0))) catch; end
+    n = nrow(df); lo = max(1, n - 71)                   # last ~72 cycles (≈3 days hourly)
     rows = NamedTuple[]
     for r in eachrow(df[lo:n, :])
         t = _t(r.target_time_utc); t === nothing && continue

@@ -338,8 +338,16 @@ function _fetch_dst()
     resp = HTTP.get(KYOTO_DST_JSON_URL; connect_timeout=15, readtimeout=30)
     resp.status == 200 || error("Kyoto Dst HTTP status $(resp.status)")
     rows = JSON3.read(String(resp.body))
-    times = DateTime[DateTime(String(r.time_tag)) for r in rows]
-    dst = Float64[Float64(r.dst) for r in rows]
+    times = DateTime[]; dst = Float64[]
+    for r in rows
+        tt = get(r, :time_tag, nothing); tt === nothing && continue
+        t = tryparse(DateTime, String(tt)); t === nothing && continue
+        dv = get(r, :dst, nothing)
+        v = dv === nothing ? nothing : tryparse(Float64, string(dv))
+        (v === nothing || !isfinite(v) || abs(v) > 9000) && continue   # reject null / fill sentinel (real Dst |x| ≪ 9000)
+        push!(times, t); push!(dst, v)
+    end
+    isempty(dst) && error("Kyoto Dst feed returned no finite values")
     return times, dst
 end
 
@@ -420,6 +428,15 @@ function _driver_gap_status(n_speed_finite::Int, n_bz_finite::Int,
     return :ok
 end
 
+# Atomic CSV write: write to a sibling .tmp then rename (same-filesystem mv is atomic), so a concurrent
+# reader (e.g. the dashboard API serving live_forecast_log.csv) never observes a half-written log.
+function _atomic_csv(path::AbstractString, df)
+    tmp = string(path, ".tmp")
+    CSV.write(tmp, df)
+    mv(tmp, path; force=true)
+    return df
+end
+
 function _append_forecast!(log_path::String, row::DataFrame)
     dir = dirname(log_path)
     !isempty(dir) && mkpath(dir)
@@ -429,7 +446,7 @@ function _append_forecast!(log_path::String, row::DataFrame)
     else
         df = row
     end
-    CSV.write(log_path, df)
+    _atomic_csv(log_path, df)
     return nrow(df)
 end
 
@@ -1607,7 +1624,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     println("Scored replay rows: $scored_path")
     println(
         "Fit rows: $(nrow(train)); validation rows: $(nrow(validation)); " *
-        "holdout rows: $(nrow(holdout)) (holdout scored once, never used for selection)"
+        "holdout rows: $(nrow(holdout)) (holdout scored once; not used to rank/tune candidates — only as the single-use deploy safety gate)"
     )
     if deploy
         println(
@@ -1692,6 +1709,25 @@ function issue_forecast(cfg::LiveVerifyConfig)
     target_time = _next_hourly_target(issue_time, cfg.horizon_hours, latest_dst_time)
     @assert target_time > issue_time
     @assert target_time > latest_dst_time
+
+    # Staleness guard. The finite-count gap check below catches a HARD gap (no finite samples) but NOT a
+    # FROZEN feed that still returns old-but-finite rows. Compare the feed vintage to the issue time: the
+    # L1/DSCOVR solar wind is minute-cadence, so a multi-hour age means the uplink has stalled and the
+    # forecast would be anchored to stale drivers (model steps silently balloon). Refuse gross solar-wind
+    # staleness (mirrors the :hard refuse); warn on moderate solar-wind or Dst staleness (Kyoto provisional
+    # Dst routinely lags a few hours, so that is a warning, not a refusal).
+    sw_age_hours  = Dates.value(issue_time - latest_common_sw) / 3_600_000
+    dst_age_hours = Dates.value(issue_time - latest_dst_time)  / 3_600_000
+    if sw_age_hours > 6
+        error(
+            "Solar-wind feed stale: latest common sample is $(round(sw_age_hours; digits=1)) h before the " *
+            "issue time (frozen/stalled L1 feed). Refusing to issue a forecast anchored to stale drivers."
+        )
+    end
+    (sw_age_hours > 2 || dst_age_hours > 6) && @warn(
+        "Stale input feed at issuance; forecast anchored to aged data.",
+        sw_age_hours=round(sw_age_hours; digits=1), dst_age_hours=round(dst_age_hours; digits=1)
+    )
 
     recent_start = latest_common_sw - Hour(1)
     recent = _drivers_for_window(plasma, mag, recent_start, latest_common_sw)
@@ -1973,7 +2009,7 @@ function verify_pending!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=noth
         verified += 1
     end
 
-    verified > 0 && CSV.write(cfg.log_path, df)
+    verified > 0 && _atomic_csv(cfg.log_path, df)
     println("Verified $verified pending forecast row(s).")
     return verified
 end
@@ -2001,7 +2037,7 @@ function refresh_observations!(cfg::LiveVerifyConfig; dst_times=nothing, dst_val
         end
     end
 
-    updated > 0 && CSV.write(cfg.log_path, df)
+    updated > 0 && _atomic_csv(cfg.log_path, df)
     println(
         "Refreshed $updated observation row(s); " *
         "$changed previously scored row(s) changed."
@@ -2053,7 +2089,7 @@ function backfill_baselines!(log_path::String)
         filled && (updated += 1)
     end
 
-    updated > 0 && CSV.write(log_path, df)
+    updated > 0 && _atomic_csv(log_path, df)
     println("Backfilled baseline forecasts for $updated row(s) (fill-if-missing).")
     return updated
 end
@@ -2070,7 +2106,7 @@ function wait_for_observation(cfg::LiveVerifyConfig, forecast)
         if idx !== nothing
             df = CSV.read(cfg.log_path, DataFrame)
             result = _score_row!(df, forecast.row_idx, Float64(dst[idx]))
-            CSV.write(cfg.log_path, df)
+            _atomic_csv(cfg.log_path, df)
             in_ci = df[forecast.row_idx, :observed_in_90ci]
             println("Observed target Dst arrived: $target = $(result.observed_dst) nT")
             println(
