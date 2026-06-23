@@ -78,11 +78,14 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
     elseif path == "/api/dbdt"
         q = HTTP.queryparams(query)
         station = uppercase(get(q, "station", "FRD"))
-        all(c -> 'A' <= c <= 'Z', station) || (station = "FRD")   # whitelist station codes
+        # Reject empty (?station=) and non-letter input: all(...) is vacuously true on "",
+        # which would otherwise pass an empty station code downstream.
+        (isempty(station) || !all(c -> 'A' <= c <= 'Z', station)) && (station = "FRD")
         nc = usgs_dbdt(; station=station)
         fc = nothing                                             # calibrated next-30-min forecast (paper3 conformal)
         if getproperty(nc, :available) == true
-            sw = swpc_snapshot().solar_wind
+            # swpc_snapshot's error fallback has no :solar_wind field; access it safely.
+            sw = get(swpc_snapshot(), :solar_wind, nothing)
             if sw !== nothing && get(sw, :available, false)
                 fc = forecast_dbdt([s.dbdt for s in nc.series], get(sw, :speed_kms, nothing),
                                    get(sw, :bz_gsm_nt, nothing); station=station)

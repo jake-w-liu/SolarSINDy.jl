@@ -83,6 +83,11 @@ function geoelectric_field(Bx_nt::AbstractVector{<:Real}, By_nt::AbstractVector{
         (Float64[float(rho_ohm_m)], Float64[]) :
         (Float64[float(l[1]) for l in layers],
          Float64[float(layers[i][2]) for i in 1:length(layers)-1])
+    # Bx and By must share a length: N drives both the loop and the per-frequency BX[k]/BY[k]
+    # access under @inbounds below, so a mismatch would read past the shorter spectrum and
+    # return silent garbage instead of failing.
+    length(Bx_nt) == length(By_nt) ||
+        throw(ArgumentError("geoelectric_field: Bx and By must have equal length"))
     N = length(Bx_nt)
     bx = (Bx_nt .- mean(Bx_nt)) .* 1e-9          # nT -> T, detrended
     by = (By_nt .- mean(By_nt)) .* 1e-9

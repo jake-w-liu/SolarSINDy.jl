@@ -43,16 +43,21 @@ propagate into the caller). Returns what happened.
 """
 function maybe_notify!(state; url::AbstractString = get(ENV, "SWM_WEBHOOK_URL", ""),
                        now_utc::AbstractString = "")
+    # Read the previous level WITHOUT committing yet: a transition's level must be recorded
+    # only once delivery is resolved, otherwise a transient POST failure advances the stored
+    # level and the next poll (same storm level) sees no change and never retries the alert.
     prev = _LAST_ALERT_LEVEL[]
-    _LAST_ALERT_LEVEL[] = state.level
     if prev == -1
+        _LAST_ALERT_LEVEL[] = state.level
         return (fired = false, changed = false, level = state.level, reason = "baseline set")
     end
     changed = prev != state.level
     if !changed
+        _LAST_ALERT_LEVEL[] = state.level
         return (fired = false, changed = false, level = state.level, reason = "no change")
     end
     if isempty(url)
+        _LAST_ALERT_LEVEL[] = state.level
         return (fired = false, changed = true, level = state.level, reason = "no webhook configured")
     end
     msg = state.level == 0 ? "Space weather returned to quiet (all clear)." :
@@ -62,8 +67,10 @@ function maybe_notify!(state; url::AbstractString = get(ENV, "SWM_WEBHOOK_URL", 
     try
         HTTP.post(url, ["Content-Type" => "application/json"], JSON3.write(payload);
                   readtimeout = 10, connect_timeout = 10, retries = 1, status_exception = true)
+        _LAST_ALERT_LEVEL[] = state.level           # commit only on successful delivery
         return (fired = true, level = state.level, previous_level = prev, message = msg)
     catch e
+        # Leave _LAST_ALERT_LEVEL at prev so the next poll re-attempts this transition.
         @warn "alert webhook POST failed" exception = e
         return (fired = false, changed = true, level = state.level, error = string(e))
     end

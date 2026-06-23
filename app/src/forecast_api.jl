@@ -105,7 +105,13 @@ function latest_cycle(df::DataFrame)
     nrow(df) == 0 && return df
     sw = df.latest_solar_wind_utc_dt
     valid = .!ismissing.(sw)
-    any(valid) || return df[df.issue_time_utc_dt .== maximum(skipmissing(df.issue_time_utc_dt)), :]
+    if !any(valid)
+        # No usable solar-wind timestamp; fall back to the newest issue time — but if those are
+        # all missing too, `maximum(skipmissing(...))` would throw on an empty collection, so
+        # return an empty sub-frame (downstream build_* already handle the no-cycle case).
+        isempty(collect(skipmissing(df.issue_time_utc_dt))) && return df[1:0, :]
+        return df[coalesce.(df.issue_time_utc_dt .== maximum(skipmissing(df.issue_time_utc_dt)), false), :]
+    end
     newest = maximum(skipmissing(sw))
     cyc = df[coalesce.(sw .== newest, false), :]
     sort!(cyc, :target_time_utc_dt)
@@ -312,9 +318,17 @@ function build_history(df::DataFrame, hours::Real=72)
                      inside_90ci=inside))
     end
     sort!(rows, by=x -> something(x.target_utc, ""))
+    # Stats must match the WINDOW the rows show, not the whole log. Compute coverage/RMSE over
+    # the windowed rows; also expose the (more robust) all-log figures under explicit names.
+    flags = [r.inside_90ci for r in rows if r.inside_90ci !== nothing]
+    sq = [(r.observed_dst_nt - r.pred_dst_nt)^2 for r in rows
+          if r.observed_dst_nt !== nothing && r.pred_dst_nt !== nothing]
+    win_cov = isempty(flags) ? nothing : round(count(flags) / length(flags); digits=3)
+    win_rmse = isempty(sq) ? nothing : round(sqrt(sum(sq) / length(sq)); digits=2)
     cal = calibration_summary(df)
     return (rows=rows, hours=hours, n=length(rows),
-            coverage_90=cal.coverage_90, rmse_nt=cal.rmse_nt)
+            coverage_90=win_cov, rmse_nt=win_rmse,
+            coverage_90_all=cal.coverage_90, rmse_nt_all=cal.rmse_nt)
 end
 
 """Active alert summary derived from the current threat status."""

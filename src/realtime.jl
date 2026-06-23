@@ -68,12 +68,15 @@ function fetch_swpc_plasma(; url::String=SWPC_PLASMA_URL,
     )
     rows = raw[2:end]  # skip header row
 
-    df = DataFrame()
     plasma_rows = [_require_swpc_columns(r, 4, "plasma") for r in rows]
-    df.time_tag = [DateTime(String(r[1]), dateformat"yyyy-mm-dd HH:MM:SS.sss") for r in plasma_rows]
-    df.density = [_parse_swpc_float(r[2]) for r in plasma_rows]
-    df.speed = [_parse_swpc_float(r[3]) for r in plasma_rows]
-    df.temperature = [_parse_swpc_float(r[4]) for r in plasma_rows]
+    # Tolerate a malformed/empty time_tag by dropping that row (mirrors the per-field NaN
+    # tolerance) rather than throwing and aborting the whole fetch cycle on one bad timestamp.
+    good = [(t, r) for (t, r) in ((_parse_swpc_time(String(r[1])), r) for r in plasma_rows) if t !== nothing]
+    df = DataFrame()
+    df.time_tag = DateTime[t for (t, _) in good]
+    df.density = [_parse_swpc_float(r[2]) for (_, r) in good]
+    df.speed = [_parse_swpc_float(r[3]) for (_, r) in good]
+    df.temperature = [_parse_swpc_float(r[4]) for (_, r) in good]
 
     return df
 end
@@ -97,13 +100,15 @@ function fetch_swpc_mag(; url::String=SWPC_MAG_URL,
     )
     rows = raw[2:end]  # skip header row
 
-    df = DataFrame()
     mag_rows = [_require_swpc_columns(r, 7, "mag") for r in rows]
-    df.time_tag = [DateTime(String(r[1]), dateformat"yyyy-mm-dd HH:MM:SS.sss") for r in mag_rows]
-    df.bx_gsm = [_parse_swpc_float(r[2]) for r in mag_rows]
-    df.by_gsm = [_parse_swpc_float(r[3]) for r in mag_rows]
-    df.bz_gsm = [_parse_swpc_float(r[4]) for r in mag_rows]
-    df.bt = [_parse_swpc_float(r[7]) for r in mag_rows]
+    # Drop rows with an unparseable time_tag instead of throwing (see fetch_swpc_plasma).
+    good = [(t, r) for (t, r) in ((_parse_swpc_time(String(r[1])), r) for r in mag_rows) if t !== nothing]
+    df = DataFrame()
+    df.time_tag = DateTime[t for (t, _) in good]
+    df.bx_gsm = [_parse_swpc_float(r[2]) for (_, r) in good]
+    df.by_gsm = [_parse_swpc_float(r[3]) for (_, r) in good]
+    df.bz_gsm = [_parse_swpc_float(r[4]) for (_, r) in good]
+    df.bt = [_parse_swpc_float(r[7]) for (_, r) in good]
 
     return df
 end
