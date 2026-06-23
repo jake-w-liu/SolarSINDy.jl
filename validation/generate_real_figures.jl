@@ -9,13 +9,7 @@
 #   fig_results_cross_cycle.pdf            — Cross-cycle generalization
 #   fig_results_coupled_network.pdf        — Coupled Dst-AE cross-index terms
 
-using PlotlySupply, PlotlyKaleido
-PlotlyKaleido.start()
-# Warmup to avoid MathJax error
-let _w = plot_scatter([0.0], [0.0])
-    PlotlySupply.savefig(_w, tempname() * ".pdf"; width=100, height=100)
-end
-
+using PlotlySupply
 using CSV, DataFrames, Statistics
 
 const DATA_DIR = joinpath(@__DIR__, "..", "data")

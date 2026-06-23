@@ -236,6 +236,28 @@ function build_ekf_shadow(log_path::AbstractString)
             rows=rows)
 end
 
+"""Storm-time replay summary: serves the offline replay report and its scored-row provenance.
+Defensive (never throws): missing/unreadable artifacts return available=false."""
+function build_storm_replay(log_path::AbstractString)
+    dir = dirname(log_path)
+    report = joinpath(dir, "storm_replay_report.md")
+    scored = joinpath(dir, "storm_replay_scored.csv")
+    isfile(report) || return (available=false,
+                              reason="no storm-replay report; run live_forecasts/storm_replay.jl")
+    md = try read(report, String) catch; return (available=false, reason="report unreadable") end
+    age = round((time() - mtime(report)) / 60; digits=1)
+    n = 0; storms = String[]
+    if isfile(scored)
+        try
+            df = CSV.read(scored, DataFrame)
+            n = nrow(df)
+            "storm" in names(df) && (storms = unique(string.(skipmissing(df.storm))))
+        catch
+        end
+    end
+    return (available=true, report_age_min=age, n_scored=n, storms=storms, report_markdown=md)
+end
+
 """Threat status: current observation + worst credible storm over the latest cycle."""
 function build_status(df::DataFrame)
     cyc = latest_cycle(df)

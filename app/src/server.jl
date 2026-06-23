@@ -95,6 +95,8 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
         return json_response(build_forecast(df))
     elseif path == "/api/ekf_shadow"
         return json_response(build_ekf_shadow(log_path))
+    elseif path == "/api/storm_replay"
+        return json_response(build_storm_replay(log_path))
     elseif path == "/api/history"
         q = HTTP.queryparams(query)
         hours = try clamp(parse(Float64, get(q, "hours", "72")), 1, 24*30) catch; 72.0 end

@@ -2,9 +2,6 @@
 # gen_sensitivity_fig.jl — Generate phase threshold sensitivity figure (SI)
 
 using PlotlySupply, CSV, DataFrames, Statistics
-import PlotlyKaleido
-
-PlotlyKaleido.start()
 
 const DATA_DIR = joinpath(@__DIR__, "..", "data")
 const FIGS_DIR = joinpath(@__DIR__, "..", "figs")
@@ -54,6 +51,6 @@ for (ri, R_thresh) in enumerate(R_vals)
 end
 
 set_legend!(fig; position=:topright)
-PlotlyKaleido.savefig(fig, joinpath(FIGS_DIR, "fig_results_phase_sensitivity.pdf");
+savefig(fig, joinpath(FIGS_DIR, "fig_results_phase_sensitivity.pdf");
                        width=504, height=360)
 println("Saved: fig_results_phase_sensitivity.pdf")

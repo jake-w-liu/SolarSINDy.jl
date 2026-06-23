@@ -77,6 +77,7 @@ export # Utils
        check_alarm, classify_severity, alarm_print, alarm_log,
        # Real-time
        fetch_swpc_plasma, fetch_swpc_mag, fetch_swpc_dst, fetch_realtime_solar_wind,
+       recover_shadow_state, feed_deadman_tripped, DEFAULT_FEED_DEADMAN_THRESHOLD,
        # Monitor
        run_monitor
 

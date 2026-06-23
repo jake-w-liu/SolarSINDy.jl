@@ -129,4 +129,22 @@ end
         exU, _ = geoelectric_field(Bx, By, 60.0; rho_ohm_m=100.0)
         @test maximum(abs, exL) > maximum(abs, exU)         # resistive ground → larger geoelectric field
     end
+
+    @testset "Phase D: storm-replay endpoint payload" begin
+        dir = mktempdir()
+        log_path = joinpath(dir, "forecast_log.csv")        # build_storm_replay reads siblings of this
+        # No report yet -> available=false, never throws.
+        r0 = build_storm_replay(log_path)
+        @test r0.available == false
+
+        write(joinpath(dir, "storm_replay_report.md"), "# Storm-time replay\n\nbody\n")
+        write(joinpath(dir, "storm_replay_scored.csv"),
+              "model_step_hours,storm\n1,\"May 2024 (Gannon, G5)\"\n3,\"May 2024 (Gannon, G5)\"\n1,\"Oct 2024\"\n")
+        r = build_storm_replay(log_path)
+        @test r.available == true
+        @test r.n_scored == 3
+        @test Set(r.storms) == Set(["May 2024 (Gannon, G5)", "Oct 2024"])
+        @test occursin("Storm-time replay", r.report_markdown)
+        @test r.report_age_min isa Real
+    end
 end

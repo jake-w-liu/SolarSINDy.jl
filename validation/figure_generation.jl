@@ -16,16 +16,7 @@
 using SolarSINDy
 using CSV, DataFrames
 using PlotlySupply
-import PlotlyKaleido
 using Statistics, Random, LinearAlgebra
-
-PlotlyKaleido.start()
-# Warmup export to avoid MathJax "MathMenu.js" error on first real figure
-let _warmup = plot_scatter([0.0], [0.0])
-    PlotlyKaleido.savefig(_warmup, tempname() * ".pdf"; width=100, height=100)
-end
-
-const savefig = PlotlyKaleido.savefig
 
 const DATA_DIR = joinpath(@__DIR__, "..", "data")
 const FIGS_DIR = joinpath(@__DIR__, "..", "figs")

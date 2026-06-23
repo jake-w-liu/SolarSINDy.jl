@@ -16,13 +16,7 @@
 using SolarSINDy
 using CSV, DataFrames
 using PlotlySupply
-import PlotlyKaleido
 using Statistics, Random, LinearAlgebra
-
-PlotlyKaleido.start()
-
-# Resolve savefig ambiguity
-const savefig = PlotlyKaleido.savefig
 
 const DATA_DIR = joinpath(@__DIR__, "..", "data")
 const FIGS_DIR = joinpath(@__DIR__, "..", "figs")

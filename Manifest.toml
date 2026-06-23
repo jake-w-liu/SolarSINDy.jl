@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "0ca963d9fcc6cda39842095c01850788417a2d12"
+project_hash = "a427a609793012a000f60e9e353a6fa6ef9e0acd"
 
 [[deps.ATK_jll]]
 deps = ["Artifacts", "Glib_jll", "JLLWrappers", "Libdl"]
@@ -353,12 +353,6 @@ deps = ["StyledStrings"]
 uuid = "ac6e5ff7-fb65-4e79-a425-ec3bc9c03011"
 version = "1.12.0"
 
-[[deps.Kaleido_jll]]
-deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "43032da5832754f58d14a91ffbe86d5f176acda9"
-uuid = "f7e6163d-2fa5-5f23-b69c-1db539e41963"
-version = "0.2.1+0"
-
 [[deps.LERC_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "aaafe88dccbd957a8d82f7d05be9b69172e0cee3"
@@ -612,17 +606,11 @@ version = "0.8.23"
     IJulia = "7073ff75-c697-5162-941a-fcdaad2a7d2a"
     JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 
-[[deps.PlotlyKaleido]]
-deps = ["Artifacts", "Base64", "JSON", "Kaleido_jll"]
-git-tree-sha1 = "c7a270d11881c0709052f8e3def3d60d551e99f3"
-uuid = "f2990250-8cf9-495f-b13a-cce12b45703c"
-version = "2.3.1"
-
 [[deps.PlotlySupply]]
-deps = ["BatchAssign", "ElectronCall", "Infiltrator", "MeshGrid", "PlotlyBase", "Reexport"]
-path = "../PlotlySupply.jl"
+deps = ["Base64", "BatchAssign", "ElectronCall", "Infiltrator", "MeshGrid", "PlotlyBase", "Printf", "Reexport"]
+git-tree-sha1 = "9d50d4d2d3074627ec93bef1d0129eb0aa77be33"
 uuid = "a389b534-8bca-4fe3-8ff2-14829cd8824f"
-version = "1.6.3"
+version = "1.8.0"
 
 [[deps.PooledArrays]]
 deps = ["DataAPI", "Future"]
@@ -704,7 +692,7 @@ uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
 version = "1.11.0"
 
 [[deps.SolarSINDy]]
-deps = ["CSV", "DataFrames", "Dates", "Downloads", "HTTP", "JSON3", "LinearAlgebra", "PlotlyKaleido", "PlotlySupply", "Random", "SpecialFunctions", "Statistics"]
+deps = ["CSV", "DataFrames", "Dates", "Downloads", "HTTP", "JSON3", "LinearAlgebra", "PlotlySupply", "Random", "SpecialFunctions", "Statistics"]
 path = "."
 uuid = "e7a3c1d2-5f8b-4a9e-b6c0-3d2e1f4a8b7c"
 version = "0.1.0"

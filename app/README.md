@@ -93,8 +93,9 @@ These thresholds are the widely used scheme across the geomagnetic-storm literat
 
 - **Dst forecast**: the project's operational **v2** nowcaster (interpretable discovered sparse
   equation + correction + online adaptive-conformal intervals), written hourly to the locked log.
-- **Solar wind (L1)**: NASA OMNI (CDAWeb/HAPI). **Dst**: Kyoto WDC. **Ground dB/dt** (future
-  layer): USGS/INTERMAGNET.
+- **Solar wind (L1)**: NOAA SWPC real-time products (`solar-wind/plasma-7-day`, `mag-7-day`) for live
+  issuance; the NASA OMNI archive (CDAWeb) is used for offline calibration and historical replay.
+  **Dst**: Kyoto WDC (via NOAA SWPC `kyoto-dst`). **Ground dB/dt** (future layer): USGS/INTERMAGNET.
 - Forecasts are **locked when issued and scored only after the target hour is observed** — the log
   is an honest, immutable track record.
 

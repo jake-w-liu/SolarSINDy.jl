@@ -13,25 +13,33 @@ const DEFAULT_SWPC_RETRY_DELAY_SEC = 1.0
 function _fetch_swpc_json(url::String;
                           max_retries::Int=DEFAULT_SWPC_MAX_RETRIES,
                           retry_delay_sec::Real=DEFAULT_SWPC_RETRY_DELAY_SEC,
-                          http_get::Function=HTTP.get)
+                          http_get::Function=HTTP.get,
+                          fallback_url::Union{Nothing,String}=nothing)
     max_retries >= 1 || throw(ArgumentError("max_retries must be >= 1"))
 
+    # Opt-in secondary vendor: only when fallback_url is supplied do we try a second
+    # source after the primary exhausts its retries. Default nothing => unchanged behavior.
+    urls = fallback_url === nothing ? (url,) : (url, fallback_url)
     last_error = nothing
-    for attempt in 1:max_retries
-        try
-            resp = http_get(url; connect_timeout=15, readtimeout=30)
-            status = getproperty(resp, :status)
-            status == 200 || error("HTTP status $status")
-            raw = JSON3.read(String(getproperty(resp, :body)))
-            length(raw) >= 2 || error("response has no data rows")
-            return raw
-        catch e
-            last_error = e
-            attempt == max_retries && error(
-                "Failed to fetch SWPC JSON from $url after $max_retries attempts: " *
-                sprint(showerror, last_error)
-            )
-            sleep(retry_delay_sec)
+    for (ui, u) in enumerate(urls)
+        for attempt in 1:max_retries
+            try
+                resp = http_get(u; connect_timeout=15, readtimeout=30)
+                status = getproperty(resp, :status)
+                status == 200 || error("HTTP status $status")
+                raw = JSON3.read(String(getproperty(resp, :body)))
+                length(raw) >= 2 || error("response has no data rows")
+                return raw
+            catch e
+                last_error = e
+                if ui == length(urls) && attempt == max_retries
+                    error(
+                        "Failed to fetch SWPC JSON from $(join(urls, " then ")) " *
+                        "after $max_retries attempts each: " * sprint(showerror, last_error)
+                    )
+                end
+                sleep(retry_delay_sec)
+            end
         end
     end
 end
@@ -50,11 +58,13 @@ Returns DataFrame with columns: time_tag, density, speed, temperature.
 function fetch_swpc_plasma(; url::String=SWPC_PLASMA_URL,
                              max_retries::Int=DEFAULT_SWPC_MAX_RETRIES,
                              retry_delay_sec::Real=DEFAULT_SWPC_RETRY_DELAY_SEC,
-                             http_get::Function=HTTP.get)
+                             http_get::Function=HTTP.get,
+                             fallback_url::Union{Nothing,String}=nothing)
     raw = _fetch_swpc_json(url;
         max_retries=max_retries,
         retry_delay_sec=retry_delay_sec,
         http_get=http_get,
+        fallback_url=fallback_url,
     )
     rows = raw[2:end]  # skip header row
 
@@ -77,11 +87,13 @@ Returns DataFrame with columns: time_tag, bx_gsm, by_gsm, bz_gsm, bt.
 function fetch_swpc_mag(; url::String=SWPC_MAG_URL,
                           max_retries::Int=DEFAULT_SWPC_MAX_RETRIES,
                           retry_delay_sec::Real=DEFAULT_SWPC_RETRY_DELAY_SEC,
-                          http_get::Function=HTTP.get)
+                          http_get::Function=HTTP.get,
+                          fallback_url::Union{Nothing,String}=nothing)
     raw = _fetch_swpc_json(url;
         max_retries=max_retries,
         retry_delay_sec=retry_delay_sec,
         http_get=http_get,
+        fallback_url=fallback_url,
     )
     rows = raw[2:end]  # skip header row
 
@@ -313,4 +325,44 @@ function _interp_short_gaps!(x::Vector{Float64}, max_gap::Int)
             i += 1
         end
     end
+end
+
+# ---------------------------------------------------------------------------
+# Operational resilience helpers (testable offline; never hot-applied to the
+# running daemon — adoption is left to the user's maintenance window).
+# ---------------------------------------------------------------------------
+
+"""
+    recover_shadow_state(load_fn, bootstrap_fn)
+
+Resilient persistent-state load. Return `load_fn()`; if it returns `nothing`
+(state file absent) or throws (torn/corrupt file), warn and fall back to
+`bootstrap_fn()`. Pure: callers inject the two thunks, so the recovery decision
+is unit-testable without any filesystem or filter state.
+"""
+function recover_shadow_state(load_fn, bootstrap_fn)
+    st = try
+        load_fn()
+    catch e
+        @warn "state load failed; re-bootstrapping from history (live drift discarded)" exception=e
+        nothing
+    end
+    return st === nothing ? bootstrap_fn() : st
+end
+
+"Default sustained-feed-failure threshold: consecutive failed fetch cycles before tripping."
+const DEFAULT_FEED_DEADMAN_THRESHOLD = 6
+
+"""
+    feed_deadman_tripped(consecutive_failures; threshold=DEFAULT_FEED_DEADMAN_THRESHOLD)
+
+Sustained-feed-failure dead-man's switch. Returns `true` once `consecutive_failures`
+upstream fetch cycles reach `threshold`, signalling the forecaster should stop
+issuing fresh forecasts rather than extrapolate on stale inputs. Pure predicate.
+"""
+function feed_deadman_tripped(consecutive_failures::Integer;
+                              threshold::Integer=DEFAULT_FEED_DEADMAN_THRESHOLD)
+    threshold >= 1 || throw(ArgumentError("threshold must be >= 1"))
+    consecutive_failures >= 0 || throw(ArgumentError("consecutive_failures must be >= 0"))
+    return consecutive_failures >= threshold
 end

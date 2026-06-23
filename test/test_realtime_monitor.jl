@@ -360,4 +360,50 @@ using HTTP
         end
     end
 
+    @testset "Phase D: SWPC secondary-vendor fallback" begin
+        # Hand-written SWPC-shaped JSON (header row + 2 data rows), no JSON encoder dep.
+        good_body = Vector{UInt8}(
+            "[[\"time_tag\",\"density\",\"speed\",\"temperature\"]," *
+            "[\"2026-01-01 00:00:00.000\",\"5.0\",\"400.0\",\"1.0e5\"]," *
+            "[\"2026-01-01 01:00:00.000\",\"6.0\",\"410.0\",\"1.1e5\"]]")
+        primary = "https://primary.example/plasma.json"
+        secondary = "https://secondary.example/plasma.json"
+
+        # Mock transport: primary always errors, secondary returns good rows.
+        function mock_get(u; kwargs...)
+            u == secondary || error("primary down")
+            return (; status = 200, body = good_body)
+        end
+
+        # With a fallback supplied, the secondary vendor rescues the fetch.
+        df = fetch_swpc_plasma(; url = primary, fallback_url = secondary,
+                                 max_retries = 2, retry_delay_sec = 0.0, http_get = mock_get)
+        @test nrow(df) == 2
+        @test df.speed[1] ≈ 400.0 atol = 1e-9
+
+        # Without a fallback (default nothing), primary failure still throws — non-breaking.
+        @test_throws ErrorException fetch_swpc_plasma(; url = primary, max_retries = 2,
+                                                        retry_delay_sec = 0.0, http_get = mock_get)
+    end
+
+    @testset "Phase D: shadow-state recovery + feed dead-man" begin
+        sentinel = (:loaded,)
+        boot = (:bootstrapped,)
+        # load succeeds -> use it
+        @test recover_shadow_state(() -> sentinel, () -> boot) === sentinel
+        # load returns nothing (missing state) -> bootstrap
+        @test recover_shadow_state(() -> nothing, () -> boot) === boot
+        # load throws (torn/corrupt state) -> bootstrap
+        @test recover_shadow_state(() -> error("torn file"), () -> boot) === boot
+
+        # dead-man predicate
+        @test feed_deadman_tripped(0) == false
+        @test feed_deadman_tripped(DEFAULT_FEED_DEADMAN_THRESHOLD - 1) == false
+        @test feed_deadman_tripped(DEFAULT_FEED_DEADMAN_THRESHOLD) == true
+        @test feed_deadman_tripped(2; threshold = 2) == true
+        @test feed_deadman_tripped(1; threshold = 2) == false
+        @test_throws ArgumentError feed_deadman_tripped(1; threshold = 0)
+        @test_throws ArgumentError feed_deadman_tripped(-1)
+    end
+
 end
