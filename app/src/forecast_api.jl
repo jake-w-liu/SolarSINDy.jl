@@ -110,7 +110,9 @@ function latest_cycle(df::DataFrame)
         # all missing too, `maximum(skipmissing(...))` would throw on an empty collection, so
         # return an empty sub-frame (downstream build_* already handle the no-cycle case).
         isempty(collect(skipmissing(df.issue_time_utc_dt))) && return df[1:0, :]
-        return df[coalesce.(df.issue_time_utc_dt .== maximum(skipmissing(df.issue_time_utc_dt)), false), :]
+        cyc0 = df[coalesce.(df.issue_time_utc_dt .== maximum(skipmissing(df.issue_time_utc_dt)), false), :]
+        sort!(cyc0, :target_time_utc_dt)   # match the normal branch so horizons stay chronological
+        return cyc0
     end
     newest = maximum(skipmissing(sw))
     cyc = df[coalesce.(sw .== newest, false), :]

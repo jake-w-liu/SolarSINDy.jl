@@ -29,9 +29,13 @@ using HTTP
             bt = [3.7, 6.4, 10.7, 13.5, 13.5],
         )
 
-        swd, tags = fetch_realtime_solar_wind(hours=3; plasma=plasma, mag=mag)
+        swd, tags, t_fresh = fetch_realtime_solar_wind(hours=3; plasma=plasma, mag=mag)
 
         @test length(tags) == 3
+        # Freshness anchor is the newest actual common sample (03:00), not the last hour-floored
+        # bin start (02:00) — the monitor uses this so a live feed is not falsely flagged STALE.
+        @test t_fresh == DateTime(2026, 1, 1, 3, 0, 0)
+        @test tags[end] == DateTime(2026, 1, 1, 2, 0, 0)
         @test swd.t == [0.0, 1.0, 2.0]
         @test swd.V[1] ≈ 410.0 atol=1e-12
         @test swd.n[1] ≈ 6.0 atol=1e-12

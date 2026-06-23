@@ -95,7 +95,7 @@ function run_monitor(; poll_interval_min::Int=5,
     try
         while true
             # Fetch latest data with error handling (refresh observed Dst too)
-            swd_new, t_new = try
+            swd_new, t_new, t_fresh = try
                 dst_now = try
                     fetch_swpc_dst()
                 catch
@@ -143,7 +143,10 @@ function run_monitor(; poll_interval_min::Int=5,
             # Data-staleness guard: a frozen feed (old rows returned 200 OK) must
             # not be displayed as current. Threshold allows Kyoto/SWPC publication
             # lag (~2-3 h) before flagging.
-            data_age = clock() - t_new[latest_idx]
+            # Measure freshness from the newest actual sample (t_fresh = t_end), not the last
+            # hour-floored bin start, which lags real time by up to ~2 h (within-hour offset +
+            # the dropped trailing partial hour) and would falsely trip STALE on a live feed.
+            data_age = clock() - t_fresh
             # Use |age|: a future-dated latest timestamp (clock skew or a mislabeled feed) is
             # anomalous too and must not read as "fresh". Threshold in minutes avoids the
             # round-half-to-even surprise of Hour(Int(round(2.5))) == 2 h.

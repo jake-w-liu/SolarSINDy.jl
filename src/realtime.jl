@@ -300,8 +300,12 @@ function fetch_realtime_solar_wind(; hours::Int=168,
     # Convert to hours from first timestamp
     t_hours = Float64[(t_hr[i] - t_hr[1]) / Hour(1) for i in 1:n_bins]
 
+    # Third return is the newest actual common sample time (NOT the last hour-floored bin
+    # start): the bins drop the trailing partial hour and are floored, so t_hr[end] lags real
+    # time by up to ~2 h. Freshness/staleness must be measured from t_end; the floored t_hr
+    # stays the Dst-anchor key and step time. (2-value callers ignore the extra by destructuring.)
     return SolarWindData(t_hours, V_hr, Bz_hr, By_hr, n_hr, Pdyn_hr,
-                         Dst_hr, Dst_star_hr), t_hr
+                         Dst_hr, Dst_star_hr), t_hr, t_end
 end
 
 """
