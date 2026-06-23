@@ -1729,6 +1729,16 @@ function issue_forecast(cfg::LiveVerifyConfig)
     dst_times, dst_vals = _fetch_dst()
     calibration = _load_calibration_for_model(cfg)
     conformal = _load_conformal_for_model(cfg)
+    # Pairing check: a deployed (non-fallback) v2 calibration should always have its conformal
+    # sidecar. If the sidecar is missing (deleted / partial restore), _resolve_interval silently
+    # reverts to the static interval_scale band the conformal machinery exists to replace — warn
+    # loudly so the operator sees the reversion rather than inferring it from interval_source.
+    if cfg.model == :v2 && calibration !== nothing &&
+       getfield(calibration, :label) != "operational_v2_fallback_v1_equiv" && conformal === nothing
+        @warn("Deployed v2 calibration is missing its conformal sidecar; served interval reverts " *
+              "to the static interval_scale band (not the calibrated conformal/ACI interval).",
+              expected_sidecar=_conformal_path(cfg.v2_calibration_path))
+    end
 
     latest_common_sw = min(maximum(plasma.time_tag), maximum(mag.time_tag))
     latest_complete_hour = _floor_hour(latest_common_sw)

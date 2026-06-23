@@ -363,6 +363,20 @@ end
         a, _ = check_alarm(config, r, DateTime(1970))
         @test a === nothing
     end
+
+    @testset "D: future-dated alarm clock does not suppress a present-time alarm" begin
+        # Regression: a forecast-horizon alarm can set last_alarm_time into the future;
+        # the cooldown elapsed then goes negative. The guard must not treat a negative
+        # elapsed as "within cooldown" and silently drop a genuine present-time alarm.
+        config = AlarmConfig(
+            Dict(MODERATE => -50.0, INTENSE => -100.0, SUPERINTENSE => -200.0),
+            false, x -> nothing, 2,
+        )
+        r_now = ForecastResult(DateTime(2026, 1, 1, 12), -120.0, -120.0, -130.0, -110.0, NaN)
+        future_clock = DateTime(2026, 1, 1, 18)   # 6 h ahead of the present observation
+        a, _ = check_alarm(config, r_now, future_clock)
+        @test a !== nothing   # fires; under the bug (elapsed = -6h < cooldown) it was suppressed
+    end
 end
 
 @testset "Baselines — Full Models" begin

@@ -51,21 +51,28 @@ end
 _station_brief(station::AbstractString) = _station_parse(station, _fetch_usgs(station, 40))
 
 function usgs_network(; stations::Vector{String} = NET_STATIONS)
-    lock(_NET_LOCK) do
+    # Lock only to read the cache; fetch all stations OUTSIDE it so one slow USGS station
+    # cannot hold the mutex (and stall every poller) for the whole asyncmap timeout.
+    st = lock(_NET_LOCK) do
         c = _NET_CACHE[]
-        if c === nothing || (time() - c[1]) > NET_TTL
-            try
-                # Limited concurrency (ntasks=3): fast enough, but polite to USGS — firing all
-                # stations at once triggers rate-limiting that fails every request.
-                res = asyncmap(_station_brief, stations; ntasks=3)
-                _NET_CACHE[] = (time(), [r for r in res if r !== nothing])
-            catch e
-                c === nothing && rethrow(e)
-                @warn "network nowcast failed; serving cached" exception=e
-            end
-        end
-        st = _NET_CACHE[][2]
-        return (generated_utc = jdt_str(string(now(UTC))), n_stations = length(st),
-                thresholds = collect(PULK), stations = st)
+        (c !== nothing && (time() - c[1]) <= NET_TTL) ? c[2] : nothing
     end
+    if st === nothing
+        st = try
+            # Limited concurrency (ntasks=3): fast enough, but polite to USGS — firing all
+            # stations at once triggers rate-limiting that fails every request.
+            fetched = [r for r in asyncmap(_station_brief, stations; ntasks=3) if r !== nothing]
+            lock(_NET_LOCK) do; _NET_CACHE[] = (time(), fetched); end
+            fetched
+        catch e
+            stale = lock(_NET_LOCK) do
+                c = _NET_CACHE[]; c === nothing ? nothing : c[2]
+            end
+            stale === nothing && rethrow(e)
+            @warn "network nowcast failed; serving cached" exception=e
+            stale
+        end
+    end
+    return (generated_utc = jdt_str(string(now(UTC))), n_stations = length(st),
+            thresholds = collect(PULK), stations = st)
 end

@@ -171,12 +171,14 @@ function run_monitor(; poll_interval_min::Int=5,
             forecast = forecast_ahead(state, V, Bz, By, n_val, Pdyn,
                                        forecast_horizon_hr)
 
-            # Check alarms on current + forecast
+            # Check alarms on current + forecast. Only the current-observation alarm advances
+            # the cooldown clock; forecast-horizon alarms have future timestamps, so letting
+            # them set last_alarm_time would push the cooldown into the future and suppress the
+            # next genuine present-time alarm. Their return value is intentionally discarded.
             alarm, last_alarm_time = check_alarm(alarm_config, result,
                                                   last_alarm_time)
             for fr in forecast
-                _, last_alarm_time = check_alarm(alarm_config, fr,
-                                                  last_alarm_time)
+                check_alarm(alarm_config, fr, last_alarm_time)
             end
 
             # Display

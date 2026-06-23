@@ -65,6 +65,19 @@ function stlsq(Θ::AbstractMatrix, dx::AbstractVector;
         ξ = ξ_new
     end
 
+    # Final threshold + resolve so the returned support always satisfies the STLSQ
+    # contract (sub-λ coefficients zeroed) regardless of how the loop exited. When the
+    # loop converged on a stable support this is a no-op (every active |ξ_j| ≥ λ, so the
+    # resolve reproduces ξ); it only corrects the max_iter-exhaustion path, which would
+    # otherwise return the last re-solve with a possibly sub-threshold coefficient.
+    ξ[abs.(ξ) .< λ] .= 0.0
+    active_final = findall(ξ .!= 0.0)
+    if !isempty(active_final)
+        ξ_final = zeros(p)
+        ξ_final[active_final] = Θn[:, active_final] \ dx
+        ξ = ξ_final
+    end
+
     # Undo normalization
     if normalize
         ξ ./= col_norms

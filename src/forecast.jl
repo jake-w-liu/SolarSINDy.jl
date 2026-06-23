@@ -1131,8 +1131,13 @@ function forecast_ahead(state::ForecastState,
     dst_ens_curr = fill(dst_curr, n_ens)
     θ_k = Vector{Float64}(undef, length(state.lib))
 
+    # The integration advances state.dt hours of dynamics per step (dst + state.dt*dDst),
+    # so the emitted timestamp must advance by the same amount; a hardcoded Hour(1) would
+    # desynchronize labels from physics whenever dt ≠ 1. dt is hourly-resolution by contract.
+    @assert state.dt > 0 && isinteger(state.dt) "forecast_ahead emits hourly labels; state.dt must be a positive whole number of hours"
+    step = Hour(round(Int, state.dt))
     for h in 1:n_hours
-        t_next = t_curr + Hour(1)
+        t_next = t_curr + step
 
         _evaluate_point_vector!(θ_k, state.lib, dst_curr, V, Bz, By, n_density, Pdyn)
 

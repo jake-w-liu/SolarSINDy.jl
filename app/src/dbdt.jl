@@ -137,16 +137,25 @@ end
 jdt_str(s) = s === nothing ? nothing : (string(first(String(s), 19)) * "Z")
 
 function usgs_dbdt(; station::AbstractString = "FRD", minutes::Int = 120)
-    lock(_DBDT_LOCK) do
+    # Hold the lock only to read the cache; fetch OUTSIDE it so one slow/hanging upstream
+    # cannot serialize every concurrent poller behind the mutex for the full timeout.
+    fresh = lock(_DBDT_LOCK) do
         c = get(_DBDT_CACHE, station, nothing)
-        if c === nothing || (time() - c[1]) > DBDT_TTL
-            try
-                _DBDT_CACHE[station] = (time(), _compute_dbdt(station, minutes))
-            catch e
-                c === nothing && return (station=station, available=false, error=string(e))
-                @warn "dB/dt nowcast failed; serving cached" station exception=e
-            end
-        end
-        return _DBDT_CACHE[station][2]
+        (c !== nothing && (time() - c[1]) <= DBDT_TTL) ? c[2] : nothing
     end
+    fresh !== nothing && return fresh
+    val = try
+        _compute_dbdt(station, minutes)
+    catch e
+        stale = lock(_DBDT_LOCK) do
+            c = get(_DBDT_CACHE, station, nothing); c === nothing ? nothing : c[2]
+        end
+        if stale !== nothing
+            @warn "dB/dt nowcast failed; serving cached" station exception=e
+            return stale
+        end
+        return (station=station, available=false, error=string(e))
+    end
+    lock(_DBDT_LOCK) do; _DBDT_CACHE[station] = (time(), val); end
+    return val
 end

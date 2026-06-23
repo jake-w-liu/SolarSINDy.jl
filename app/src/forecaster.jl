@@ -51,8 +51,17 @@ function forecast_dbdt(dbdt_recent::AbstractVector, V, Bz; station::AbstractStri
     exc = [(threshold = Int(thr),
             prob = round(count(>( (log1p(thr) - ẑ) / s ), rn) / n; digits=3))
            for thr in a.thresholds]
+    # Reliability guard: the log-space ridge extrapolates catastrophically when the live
+    # features sit far outside the calibration support, and the expm1 then saturates at the
+    # ~2000 nT/min cap with ~1.0 exceedance. Flag (do not hide) such forecasts so the
+    # dashboard can render "out of validated range" instead of a confident Extreme number.
+    Z_SUPPORT = 6.0                                # |standardized feature| beyond ~6σ ⇒ extrapolation
+    out_of_range = any(>(Z_SUPPORT), abs.(zf))
+    saturated = (ẑ >= zcap) || (ẑ + q90 * s >= zcap)
     return (point_dbdt = round(max(point, 0.0); digits=2),
             ub90_dbdt = round(ub90; digits=2),
             exceedance = exc, station = station,
-            horizon_min = 30, source = "paper3 online conformal")
+            horizon_min = 30, source = "paper3 online conformal",
+            reliable = !(out_of_range || saturated),
+            out_of_validated_range = out_of_range, saturated = saturated)
 end

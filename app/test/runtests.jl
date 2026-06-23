@@ -147,4 +147,20 @@ end
         @test occursin("Storm-time replay", r.report_markdown)
         @test r.report_age_min isa Real
     end
+
+    @testset "dB/dt forecaster flags out-of-validated-range / saturated inputs" begin
+        # A merely quiet-to-mild dB/dt history forecasts within the validated range.
+        normal = forecast_dbdt(fill(2.0, 30), 420.0, -3.0; station="FRD")
+        if normal !== nothing                      # only if the FRD artifact is present
+            @test haskey(normal, :reliable)
+            @test normal.reliable == true
+            @test normal.saturated == false
+            # An absurd dB/dt history (far outside the ~1.7 nT/min calibration mean) must be
+            # flagged unreliable/saturated rather than surfaced as a confident Extreme forecast.
+            extreme = forecast_dbdt(fill(5000.0, 30), 1200.0, -80.0; station="FRD")
+            @test extreme !== nothing
+            @test extreme.reliable == false
+            @test (extreme.out_of_validated_range || extreme.saturated)
+        end
+    end
 end

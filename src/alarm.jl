@@ -63,15 +63,15 @@ function classify_severity(dst::Float64,
     # every `NaN <= t` silently fall through to QUIET) so the suppression is intentional and a
     # caller can detect it via `isnan` on the classified input.
     isnan(dst) && return QUIET
-    if dst <= get(thresholds, SUPERINTENSE, -200.0)
-        return SUPERINTENSE
-    elseif dst <= get(thresholds, INTENSE, -100.0)
-        return INTENSE
-    elseif dst <= get(thresholds, MODERATE, -50.0)
-        return MODERATE
-    else
-        return QUIET
-    end
+    # Upgrade cascade from least to most severe so the result is the most severe tier the
+    # value actually crosses. This is identical to an ordered if/elseif for the documented
+    # monotone thresholds (SUPERINTENSE ≤ INTENSE ≤ MODERATE) but stays correct (most-severe
+    # crossed tier wins) even if a caller supplies a non-monotone custom threshold dict.
+    sev = QUIET
+    dst <= get(thresholds, MODERATE, -50.0) && (sev = MODERATE)
+    dst <= get(thresholds, INTENSE, -100.0) && (sev = INTENSE)
+    dst <= get(thresholds, SUPERINTENSE, -200.0) && (sev = SUPERINTENSE)
+    return sev
 end
 
 """
@@ -86,8 +86,11 @@ function check_alarm(config::AlarmConfig, result::ForecastResult,
 
     severity == QUIET && return (nothing, last_alarm_time)
 
-    # Check cooldown
-    if result.t - last_alarm_time < Hour(config.cooldown_hours)
+    # Check cooldown. Guard the lower bound so a future-dated last_alarm_time (e.g. set by a
+    # forecast-horizon alarm whose result.t is ahead of wall clock) cannot make `elapsed`
+    # negative and silently suppress a genuine present-time alarm.
+    elapsed = result.t - last_alarm_time
+    if Millisecond(0) <= elapsed < Hour(config.cooldown_hours)
         return (nothing, last_alarm_time)
     end
 

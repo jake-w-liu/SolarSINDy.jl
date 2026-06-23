@@ -46,8 +46,11 @@ function swpc_solar_wind()
     if mag !== nothing && length(mag) > 1
         h = String.(collect(mag[1])); idx = Dict(h[i] => i for i in eachindex(h))
         row = mag[end]
-        sw[:bz_gsm_nt] = jnum(_pf(row[get(idx, "bz_gsm", 0)]))
-        sw[:bt_nt]     = jnum(_pf(row[get(idx, "bt", 0)]))
+        # Use a `nothing` sentinel (not 0): row[0] would throw BoundsError (1-based) and unwind
+        # to swpc_snapshot's catch, nulling the WHOLE snapshot instead of just the absent field.
+        _field(name) = (i = get(idx, name, nothing); i === nothing ? nothing : jnum(_pf(row[i])))
+        sw[:bz_gsm_nt] = _field("bz_gsm")
+        sw[:bt_nt]     = _field("bt")
         sw[:mag_time_utc] = jdt(_swpc_dt(row[1]))
         sw[:available] = true
     end
@@ -55,8 +58,9 @@ function swpc_solar_wind()
     if pls !== nothing && length(pls) > 1
         h = String.(collect(pls[1])); idx = Dict(h[i] => i for i in eachindex(h))
         row = pls[end]
-        sw[:speed_kms]   = jnum(_pf(row[get(idx, "speed", 0)]))
-        sw[:density_cm3] = jnum(_pf(row[get(idx, "density", 0)]))
+        _field(name) = (i = get(idx, name, nothing); i === nothing ? nothing : jnum(_pf(row[i])))
+        sw[:speed_kms]   = _field("speed")
+        sw[:density_cm3] = _field("density")
         sw[:plasma_time_utc] = jdt(_swpc_dt(row[1]))
     end
     return sw
@@ -124,18 +128,27 @@ function _build_swpc_snapshot()
 end
 
 function swpc_snapshot()
-    lock(_SWPC_LOCK) do
+    # Lock only to read the cache; build (blocking HTTP) outside it so one stalled SWPC
+    # product cannot serialize every dashboard poller behind the mutex.
+    fresh = lock(_SWPC_LOCK) do
         c = _SWPC_CACHE[]
-        if c === nothing || (time() - c[1]) > SWPC_TTL
-            try
-                _SWPC_CACHE[] = (time(), _build_swpc_snapshot())
-            catch e
-                c === nothing && return (source = "NOAA SWPC", available = false, error = string(e))
-                @warn "SWPC snapshot build failed; serving cached" exception = e
-            end
-        end
-        return _SWPC_CACHE[][2]
+        (c !== nothing && (time() - c[1]) <= SWPC_TTL) ? c[2] : nothing
     end
+    fresh !== nothing && return fresh
+    val = try
+        _build_swpc_snapshot()
+    catch e
+        stale = lock(_SWPC_LOCK) do
+            c = _SWPC_CACHE[]; c === nothing ? nothing : c[2]
+        end
+        if stale !== nothing
+            @warn "SWPC snapshot build failed; serving cached" exception = e
+            return stale
+        end
+        return (source = "NOAA SWPC", available = false, error = string(e))
+    end
+    lock(_SWPC_LOCK) do; _SWPC_CACHE[] = (time(), val); end
+    return val
 end
 
 # Honest threshold-based upstream indicator (NOT a fused scalar): flags "elevated" when any
