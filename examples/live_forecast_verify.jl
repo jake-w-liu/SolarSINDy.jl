@@ -685,26 +685,54 @@ end
 # (lo, hi), or `nothing` when there is too little verified history for this horizon
 # (the caller then keeps the static interval). Fail-safe: any error returns
 # `nothing`, so a malformed log can never break issuance.
+# Activity regime for the residual pool — same rule and threshold as the stratified
+# conformal calibration (SolarSINDy._activity_regime / CONFORMAL_ACTIVITY_THRESHOLD_NT):
+# :disturbed when latest_dst ≤ threshold, else :quiet; non-finite Dst → :disturbed.
+const _ACI_ACTIVITY_THRESHOLD_NT = -30.0
+_aci_regime(latest_dst::Real, thr::Real=_ACI_ACTIVITY_THRESHOLD_NT) =
+    (isfinite(latest_dst) && latest_dst > thr) ? :quiet : :disturbed
+
 function _aci_interval_from_log(log_path::AbstractString, center::Real,
                                 horizon_steps::Integer;
+                                latest_dst::Real=NaN,
+                                activity_threshold::Real=_ACI_ACTIVITY_THRESHOLD_NT,
                                 target_coverage::Float64=0.90, gamma::Float64=0.03,
                                 warmup::Int=30)
     try
         isfile(log_path) || return nothing
         df = CSV.read(log_path, DataFrame)
         cols = names(df)
-        all(c -> c in cols, ("horizon_hours", "v2_pred_dst_nt",
-                             "observation_dst_nt", "issue_time_utc")) || return nothing
+        # Key on model_step_hours — the lead (target − anchor) the QUERY is keyed on —
+        # not horizon_hours (wall-clock target − issue). The two differ whenever the
+        # anchor Dst lags the issue time, which silently routed long leads to a
+        # different / empty residual pool and through to the over-wide fallback.
+        all(c -> c in cols, ("model_step_hours", "v2_pred_dst_nt",
+                             "observation_dst_nt", "issue_time_utc", "latest_dst_nt")) || return nothing
         h = Int(horizon_steps)
-        idx = Int[]
-        for i in 1:nrow(df)
-            hv = df[i, :horizon_hours]; pv = df[i, :v2_pred_dst_nt]
-            ov = df[i, :observation_dst_nt]
-            (ismissing(hv) || ismissing(pv) || ismissing(ov)) && continue
-            (round(Int, Float64(hv)) == h) || continue
-            (isfinite(Float64(pv)) && isfinite(Float64(ov))) || continue
-            push!(idx, i)
+        cur_regime = _aci_regime(Float64(latest_dst), activity_threshold)
+        # Residual indices at this lead; regime_match restricts to the current activity
+        # regime so a quiet-period band is not inflated by past storm-time residuals.
+        collect_idx(regime_match::Bool) = begin
+            out = Int[]
+            for i in 1:nrow(df)
+                hv = df[i, :model_step_hours]; pv = df[i, :v2_pred_dst_nt]
+                ov = df[i, :observation_dst_nt]; ld = df[i, :latest_dst_nt]
+                (ismissing(hv) || ismissing(pv) || ismissing(ov)) && continue
+                (round(Int, Float64(hv)) == h) || continue
+                (isfinite(Float64(pv)) && isfinite(Float64(ov))) || continue
+                if regime_match
+                    (ismissing(ld) || !isfinite(Float64(ld))) && continue
+                    (_aci_regime(Float64(ld), activity_threshold) == cur_regime) || continue
+                end
+                push!(out, i)
+            end
+            out
         end
+        # Prefer the regime-conditional pool; fall back to the all-regime pool at this
+        # lead if regime data is too sparse (graceful — still correctly lead-keyed ACI,
+        # never the over-wide static fallback).
+        idx = isfinite(Float64(latest_dst)) ? collect_idx(true) : collect_idx(false)
+        length(idx) < warmup + 5 && (idx = collect_idx(false))
         length(idx) < warmup + 5 && return nothing
         idx = idx[sortperm([string(df[i, :issue_time_utc]) for i in idx])]
         ac = init_adaptive_conformal(; target_coverage=target_coverage,
@@ -1874,7 +1902,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
     # interval drops (≈0.84 on broad replay vs 0.89 for ACI). The ACI state is
     # derived per horizon from the verified log. Fail-safe: insufficient history or
     # any error keeps the static interval above; the point forecast is unchanged.
-    let aci = _aci_interval_from_log(cfg.log_path, pred_dst, model_steps)
+    let aci = _aci_interval_from_log(cfg.log_path, pred_dst, model_steps; latest_dst=latest_dst)
         if aci !== nothing
             ci05_dst, ci95_dst, interval_source = aci[1], aci[2], "aci"
         end

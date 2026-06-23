@@ -982,4 +982,39 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         # The surviving rows are exactly the fully finite ones (rows 1 and 4).
         @test metrics[:v2_pred_dst_nt].rmse ≈ 1.0 atol = 1e-12
     end
+
+    @testset "ACI interval: lead-keyed (model_step) and regime-conditional" begin
+        # Regression for the horizon-key bug: the query keys on model_step_hours
+        # (target − anchor), but the residual pool was filtered on horizon_hours
+        # (target − issue). When the anchor lags issue time the two differ, so long
+        # leads matched an empty pool and fell through to the over-wide static band.
+        mktempdir() do dir
+            log = joinpath(dir, "log.csv")
+            # All rows are model_step 7 but wall-clock horizon ~5.5 h (rounds to 6 ≠ 7):
+            # the bug filter (round(horizon_hours)==7) would find NONE of them.
+            n = 60
+            ms = fill(7.0, 2n); hh = fill(5.5, 2n)
+            pred = zeros(2n); obs = zeros(2n); ld = zeros(2n); iss = String[]
+            for k in 1:n                                   # quiet regime: tiny ±5 residuals
+                obs[k] = isodd(k) ? 5.0 : -5.0; ld[k] = 5.0
+            end
+            for k in 1:n                                   # disturbed regime: large ±60 residuals
+                j = n + k; obs[j] = isodd(k) ? 60.0 : -60.0; ld[j] = -80.0
+            end
+            for i in 1:2n; push!(iss, "2026-01-01T" * lpad(string(i ÷ 60), 2, '0') * ":" * lpad(string(i % 60), 2, '0') * ":00"); end
+            CSV.write(log, DataFrame(model_step_hours=ms, horizon_hours=hh,
+                                     v2_pred_dst_nt=pred, observation_dst_nt=obs,
+                                     latest_dst_nt=ld, issue_time_utc=iss))
+            # Quiet query: pools only the ±5 rows -> narrow band (NOT the old ~nothing/fallback).
+            q = _aci_interval_from_log(log, 0.0, 7; latest_dst=5.0)
+            @test q !== nothing                            # would be `nothing` under the horizon-key bug
+            hw_q = (q[2] - q[1]) / 2
+            @test 3.0 <= hw_q <= 12.0                       # tracks the ±5 quiet residuals
+            # Disturbed query: pools the ±60 rows -> much wider band (regime conditioning).
+            d = _aci_interval_from_log(log, 0.0, 7; latest_dst=-80.0)
+            @test d !== nothing
+            hw_d = (d[2] - d[1]) / 2
+            @test hw_d > 3 * hw_q                           # storm regime band is far wider than quiet
+        end
+    end
 end
