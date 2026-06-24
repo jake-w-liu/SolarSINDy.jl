@@ -1921,6 +1921,45 @@ function issue_forecast(cfg::LiveVerifyConfig)
     v2_ci05_log = interval_source in ("conformal", "aci") ? ci05_dst : selected.v2_ci05_dst
     v2_ci95_log = interval_source in ("conformal", "aci") ? ci95_dst : selected.v2_ci95_dst
 
+    # ---- Improved-v2 forecast (ADDITIVE; the v2_* / pred_* columns above are byte-identical) ----
+    # Same discovered ODE and same v2 residual correction, but the FROZEN driver tail (the `else recent`
+    # branch of the v2 loop) is replaced by Direction B: a regime-aware relaxation of the persisted driver's
+    # southward field toward zero, with a timescale that LENGTHENS during active deepening (recent Dst still
+    # dropping) so it does not under-predict storm depth, and relaxes normally in recovery. Observed-wind steps
+    # are identical to v2 (which already carries the L1 look-ahead, Direction A, where the solar wind is fresher
+    # than Dst). With the relaxation off (tau=Inf) it reproduces v2 exactly (relax=1 -> driver = `recent`).
+    # Served forecast is DEPTH-SAFE: most-negative point and downward-widened band across {v2, improved}, so a
+    # forecaster that under-predicts depth can never make the severity under-warn relative to v2.
+    improved_pred_dst = pred_dst; improved_ci05 = ci05_dst; improved_ci95 = ci95_dst
+    try
+        rate_1h = length(dst_vals) >= 2 ? Float64(dst_vals[end] - dst_vals[end - 1]) : 0.0
+        tau_eff = min(48.0, 3.0 * (1.0 + max(0.0, -rate_1h) / 7.5))   # regime-aware B (R0=7.5 nT/h, tau0=3 h, cap 48 h)
+        istate = init_forecast(; coefficients_csv=coef_csv, ensemble_csv=ens_csv, t0=latest_dst_time, dst0=anchor_dst_star)
+        n_frozen = 0; iresult = nothing; ist = latest_dst_time + Hour(1)
+        while ist <= target_time
+            sh = ist - Hour(1)
+            idrv = if sh < latest_complete_hour
+                _drivers_for_window(plasma, mag, sh, sh + Hour(1); fallback=recent)   # observed wind (== v2)
+            else
+                n_frozen += 1; rl = exp(-n_frozen / tau_eff)                          # relax the frozen tail (B)
+                (V=recent.V, Bz=recent.Bz * rl, By=recent.By * rl, n=recent.n, Pdyn=recent.Pdyn)
+            end
+            iresult = step_forecast!(istate, ist, idrv.V, idrv.Bz, idrv.By, idrv.n, idrv.Pdyn)
+            ist += Hour(1)
+        end
+        if iresult !== nothing && isfinite(iresult.dst_predicted)
+            iv1 = _dst_from_dst_star(iresult.dst_predicted, used_drivers.Pdyn)
+            improved_pred_dst = iv1 + selected.v2_correction                          # same issue-time v2 correction
+            improved_ci05 = improved_pred_dst + (v2_ci05_log - selected.v2_pred_dst)  # reuse the v2 band half-widths
+            improved_ci95 = improved_pred_dst + (v2_ci95_log - selected.v2_pred_dst)
+        end
+    catch e
+        @warn "improved-v2 forecast failed; serving v2 only" exception=(e, catch_backtrace())
+    end
+    served_pred_dst = min(selected.v2_pred_dst, improved_pred_dst)   # depth-safe point (most negative)
+    served_ci05_dst = min(v2_ci05_log, improved_ci05)                # widened lower (deeper)
+    served_ci95_dst = max(v2_ci95_log, improved_ci95)               # widened upper
+
     row = DataFrame(
         issue_time_utc=[string(issue_time)],
         latest_solar_wind_utc=[string(latest_common_sw)],
@@ -1979,6 +2018,13 @@ function issue_forecast(cfg::LiveVerifyConfig)
         burton_dst_nt=[burton_dst],
         burton_full_dst_nt=[burton_full_dst],
         obrien_dst_nt=[obrien_dst],
+        improved_model_version=["v2-improved-AB"],
+        improved_pred_dst_nt=[improved_pred_dst],
+        improved_pred_dst_ci05_nt=[improved_ci05],
+        improved_pred_dst_ci95_nt=[improved_ci95],
+        served_pred_dst_nt=[served_pred_dst],
+        served_pred_dst_ci05_nt=[served_ci05_dst],
+        served_pred_dst_ci95_nt=[served_ci95_dst],
         observation_dst_nt=[missing],
         residual_dst_nt=[missing],
         observed_in_90ci=[missing],
