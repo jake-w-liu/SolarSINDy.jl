@@ -10,17 +10,23 @@
 using JSON3, Statistics
 
 const _FORECASTER = Dict{String,Any}()
+const _FORECASTER_LOCK = ReentrantLock()
 
 function load_forecaster(; station::AbstractString = "FRD")
-    haskey(_FORECASTER, station) && return _FORECASTER[station]
-    path = joinpath(@__DIR__, "..", "models", "forecaster_$(station).json")
-    isfile(path) || return nothing
-    try
-        _FORECASTER[station] = JSON3.read(read(path, String))
-    catch e
-        @warn "forecaster artifact load failed" station exception=e; return nothing
+    # Guard the check-then-load-then-store like the sibling caches (_DBDT/_SWPC/_NET/_LOG):
+    # the file read between the haskey miss and the store is a yield point, so two concurrent
+    # first-time pollers could otherwise both load (and, multi-threaded, race the setindex!).
+    lock(_FORECASTER_LOCK) do
+        haskey(_FORECASTER, station) && return _FORECASTER[station]
+        path = joinpath(@__DIR__, "..", "models", "forecaster_$(station).json")
+        isfile(path) || return nothing
+        try
+            _FORECASTER[station] = JSON3.read(read(path, String))
+        catch e
+            @warn "forecaster artifact load failed" station exception=e; return nothing
+        end
+        return get(_FORECASTER, station, nothing)
     end
-    return get(_FORECASTER, station, nothing)
 end
 
 # Features (must match export): dbdt_now, dbdt_mean30, dbdt_max30, dbdt_std30, V, Bz, Bs, VBs.
