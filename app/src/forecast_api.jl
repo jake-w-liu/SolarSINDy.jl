@@ -215,35 +215,6 @@ function build_forecast(df::DataFrame)
             horizons=horizons)
 end
 
-# SHADOW: the validated constrained-EKF 1 h forecast, read from its OWN log. This is an experimental
-# parallel series (it never alters the locked v1/v2 record); the dashboard draws it as a separate line so
-# its live 1 h skill can be watched against the locked v2 forecast.
-function build_ekf_shadow(log_path::AbstractString)
-    shadow = joinpath(dirname(log_path), "ekf_shadow_log.csv")
-    isfile(shadow) || return (available=false, rows=NamedTuple[])
-    df = try CSV.read(shadow, DataFrame) catch; return (available=false, rows=NamedTuple[]) end
-    (nrow(df) == 0 || !("ekf_v2_pred_dst_nt" in names(df))) && return (available=false, rows=NamedTuple[])
-    # total parser: tolerate a missing/malformed/Z-suffixed cell by skipping that row, never throwing
-    # (so the endpoint keeps its available=false / partial-rows contract instead of 500-ing).
-    _t(x) = x isa DateTime ? x : tryparse(DateTime, first(split(replace(string(x), "Z" => ""), ".")))
-    # Sort by PARSED time, not the raw string: string order ≠ chronological under mixed fractional-second
-    # precision / Z-suffix, which would corrupt which rows the tail slice selects.
-    try sort!(df, :target_time_utc; by = x -> something(_t(x), DateTime(0))) catch; end
-    n = nrow(df); lo = max(1, n - 71)                   # last ~72 cycles (≈3 days hourly)
-    rows = NamedTuple[]
-    for r in eachrow(df[lo:n, :])
-        t = _t(r.target_time_utc); t === nothing && continue
-        push!(rows, (target_utc=jdt(t),
-                     ekf_v2_pred_dst_nt=jnum(r.ekf_v2_pred_dst_nt),
-                     locked_v2_pred_dst_nt=jnum(r.locked_v2_pred_dst_nt),
-                     fallback=(("fallback" in names(df)) && r.fallback === true)))
-    end
-    return (available=true,
-            fixed_decay=("fixed_decay" in names(df) ? jnum(df.fixed_decay[end]) : nothing),
-            latest_decay=("adapted_decay" in names(df) ? jnum(df.adapted_decay[end]) : nothing),
-            rows=rows)
-end
-
 """Storm-time replay summary: serves the offline replay report and its scored-row provenance.
 Defensive (never throws): missing/unreadable artifacts return available=false."""
 function build_storm_replay(log_path::AbstractString)
