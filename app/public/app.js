@@ -146,8 +146,11 @@ async function renderForecast(forecast, history, status) {
   const H = forecast.horizons;
   const anchorT = forecast.anchor_dst_time_utc, anchorY = forecast.anchor_dst_nt;
   const fx = H.map(h => h.target_utc);
-  const pred = H.map(h => h.pred_dst_nt);
-  const lo = H.map(h => h.ci05_dst_nt), hi = H.map(h => h.ci95_dst_nt);
+  const pred = H.map(h => h.pred_dst_nt);                                          // v2 reference
+  const improved = H.map(h => h.improved_dst_nt != null ? h.improved_dst_nt : h.pred_dst_nt);  // primary
+  // depth-safe widened band (covers the v2<->improved depth gap); legacy logs fall back to the v2 band
+  const lo = H.map(h => h.served_ci05_dst_nt != null ? h.served_ci05_dst_nt : h.ci05_dst_nt);
+  const hi = H.map(h => h.served_ci95_dst_nt != null ? h.served_ci95_dst_nt : h.ci95_dst_nt);
 
   // observed (past) context, last ~36 h
   const obs = observedSeries(history);
@@ -159,9 +162,10 @@ async function renderForecast(forecast, history, status) {
   // so the chart continuously shows prediction vs realized observation
   const track = forecastTrack(history, cutoff);
 
-  // pred line connects from the anchor observation
+  // lines connect from the anchor observation
   const px = (anchorT ? [anchorT] : []).concat(fx);
-  const py = (anchorT ? [anchorY] : []).concat(pred);
+  const py = (anchorT ? [anchorY] : []).concat(pred);          // v2 reference
+  const ipy = (anchorT ? [anchorY] : []).concat(improved);     // improved-v2 (primary)
 
   const ally = [...oy, ...lo, ...hi, ...py, ...track.y]
     .filter(v => v != null && !Number.isNaN(v));
@@ -189,20 +193,24 @@ async function renderForecast(forecast, history, status) {
   // observed reality (on top)
   if (ox.length) traces.push({ x: ox, y: oy, mode:"lines+markers", name:"Observed Dst",
     line:{color:WONG.obs, width:2}, marker:{size:5} });
-  // forward forecast for the current cycle (solid)
-  traces.push({ x: px, y: py, mode:"lines+markers", name:"Forecast Dst (v2)",
-    line:{color:WONG.fcst, width:2.6}, marker:{size:6} });
+  // v2 reference (dashed, muted) so both models are visible
+  traces.push({ x: px, y: py, mode:"lines", name:"v2 (reference)",
+    line:{color:"rgba(0,114,178,0.45)", width:1.4, dash:"dash"}, opacity:0.85,
+    hovertemplate:"v2 %{y:.0f} nT<extra></extra>" });
+  // improved-v2 (A+B driver model) — primary forecast (solid)
+  traces.push({ x: px, y: ipy, mode:"lines+markers", name:"Forecast Dst (improved)",
+    line:{color:WONG.fcst, width:2.6}, marker:{size:6},
+    hovertemplate:"improved %{y:.0f} nT<extra></extra>" });
 
   const layout = Object.assign(PLOT_LAYOUT(), { shapes, annotations: anns });
   await Plotly.react("forecast-plot", traces, layout, {displayModeBar:false, responsive:true});
 
   const src = forecast.interval_source || "—";
-  cap.innerHTML = `Solid blue: current forecast issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
-    + `<span data-reltime="${forecast.latest_solar_wind_utc}">${relTime(forecast.latest_solar_wind_utc)}</span> (shaded = calibrated 90% interval, ${src}). `
-    + `Dotted blue: forecasts already locked for past hours, plotted against the observed Dst (orange) that has since `
-    + `arrived — the live, rolling record of prediction vs reality. `
-    + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Horizons beyond `
-    + `the last complete hour assume solar-wind persistence — genuine new-disturbance lead is the L1 transit (~30–60 min).`;
+  cap.innerHTML = `Solid blue: the improved forecast issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
+    + `<span data-reltime="${forecast.latest_solar_wind_utc}">${relTime(forecast.latest_solar_wind_utc)}</span>. It uses the L1 solar-wind lead for the near term and a regime-aware driver relaxation for the multi-hour tail. `
+    + `Dashed blue: the previous v2 forecast (frozen-driver) for reference. Shaded: the 90% interval, widened to cover both (${src}); the severity scale uses the deeper of the two so it never under-warns. `
+    + `Dotted blue: forecasts already locked for past hours, plotted against the observed Dst (orange) that has since arrived. `
+    + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Genuine new-disturbance lead is the L1 transit (~30–60 min).`;
 }
 
 async function renderHistory(history) {
