@@ -12,7 +12,7 @@
 #
 # No new heavy dependencies: CSV, DataFrames, Dates, Statistics are already in the stack.
 
-using CSV, DataFrames, Dates, Statistics
+using CSV, DataFrames, Dates, Statistics, JSON3
 
 # ---- Dst storm-intensity threat scale --------------------------------------------------
 # Verified against the geomagnetic-storm literature: the widely adopted Dst classification
@@ -219,8 +219,23 @@ function _recent_observed(df::DataFrame; hours::Real=48)
     return out
 end
 
+# Sub-hour MODEL trajectory (display only) written by the engine next to the log: the served forecast integrated
+# at a sub-hour step. Not a validated sub-hour forecast (Dst is observed hourly; the ODE is hourly-fit) — it is the
+# hourly model's own interpolation. Defensive: missing/unreadable/stale → [].
+function _subhour_traj(log_path::AbstractString)
+    isempty(log_path) && return NamedTuple[]
+    f = joinpath(dirname(log_path), "subhour_trajectory.json")
+    isfile(f) || return NamedTuple[]
+    try
+        d = JSON3.read(read(f, String))
+        return [(target_utc = String(p.t) * "Z", dst_nt = jnum(p.dst)) for p in d.points]
+    catch
+        return NamedTuple[]
+    end
+end
+
 """Forecast trajectory of the most recent cycle: anchor + per-horizon point and 90% band."""
-function build_forecast(df::DataFrame)
+function build_forecast(df::DataFrame, log_path::AbstractString="")
     cyc = latest_cycle(df)
     nrow(cyc) == 0 && return (issue_time_utc=nothing, horizons=[])
     horizons = NamedTuple[]
@@ -242,6 +257,7 @@ function build_forecast(df::DataFrame)
             interval_source=("interval_source" in names(cyc) ? String(coalesce(r1.interval_source, "unknown")) : "unknown"),
             model_version=("model_version" in names(cyc) ? String(coalesce(r1.model_version, "v2")) : "v2"),
             recent_observed=_recent_observed(df),
+            subhour_trajectory=_subhour_traj(log_path),
             horizons=horizons)
 end
 

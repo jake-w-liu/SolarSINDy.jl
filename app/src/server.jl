@@ -95,7 +95,7 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
     elseif path == "/api/network"
         return json_response(usgs_network())
     elseif path == "/api/forecast"
-        return json_response(build_forecast(df))
+        return json_response(build_forecast(df, log_path))
     elseif path == "/api/storm_replay"
         return json_response(build_storm_replay(log_path))
     elseif path == "/api/history"

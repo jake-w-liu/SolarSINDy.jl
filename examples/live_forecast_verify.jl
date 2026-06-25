@@ -457,6 +457,32 @@ function _subhourly_driver(plasma::DataFrame, mag::DataFrame, step_time::DateTim
             Pdyn = f*meas.Pdyn + (1-f)*recent.Pdyn)
 end
 
+# Sub-hour MODEL TRAJECTORY for the near term: the served forecast integrated at a sub-hour step (default 15 min)
+# with the same per-hour drivers (observed / L1 look-ahead / frozen). This is DISPLAY ONLY and is a model
+# trajectory, not a validated sub-hour forecast: Dst is published only hourly (no sub-hour ground truth) and the
+# discovered ODE is fit on hourly data, so the curve is the hourly-scale model's own interpolation. It tracks the
+# hourly forecast closely because the ring current has little sub-hour structure.
+function _subhour_trajectory(coef_csv, ens_csv, latest_dst_time::DateTime, anchor_dst_star::Float64,
+                             plasma::DataFrame, mag::DataFrame, recent, latest_complete_hour::DateTime,
+                             latest_common_sw::DateTime, pdyn::Float64, v2_correction::Float64;
+                             window_h::Int=6, substeps::Int=4)
+    st = init_forecast(; coefficients_csv=coef_csv, ensemble_csv=ens_csv, t0=latest_dst_time,
+                         dst0=anchor_dst_star, dt=1.0 / substeps)
+    pts = NamedTuple[]
+    for k in 1:window_h
+        hstart = latest_dst_time + Hour(k - 1)
+        drv = hstart < latest_complete_hour ?
+            _drivers_for_window(plasma, mag, hstart, hstart + Hour(1); fallback=recent) :
+            _subhourly_driver(plasma, mag, latest_dst_time + Hour(k), recent, latest_common_sw)
+        for s in 1:substeps
+            t = latest_dst_time + Millisecond(round(Int, ((k - 1) + s / substeps) * 3_600_000))
+            res = step_forecast!(st, t, drv.V, drv.Bz, drv.By, drv.n, drv.Pdyn)
+            push!(pts, (t=string(t), dst=_dst_from_dst_star(res.dst_predicted, pdyn) + v2_correction))
+        end
+    end
+    return pts
+end
+
 function _append_forecast!(log_path::String, row::DataFrame)
     dir = dirname(log_path)
     !isempty(dir) && mkpath(dir)
@@ -2073,6 +2099,19 @@ function issue_forecast(cfg::LiveVerifyConfig)
         obrien_residual_dst_nt=[missing],
     )
     row_idx = _append_forecast!(cfg.log_path, row)
+
+    # Sub-hour model trajectory (display only) for the latest cycle; overwritten each issue (idempotent).
+    try
+        traj = _subhour_trajectory(coef_csv, ens_csv, latest_dst_time, anchor_dst_star, plasma, mag, recent,
+                                   latest_complete_hour, latest_common_sw, used_drivers.Pdyn, selected.v2_correction)
+        open(joinpath(dirname(cfg.log_path), "subhour_trajectory.json"), "w") do io
+            JSON3.write(io, Dict("issue_time_utc" => string(issue_time),
+                                 "anchor_time_utc" => string(latest_dst_time),
+                                 "anchor_dst_nt" => latest_dst, "points" => traj))
+        end
+    catch e
+        @warn "sub-hour trajectory write failed" exception=(e, catch_backtrace())
+    end
 
     println("Logged live forecast row $row_idx: $(cfg.log_path)")
     println("Issue UTC: $issue_time")

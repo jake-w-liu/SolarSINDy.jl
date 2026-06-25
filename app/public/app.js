@@ -171,7 +171,11 @@ async function renderForecast(forecast, history, status) {
   const py = (anchorT ? [anchorY] : []).concat(pred);          // v2 reference
   const svy = (anchorT ? [anchorY] : []).concat(served);       // promoted served forecast
 
-  const ally = [...oy, ...lo, ...hi, ...py, ...svy, ...track.y]
+  // sub-hour model trajectory (display only): served forecast integrated at sub-hour steps
+  const traj = (forecast.subhour_trajectory || []).filter(p => p && p.dst_nt != null);
+  const trajX = traj.map(p => p.target_utc), trajY = traj.map(p => p.dst_nt);
+
+  const ally = [...oy, ...lo, ...hi, ...py, ...svy, ...trajY, ...track.y]
     .filter(v => v != null && !Number.isNaN(v));
   const ymin = ally.length ? Math.min(...ally) : -50, ymax = ally.length ? Math.max(...ally) : 20;
   const { shapes, anns } = thresholdShapes(ymin, ymax);
@@ -197,6 +201,10 @@ async function renderForecast(forecast, history, status) {
   // observed reality (on top)
   if (ox.length) traces.push({ x: ox, y: oy, mode:"lines+markers", name:"Observed Dst",
     line:{color:WONG.obs, width:2}, marker:{size:5} });
+  // sub-hour model trajectory (15-min): the served forecast at sub-hour resolution. Display only — a model
+  // trajectory, not a validated sub-hour forecast (Dst is observed hourly), so it tracks the forecast line.
+  if (trajX.length) traces.push({ x: trajX, y: trajY, mode:"lines", name:"Sub-hour trajectory (model)",
+    line:{color:"#009E73", width:1.3}, opacity:0.85, hovertemplate:"sub-hour %{y:.1f} nT<extra></extra>" });
   // v2 (frozen-driver) reference, thin dashed — so the look-ahead refinement is visible where it differs.
   traces.push({ x: px, y: py, mode:"lines", name:"v2 (frozen-driver)",
     line:{color:"rgba(0,114,178,0.45)", width:1.4, dash:"dash"}, opacity:0.85,
