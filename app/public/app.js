@@ -201,20 +201,32 @@ async function renderForecast(forecast, history, status) {
   // observed reality (on top)
   if (ox.length) traces.push({ x: ox, y: oy, mode:"lines+markers", name:"Observed Dst",
     line:{color:WONG.obs, width:2}, marker:{size:5} });
-  // sub-hour model trajectory (15-min): the served forecast at sub-hour resolution. Display only — a model
-  // trajectory, not a validated sub-hour forecast (Dst is observed hourly), so it tracks the forecast line.
-  if (trajX.length) traces.push({ x: trajX, y: trajY, mode:"lines", name:"Sub-hour trajectory (model)",
-    line:{color:"#009E73", width:1.3}, opacity:0.85, hovertemplate:"sub-hour %{y:.1f} nT<extra></extra>" });
-  // v2 (frozen-driver) reference, thin dashed — so the look-ahead refinement is visible where it differs.
+  // v2 (frozen-driver) reference, thin dashed.
   traces.push({ x: px, y: py, mode:"lines", name:"v2 (frozen-driver)",
     line:{color:"rgba(0,114,178,0.45)", width:1.4, dash:"dash"}, opacity:0.85,
     hovertemplate:"v2 %{y:.0f} nT<extra></extra>" });
-  // PROMOTED served forecast = v2 + L1 look-ahead (solid, primary).
-  traces.push({ x: px, y: svy, mode:"lines+markers", name:"Forecast Dst (v2 + L1 look-ahead)",
-    line:{color:WONG.fcst, width:2.6}, marker:{size:6},
-    hovertemplate:"served %{y:.0f} nT<extra></extra>" });
+  // PROMOTED served forecast = v2 + L1 look-ahead, drawn at 15-min SUB-HOUR resolution when the trajectory is
+  // available (falls back to the hourly points). The forecast line ITSELF carries the sub-hour resolution, so
+  // zooming the forecast region resolves it into 4 points/hour.
+  const fcx = trajX.length ? [anchorT].concat(trajX) : px;
+  const fcy = trajX.length ? [anchorY].concat(trajY) : svy;
+  traces.push({ x: fcx, y: fcy, mode:"lines", name:"Forecast Dst (v2 + L1 look-ahead, 15-min)",
+    line:{color:WONG.fcst, width:2.6}, hovertemplate:"forecast %{y:.1f} nT<extra></extra>" });
+  // markers at the issued hourly horizons (the scored targets), drawn on top of the sub-hour line.
+  traces.push({ x: px, y: svy, mode:"markers", name:"issued horizons",
+    marker:{size:8, color:WONG.fcst, line:{color:"#0b1020", width:1.2}},
+    hovertemplate:"issued %{y:.1f} nT<extra></extra>" });
 
   const layout = Object.assign(PLOT_LAYOUT(), { shapes, annotations: anns });
+  // Default the view to the forecast window (recent observed + the forecast/sub-hour), so the 15-min trace is
+  // front-and-centre instead of a thin slice inside 36 h of history. Autoscale (home button) restores full range.
+  const fEnd = trajX.length ? trajX[trajX.length-1] : (fx.length ? fx[fx.length-1] : null);
+  const vStart = anchorT || (fx.length ? fx[0] : null);
+  if (fEnd && vStart) {
+    layout.xaxis = Object.assign({}, layout.xaxis, {
+      range: [new Date(Date.parse(vStart) - 6*3600*1000).toISOString(),
+              new Date(Date.parse(fEnd) + 30*60*1000).toISOString()], autorange: false });
+  }
   await Plotly.react("forecast-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
 
   const src = forecast.interval_source || "—";

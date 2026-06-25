@@ -64,7 +64,7 @@ function serve_static(path::AbstractString)
     # Confine to PUBLIC_DIR.
     (startswith(file, PUBLIC_DIR) && isfile(file)) || return HTTP.Response(404, "not found")
     return HTTP.Response(200, ["Content-Type" => content_type(file),
-                              "Cache-Control" => "no-cache"], read(file))
+                              "Cache-Control" => "no-store"], read(file))
 end
 
 function api_handler(path::AbstractString, query::AbstractString, log_path::AbstractString)
