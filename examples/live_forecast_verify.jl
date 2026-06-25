@@ -464,7 +464,7 @@ end
 # hourly forecast closely because the ring current has little sub-hour structure.
 function _subhour_trajectory(coef_csv, ens_csv, latest_dst_time::DateTime, anchor_dst_star::Float64,
                              plasma::DataFrame, mag::DataFrame, recent, latest_complete_hour::DateTime,
-                             latest_common_sw::DateTime, pdyn::Float64, v2_correction::Float64;
+                             latest_common_sw::DateTime, v2_correction::Float64;
                              window_h::Int=6, substeps::Int=4)
     st = init_forecast(; coefficients_csv=coef_csv, ensemble_csv=ens_csv, t0=latest_dst_time,
                          dst0=anchor_dst_star, dt=1.0 / substeps)
@@ -477,7 +477,7 @@ function _subhour_trajectory(coef_csv, ens_csv, latest_dst_time::DateTime, ancho
         for s in 1:substeps
             t = latest_dst_time + Millisecond(round(Int, ((k - 1) + s / substeps) * 3_600_000))
             res = step_forecast!(st, t, drv.V, drv.Bz, drv.By, drv.n, drv.Pdyn)
-            push!(pts, (t=string(t), dst=_dst_from_dst_star(res.dst_predicted, pdyn) + v2_correction))
+            push!(pts, (t=string(t), dst=_dst_from_dst_star(res.dst_predicted, drv.Pdyn) + v2_correction))   # per-step target-time Pdyn
         end
     end
     return pts
@@ -2111,7 +2111,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
     # Sub-hour model trajectory (display only) for the latest cycle; overwritten each issue (idempotent).
     try
         traj = _subhour_trajectory(coef_csv, ens_csv, latest_dst_time, anchor_dst_star, plasma, mag, recent,
-                                   latest_complete_hour, latest_common_sw, used_drivers.Pdyn, selected.v2_correction)
+                                   latest_complete_hour, latest_common_sw, selected.v2_correction)
         open(joinpath(dirname(cfg.log_path), "subhour_trajectory.json"), "w") do io
             JSON3.write(io, Dict("issue_time_utc" => string(issue_time),
                                  "anchor_time_utc" => string(latest_dst_time),
