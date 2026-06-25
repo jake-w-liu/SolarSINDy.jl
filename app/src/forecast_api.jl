@@ -98,15 +98,11 @@ end
 _pred(row)  = _col(row, :v2_pred_dst_nt,      :pred_dst_nt)
 _ci05(row)  = _col(row, :v2_pred_dst_ci05_nt, :pred_dst_ci05_nt)
 _ci95(row)  = _col(row, :v2_pred_dst_ci95_nt, :pred_dst_ci95_nt)
-# Improved-v2 (A+B) display series + the DEPTH-SAFE served series, each with graceful fallback to v2 so legacy
-# rows (no improved_*/served_* columns) degrade to the v2 forecast. _pred/_ci05/_ci95 above stay = v2 so the
-# scored 90% coverage (calibration_summary/verified_rows) is computed on the v2 conformal band, untouched.
-_ipred(row) = _col(row, :improved_pred_dst_nt,        :v2_pred_dst_nt)
-_ici05(row) = _col(row, :improved_pred_dst_ci05_nt,   :v2_pred_dst_ci05_nt)
-_ici95(row) = _col(row, :improved_pred_dst_ci95_nt,   :v2_pred_dst_ci95_nt)
-_spred(row) = _col(row, :served_pred_dst_nt,          :v2_pred_dst_nt)   # depth-safe point = min(v2, improved)
-_sci05(row) = _col(row, :served_pred_dst_ci05_nt,     :v2_pred_dst_ci05_nt)  # widened lower
-_sci95(row) = _col(row, :served_pred_dst_ci95_nt,     :v2_pred_dst_ci95_nt)  # widened upper
+# The served forecast is the v2 frozen-driver model (Direction B removed). _pred/_ci05/_ci95 are the single
+# source of truth for the point forecast, the 90% conformal band, and the threat assessment.
+# Sub-hourly (minute) layer — SHADOW series for display only; never feeds severity. Falls back to v2 for legacy
+# rows issued before the minute layer existed.
+_shpred(row) = _col(row, :sub_hourly_pred_dst_nt, :v2_pred_dst_nt)
 
 # Rows of the most recent forecast cycle = those sharing the freshest input-data vintage
 # (latest_solar_wind_utc). Returns a sub-DataFrame sorted by target time.
@@ -202,6 +198,25 @@ function calibration_summary(df::DataFrame)
 end
 
 # ---- payload builders ------------------------------------------------------------------
+# Recent observed Dst straight from the log's latest_dst columns (every row records the freshest Kyoto Dst at
+# its issue). This runs to the forecast anchor with no extra network dependency, so the observed line is
+# continuous up to where the forecast begins (the verified-row track lags by the verification delay). Later
+# rows overwrite earlier ones at the same timestamp, so revised Dst values win.
+function _recent_observed(df::DataFrame; hours::Real=48)
+    nrow(df) == 0 && return NamedTuple[]
+    (hasproperty(df, :latest_dst_time_utc_dt) && hasproperty(df, :latest_dst_nt)) || return NamedTuple[]
+    cutoff = now(UTC) - Hour(round(Int, hours))
+    seen = Dict{DateTime,Float64}()
+    for r in eachrow(df)
+        t = r.latest_dst_time_utc_dt; v = jnum(r.latest_dst_nt)
+        (t === missing || v === nothing || t < cutoff) && continue
+        seen[t] = v
+    end
+    out = [(target_utc=jdt(t), observed_dst_nt=v) for (t, v) in seen]
+    sort!(out, by=x -> x.target_utc)
+    return out
+end
+
 """Forecast trajectory of the most recent cycle: anchor + per-horizon point and 90% band."""
 function build_forecast(df::DataFrame)
     cyc = latest_cycle(df)
@@ -210,13 +225,10 @@ function build_forecast(df::DataFrame)
     for r in eachrow(cyc)
         push!(horizons, (target_utc=jdt(r.target_time_utc_dt),
                          horizon_hours=jnum(r.horizon_hours),
-                         pred_dst_nt=jnum(_pred(r)),          # v2 reference point (and calibration band)
+                         pred_dst_nt=jnum(_pred(r)),          # v2 frozen-driver point forecast
                          ci05_dst_nt=jnum(_ci05(r)),
                          ci95_dst_nt=jnum(_ci95(r)),
-                         improved_dst_nt=jnum(_ipred(r)),     # improved-v2 (A+B) — primary display series
-                         served_dst_nt=jnum(_spred(r)),       # depth-safe served point = min(v2, improved)
-                         served_ci05_dst_nt=jnum(_sci05(r)),  # widened band (covers the v2<->improved depth gap)
-                         served_ci95_dst_nt=jnum(_sci95(r))))
+                         subhourly_dst_nt=jnum(_shpred(r))))  # minute-layer shadow (display only)
     end
     r1 = first(cyc)
     return (issue_time_utc=jdt(r1.issue_time_utc_dt),
@@ -225,6 +237,7 @@ function build_forecast(df::DataFrame)
             anchor_dst_time_utc=jdt(r1.latest_dst_time_utc_dt),
             interval_source=("interval_source" in names(cyc) ? String(coalesce(r1.interval_source, "unknown")) : "unknown"),
             model_version=("model_version" in names(cyc) ? String(coalesce(r1.model_version, "v2")) : "v2"),
+            recent_observed=_recent_observed(df),
             horizons=horizons)
 end
 
@@ -259,13 +272,12 @@ function build_status(df::DataFrame)
                 message="No forecast rows in log yet.", calibration=cal)
     end
     r1 = first(cyc)
-    # DEPTH-SAFE severity: classify on the served point (= min(v2, improved)) and the widened lower bound
-    # (= min(v2_ci05, improved_ci05)), so a forecaster that under-predicts depth can never make the severity
-    # under-warn relative to v2. Legacy rows degrade to v2 via the accessor fallback.
-    preds = filter(!isnothing, jnum.(_spred.(eachrow(cyc))))
-    lbs   = filter(!isnothing, jnum.(_sci05.(eachrow(cyc))))
-    point_min = isempty(preds) ? nothing : minimum(preds)            # most negative point across {v2, improved}
-    worst_cred = isempty(lbs)  ? nothing : minimum(lbs)              # most negative widened 90% bound
+    # Severity is classified on the v2 point forecast and its calibrated 90% lower bound across the cycle:
+    # the most negative point and the most negative lower bound over the issued horizons.
+    preds = filter(!isnothing, jnum.(_pred.(eachrow(cyc))))
+    lbs   = filter(!isnothing, jnum.(_ci05.(eachrow(cyc))))
+    point_min = isempty(preds) ? nothing : minimum(preds)            # most negative v2 point over the horizons
+    worst_cred = isempty(lbs)  ? nothing : minimum(lbs)              # most negative calibrated 90% lower bound
     lvl_pt, lbl_pt = point_min === nothing ? (0, THREAT_LABELS[1]) : dst_threat_level(point_min)
     lvl_wc, lbl_wc = worst_cred === nothing ? (0, THREAT_LABELS[1]) : dst_threat_level(worst_cred)
     # Reported threat level is the point-forecast level; a "watch" flag fires when the
@@ -287,9 +299,7 @@ function build_status(df::DataFrame)
                        note="Genuine upstream lead for new severity is the L1 advection time (~30-60 min). " *
                             "Multi-day lead requires CME eruption/propagation models, not yet in this system."),
             calibration=cal,
-            model_version=(hasproperty(r1, :improved_model_version) && r1.improved_model_version !== missing ?
-                           String(r1.improved_model_version) :
-                           ("model_version" in names(cyc) ? String(coalesce(r1.model_version, "v2")) : "v2")))
+            model_version=("model_version" in names(cyc) ? String(coalesce(r1.model_version, "v2")) : "v2"))
 end
 
 """Recent verified track record (observed vs predicted with band) for the last `hours`."""
