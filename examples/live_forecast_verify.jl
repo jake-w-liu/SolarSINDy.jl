@@ -513,6 +513,16 @@ function _score_row!(df::DataFrame, row_idx::Int, observed_dst::Float64)
         end
     end
 
+    # Score the promoted served forecast (v2 + L1 look-ahead) alongside v2, so its live skill is tracked.
+    served_pred = _optional_float(df, row_idx, :served_pred_dst_nt)
+    if !ismissing(served_pred)
+        _set_value!(df, row_idx, :served_residual_dst_nt, observed_dst - served_pred)
+        s05 = _optional_float(df, row_idx, :served_pred_dst_ci05_nt)
+        s95 = _optional_float(df, row_idx, :served_pred_dst_ci95_nt)
+        (!ismissing(s05) && !ismissing(s95)) &&
+            _set_value!(df, row_idx, :served_observed_in_90ci, min(s05, s95) <= observed_dst <= max(s05, s95))
+    end
+
     for (pred_col, residual_col) in (
         (:persistence_dst_nt, :persistence_residual_dst_nt),
         (:burton_dst_nt, :burton_residual_dst_nt),
@@ -1950,13 +1960,13 @@ function issue_forecast(cfg::LiveVerifyConfig)
     # equal to v2 so the live log keeps a stable schema and the dashboard/historical rows read consistently.
     # ponytail: improved_*/served_* kept == v2 for CSV-schema stability; drop the columns in a log migration if desired.
     improved_pred_dst = selected.v2_pred_dst; improved_ci05 = v2_ci05_log; improved_ci95 = v2_ci95_log
-    served_pred_dst = selected.v2_pred_dst; served_ci05_dst = v2_ci05_log; served_ci95_dst = v2_ci95_log
 
-    # ---- Minute (sub-hourly) layer: SHADOW (computed + logged + charted, NOT served/severity) ----
+    # ---- L1 look-ahead layer (Direction A) ----
     # Same discovered ODE and v2 residual correction, but the frozen-driver tail is driven by the 1-min L1 wind
-    # propagating into each Earth-hour and already measured by issue time (Direction A at minute resolution;
-    # leakage-safe, reduces to v2 where no measured wind maps in). Pending a forward shadow campaign before it can
-    # drive the served forecast or severity (per the multi-scale design's shadow-before-promote gate).
+    # propagating into each Earth-hour and already measured by issue time (leakage-safe; reduces to v2 where no
+    # measured wind maps in). Backtested on the storm set (live_forecasts/validate_ballistic_subhourly.jl):
+    # continuity to v2 = 0, and lower RMSE than v2 at every lead (15.9/28.7/38.8/67.5 vs 18.0/30.2/40.1/68.3 nT),
+    # so it is PROMOTED to the served forecast.
     sub_hourly_pred_dst = selected.v2_pred_dst
     try
         sstate = init_forecast(; coefficients_csv=coef_csv, ensemble_csv=ens_csv, t0=latest_dst_time, dst0=anchor_dst_star)
@@ -1965,7 +1975,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
             sh = sst - Hour(1)
             sdrv = sh < latest_complete_hour ?
                 _drivers_for_window(plasma, mag, sh, sh + Hour(1); fallback=recent) :   # observed hour (== v2)
-                _subhourly_driver(plasma, mag, sst, recent, latest_common_sw)           # minute layer on the tail
+                _subhourly_driver(plasma, mag, sst, recent, latest_common_sw)           # L1 look-ahead on the tail
             sresult = step_forecast!(sstate, sst, sdrv.V, sdrv.Bz, sdrv.By, sdrv.n, sdrv.Pdyn)
             sst += Hour(1)
         end
@@ -1974,10 +1984,16 @@ function issue_forecast(cfg::LiveVerifyConfig)
             sub_hourly_pred_dst = sv1 + selected.v2_correction
         end
     catch e
-        @warn "sub-hourly shadow forecast failed; using v2" exception=(e, catch_backtrace())
+        @warn "L1 look-ahead forecast failed; serving v2" exception=(e, catch_backtrace())
     end
     sub_hourly_ci05 = sub_hourly_pred_dst + (v2_ci05_log - selected.v2_pred_dst)
     sub_hourly_ci95 = sub_hourly_pred_dst + (v2_ci95_log - selected.v2_pred_dst)
+
+    # ---- PROMOTED served forecast = v2 + L1 look-ahead. Severity (build_status) applies a depth-safe floor
+    # min(v2, served) so the look-ahead can only escalate, never under-warn, relative to frozen v2.
+    served_pred_dst = sub_hourly_pred_dst
+    served_ci05_dst = sub_hourly_ci05
+    served_ci95_dst = sub_hourly_ci95
 
     row = DataFrame(
         issue_time_utc=[string(issue_time)],
@@ -2044,7 +2060,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
         served_pred_dst_nt=[served_pred_dst],
         served_pred_dst_ci05_nt=[served_ci05_dst],
         served_pred_dst_ci95_nt=[served_ci95_dst],
-        sub_hourly_model_version=["subA-shadow"],
+        sub_hourly_model_version=["v2+L1A"],
         sub_hourly_pred_dst_nt=[sub_hourly_pred_dst],
         sub_hourly_pred_dst_ci05_nt=[sub_hourly_ci05],
         sub_hourly_pred_dst_ci95_nt=[sub_hourly_ci95],

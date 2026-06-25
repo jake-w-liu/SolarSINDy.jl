@@ -100,9 +100,11 @@ _ci05(row)  = _col(row, :v2_pred_dst_ci05_nt, :pred_dst_ci05_nt)
 _ci95(row)  = _col(row, :v2_pred_dst_ci95_nt, :pred_dst_ci95_nt)
 # The served forecast is the v2 frozen-driver model (Direction B removed). _pred/_ci05/_ci95 are the single
 # source of truth for the point forecast, the 90% conformal band, and the threat assessment.
-# Sub-hourly (minute) layer — SHADOW series for display only; never feeds severity. Falls back to v2 for legacy
-# rows issued before the minute layer existed.
-_shpred(row) = _col(row, :sub_hourly_pred_dst_nt, :v2_pred_dst_nt)
+# Served (promoted) forecast = v2 + L1 look-ahead. _pred/_ci05/_ci95 stay v2 (the reference scored for the
+# continuous track record); severity uses the depth-safe min(v2, served). Falls back to v2 for legacy rows.
+_served(row) = _col(row, :served_pred_dst_nt,      :v2_pred_dst_nt)
+_sc05(row)   = _col(row, :served_pred_dst_ci05_nt, :v2_pred_dst_ci05_nt)
+_sc95(row)   = _col(row, :served_pred_dst_ci95_nt, :v2_pred_dst_ci95_nt)
 
 # Rows of the most recent forecast cycle = those sharing the freshest input-data vintage
 # (latest_solar_wind_utc). Returns a sub-DataFrame sorted by target time.
@@ -225,10 +227,12 @@ function build_forecast(df::DataFrame)
     for r in eachrow(cyc)
         push!(horizons, (target_utc=jdt(r.target_time_utc_dt),
                          horizon_hours=jnum(r.horizon_hours),
-                         pred_dst_nt=jnum(_pred(r)),          # v2 frozen-driver point forecast
+                         pred_dst_nt=jnum(_pred(r)),          # v2 frozen-driver (reference)
                          ci05_dst_nt=jnum(_ci05(r)),
                          ci95_dst_nt=jnum(_ci95(r)),
-                         subhourly_dst_nt=jnum(_shpred(r))))  # minute-layer shadow (display only)
+                         served_dst_nt=jnum(_served(r)),      # promoted served forecast (v2 + L1 look-ahead)
+                         served_ci05_dst_nt=jnum(_sc05(r)),
+                         served_ci95_dst_nt=jnum(_sc95(r))))
     end
     r1 = first(cyc)
     return (issue_time_utc=jdt(r1.issue_time_utc_dt),
@@ -272,12 +276,13 @@ function build_status(df::DataFrame)
                 message="No forecast rows in log yet.", calibration=cal)
     end
     r1 = first(cyc)
-    # Severity is classified on the v2 point forecast and its calibrated 90% lower bound across the cycle:
-    # the most negative point and the most negative lower bound over the issued horizons.
-    preds = filter(!isnothing, jnum.(_pred.(eachrow(cyc))))
-    lbs   = filter(!isnothing, jnum.(_ci05.(eachrow(cyc))))
-    point_min = isempty(preds) ? nothing : minimum(preds)            # most negative v2 point over the horizons
-    worst_cred = isempty(lbs)  ? nothing : minimum(lbs)              # most negative calibrated 90% lower bound
+    # Depth-safe severity: the L1 look-ahead can escalate but never under-warn vs frozen v2. Per horizon take the
+    # deeper (more negative) of {v2, served}, then the most negative across horizons.
+    dmin(a, b) = (a === nothing && b === nothing) ? nothing : min(something(a, b), something(b, a))
+    preds = filter(!isnothing, [dmin(jnum(_pred(r)), jnum(_served(r))) for r in eachrow(cyc)])
+    lbs   = filter(!isnothing, [dmin(jnum(_ci05(r)), jnum(_sc05(r)))   for r in eachrow(cyc)])
+    point_min = isempty(preds) ? nothing : minimum(preds)            # most negative depth-safe point
+    worst_cred = isempty(lbs)  ? nothing : minimum(lbs)              # most negative depth-safe 90% lower bound
     lvl_pt, lbl_pt = point_min === nothing ? (0, THREAT_LABELS[1]) : dst_threat_level(point_min)
     lvl_wc, lbl_wc = worst_cred === nothing ? (0, THREAT_LABELS[1]) : dst_threat_level(worst_cred)
     # Reported threat level is the point-forecast level; a "watch" flag fires when the

@@ -146,10 +146,10 @@ async function renderForecast(forecast, history, status) {
   const H = forecast.horizons;
   const anchorT = forecast.anchor_dst_time_utc, anchorY = forecast.anchor_dst_nt;
   const fx = H.map(h => h.target_utc);
-  const pred = H.map(h => h.pred_dst_nt);                       // v2 frozen-driver point forecast
-  const subh = H.map(h => h.subhourly_dst_nt != null ? h.subhourly_dst_nt : h.pred_dst_nt);  // minute-layer shadow
-  const lo = H.map(h => h.ci05_dst_nt);                         // v2 calibrated 90% band
-  const hi = H.map(h => h.ci95_dst_nt);
+  const pred = H.map(h => h.pred_dst_nt);                       // v2 frozen-driver (reference)
+  const served = H.map(h => h.served_dst_nt != null ? h.served_dst_nt : h.pred_dst_nt);   // promoted: v2 + L1 look-ahead
+  const lo = H.map(h => h.served_ci05_dst_nt != null ? h.served_ci05_dst_nt : h.ci05_dst_nt);  // served 90% band
+  const hi = H.map(h => h.served_ci95_dst_nt != null ? h.served_ci95_dst_nt : h.ci95_dst_nt);
 
   // observed (past) context, last ~36 h. Merge the verified-row observations with the log's recent latest_dst
   // feed so the line is continuous up to the forecast anchor (verified rows lag by the verification delay).
@@ -168,10 +168,10 @@ async function renderForecast(forecast, history, status) {
 
   // lines connect from the anchor observation
   const px = (anchorT ? [anchorT] : []).concat(fx);
-  const py = (anchorT ? [anchorY] : []).concat(pred);          // v2 forecast
-  const spy = (anchorT ? [anchorY] : []).concat(subh);         // sub-hourly shadow
+  const py = (anchorT ? [anchorY] : []).concat(pred);          // v2 reference
+  const svy = (anchorT ? [anchorY] : []).concat(served);       // promoted served forecast
 
-  const ally = [...oy, ...lo, ...hi, ...py, ...spy, ...track.y]
+  const ally = [...oy, ...lo, ...hi, ...py, ...svy, ...track.y]
     .filter(v => v != null && !Number.isNaN(v));
   const ymin = ally.length ? Math.min(...ally) : -50, ymax = ally.length ? Math.max(...ally) : 20;
   const { shapes, anns } = thresholdShapes(ymin, ymax);
@@ -197,24 +197,23 @@ async function renderForecast(forecast, history, status) {
   // observed reality (on top)
   if (ox.length) traces.push({ x: ox, y: oy, mode:"lines+markers", name:"Observed Dst",
     line:{color:WONG.obs, width:2}, marker:{size:5} });
-  // sub-hourly minute layer (shadow): drives the near term with 1-min L1 wind; differs from v2 only when the
-  // fresh wind sharpens the first hours. Display only — not used for severity. Drawn under the v2 line.
-  traces.push({ x: px, y: spy, mode:"lines", name:"Sub-hourly A (shadow)",
-    line:{color:"#009E73", width:1.5, dash:"dot"}, opacity:0.85,
-    hovertemplate:"sub-hourly %{y:.0f} nT<extra></extra>" });
-  // v2 forecast (frozen-driver beyond the L1 advection window) — the served forecast
-  traces.push({ x: px, y: py, mode:"lines+markers", name:"Forecast Dst (v2)",
-    line:{color:WONG.fcst, width:2.6}, marker:{size:6},
+  // v2 (frozen-driver) reference, thin dashed — so the look-ahead refinement is visible where it differs.
+  traces.push({ x: px, y: py, mode:"lines", name:"v2 (frozen-driver)",
+    line:{color:"rgba(0,114,178,0.45)", width:1.4, dash:"dash"}, opacity:0.85,
     hovertemplate:"v2 %{y:.0f} nT<extra></extra>" });
+  // PROMOTED served forecast = v2 + L1 look-ahead (solid, primary).
+  traces.push({ x: px, y: svy, mode:"lines+markers", name:"Forecast Dst (v2 + L1 look-ahead)",
+    line:{color:WONG.fcst, width:2.6}, marker:{size:6},
+    hovertemplate:"served %{y:.0f} nT<extra></extra>" });
 
   const layout = Object.assign(PLOT_LAYOUT(), { shapes, annotations: anns });
   await Plotly.react("forecast-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
 
   const src = forecast.interval_source || "—";
-  cap.innerHTML = `Solid blue: the v2 forecast issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
-    + `<span data-reltime="${forecast.latest_solar_wind_utc}">${relTime(forecast.latest_solar_wind_utc)}</span>. It uses the L1 solar-wind lead within the advection window, then holds the driver constant for the multi-hour tail. `
+  cap.innerHTML = `Solid blue: the served forecast (v2 + L1 look-ahead) issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
+    + `<span data-reltime="${forecast.latest_solar_wind_utc}">${relTime(forecast.latest_solar_wind_utc)}</span>. The L1 look-ahead drives the near term with the 1-min upstream wind already measured at L1; beyond it the driver is held constant. `
     + `Shaded: the calibrated 90% interval (${src}); the severity scale uses its lower bound. `
-    + `Green dotted: a sub-hourly shadow that drives the near term with the 1-min L1 wind (display only, not yet used for severity) — it tracks the blue line except where fresh upstream wind sharpens the first hours. `
+    + `Dashed blue: the v2 frozen-driver reference — the solid line tracks it except where fresh upstream wind sharpens the first hours; severity uses the deeper of the two so the look-ahead never under-warns. `
     + `Dotted blue: forecasts already locked for past hours, plotted against the observed Dst (orange) that has since arrived. `
     + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Genuine new-disturbance lead is the L1 transit (~30–60 min).`;
 }
