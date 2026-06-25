@@ -1095,9 +1095,9 @@ function step_forecast!(state::ForecastState,
     result = ForecastResult(
         t,
         dst_next,
-        dst_ens[max(1, div(n_ens, 2))],   # median (guard index 0 when n_ens==1)
-        dst_ens[max(1, div(n_ens, 20))],   # 5th percentile
-        dst_ens[min(n_ens, n_ens - div(n_ens, 20) + 1)],  # 95th percentile
+        dst_ens[clamp(ceil(Int, 0.50 * n_ens), 1, n_ens)],   # median
+        dst_ens[clamp(ceil(Int, 0.05 * n_ens), 1, n_ens)],   # 5th percentile (ceil-quantile, matches _quantile_sorted)
+        dst_ens[clamp(ceil(Int, 0.95 * n_ens), 1, n_ens)],   # 95th percentile
         dst_observed,
     )
 
@@ -1156,9 +1156,9 @@ function forecast_ahead(state::ForecastState,
 
         push!(results, ForecastResult(
             t_next, dst_next,
-            sorted_ens[max(1, div(n_ens, 2))],
-            sorted_ens[max(1, div(n_ens, 20))],
-            sorted_ens[min(n_ens, n_ens - div(n_ens, 20) + 1)],
+            sorted_ens[clamp(ceil(Int, 0.50 * n_ens), 1, n_ens)],
+            sorted_ens[clamp(ceil(Int, 0.05 * n_ens), 1, n_ens)],
+            sorted_ens[clamp(ceil(Int, 0.95 * n_ens), 1, n_ens)],
             NaN,
         ))
 

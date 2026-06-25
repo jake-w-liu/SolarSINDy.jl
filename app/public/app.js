@@ -159,7 +159,7 @@ async function renderForecast(forecast, history, status) {
   const obsX = [...obsMap.keys()].sort();
   const obs = { x: obsX, y: obsX.map(t => obsMap.get(t)) };
   const cutoff = Date.now() - 36*3600*1000;
-  const oi = obs.x.map((t,i)=>i).filter(i => Date.parse(obs.x[i]) >= cutoff);
+  const oi = obs.x.map((t,i)=>i).filter(i => { const ms = Date.parse(obs.x[i]); return !Number.isNaN(ms) && ms >= cutoff; });
   const ox = oi.map(i=>obs.x[i]), oy = oi.map(i=>obs.y[i]);
 
   // what we FORECAST for those same past hours (locked v2 prediction + its 90% band),
