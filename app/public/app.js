@@ -127,7 +127,7 @@ function forecastTrack(history, cutoffMs) {
   const best = new Map();
   for (const r of (history.rows || [])) {
     if (r.pred_dst_nt == null || !r.target_utc) continue;
-    if (cutoffMs && Date.parse(r.target_utc) < cutoffMs) continue;
+    if (cutoffMs) { const ms = Date.parse(r.target_utc); if (!Number.isNaN(ms) && ms < cutoffMs) continue; }
     const lead = Math.abs(r.horizon_hours == null ? 1e9 : r.horizon_hours);
     const cur = best.get(r.target_utc);
     if (!cur || lead < cur.lead) best.set(r.target_utc, { lead, pred: r.pred_dst_nt });
@@ -261,8 +261,9 @@ async function renderHistory(history) {
     pt(inside, "rgba(46,158,107,0.85)", "forecast · inside 90%"),
     pt(outside, "rgba(192,57,43,0.9)", "forecast · outside 90%"),
   ];
-  const ally = [...obs.y, ...rows.map(r=>r.pred_dst_nt)].filter(v=>v!=null);
-  const { shapes, anns } = thresholdShapes(Math.min(...ally), Math.max(...ally));
+  const ally = [...obs.y, ...rows.map(r=>r.pred_dst_nt)].filter(v=>v!=null && !Number.isNaN(v));
+  const ymin = ally.length ? Math.min(...ally) : -50, ymax = ally.length ? Math.max(...ally) : 20;
+  const { shapes, anns } = thresholdShapes(ymin, ymax);
   const layout = Object.assign(PLOT_LAYOUT(), { shapes, annotations: anns });
   layout.margin.t = 10;
   await Plotly.react("history-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
@@ -398,8 +399,8 @@ async function renderDbdt(dbdt) {
   } else { fcEl.innerHTML = ""; }
 
   if (await ensurePlotly() && dbdt.series && dbdt.series.length) {
-    const x = dbdt.series.map(s => s.t), y = dbdt.series.map(s => s.dbdt);
-    const ymax = Math.max(22, 1.2 * Math.max(...y));
+    const x = dbdt.series.map(s => s.t), y = dbdt.series.map(s => s.dbdt).filter(v => v != null && !Number.isNaN(v));
+    const ymax = y.length ? Math.max(22, 1.2 * Math.max(...y)) : 22;
     const shapes = [], anns = [];
     PULK.forEach((thr, i) => {
       if (thr <= ymax) {

@@ -1092,12 +1092,15 @@ function step_forecast!(state::ForecastState,
     end
     sort!(dst_ens)
 
+    i50 = clamp(ceil(Int, 0.50 * n_ens), 1, n_ens)   # ensemble percentile indices, ordering-enforced: i05<=i50<=i95
+    i05 = clamp(ceil(Int, 0.05 * n_ens), 1, i50)
+    i95 = clamp(ceil(Int, 0.95 * n_ens), i50, n_ens)
     result = ForecastResult(
         t,
         dst_next,
-        dst_ens[clamp(ceil(Int, 0.50 * n_ens), 1, n_ens)],   # median
-        dst_ens[clamp(ceil(Int, 0.05 * n_ens), 1, n_ens)],   # 5th percentile (ceil-quantile, matches _quantile_sorted)
-        dst_ens[clamp(ceil(Int, 0.95 * n_ens), 1, n_ens)],   # 95th percentile
+        dst_ens[i50],   # median
+        dst_ens[i05],   # 5th percentile
+        dst_ens[i95],   # 95th percentile
         dst_observed,
     )
 
@@ -1153,12 +1156,14 @@ function forecast_ahead(state::ForecastState,
             dst_ens_curr[i] = clamp(dst_ens_curr[i] + state.dt * dDst_i, -2000.0, 50.0)
         end
         sorted_ens = sort(dst_ens_curr)
-
+        j50 = clamp(ceil(Int, 0.50 * n_ens), 1, n_ens)   # ordering-enforced ensemble percentile indices
+        j05 = clamp(ceil(Int, 0.05 * n_ens), 1, j50)
+        j95 = clamp(ceil(Int, 0.95 * n_ens), j50, n_ens)
         push!(results, ForecastResult(
             t_next, dst_next,
-            sorted_ens[clamp(ceil(Int, 0.50 * n_ens), 1, n_ens)],
-            sorted_ens[clamp(ceil(Int, 0.05 * n_ens), 1, n_ens)],
-            sorted_ens[clamp(ceil(Int, 0.95 * n_ens), 1, n_ens)],
+            sorted_ens[j50],
+            sorted_ens[j05],
+            sorted_ens[j95],
             NaN,
         ))
 

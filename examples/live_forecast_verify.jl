@@ -665,6 +665,10 @@ function _live_v2_memory_features(plasma::DataFrame, mag::DataFrame,
                                   latest_dst_time::DateTime,
                                   current_drivers)
     dst_map = _dst_lookup(dst_times, dst_vals)
+    # Sparse/provisional Dst: if any of the three required hours is missing, return neutral (zeroed) memory features
+    # rather than cascading fallbacks that can make the 3 h delta wrongly equal the 1 h delta.
+    all(haskey(dst_map, t) for t in (latest_dst_time, latest_dst_time - Hour(1), latest_dst_time - Hour(3))) ||
+        return _zero_v2_memory_features()
     latest_dst = get(dst_map, latest_dst_time, Float64(dst_vals[end]))
     prev1_dst = get(dst_map, latest_dst_time - Hour(1), latest_dst)
     prev3_dst = get(dst_map, latest_dst_time - Hour(3), prev1_dst)
@@ -1976,6 +1980,8 @@ function issue_forecast(cfg::LiveVerifyConfig)
     # Reflect the deployed interval in the v2 CI columns the report scores.
     v2_ci05_log = interval_source in ("conformal", "aci") ? ci05_dst : selected.v2_ci05_dst
     v2_ci95_log = interval_source in ("conformal", "aci") ? ci95_dst : selected.v2_ci95_dst
+    # Guard: a non-finite resolved interval falls back to the v2 baseline band so no NaN reaches the log/served band.
+    (isfinite(v2_ci05_log) && isfinite(v2_ci95_log)) || (v2_ci05_log = selected.v2_ci05_dst; v2_ci95_log = selected.v2_ci95_dst)
 
     # ---- Direction B (driver relaxation) removed ----
     # The multi-hour driver is unobserved and not predictable at issue time. A regime-aware relaxation of the
@@ -1996,7 +2002,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
     sub_hourly_pred_dst = selected.v2_pred_dst
     try
         sstate = init_forecast(; coefficients_csv=coef_csv, ensemble_csv=ens_csv, t0=latest_dst_time, dst0=anchor_dst_star)
-        sresult = nothing; sst = latest_dst_time + Hour(1)
+        sresult = nothing; sst = latest_dst_time + Hour(1); sdrv = recent
         while sst <= target_time
             sh = sst - Hour(1)
             sdrv = sh < latest_complete_hour ?
@@ -2006,7 +2012,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
             sst += Hour(1)
         end
         if sresult !== nothing && isfinite(sresult.dst_predicted)
-            sv1 = _dst_from_dst_star(sresult.dst_predicted, used_drivers.Pdyn)
+            sv1 = _dst_from_dst_star(sresult.dst_predicted, sdrv.Pdyn)   # target-step Pdyn (sub-hourly tail), not the stale v2 driver
             sub_hourly_pred_dst = sv1 + selected.v2_correction
         end
     catch e
