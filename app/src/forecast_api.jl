@@ -102,9 +102,10 @@ _ci95(row)  = _col(row, :v2_pred_dst_ci95_nt, :pred_dst_ci95_nt)
 # source of truth for the point forecast, the 90% conformal band, and the threat assessment.
 # Served (promoted) forecast = v2 + L1 look-ahead. _pred/_ci05/_ci95 stay v2 (the reference scored for the
 # continuous track record); severity uses the depth-safe min(v2, served). Falls back to v2 for legacy rows.
-_served(row) = _col(row, :served_pred_dst_nt,      :v2_pred_dst_nt)
-_sc05(row)   = _col(row, :served_pred_dst_ci05_nt, :v2_pred_dst_ci05_nt)
-_sc95(row)   = _col(row, :served_pred_dst_ci95_nt, :v2_pred_dst_ci95_nt)
+# 3-tier fallback served -> v2 -> legacy (pred_dst_*), so rows from any schema era resolve to a finite value.
+_served(row) = (x = _col(row, :served_pred_dst_nt,      :v2_pred_dst_nt);      x === missing ? _pred(row) : x)
+_sc05(row)   = (x = _col(row, :served_pred_dst_ci05_nt, :v2_pred_dst_ci05_nt); x === missing ? _ci05(row) : x)
+_sc95(row)   = (x = _col(row, :served_pred_dst_ci95_nt, :v2_pred_dst_ci95_nt); x === missing ? _ci95(row) : x)
 
 # Rows of the most recent forecast cycle = those sharing the freshest input-data vintage
 # (latest_solar_wind_utc). Returns a sub-DataFrame sorted by target time.

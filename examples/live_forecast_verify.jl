@@ -1977,14 +1977,14 @@ function issue_forecast(cfg::LiveVerifyConfig)
     v2_ci05_log = interval_source in ("conformal", "aci") ? ci05_dst : selected.v2_ci05_dst
     v2_ci95_log = interval_source in ("conformal", "aci") ? ci95_dst : selected.v2_ci95_dst
 
-    # ---- Driver beyond the L1 advection window: frozen-driver default (Direction B removed) ----
-    # The multi-hour driver is unobserved and not predictable from the data available at issue time. A
-    # regime-aware relaxation of the frozen southward field (Direction B) was evaluated and does not improve
-    # broad-population accuracy over freezing — it under-predicts the depth of actively intensifying storms — so
-    # the served forecast holds the driver constant (v2). v2 already carries the L1 look-ahead (Direction A) on
-    # observed hours, where the solar wind is fresher than Dst. The improved_*/served_* columns are retained
-    # equal to v2 so the live log keeps a stable schema and the dashboard/historical rows read consistently.
-    # ponytail: improved_*/served_* kept == v2 for CSV-schema stability; drop the columns in a log migration if desired.
+    # ---- Direction B (driver relaxation) removed ----
+    # The multi-hour driver is unobserved and not predictable at issue time. A regime-aware relaxation of the
+    # frozen southward field (Direction B) was evaluated and does not beat freezing on the broad backtest (it
+    # under-predicts the depth of actively intensifying storms), so it is not used. The improved_* columns are
+    # retained equal to v2 for CSV-schema stability (legacy). The served_* columns are PROMOTED below to the L1
+    # look-ahead forecast (v2 + Direction A), which lowers RMSE at every backtested lead; severity floors them
+    # against v2 (build_status) so the look-ahead can only escalate, never under-warn.
+    # ponytail: improved_* kept == v2 for schema stability; drop the column in a log migration if desired.
     improved_pred_dst = selected.v2_pred_dst; improved_ci05 = v2_ci05_log; improved_ci95 = v2_ci95_log
 
     # ---- L1 look-ahead layer (Direction A) ----
@@ -2097,6 +2097,8 @@ function issue_forecast(cfg::LiveVerifyConfig)
         burton_residual_dst_nt=[missing],
         burton_full_residual_dst_nt=[missing],
         obrien_residual_dst_nt=[missing],
+        served_residual_dst_nt=[missing],
+        served_observed_in_90ci=[missing],
     )
     row_idx = _append_forecast!(cfg.log_path, row)
 

@@ -172,7 +172,7 @@ async function renderForecast(forecast, history, status) {
   const svy = (anchorT ? [anchorY] : []).concat(served);       // promoted served forecast
 
   // sub-hour model trajectory (display only): served forecast integrated at sub-hour steps
-  const traj = (forecast.subhour_trajectory || []).filter(p => p && p.dst_nt != null);
+  const traj = (forecast.subhour_trajectory || []).filter(p => p && p.dst_nt != null && p.target_utc);
   const trajX = traj.map(p => p.target_utc), trajY = traj.map(p => p.dst_nt);
 
   const ally = [...oy, ...lo, ...hi, ...py, ...svy, ...trajY, ...track.y]
@@ -208,14 +208,17 @@ async function renderForecast(forecast, history, status) {
   // PROMOTED served forecast = v2 + L1 look-ahead, drawn at 15-min SUB-HOUR resolution when the trajectory is
   // available (falls back to the hourly points). The forecast line ITSELF carries the sub-hour resolution, so
   // zooming the forecast region resolves it into 4 points/hour.
-  const fcx = trajX.length ? [anchorT].concat(trajX) : px;
-  const fcy = trajX.length ? [anchorY].concat(trajY) : svy;
+  const useTraj = trajX.length && anchorT != null && anchorY != null;   // guard null anchor before prepending
+  const fcx = useTraj ? [anchorT].concat(trajX) : px;
+  const fcy = useTraj ? [anchorY].concat(trajY) : svy;
+  // 15-min markers: medium blue, size 5 (matches the other series); distinguished from the hourly markers by
+  // shade (medium vs dark) and size (5 vs 7). Zooming separates them, so no per-zoom resize.
   traces.push({ x: fcx, y: fcy, mode:"lines+markers", name:"Forecast Dst (v2 + L1 look-ahead, 15-min)",
-    line:{color:WONG.fcst, width:2.2}, marker:{size:7, color:"#7fc2ff", line:{color:"#0b1020", width:1.2}},
+    line:{color:WONG.fcst, width:2.2}, marker:{size:5, color:"#3f8fd0", line:{color:"#0b1020", width:0.5}},
     hovertemplate:"forecast %{y:.1f} nT (15-min)<extra></extra>" });
-  // markers at the issued hourly horizons (the scored targets), drawn on top of the sub-hour line.
+  // markers at the issued hourly horizons (the scored targets): darker + larger to flag the scored points.
   traces.push({ x: px, y: svy, mode:"markers", name:"issued horizons",
-    marker:{size:8, color:WONG.fcst, line:{color:"#0b1020", width:1.2}},
+    marker:{size:7, color:"#004e7a", line:{color:"#cfe3f5", width:1}},
     hovertemplate:"issued %{y:.1f} nT<extra></extra>" });
 
   const layout = Object.assign(PLOT_LAYOUT(), { shapes, annotations: anns });
@@ -223,10 +226,11 @@ async function renderForecast(forecast, history, status) {
   // front-and-centre instead of a thin slice inside 36 h of history. Autoscale (home button) restores full range.
   const fEnd = trajX.length ? trajX[trajX.length-1] : (fx.length ? fx[fx.length-1] : null);
   const vStart = anchorT || (fx.length ? fx[0] : null);
-  if (fEnd && vStart) {
+  const vMs = vStart ? Date.parse(vStart) : NaN, eMs = fEnd ? Date.parse(fEnd) : NaN;
+  if (!Number.isNaN(vMs) && !Number.isNaN(eMs)) {     // guard unparseable timestamps -> skip range, keep autorange
     layout.xaxis = Object.assign({}, layout.xaxis, {
-      range: [new Date(Date.parse(vStart) - 6*3600*1000).toISOString(),
-              new Date(Date.parse(fEnd) + 30*60*1000).toISOString()], autorange: false });
+      range: [new Date(vMs - 6*3600*1000).toISOString(), new Date(eMs + 30*60*1000).toISOString()],
+      autorange: false });
   }
   await Plotly.react("forecast-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
 
