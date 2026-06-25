@@ -210,8 +210,9 @@ async function renderForecast(forecast, history, status) {
   // zooming the forecast region resolves it into 4 points/hour.
   const fcx = trajX.length ? [anchorT].concat(trajX) : px;
   const fcy = trajX.length ? [anchorY].concat(trajY) : svy;
-  traces.push({ x: fcx, y: fcy, mode:"lines", name:"Forecast Dst (v2 + L1 look-ahead, 15-min)",
-    line:{color:WONG.fcst, width:2.6}, hovertemplate:"forecast %{y:.1f} nT<extra></extra>" });
+  traces.push({ x: fcx, y: fcy, mode:"lines+markers", name:"Forecast Dst (v2 + L1 look-ahead, 15-min)",
+    line:{color:WONG.fcst, width:2.4}, marker:{size:4, color:WONG.fcst, opacity:0.85},
+    hovertemplate:"forecast %{y:.1f} nT (15-min)<extra></extra>" });
   // markers at the issued hourly horizons (the scored targets), drawn on top of the sub-hour line.
   traces.push({ x: px, y: svy, mode:"markers", name:"issued horizons",
     marker:{size:8, color:WONG.fcst, line:{color:"#0b1020", width:1.2}},
