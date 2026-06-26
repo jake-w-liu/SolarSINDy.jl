@@ -544,26 +544,101 @@ function _subhour_trajectory(coef_csv, ens_csv, latest_dst_time::DateTime, ancho
     return pts
 end
 
+function _with_forecast_log_lock(f, log_path::String; timeout_sec::Float64=30.0,
+                                 stale_after_sec::Float64=900.0, poll_sec::Float64=0.05)
+    lock_dir = log_path * ".lock"
+    reap_dir = lock_dir * ".reap"
+    parent = dirname(lock_dir)
+    !isempty(parent) && mkpath(parent)
+    deadline = time() + timeout_sec
+    acquired = false
+    while !acquired
+        if isdir(reap_dir)
+            stale_reaper = try
+                time() - stat(reap_dir).mtime > stale_after_sec
+            catch
+                false
+            end
+            stale_reaper && rm(reap_dir; recursive=true, force=true)
+            time() < deadline || error("timed out waiting for forecast log lock: $lock_dir")
+            sleep(poll_sec)
+            continue
+        end
+        try
+            mkdir(lock_dir)
+            acquired = true
+        catch e
+            isdir(lock_dir) || throw(e)
+            stale = try
+                time() - stat(lock_dir).mtime > stale_after_sec
+            catch
+                false
+            end
+            if stale
+                reaping = false
+                try
+                    mkdir(reap_dir)
+                    reaping = true
+                catch reap_err
+                    isdir(reap_dir) || throw(reap_err)
+                end
+                if reaping
+                    try
+                        if isdir(lock_dir)
+                            still_stale = try
+                                time() - stat(lock_dir).mtime > stale_after_sec
+                            catch
+                                false
+                            end
+                            if still_stale
+                                rm(lock_dir; recursive=true, force=true)
+                                try
+                                    mkdir(lock_dir)
+                                    acquired = true
+                                catch lock_err
+                                    isdir(lock_dir) || throw(lock_err)
+                                end
+                            end
+                        end
+                    finally
+                        rm(reap_dir; recursive=true, force=true)
+                    end
+                    acquired && break
+                end
+            end
+            time() < deadline || error("timed out waiting for forecast log lock: $lock_dir")
+            sleep(poll_sec)
+        end
+    end
+    try
+        return f()
+    finally
+        acquired && rm(lock_dir; recursive=true, force=true)
+    end
+end
+
 function _append_forecast!(log_path::String, row::DataFrame; return_status::Bool=false)
     dir = dirname(log_path)
     !isempty(dir) && mkpath(dir)
-    if isfile(log_path)
-        df = CSV.read(log_path, DataFrame)
-        dup_idx = _pending_duplicate_forecast_row(df, row)
-        if dup_idx !== nothing
-            println(
-                "Skipped duplicate pending forecast row $dup_idx: " *
-                "latest_dst=$(row[1, :latest_dst_time_utc]) target=$(row[1, :target_time_utc]) " *
-                "model=$(row[1, :model_version])"
-            )
-            return return_status ? (; row_idx=dup_idx, appended=false) : dup_idx
+    return _with_forecast_log_lock(log_path) do
+        if isfile(log_path)
+            df = CSV.read(log_path, DataFrame)
+            dup_idx = _pending_duplicate_forecast_row(df, row)
+            if dup_idx !== nothing
+                println(
+                    "Skipped duplicate pending forecast row $dup_idx: " *
+                    "latest_dst=$(row[1, :latest_dst_time_utc]) target=$(row[1, :target_time_utc]) " *
+                    "model=$(row[1, :model_version])"
+                )
+                return return_status ? (; row_idx=dup_idx, appended=false) : dup_idx
+            end
+            df = vcat(df, row; cols=:union)
+        else
+            df = row
         end
-        df = vcat(df, row; cols=:union)
-    else
-        df = row
+        _atomic_csv(log_path, df)
+        return return_status ? (; row_idx=nrow(df), appended=true) : nrow(df)
     end
-    _atomic_csv(log_path, df)
-    return return_status ? (; row_idx=nrow(df), appended=true) : nrow(df)
 end
 
 function _pending_duplicate_forecast_row(df::DataFrame, row::DataFrame)

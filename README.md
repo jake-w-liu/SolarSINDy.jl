@@ -287,7 +287,7 @@ Useful scripts: `download_omni.jl`, `real_data_discovery.jl`, `phase_dependent_d
 julia --project=SolarSINDy.jl SolarSINDy.jl/test/runtests.jl
 ```
 
-Current result: **686/686 passing** (deterministic, ~1m40s). The suite uses independent
+Current result: **835/835 passing**. The suite uses independent
 expectations — analytical checks, conservation/limiting cases, and regression baselines —
 rather than tautologies. Coverage includes:
 
@@ -297,6 +297,7 @@ rather than tautologies. Coverage includes:
 - stratified and adaptive conformal coverage (finite-sample guarantee, exchangeability)
 - OMNI parsing, fill-value replacement, cleaning, and storm-catalog extraction
 - realtime hourly aggregation and forecast initialization
+- live-log duplicate suppression, filesystem locking, and stale-lock recovery
 
 See [TEST_REPORT.md](../TEST_REPORT.md) for coverage, tolerances, and anti-false-test notes.
 

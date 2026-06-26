@@ -172,14 +172,52 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
                 observation_dst_nt=[missing],
             )
 
-            @test _append_forecast!(log_path, row) == 1
+            first = _append_forecast!(log_path, row; return_status=true)
+            @test first.row_idx == 1
+            @test first.appended
             duplicate = copy(row)
             duplicate.issue_time_utc .= "2026-06-06T04:11:00"
 
-            @test _append_forecast!(log_path, duplicate) == 1
+            second = _append_forecast!(log_path, duplicate; return_status=true)
+            @test second.row_idx == 1
+            @test !second.appended
             written = CSV.read(log_path, DataFrame)
             @test nrow(written) == 1
             @test string(written[1, :issue_time_utc]) == "2026-06-06T04:10:00"
+        end
+    end
+
+    @testset "C0-5: forecast log lock creates and releases lock directory" begin
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "live_forecast_log.csv")
+            lock_dir = log_path * ".lock"
+
+            result = _with_forecast_log_lock(log_path) do
+                @test isdir(lock_dir)
+                :locked
+            end
+
+            @test result == :locked
+            @test !isdir(lock_dir)
+        end
+    end
+
+    @testset "C0-6: forecast log lock recovers stale lock directory" begin
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "live_forecast_log.csv")
+            lock_dir = log_path * ".lock"
+            reap_dir = lock_dir * ".reap"
+            mkdir(lock_dir)
+
+            result = _with_forecast_log_lock(log_path; stale_after_sec=0.0) do
+                @test isdir(lock_dir)
+                @test !isdir(reap_dir)
+                :recovered
+            end
+
+            @test result == :recovered
+            @test !isdir(lock_dir)
+            @test !isdir(reap_dir)
         end
     end
 
