@@ -32,6 +32,8 @@ function main()
     @assert selected.v2_ci95_dst == v1_ci95
 
     @assert _v2_tail_tau(-30.0) > _v2_tail_tau(5.0)
+    @assert _near_term_extreme_inertia_guard(-250.0, 2)
+    @assert !_near_term_extreme_inertia_guard(-250.0, 3)
     recovery = _relaxed_tail_driver(drivers, 1, 5.0)
     deepening = _relaxed_tail_driver(drivers, 1, -30.0)
     @assert abs(recovery.Bz) < abs(drivers.Bz)

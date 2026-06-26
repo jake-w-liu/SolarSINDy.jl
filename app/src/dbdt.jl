@@ -35,9 +35,9 @@ function _fetch_usgs(station::AbstractString, minutes::Int)
     url = string(USGS_BASE, "?id=", station, "&starttime=", f(t0), "&endtime=", f(t1),
                  "&elements=X,Y&format=json&sampling_period=60")
     try
-        # Bounded timeouts: when USGS throttles, fail fast (~12 s) and let the cache serve the
-        # last good nowcast, rather than stalling /api/dbdt and /api/alerts.
-        r = HTTP.get(url; readtimeout=12, connect_timeout=8, retries=1, status_exception=true)
+        # Fail fast when USGS throttles or stalls. The dashboard is single-process, so
+        # a slow third-party dB/dt nowcast must not block status/forecast endpoints.
+        r = HTTP.get(url; readtimeout=3, connect_timeout=2, retries=0, status_exception=true)
         return JSON3.read(r.body)
     catch e
         @warn "USGS dB/dt fetch failed" station exception=e

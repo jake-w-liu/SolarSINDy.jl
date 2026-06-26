@@ -15,6 +15,7 @@ const SWPC_BASE = "https://services.swpc.noaa.gov"
 const SWPC_TTL = 50.0                       # seconds; SWPC products update ~1/min
 const _SWPC_CACHE = Ref{Any}(nothing)       # (fetch_time::Float64, snapshot)
 const _SWPC_LOCK = ReentrantLock()
+const _SWPC_REFRESHING = Ref(false)
 
 # parse a possibly-string numeric to Float64 or nothing
 _pf(x) = x === nothing ? nothing : (x isa Number ? Float64(x) :
@@ -33,10 +34,10 @@ function _swpc_dt(s)
     try; return DateTime(first(str, 19)); catch; return missing; end
 end
 
-function _swpc_get(path; readtimeout=15, connect_timeout=10)
+function _swpc_get(path; readtimeout=1, connect_timeout=1)
     try
         r = HTTP.get(SWPC_BASE * path; readtimeout=readtimeout,
-                     connect_timeout=connect_timeout, retries=1, status_exception=true)
+                     connect_timeout=connect_timeout, retries=0, status_exception=true)
         return JSON3.read(r.body)
     catch e
         @warn "SWPC fetch failed" path exception=e
@@ -151,6 +152,33 @@ function swpc_snapshot()
     end
     lock(_SWPC_LOCK) do; _SWPC_CACHE[] = (time(), val); end
     return val
+end
+
+function swpc_snapshot_cached_or_refresh()
+    c = lock(_SWPC_LOCK) do
+        _SWPC_CACHE[]
+    end
+    if c !== nothing && (time() - c[1]) <= SWPC_TTL
+        return c[2]
+    end
+    if !_SWPC_REFRESHING[]
+        _SWPC_REFRESHING[] = true
+        @async begin
+            try
+                swpc_snapshot()
+            catch e
+                @warn "async SWPC refresh failed" exception=e
+            finally
+                _SWPC_REFRESHING[] = false
+            end
+        end
+    end
+    if c !== nothing
+        return c[2]
+    end
+    return (source = "NOAA SWPC", fetched_utc = jdt(now(UTC)), available = false,
+            solar_wind = Dict{Symbol,Any}(:available => false), kp = nothing,
+            scales = nothing, alerts = NamedTuple[])
 end
 
 # Honest threshold-based upstream indicator (NOT a fused scalar): flags "elevated" when any

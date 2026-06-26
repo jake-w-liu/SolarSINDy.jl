@@ -70,7 +70,7 @@ end
 function api_handler(path::AbstractString, query::AbstractString, log_path::AbstractString)
     df = get_log(log_path)
     if path == "/api/status"
-        snap = swpc_snapshot()
+        snap = swpc_snapshot_cached_or_refresh()
         return json_response(merge(build_status(df),
                                    (upstream = snap, upstream_status = upstream_assessment(snap))))
     elseif path == "/api/swpc"
@@ -103,7 +103,7 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
         hours = try clamp(parse(Float64, get(q, "hours", "72")), 1, 24*30) catch; 72.0 end
         return json_response(build_history(df, hours))
     elseif path == "/api/alerts"
-        snap = swpc_snapshot()
+        snap = swpc_snapshot_cached_or_refresh()
         combined = compute_alert_state(build_status(df), upstream_assessment(snap), usgs_dbdt())
         return json_response(merge(build_alerts(df),
                                    (overall_level = combined.level, overall_reasons = combined.reasons)))

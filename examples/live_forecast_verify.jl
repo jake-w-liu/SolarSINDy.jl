@@ -441,6 +441,10 @@ const L1_DIST_KM = 1.5e6   # L1 standoff [km]; solar-wind transit lag to Earth =
 const V2_TAIL_TAU0_H = 3.0
 const V2_TAIL_R0_NT_PER_H = 7.5
 const V2_TAIL_TAU_MAX_H = 48.0
+const V2_EXTREME_INERTIA_DST_NT = -240.0
+const V2_EXTREME_INERTIA_MAX_H = 2
+const V2_SERVED_TAIL_VERSION = "v2+L1A+Bregime+Pinertia"
+const V1_SERVED_TAIL_VERSION = "v1+L1A+Bregime"
 
 _blend_drivers(frac::Real, measured, recent) = (
     V = Float64(frac) * measured.V + (1 - Float64(frac)) * recent.V,
@@ -470,6 +474,13 @@ function _relaxed_tail_driver(last_known, hours_since_l1::Integer, dst_rate_nt_p
         n=last_known.n,
         Pdyn=last_known.Pdyn,
     )
+end
+
+function _near_term_extreme_inertia_guard(latest_dst::Real, model_steps::Integer;
+                                          threshold::Real=V2_EXTREME_INERTIA_DST_NT,
+                                          max_steps::Integer=V2_EXTREME_INERTIA_MAX_H)
+    latest = Float64(latest_dst)
+    return isfinite(latest) && 0 < model_steps <= max_steps && latest <= Float64(threshold)
 end
 
 function _shift_interval_to_center(center::Real, reference_center::Real,
@@ -2153,13 +2164,16 @@ function issue_forecast(cfg::LiveVerifyConfig)
     # ---- Legacy schema stability ----
     # The improved_* columns are retained equal to v2 for CSV-schema stability. The served_* columns are promoted
     # below to the industrial v2 tail: L1 look-ahead while measured wind is mapped to the target hour, then
-    # regime-aware relaxation after the L1-known window.
+    # regime-aware relaxation after the L1-known window, plus a narrow persistence
+    # guard for 1-2 h forecasts when observed Dst is already in the extreme core.
     improved_pred_dst = selected.v2_pred_dst; improved_ci05 = v2_ci05_log; improved_ci95 = v2_ci95_log
 
     # ---- Industrial served tail: L1 look-ahead (A) + regime-aware relaxation (B) ----
     # The L1-measured portion is leakage-safe because it is capped at latest_common_sw. Once no measured L1 wind
     # maps into the target hour, Bz/By relax toward quiet conditions; the relaxation time lengthens during rapid
-    # Dst deepening to avoid the shallow severe-storm bias found in the plain-B replay.
+    # Dst deepening to avoid the shallow severe-storm bias found in the plain-B replay. If Dst is already <= -240 nT
+    # and the target is within 2 model hours, the point forecast falls back to persistence; the replay scorecard
+    # identifies that near-term extreme-core cell as inertia-dominated.
     reference_pred_dst = selected.model_version == "v2" ? selected.v2_pred_dst : pred_dst
     reference_ci05_dst = selected.model_version == "v2" ? v2_ci05_log : ci05_dst
     reference_ci95_dst = selected.model_version == "v2" ? v2_ci95_log : ci95_dst
@@ -2196,6 +2210,10 @@ function issue_forecast(cfg::LiveVerifyConfig)
     catch e
         @warn "industrial L1/regime-aware tail failed; serving base forecast" exception=(e, catch_backtrace())
     end
+    if selected.model_version == "v2" &&
+       _near_term_extreme_inertia_guard(latest_dst, model_steps)
+        sub_hourly_pred_dst = latest_dst
+    end
     sub_hourly_ci05, sub_hourly_ci95 = _shift_interval_to_center(
         sub_hourly_pred_dst,
         reference_pred_dst,
@@ -2203,7 +2221,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
         reference_ci95_dst,
     )
 
-    # ---- PROMOTED served forecast = v2 + industrial L1/regime-aware tail. Severity (build_status) applies a
+    # ---- PROMOTED served forecast = v2 + industrial L1/regime-aware/inertia tail. Severity (build_status) applies a
     # depth-safe floor min(v2, served) so the served tail can only escalate, never under-warn, relative to v2.
     served_pred_dst = sub_hourly_pred_dst
     served_ci05_dst = sub_hourly_ci05
@@ -2220,7 +2238,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
         horizon_hours=[wall_horizon],
         wall_clock_lead_hours=[wall_horizon],
         model_step_hours=[model_steps],
-        driver_assumption=["observed_solar_wind_until_latest_complete_hour_then_l1_measured_lookahead_then_regime_aware_relaxation"],
+        driver_assumption=["observed_solar_wind_until_latest_complete_hour_then_l1_measured_lookahead_then_regime_aware_relaxation_then_extreme_inertia_guard"],
         driver_data_gap=[driver_data_gap],
         n_speed_finite_trailing_hour=[n_speed_finite],
         n_bz_finite_trailing_hour=[n_bz_finite],
@@ -2274,7 +2292,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
         served_pred_dst_nt=[served_pred_dst],
         served_pred_dst_ci05_nt=[served_ci05_dst],
         served_pred_dst_ci95_nt=[served_ci95_dst],
-        sub_hourly_model_version=[selected.model_version == "v2" ? "v2+L1A+Bregime" : "v1+L1A+Bregime"],
+        sub_hourly_model_version=[selected.model_version == "v2" ? V2_SERVED_TAIL_VERSION : V1_SERVED_TAIL_VERSION],
         sub_hourly_pred_dst_nt=[sub_hourly_pred_dst],
         sub_hourly_pred_dst_ci05_nt=[sub_hourly_ci05],
         sub_hourly_pred_dst_ci95_nt=[sub_hourly_ci95],

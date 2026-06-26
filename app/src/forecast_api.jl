@@ -341,7 +341,7 @@ function build_status(df::DataFrame)
                     point_min_dst_nt=point_min, worst_credible_dst_nt=worst_cred,
                     basis="Dst storm-intensity scale (-30/-50/-100/-200 nT)"),
             lead_time=(forecast_horizon_hours=horizon_max,
-                       driver_assumption="L1 measured look-ahead, then regime-aware relaxation beyond the L1-known window",
+                       driver_assumption="L1 measured look-ahead, then regime-aware relaxation beyond the L1-known window, with a near-term extreme-Dst inertia guard",
                        physical_upstream_lead_min=[30, 60],
                        note="Genuine upstream lead for new severity is the L1 advection time (~30-60 min). " *
                             "Multi-day lead requires CME eruption/propagation models, not yet in this system."),

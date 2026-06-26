@@ -995,6 +995,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         tau_deepening = _v2_tail_tau(-30.0)
         @test tau_deepening > tau_recovery
         @test tau_deepening <= V2_TAIL_TAU_MAX_H
+        @test V2_SERVED_TAIL_VERSION == "v2+L1A+Bregime+Pinertia"
 
         relaxed_recovery = _relaxed_tail_driver(driver, 1, 5.0)
         relaxed_deepening = _relaxed_tail_driver(driver, 1, -30.0)
@@ -1011,6 +1012,10 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         lo, hi = _shift_interval_to_center(-90.0, -80.0, -100.0, -60.0)
         @test (lo, hi) == (-110.0, -70.0)
         @test_throws ArgumentError _shift_interval_to_center(NaN, -80.0, -100.0, -60.0)
+        @test _near_term_extreme_inertia_guard(-250.0, 1)
+        @test _near_term_extreme_inertia_guard(-250.0, 2)
+        @test !_near_term_extreme_inertia_guard(-250.0, 3)
+        @test !_near_term_extreme_inertia_guard(-239.9, 2)
 
         t0 = DateTime(2026, 6, 6, 0)
         plasma = DataFrame(time_tag=[t0 + Minute(5)], speed=[410.0], density=[5.0])
