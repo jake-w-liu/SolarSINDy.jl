@@ -113,12 +113,12 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
 ```
 
 The headline comparison in this report is a same-row table:
-`Operational v2` versus `SINDy v1`, persistence, Burton, BurtonFull, and
-O'Brien--McPherron. `Operational v2` is the upgraded method. Internal v2
+`V2` versus `SINDy v1`, persistence, Burton, BurtonFull, and
+O'Brien--McPherron. `V2` is the upgraded method. Internal v2
 component/selector metadata is reported only in the audit section and is not a
 separate headline model.
 
-## Operational v2 Calibration
+## V2 Calibration
 
 The default live model is `--model=v1`, which preserves the paper model path.
 `--model=v2` enables an experimental operational wrapper that applies a causal
@@ -145,18 +145,16 @@ shown to beat the strong baselines is never shipped. Candidate feature sets
 include instantaneous coupling terms, causal Dst and solar-wind memory terms,
 and expert-disagreement terms when baseline predictions are available. On small
 fit sets the selector is held to the corrected SINDy center to avoid choosing a
-baseline component on noise. The issued operational v2 output is one upgraded
+baseline component on noise. The issued V2 output is one upgraded
 forecast; the internal `v2_selected_component` field is audit metadata, not a
 separate headline model.
 
-The logged v2 reference forecast remains the calibrated point and interval used
-for audit and model-comparison scores. The operationally served forecast
-columns (`served_*` and `sub_hourly_*`) add the industrial multi-hour tail:
+The logged pre-upgrade baseline remains available for audit and model-comparison
+scores. The product V2 columns (`served_*` and `sub_hourly_*`, retained under
+their historical names for schema compatibility) add the multi-hour tail:
 target hours already measured at L1 use the upstream look-ahead, and later
 hours relax Bz/By toward quiet with a longer timescale during rapid Dst
-deepening. The dashboard severity calculation uses the deeper of the v2
-reference and served forecast, so the served tail can escalate but not
-under-warn relative to v2.
+deepening. The dashboard displays this upgraded V2 as the single forecast.
 
 Fit the calibration from a prior replay or locked live log:
 
@@ -201,7 +199,7 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --table=live_forecasts/live_replay_v2_144h.csv
 ```
 
-The v2 calibration is not evidence of industrial readiness by itself. It must be
+The v2 calibration is not evidence of readiness by itself. It must be
 scored chronologically against held-out rows and then accumulated through locked
 live forecasts exactly like v1.
 
@@ -220,9 +218,9 @@ When the sidecar is present, `--model=v2` issuance sources the logged 90%
 interval from the conformal half-width for the row's horizon and activity
 regime, instead of the v1-ensemble-spread interval scale. Each row records an
 `interval_source` column (`conformal` or `interval_scale`) for audit. The point
-forecast is unchanged; only the uncertainty band changes. The served forecast
-band is shifted by the same offset as the served point forecast, preserving the
-calibrated v2 half-width while tracking the industrial served tail.
+forecast is unchanged; only the uncertainty band changes. The V2 product band
+is shifted by the same offset as the V2 product point forecast, preserving the
+calibrated half-width while tracking the upgraded V2 tail.
 
 To populate the horizon strata, build the conformal calibration table with
 multiple lead times via `--replay-horizons`:

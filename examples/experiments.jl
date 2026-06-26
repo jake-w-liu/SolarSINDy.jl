@@ -49,7 +49,7 @@ function main()
     @assert !s.l1_measured
     @assert s.driver == drivers
 
-    println("SolarSINDy experiments: industrial-v2 deterministic smoke PASS")
+    println("SolarSINDy experiments: V2 deterministic smoke PASS")
     return true
 end
 

@@ -306,14 +306,14 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test occursin("Pending rows: 1", text)
             @test occursin("Same-row forecast comparison rows: 2", text)
             @test occursin("## Same-Row Model Comparison", text)
-            @test occursin("| Operational v2 | 2 |", text)
+            @test occursin("| V2 | 2 |", text)
             @test occursin("| SINDy v1 | 2 |", text)
             @test occursin("## Pending Rows", text)
             @test occursin("2026-06-06T10:00:00", text)
             @test occursin("| v2 |", text)
-            @test occursin("## Worst Operational v2 Misses", text)
+            @test occursin("## Worst V2 Misses", text)
             @test occursin("## Operational V2 Audit", text)
-            @test !occursin("| Operational v2 | 3 |", text)
+            @test !occursin("| V2 | 3 |", text)
             @test !occursin("| Selected |", text)
         end
     end
@@ -710,7 +710,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         end
     end
 
-    @testset "F1+F2: served conformal interval undercoverage on holdout blocks v2 deploy" begin
+    @testset "F1+F2: V2 conformal interval undercoverage on holdout blocks deploy" begin
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")
             cal_path = joinpath(tmp, "v2_calibration.csv")
@@ -765,7 +765,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test selection.deploy_block_reason[1] == "conformal_holdout_undercover"
             @test selection.conformal_holdout_coverage[1] < cfg.v2_coverage_floor
             @test !selection.conformal_gate_pass[1]
-            # The served conformal interval's holdout coverage drove the block: the
+            # The V2 conformal interval's holdout coverage drove the block: the
             # candidate v2 (+4) under-covers the untouched holdout where the +4
             # correction breaks down, so the gate refused it.
             @test selection.conformal_holdout_coverage[1] == 0.0
@@ -845,14 +845,14 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test nrow(df) == 2
             @test all(!ismissing, df.observation_dst_nt)
             @test occursin("Same-row forecast comparison rows: 2", text)
-            @test occursin("Operational v2 is the upgraded method", text)
+            @test occursin("V2 is the operational method", text)
         end
     end
 
-    @testset "C0-3: live report headlines served industrial V2 when available" begin
+    @testset "C0-3: live report headlines upgraded V2 when available" begin
         mktempdir() do dir
-            log_path = joinpath(dir, "served_log.csv")
-            report_path = joinpath(dir, "served_report.md")
+            log_path = joinpath(dir, "v2_log.csv")
+            report_path = joinpath(dir, "v2_report.md")
             df = DataFrame(
                 issue_time_utc=["2026-06-06T09:00:00", "2026-06-06T10:00:00"],
                 latest_dst_time_utc=["2026-06-06T09:00:00", "2026-06-06T10:00:00"],
@@ -884,12 +884,11 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             CSV.write(log_path, df)
             write_live_comparison_report(log_path, report_path)
             text = read(report_path, String)
-            @test occursin("Served industrial V2 is the dashboard-served experimental method", text)
-            @test occursin("Served industrial V2 90% interval coverage", text)
-            @test occursin("| Served industrial V2 | 2 |", text)
-            @test occursin("| Reference V2 | 2 |", text)
-            @test !occursin("| Operational v2 | 2 |", text)
-            @test occursin("reference v2 pred", text)
+            @test occursin("V2 is the dashboard forecast", text)
+            @test occursin("V2 90% interval coverage", text)
+            @test occursin("| V2 | 2 |", text)
+            @test occursin("| Pre-upgrade baseline | 2 |", text)
+            @test occursin("pre-upgrade baseline pred", text)
         end
     end
 
@@ -989,7 +988,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         @test _assert_issuable_model(:v2, 1) === nothing
     end
 
-    @testset "V2 industrial tail: regime-aware relaxation and finite interval shift" begin
+    @testset "V2 tail: regime-aware relaxation and finite interval shift" begin
         driver = (V=420.0, Bz=-12.0, By=4.0, n=6.0, Pdyn=2.5)
         tau_recovery = _v2_tail_tau(5.0)
         tau_deepening = _v2_tail_tau(-30.0)

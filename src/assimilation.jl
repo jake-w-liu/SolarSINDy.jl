@@ -26,8 +26,8 @@
 #   * injection-adaptive EKF: worse than decay-only and robustly not promotable across
 #     the tested injection-walk variance sweep.
 # Keep this module for reproducible negative evidence and future assimilation experiments,
-# but do not wire EKF output into dashboard, daemon, alerting, or served forecast columns
-# without a new promotion report that passes the industrial gate.
+# but do not wire EKF output into dashboard, daemon, alerting, or V2 forecast columns
+# without a new promotion report that passes the V2 readiness gate.
 
 """
     AssimilationFilter

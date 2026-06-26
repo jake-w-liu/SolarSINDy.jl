@@ -554,14 +554,14 @@ df_scale = DataFrame(
 )
 CSV.write(joinpath(DATA_DIR, "scalability_sweep.csv"), df_scale)
 println("  Saved data/scalability_sweep.csv")
-println("  Burton reference RMSE: $(round(burton_rmse_sc, digits=2))")
+println("  Burton comparison RMSE: $(round(burton_rmse_sc, digits=2))")
 
 fig8 = plot_scatter(Float64.(n_storm_vals), scale_rmse;
     xlabel="Number of Training Storms",
     ylabel="Held-Out RMSE [nT]",
     mode="lines+markers", color=COLORS[1], dash=DASHES[1],
     legend="SINDy", linewidth=2, marker_size=8)
-# Add Burton reference line
+# Add Burton comparison line
 plot_scatter!(fig8, Float64.([1, 10]), [burton_rmse_sc, burton_rmse_sc];
     color=COLORS[2], dash=DASHES[2], mode="lines",
     legend="Burton", linewidth=2)

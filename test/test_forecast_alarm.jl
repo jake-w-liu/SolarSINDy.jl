@@ -128,7 +128,7 @@ using Dates
         @test r.dst_predicted <= 50.0    # within state bounds
     end
 
-    @testset "A/D: Operational v2 calibration" begin
+    @testset "A/D: V2 calibration" begin
         cal0 = default_operational_v2_calibration(;
             feature_names=[:latest_dst_nt],
             interval_scale=2.0,
@@ -195,7 +195,7 @@ using Dates
         end
     end
 
-    @testset "D: Operational v2 center clamped to physical Dst range" begin
+    @testset "D: V2 center clamped to physical Dst range" begin
         # Mutation-sensitive guard for the operational-v2 center clamp. A
         # pathological positive residual correction must not push the issued
         # Dst* above the physical ceiling (+50 nT) used by every other forecast
@@ -231,7 +231,7 @@ using Dates
         @test (pred_hot.ci05_dst + pred_hot.ci95_dst) / 2 ≈ pred_hot.pred_dst atol=1e-9
     end
 
-    @testset "A/D: Operational v2 guarded baseline selector" begin
+    @testset "A/D: V2 guarded baseline selector" begin
         n = 16
         v1_pred = fill(-40.0, n)
         observed = collect(-48.0:-1.0:-63.0)

@@ -10,7 +10,7 @@
 # predictions two ways — fixed v1 coefficients and EKF-adapted (decay, q=1e-4, the deployable single q) —
 # fit the REAL v2 correction (operational calibration) on the OTHER storms' residuals for each, and apply
 # it to the held-out storm. We compare four one-step RMSEs:
-#   A = fixed v1 (raw)              B = fixed v1 + v2 correction   (= operational v2)
+#   A = fixed v1 (raw)              B = fixed v1 + V2 correction
 #   C = EKF  v1 (raw)              D = EKF  v1 + v2 correction
 # Verdict: if D ~ B, the v2 correction already captures the EKF gain -> EKF REDUNDANT with v2. If D < B by
 # a meaningful margin, the EKF adds value ON TOP of v2 -> worth deploying. If B <= C, the correction alone

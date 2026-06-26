@@ -32,7 +32,7 @@ end
 """
     OperationalV2Calibration
 
-Small causal post-processing layer for an operational v2 forecast.
+Small causal post-processing layer for a V2 forecast.
 
 The correction is fit from prior replay/live rows only:
 
@@ -626,7 +626,7 @@ function fit_operational_v2_calibration(df::DataFrame;
     _require_columns(prepared, required)
     clean = _finite_rows(prepared, required)
     nrow(clean) > length(feature_names) + 1 ||
-        throw(ArgumentError("not enough finite rows to fit operational v2 calibration"))
+        throw(ArgumentError("not enough finite rows to fit V2 calibration"))
 
     μ = [mean(Float64.(clean[!, c])) for c in feature_names]
     σ = [std(Float64.(clean[!, c])) for c in feature_names]
@@ -852,7 +852,7 @@ function read_operational_v2_calibration(path::String)
     df = CSV.read(path, DataFrame)
     _require_columns(df, [:feature, :feature_mean, :feature_scale,
                           :coefficient, :interval_scale, :label])
-    nrow(df) >= 1 || throw(ArgumentError("empty operational v2 calibration: $path"))
+    nrow(df) >= 1 || throw(ArgumentError("empty V2 calibration: $path"))
     String(df.feature[1]) == "intercept" ||
         throw(ArgumentError("first calibration row must be feature=intercept"))
     feature_names = Symbol.(String.(df.feature[2:end]))

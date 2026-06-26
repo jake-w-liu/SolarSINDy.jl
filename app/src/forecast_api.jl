@@ -89,22 +89,21 @@ function get_log(path::AbstractString)
     end
 end
 
-# Pick the v2 forecast column with a graceful fallback to the operational column. hasproperty is checked
-# BEFORE access so a CSV schema without the v2_* columns falls back instead of throwing "column not found".
+# Pick forecast columns with graceful fallbacks. hasproperty is checked BEFORE
+# access so older CSV schemas fall back instead of throwing "column not found".
 function _col(row, a::Symbol, b::Symbol)
     hasproperty(row, a) && getproperty(row, a) !== missing && return getproperty(row, a)
     hasproperty(row, b) ? getproperty(row, b) : missing
 end
-_pred(row)  = _col(row, :v2_pred_dst_nt,      :pred_dst_nt)
-_ci05(row)  = _col(row, :v2_pred_dst_ci05_nt, :pred_dst_ci05_nt)
-_ci95(row)  = _col(row, :v2_pred_dst_ci95_nt, :pred_dst_ci95_nt)
-# The scored v2 reference point and band stay in _pred/_ci05/_ci95. The operationally served forecast lives in
-# _served/_sc05/_sc95: v2 plus the industrial L1 look-ahead / regime-aware tail. Severity uses the depth-safe
-# min(v2, served), so the overlay can escalate but not under-warn relative to v2. Falls back to v2 for legacy rows.
-# 3-tier fallback served -> v2 -> legacy (pred_dst_*), so rows from any schema era resolve to a finite value.
-_served(row) = (x = _col(row, :served_pred_dst_nt,      :v2_pred_dst_nt);      x === missing ? _pred(row) : x)
-_sc05(row)   = (x = _col(row, :served_pred_dst_ci05_nt, :v2_pred_dst_ci05_nt); x === missing ? _ci05(row) : x)
-_sc95(row)   = (x = _col(row, :served_pred_dst_ci95_nt, :v2_pred_dst_ci95_nt); x === missing ? _ci95(row) : x)
+_audit_pred(row) = _col(row, :v2_pred_dst_nt,      :pred_dst_nt)
+_audit_ci05(row) = _col(row, :v2_pred_dst_ci05_nt, :pred_dst_ci05_nt)
+_audit_ci95(row) = _col(row, :v2_pred_dst_ci95_nt, :pred_dst_ci95_nt)
+
+# Upgraded V2 is the product forecast. The live CSV keeps older product-column
+# names, with fallback to older v2_/pred_* columns for legacy rows.
+_v2_pred(row) = (x = _col(row, :served_pred_dst_nt,      :v2_pred_dst_nt);      x === missing ? _audit_pred(row) : x)
+_v2_ci05(row) = (x = _col(row, :served_pred_dst_ci05_nt, :v2_pred_dst_ci05_nt); x === missing ? _audit_ci05(row) : x)
+_v2_ci95(row) = (x = _col(row, :served_pred_dst_ci95_nt, :v2_pred_dst_ci95_nt); x === missing ? _audit_ci95(row) : x)
 
 # Rows of the most recent forecast cycle = those sharing the freshest input-data vintage
 # (latest_solar_wind_utc). Returns a sub-DataFrame sorted by target time.
@@ -129,7 +128,7 @@ end
 
 # Verified rows: a real forecast (target strictly AFTER both the issue time and the last observed Dst — a
 # 0-lead row is not a forecast and is what the locked comparison report excludes), with a FINITE observation
-# and a finite v2 point + band. jnum(obs) rejects NaN/Inf observations that would otherwise reach the
+# and a finite V2 point + band. jnum(obs) rejects NaN/Inf observations that would otherwise reach the
 # calibration summary and make JSON serialization throw.
 function verified_rows(df::DataFrame)
     nrow(df) == 0 && return df
@@ -141,8 +140,8 @@ function verified_rows(df::DataFrame)
         valid_lead = tt !== missing &&
                      (!has_issue  || r.issue_time_utc_dt      === missing || tt > r.issue_time_utc_dt) &&
                      (!has_anchor || r.latest_dst_time_utc_dt === missing || tt > r.latest_dst_time_utc_dt)
-        keep[i] = valid_lead && jnum(r.observation_dst_nt) !== nothing && jnum(_pred(r)) !== nothing &&
-                  jnum(_ci05(r)) !== nothing && jnum(_ci95(r)) !== nothing
+        keep[i] = valid_lead && jnum(r.observation_dst_nt) !== nothing && jnum(_v2_pred(r)) !== nothing &&
+                  jnum(_v2_ci05(r)) !== nothing && jnum(_v2_ci95(r)) !== nothing
     end
     return df[keep, :]
 end
@@ -162,41 +161,46 @@ function calibration_summary(df::DataFrame)
     v = verified_rows(df)
     n = nrow(v)
     n == 0 && return (n_verified=0, coverage_90=nothing, rmse_nt=nothing,
-                      served_n_verified=0, served_coverage_90=nothing, served_rmse_nt=nothing,
-                      served_reference_rmse_nt=nothing,
+                      v2_n_verified=0, v2_coverage_90=nothing, v2_rmse_nt=nothing,
+                      audit_baseline_rmse_nt=nothing,
                       rmse_persistence_nt=nothing, rmse_obrien_nt=nothing,
                       current_interval_source=live_src, n_verified_current_source=0,
                       deepest_obs_dst_nt=nothing, n_storm_verified=0, by_source=[])
     obs   = Float64.(v.observation_dst_nt)
-    pred  = Float64.(_pred.(eachrow(v)))
-    ci05  = Float64.(_ci05.(eachrow(v)))
-    ci95  = Float64.(_ci95.(eachrow(v)))
+    pred  = Float64.(_v2_pred.(eachrow(v)))
+    ci05  = Float64.(_v2_ci05.(eachrow(v)))
+    ci95  = Float64.(_v2_ci95.(eachrow(v)))
+    audit_pred = Float64.(_audit_pred.(eachrow(v)))
     inside = (obs .>= ci05) .& (obs .<= ci95)
     rmse(p) = sqrt(mean((obs .- p).^2))
-    served_mask = falses(n)
+    product_col_mask = falses(n)
     if all(c -> c in names(v), ("served_pred_dst_nt", "served_pred_dst_ci05_nt", "served_pred_dst_ci95_nt"))
-        served_mask .= [jnum(v[i, :served_pred_dst_nt]) !== nothing &&
-                        jnum(v[i, :served_pred_dst_ci05_nt]) !== nothing &&
-                        jnum(v[i, :served_pred_dst_ci95_nt]) !== nothing for i in 1:n]
+        product_col_mask .= [jnum(v[i, :served_pred_dst_nt]) !== nothing &&
+                             jnum(v[i, :served_pred_dst_ci05_nt]) !== nothing &&
+                             jnum(v[i, :served_pred_dst_ci95_nt]) !== nothing for i in 1:n]
     end
-    served_n = count(served_mask)
-    served_cov = nothing
-    served_rmse = nothing
-    served_ref_rmse = nothing
-    if served_n > 0
-        spred = Float64.(v[served_mask, :served_pred_dst_nt])
-        slo = Float64.(v[served_mask, :served_pred_dst_ci05_nt])
-        shi = Float64.(v[served_mask, :served_pred_dst_ci95_nt])
-        sobs = obs[served_mask]
+    product_col_n = count(product_col_mask)
+    product_col_cov = nothing
+    product_col_rmse = nothing
+    audit_rmse = jnum(round(rmse(audit_pred); digits=2))
+    if product_col_n > 0
+        spred = Float64.(v[product_col_mask, :served_pred_dst_nt])
+        slo = Float64.(v[product_col_mask, :served_pred_dst_ci05_nt])
+        shi = Float64.(v[product_col_mask, :served_pred_dst_ci95_nt])
+        sobs = obs[product_col_mask]
         sinside = (sobs .>= slo) .& (sobs .<= shi)
-        served_cov = jnum(round(mean(sinside); digits=3))
-        served_rmse = jnum(round(sqrt(mean((sobs .- spred).^2)); digits=2))
-        served_ref_rmse = jnum(round(sqrt(mean((sobs .- pred[served_mask]).^2)); digits=2))
+        product_col_cov = jnum(round(mean(sinside); digits=3))
+        product_col_rmse = jnum(round(sqrt(mean((sobs .- spred).^2)); digits=2))
+        audit_rmse = jnum(round(sqrt(mean((sobs .- audit_pred[product_col_mask]).^2)); digits=2))
     end
+    product_mask = product_col_n > 0 ? product_col_mask : trues(n)
+    product_n = count(product_mask)
+    product_cov = product_col_n > 0 ? product_col_cov : jnum(round(mean(inside); digits=3))
+    product_rmse = product_col_n > 0 ? product_col_rmse : jnum(round(rmse(pred); digits=2))
     pers = "persistence_dst_nt" in names(v) ? collect(v.persistence_dst_nt) : fill(missing, n)
     obri = "obrien_dst_nt" in names(v) ? collect(v.obrien_dst_nt) : fill(missing, n)
-    rmse_opt(col) = begin
-        m = (.!ismissing.(col)) .& isfinite.(coalesce.(col, NaN))
+    rmse_opt(col, mask=trues(n)) = begin
+        m = mask .& (.!ismissing.(col)) .& isfinite.(coalesce.(col, NaN))
         any(m) ? sqrt(mean((obs[m] .- Float64.(col[m])).^2)) : nothing
     end
 
@@ -209,15 +213,15 @@ function calibration_summary(df::DataFrame)
     end
     n_live = count(srcs .== live_src)
 
-    return (n_verified=n,
-            coverage_90=jnum(round(mean(inside); digits=3)),
-            rmse_nt=jnum(round(rmse(pred); digits=2)),
-            served_n_verified=served_n,
-            served_coverage_90=served_cov,
-            served_rmse_nt=served_rmse,
-            served_reference_rmse_nt=served_ref_rmse,
-            rmse_persistence_nt=(x = rmse_opt(pers); x === nothing ? nothing : round(x; digits=2)),
-            rmse_obrien_nt=(x = rmse_opt(obri); x === nothing ? nothing : round(x; digits=2)),
+    return (n_verified=product_n,
+            coverage_90=product_cov,
+            rmse_nt=product_rmse,
+            v2_n_verified=product_n,
+            v2_coverage_90=product_cov,
+            v2_rmse_nt=product_rmse,
+            audit_baseline_rmse_nt=audit_rmse,
+            rmse_persistence_nt=(x = rmse_opt(pers, product_mask); x === nothing ? nothing : round(x; digits=2)),
+            rmse_obrien_nt=(x = rmse_opt(obri, product_mask); x === nothing ? nothing : round(x; digits=2)),
             current_interval_source=live_src,
             n_verified_current_source=n_live,
             deepest_obs_dst_nt=jnum(round(minimum(obs); digits=1)),
@@ -245,7 +249,7 @@ function _recent_observed(df::DataFrame; hours::Real=48)
     return out
 end
 
-# Sub-hour MODEL trajectory (display only) written by the engine next to the log: the served forecast integrated
+# Sub-hour MODEL trajectory (display only) written by the engine next to the log: V2 integrated
 # at a sub-hour step. Not a validated sub-hour forecast (Dst is observed hourly; the ODE is hourly-fit) — it is the
 # hourly model's own interpolation. Defensive: missing/unreadable/stale → [].
 function _subhour_traj(log_path::AbstractString)
@@ -268,12 +272,10 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
     for r in eachrow(cyc)
         push!(horizons, (target_utc=jdt(r.target_time_utc_dt),
                          horizon_hours=jnum(r.horizon_hours),
-                         pred_dst_nt=jnum(_pred(r)),          # v2 reference
-                         ci05_dst_nt=jnum(_ci05(r)),
-                         ci95_dst_nt=jnum(_ci95(r)),
-                         served_dst_nt=jnum(_served(r)),      # promoted served forecast (v2 + industrial tail)
-                         served_ci05_dst_nt=jnum(_sc05(r)),
-                         served_ci95_dst_nt=jnum(_sc95(r))))
+                         pred_dst_nt=jnum(_v2_pred(r)),
+                         ci05_dst_nt=jnum(_v2_ci05(r)),
+                         ci95_dst_nt=jnum(_v2_ci95(r)),
+                         audit_baseline_dst_nt=jnum(_audit_pred(r))))
     end
     r1 = first(cyc)
     return (issue_time_utc=jdt(r1.issue_time_utc_dt),
@@ -318,13 +320,10 @@ function build_status(df::DataFrame)
                 message="No forecast rows in log yet.", calibration=cal)
     end
     r1 = first(cyc)
-    # Depth-safe severity: the industrial tail can escalate but never under-warn vs v2. Per horizon take the
-    # deeper (more negative) of {v2, served}, then the most negative across horizons.
-    dmin(a, b) = (a === nothing && b === nothing) ? nothing : min(something(a, b), something(b, a))
-    preds = filter(!isnothing, [dmin(jnum(_pred(r)), jnum(_served(r))) for r in eachrow(cyc)])
-    lbs   = filter(!isnothing, [dmin(jnum(_ci05(r)), jnum(_sc05(r)))   for r in eachrow(cyc)])
-    point_min = isempty(preds) ? nothing : minimum(preds)            # most negative depth-safe point
-    worst_cred = isempty(lbs)  ? nothing : minimum(lbs)              # most negative depth-safe 90% lower bound
+    preds = filter(!isnothing, [jnum(_v2_pred(r)) for r in eachrow(cyc)])
+    lbs   = filter(!isnothing, [jnum(_v2_ci05(r)) for r in eachrow(cyc)])
+    point_min = isempty(preds) ? nothing : minimum(preds)
+    worst_cred = isempty(lbs)  ? nothing : minimum(lbs)
     lvl_pt, lbl_pt = point_min === nothing ? (0, THREAT_LABELS[1]) : dst_threat_level(point_min)
     lvl_wc, lbl_wc = worst_cred === nothing ? (0, THREAT_LABELS[1]) : dst_threat_level(worst_cred)
     # Reported threat level is the point-forecast level; a "watch" flag fires when the
@@ -358,12 +357,12 @@ function build_history(df::DataFrame, hours::Real=72)
     for r in eachrow(v)
         t = r.target_time_utc_dt
         (t === missing || t < cutoff) && continue
-        obs = jnum(r.observation_dst_nt); p = jnum(_served(r))
-        lo = jnum(_sc05(r)); hi = jnum(_sc95(r))
+        obs = jnum(r.observation_dst_nt); p = jnum(_v2_pred(r))
+        lo = jnum(_v2_ci05(r)); hi = jnum(_v2_ci95(r))
         inside = (obs !== nothing && lo !== nothing && hi !== nothing) ? (obs >= lo && obs <= hi) : nothing
         push!(rows, (target_utc=jdt(t), horizon_hours=jnum(r.horizon_hours),
                      observed_dst_nt=obs, pred_dst_nt=p, ci05_dst_nt=lo, ci95_dst_nt=hi,
-                     reference_v2_dst_nt=jnum(_pred(r)),
+                     audit_baseline_dst_nt=jnum(_audit_pred(r)),
                      inside_90ci=inside))
     end
     sort!(rows, by=x -> something(x.target_utc, ""))
@@ -377,8 +376,8 @@ function build_history(df::DataFrame, hours::Real=72)
     cal = calibration_summary(df)
     return (rows=rows, hours=hours, n=length(rows),
             coverage_90=win_cov, rmse_nt=win_rmse,
-            coverage_90_all=something(cal.served_coverage_90, cal.coverage_90),
-            rmse_nt_all=something(cal.served_rmse_nt, cal.rmse_nt))
+            coverage_90_all=something(cal.v2_coverage_90, cal.coverage_90),
+            rmse_nt_all=something(cal.v2_rmse_nt, cal.rmse_nt))
 end
 
 """Active alert summary derived from the current threat status."""

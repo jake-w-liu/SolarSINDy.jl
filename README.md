@@ -10,9 +10,9 @@ The package is organized as two layers:
 1. **Discovery (v1).** Sparse identification of nonlinear dynamics (SINDy) recovers a
    closed-form solar wind–magnetosphere coupling equation for the Dst index from storm
    time series, alongside classical physical baselines.
-2. **Operational forecasting (v2).** A causal reference post-processing layer corrects
+2. **Operational forecasting (v2).** A causal post-processing layer corrects
    the v1 point forecast and attaches **distribution-free conformal predictive
-   intervals** with finite-sample coverage. The served industrial V2 layer then applies
+   intervals** with finite-sample coverage. V2 then applies
    measured L1 look-ahead, regime-aware Bz/By relaxation, and guarded fallback selection,
    producing the calibrated Dst forecast used by the live monitor and dashboard.
 
@@ -33,13 +33,13 @@ The package is organized as two layers:
 - stratified split-conformal predictive intervals with finite-sample coverage, stratified
   by lead time × geomagnetic activity regime
 - adaptive (online) conformal updating under distribution shift
-- industrial served tail: measured L1 look-ahead while target-hour wind is already
+- V2 tail: measured L1 look-ahead while target-hour wind is already
   upstream-observed, then regime-aware Bz/By relaxation that lengthens during rapid
   Dst deepening
 - guarded component selection over corrected SINDy, uncorrected SINDy v1, persistence,
   Burton, Burton-full, and O'Brien–McPherron, deployed only after chronological validation
 - online assimilation utilities for reproducibility and shadow experiments; EKF-on-SINDy
-  failed promotion gates and is not part of the served forecast
+  failed promotion gates and is not part of the V2 forecast
 - forecast skill metrics (RMSE, correlation, skill score, prediction efficiency, Wilcoxon)
 
 **Real-time**
@@ -47,16 +47,15 @@ The package is organized as two layers:
 - NOAA SWPC plasma / magnetic-field / Dst fetchers
 - a rolling monitor loop with calibrated storm-severity alarms
 
-## Industrial served forecast status
+## V2 forecast status
 
-The dashboard and live monitor use the served industrial V2 columns whenever they are
-present in the locked forecast log. The reference V2 correction remains in the log for
-same-row audit and fallback comparison; the served industrial V2 output is the headline
-forecast shown to users.
+The dashboard and live monitor show a single V2 forecast. Historical log columns named
+`served_*` carry that upgraded V2 product; the earlier V2 correction remains only as a
+pre-upgrade audit baseline for same-row comparisons.
 
 EKF-on-SINDy is retained as research infrastructure only. Both tested deployment paths
 (decay-only and injection-adaptive EKF) failed promotion gates, so they are not exposed
-through the dashboard, daemon, alerting path, or served forecast columns. Recent
+through the dashboard, daemon, alerting path, or V2 forecast columns. Recent
 lower-RMSE relaxed-tail variants also remain diagnostic until they avoid severe-storm
 under-warning in sustained southward-Bz stress rows.
 
@@ -122,7 +121,7 @@ println("Prediction efficiency = ", prediction_efficiency(Dst_pred, swd.Dst_star
 
 ## Quick start — calibrated forecast (v2)
 
-Fit the operational v2 calibration from a replay table of prior forecasts (issue-time
+Fit the V2 calibration from a replay table of prior forecasts (issue-time
 features + realized observations), then issue a corrected point forecast with a
 finite-sample conformal interval:
 
@@ -136,7 +135,7 @@ lo, hi = conformal_interval(cal, point_forecast, horizon, latest_dst)   # scalar
 println("90% band: [", lo, ", ", hi, "]  (target coverage 0.90)")
 println("empirical coverage = ", conformal_coverage(cal, points, observations, horizons, latest_dsts))
 
-# 2. Operational v2 causal correction on top of the v1 point forecast.
+# 2. V2 causal correction on top of the v1 point forecast.
 #    replay_df is a DataFrame of prior issued forecasts + realized observations.
 v2cal = fit_operational_v2_calibration(replay_df)            # β·z fit from prior rows only
 out = operational_v2_predict(v2cal, v1_point, v1_ci05, v1_ci95, features)
@@ -248,7 +247,7 @@ end to end with no external paths.
 **Metrics** — `rmse`, `correlation`, `skill_score`, `prediction_efficiency`,
 `metrics_summary`, `wilcoxon_signed_rank_p`
 
-**Forecast (v1 + reference/served operational v2)** — `ForecastState`, `ForecastResult`, `init_forecast`,
+**Forecast (v1 + V2 correction and audit baseline)** — `ForecastState`, `ForecastResult`, `init_forecast`,
 `step_forecast!`, `forecast_ahead`, `OperationalV2Calibration`,
 `default_operational_v2_calibration`, `operational_v2_feature_tuple`,
 `fit_operational_v2_calibration`, `operational_v2_predict`, `score_operational_v2`,

@@ -94,7 +94,7 @@ end
         @test _swpc_row_field(idx, ["2026-06-26T00:00:00Z", "460.5"], "bz_gsm") === nothing
     end
 
-    @testset "forecast API scores served industrial V2 when present" begin
+    @testset "forecast API exposes upgraded V2 as the product forecast" begin
         issue1 = now(UTC) - Hour(3)
         issue2 = now(UTC) - Hour(2)
         df = DataFrame(
@@ -117,14 +117,20 @@ end
             model_version=["v2", "v2"],
         )
         cal = calibration_summary(df)
-        @test cal.served_n_verified == 2
-        @test cal.served_rmse_nt < cal.rmse_nt
-        @test cal.served_reference_rmse_nt == cal.rmse_nt
-        @test cal.served_coverage_90 == 1.0
+        expected_v2_rmse = round(sqrt(mean((df.observation_dst_nt .- df.served_pred_dst_nt).^2)); digits=2)
+        expected_audit_rmse = round(sqrt(mean((df.observation_dst_nt .- df.v2_pred_dst_nt).^2)); digits=2)
+        @test cal.v2_n_verified == 2
+        @test cal.v2_rmse_nt == expected_v2_rmse
+        @test cal.rmse_nt == expected_v2_rmse
+        @test cal.audit_baseline_rmse_nt == expected_audit_rmse
+        @test cal.v2_coverage_90 == 1.0
         hist = build_history(df, 24)
-        @test hist.rmse_nt == cal.served_rmse_nt
+        @test hist.rmse_nt == cal.v2_rmse_nt
         @test hist.rows[1].pred_dst_nt == df.served_pred_dst_nt[1]
-        @test hist.rows[1].reference_v2_dst_nt == df.v2_pred_dst_nt[1]
+        @test hist.rows[1].audit_baseline_dst_nt == df.v2_pred_dst_nt[1]
+        fc = build_forecast(df)
+        @test fc.horizons[1].pred_dst_nt == df.served_pred_dst_nt[2]
+        @test fc.horizons[1].audit_baseline_dst_nt == df.v2_pred_dst_nt[2]
     end
 
     @testset "static file serving is traversal-guarded" begin

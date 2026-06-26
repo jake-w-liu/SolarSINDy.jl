@@ -77,7 +77,7 @@ function _usage()
       --backfill-baselines   Fill baseline forecasts/residuals for existing rows.
       --replay-recent        Build a recent causal replay table from live feeds.
       --replay-omni          Build a longer causal replay table from local OMNI CSV.
-      --fit-v2-calibration   Fit operational v2 calibration from --table CSV.
+      --fit-v2-calibration   Fit V2 calibration from --table CSV.
       --wait                 Issue one row, then poll until its target observation arrives.
       --campaign             Issue multiple operational-v2 horizons, verify, and report.
       --summary              Print aggregate live-log scores.
@@ -515,7 +515,7 @@ _subhourly_driver(plasma::DataFrame, mag::DataFrame, step_time::DateTime,
                   recent, latest_common_sw::DateTime) =
     _subhourly_driver_with_status(plasma, mag, step_time, recent, latest_common_sw).driver
 
-# Sub-hour MODEL TRAJECTORY for the near term: the served forecast integrated at a sub-hour step (default 15 min)
+# Sub-hour MODEL TRAJECTORY for the near term: the V2 forecast integrated at a sub-hour step (default 15 min)
 # with the same per-hour drivers (observed / L1 look-ahead / regime-aware tail). This is DISPLAY ONLY and is a model
 # trajectory, not a validated sub-hour forecast: Dst is published only hourly (no sub-hour ground truth) and the
 # discovered ODE is fit on hourly data, so the curve is the hourly-scale model's own interpolation. It tracks the
@@ -712,7 +712,7 @@ function _score_row!(df::DataFrame, row_idx::Int, observed_dst::Float64)
         end
     end
 
-    # Score the promoted served forecast (v2 + industrial L1/regime-aware tail) alongside v2, so its live skill is tracked.
+    # Score the V2 product forecast alongside the pre-upgrade baseline, so live skill is tracked on identical rows.
     served_pred = _optional_float(df, row_idx, :served_pred_dst_nt)
     if !ismissing(served_pred)
         _set_value!(df, row_idx, :served_residual_dst_nt, observed_dst - served_pred)
@@ -894,7 +894,7 @@ function _load_calibration_for_model(cfg::LiveVerifyConfig)
     cfg.model == :v1 && return nothing
     cfg.model == :v2 || error("Unsupported model: $(cfg.model)")
     isfile(cfg.v2_calibration_path) || error(
-        "Operational v2 calibration not found at $(cfg.v2_calibration_path). " *
+        "V2 calibration not found at $(cfg.v2_calibration_path). " *
         "Run --fit-v2-calibration first."
     )
     return read_operational_v2_calibration(cfg.v2_calibration_path)
@@ -1250,7 +1250,7 @@ function replay_recent_table(plasma::DataFrame, mag::DataFrame,
     isempty(rows) && error("No replay rows could be scored from the available feeds")
     out = SolarSINDy.add_operational_v2_features!(DataFrame(rows))
     if model == :v2
-        calibration === nothing && error("Operational v2 replay requires calibration")
+        calibration === nothing && error("V2 replay requires calibration")
         scored = score_operational_v2(out, calibration)
         scored[!, :model_version] = fill("v2", nrow(scored))
         scored[!, :pred_dst_nt] = scored.v2_pred_dst_nt
@@ -1308,7 +1308,7 @@ end
 function _print_replay_metrics(df::DataFrame)
     println("Recent causal replay rows: $(nrow(df))")
     for (name, col) in (
-        ("Operational v2", :v2_pred_dst_nt),
+        ("V2", :v2_pred_dst_nt),
         ("SINDy v1", :v1_pred_dst_nt),
         ("Persistence", :persistence_dst_nt),
         ("Burton", :burton_dst_nt),
@@ -1743,7 +1743,7 @@ function _select_validated_v2_calibration(train::DataFrame,
             end
         end
     end
-    best === nothing && throw(ArgumentError("no operational v2 calibration candidate could be fit"))
+    best === nothing && throw(ArgumentError("no V2 calibration candidate could be fit"))
     return (; best..., candidates=DataFrame(candidates))
 end
 
@@ -1822,7 +1822,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     # Holdout is never used to select feature set, ridge, component, or any tuning
     # parameter — those are chosen on validation only. It is read for honest
     # out-of-sample reporting and, since F1+F2, as a single final go/no-go safety
-    # gate on the served conformal interval's coverage (M8); it does not feed back
+    # gate on the V2 conformal interval's coverage (M8); it does not feed back
     # into model selection.
     holdout_scored = score_operational_v2(holdout, cal)
     holdout_v2 = _scored_metric(holdout_scored, :v2_pred_dst_nt)
@@ -1879,7 +1879,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
         end
     end
 
-    println("Fitted operational v2 calibration: $(cfg.v2_calibration_path)")
+    println("Fitted V2 calibration: $(cfg.v2_calibration_path)")
     println("Wrote v2 candidate selection audit: $selection_path")
     conformal === nothing || println("Wrote conformal calibration: $conformal_path")
     println("Scored replay rows: $scored_path")
@@ -1896,7 +1896,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     else
         @warn(
             "Best v2 candidate failed the acceptance gate " *
-            "(validation beat + thick-enough validation split + served conformal " *
+            "(validation beat + thick-enough validation split + V2 conformal " *
             "interval holdout coverage ≥ floor); deployed v1-equivalent fallback.",
             block_reason=deploy_block_reason,
             best_validation_rmse=selection.validation_rmse,
@@ -1926,7 +1926,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
         println("Holdout v2 90% coverage (conformal): $(round(holdout_conformal_coverage; digits=3))")
     isnan(candidate_conformal_holdout_coverage) ||
         println(
-            "Served-interval (conformal) holdout coverage gated against floor " *
+            "V2 interval (conformal) holdout coverage gated against floor " *
             "$(cfg.v2_coverage_floor): $(round(candidate_conformal_holdout_coverage; digits=3)) " *
             "($(conformal_gate_ok ? "PASS" : "FAIL"))"
         )
@@ -1968,7 +1968,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
     # loudly so the operator sees the reversion rather than inferring it from interval_source.
     if cfg.model == :v2 && calibration !== nothing &&
        getfield(calibration, :label) != "operational_v2_fallback_v1_equiv" && conformal === nothing
-        @warn("Deployed v2 calibration is missing its conformal sidecar; served interval reverts " *
+        @warn("Deployed V2 calibration is missing its conformal sidecar; V2 interval reverts " *
               "to the static interval_scale band (not the calibrated conformal/ACI interval).",
               expected_sidecar=_conformal_path(cfg.v2_calibration_path))
     end
@@ -2162,13 +2162,13 @@ function issue_forecast(cfg::LiveVerifyConfig)
     end
 
     # ---- Legacy schema stability ----
-    # The improved_* columns are retained equal to v2 for CSV-schema stability. The served_* columns are promoted
-    # below to the industrial v2 tail: L1 look-ahead while measured wind is mapped to the target hour, then
+    # The improved_* columns are retained equal to the pre-upgrade baseline for CSV-schema stability. The served_* columns
+    # carry the V2 product: L1 look-ahead while measured wind is mapped to the target hour, then
     # regime-aware relaxation after the L1-known window, plus a narrow persistence
     # guard for 1-2 h forecasts when observed Dst is already in the extreme core.
     improved_pred_dst = selected.v2_pred_dst; improved_ci05 = v2_ci05_log; improved_ci95 = v2_ci95_log
 
-    # ---- Industrial served tail: L1 look-ahead (A) + regime-aware relaxation (B) ----
+    # ---- V2 tail: L1 look-ahead (A) + regime-aware relaxation (B) ----
     # The L1-measured portion is leakage-safe because it is capped at latest_common_sw. Once no measured L1 wind
     # maps into the target hour, Bz/By relax toward quiet conditions; the relaxation time lengthens during rapid
     # Dst deepening to avoid the shallow severe-storm bias found in the plain-B replay. If Dst is already <= -240 nT
@@ -2208,7 +2208,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
             sub_hourly_pred_dst = ismissing(selected.v2_correction) ? sv1 : sv1 + selected.v2_correction
         end
     catch e
-        @warn "industrial L1/regime-aware tail failed; serving base forecast" exception=(e, catch_backtrace())
+        @warn "V2 L1/regime-aware tail failed; serving pre-upgrade baseline" exception=(e, catch_backtrace())
     end
     if selected.model_version == "v2" &&
        _near_term_extreme_inertia_guard(latest_dst, model_steps)
@@ -2221,8 +2221,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
         reference_ci95_dst,
     )
 
-    # ---- PROMOTED served forecast = v2 + industrial L1/regime-aware/inertia tail. Severity (build_status) applies a
-    # depth-safe floor min(v2, served) so the served tail can only escalate, never under-warn, relative to v2.
+    # ---- V2 product forecast = pre-upgrade baseline + L1/regime-aware/inertia tail.
     served_pred_dst = sub_hourly_pred_dst
     served_ci05_dst = sub_hourly_ci05
     served_ci95_dst = sub_hourly_ci95
@@ -2332,24 +2331,29 @@ function issue_forecast(cfg::LiveVerifyConfig)
     println("Latest SWPC solar wind: $latest_common_sw")
     println("Latest observed Kyoto Dst: $latest_dst_time = $latest_dst nT")
     println("Target observation UTC: $target_time")
-    model_label = selected.model_version == "v2" ? "Reference V2" : "SINDy v1"
+    model_label = selected.model_version == "v2" ? "V2" : "SINDy v1"
     println("Forecast model: $model_label")
     println("Lead time: $(round(wall_horizon; digits=3)) hr wall-clock, $model_steps model steps")
     println("Forecast Dst*: $(round(result.dst_predicted; digits=2)) nT")
-    println(
-        "$model_label Dst: $(round(pred_dst; digits=2)) nT; 90% CI " *
-        "[$(round(ci05_dst; digits=2)), $(round(ci95_dst; digits=2))]"
-    )
     if selected.model_version == "v2"
         println(
-            "Served industrial V2 Dst: $(round(served_pred_dst; digits=2)) nT; 90% CI " *
+            "V2 Dst: $(round(served_pred_dst; digits=2)) nT; 90% CI " *
             "[$(round(served_ci05_dst; digits=2)), $(round(served_ci95_dst; digits=2))]"
+        )
+        println(
+            "Pre-upgrade baseline Dst: $(round(pred_dst; digits=2)) nT; 90% CI " *
+            "[$(round(ci05_dst; digits=2)), $(round(ci95_dst; digits=2))]"
         )
         println(
             "SINDy-v1 Dst: $(round(v1_pred_dst; digits=2)) nT; " *
             "v2 correction=$(round(selected.v2_correction; digits=2)) nT; " *
             "interval scale=$(round(selected.v2_interval_scale; digits=2)); " *
             "component=$(selected.v2_selected_component)"
+        )
+    else
+        println(
+            "$model_label Dst: $(round(pred_dst; digits=2)) nT; 90% CI " *
+            "[$(round(ci05_dst; digits=2)), $(round(ci95_dst; digits=2))]"
         )
     end
     println(
@@ -2714,9 +2718,9 @@ function _standard_model_columns(df::DataFrame)
     specs = Pair{String,Symbol}[]
     served_active = String(:served_pred_dst_nt) in names(df)
     if served_active
-        push!(specs, "Served industrial V2" => :served_pred_dst_nt)
+        push!(specs, "V2" => :served_pred_dst_nt)
     end
-    v2_label = served_active ? "Reference V2" : "Operational v2"
+    v2_label = served_active ? "Pre-upgrade baseline" : "V2"
     append!(specs, Pair{String,Symbol}[
         v2_label => :v2_pred_dst_nt,
         "SINDy v1" => :v1_pred_dst_nt,
@@ -2800,7 +2804,7 @@ function write_live_comparison_report(log_path::String, report_path::String)
     model_specs = _standard_model_columns(df)
     comparison_rows = _same_row_model_indices(df, valid_verified, model_specs)
     served_active = any(last(spec) == :served_pred_dst_nt for spec in model_specs)
-    headline_name = served_active ? "Served industrial V2" : "Operational v2"
+    headline_name = "V2"
     headline_col = served_active ? :served_pred_dst_nt : :v2_pred_dst_nt
     headline_ci05 = served_active ? :served_pred_dst_ci05_nt : :v2_pred_dst_ci05_nt
     headline_ci95 = served_active ? :served_pred_dst_ci95_nt : :v2_pred_dst_ci95_nt
@@ -2827,9 +2831,9 @@ function write_live_comparison_report(log_path::String, report_path::String)
     push!(lines, "## Same-Row Model Comparison")
     push!(lines, "")
     if served_active
-        push!(lines, "Served industrial V2 is the dashboard-served experimental method. Reference v2 is retained as an audit baseline; all rows are identical verified targets.")
+        push!(lines, "V2 is the dashboard forecast. The pre-upgrade baseline is retained only as an audit comparator; all rows are identical verified targets.")
     else
-        push!(lines, "Operational v2 is the upgraded method. This table compares v2, v1, and baselines on identical verified rows.")
+        push!(lines, "V2 is the operational method. This table compares V2, v1, and baselines on identical verified rows.")
     end
     push!(lines, "")
     push!(lines, "| model | n | RMSE nT | MAE nT | bias nT |")
@@ -2842,7 +2846,7 @@ function write_live_comparison_report(log_path::String, report_path::String)
     push!(lines, "")
     push!(lines, "## Verified $headline_name Rows")
     push!(lines, "")
-    ref_header = served_active ? "reference v2 pred | " : ""
+    ref_header = served_active ? "pre-upgrade baseline pred | " : ""
     push!(lines, "| issue UTC | target UTC | lead h | observed | $(lowercase(headline_name)) pred | residual obs-pred | abs error | inside 90% CI | $(ref_header)SINDy v1 pred | persistence | Burton | OBrien |")
     if served_active
         push!(lines, "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |")
@@ -2893,10 +2897,10 @@ function write_live_comparison_report(log_path::String, report_path::String)
         push!(lines, "## Pending Rows")
         push!(lines, "")
         if served_active
-            push!(lines, "| issue UTC | target UTC | model | served industrial V2 pred | reference v2 pred | CI05 | CI95 |")
+            push!(lines, "| issue UTC | target UTC | model | V2 pred | pre-upgrade baseline pred | CI05 | CI95 |")
             push!(lines, "| --- | --- | --- | ---: | ---: | ---: | ---: |")
         else
-            push!(lines, "| issue UTC | target UTC | model | operational v2 pred | CI05 | CI95 |")
+            push!(lines, "| issue UTC | target UTC | model | V2 pred | CI05 | CI95 |")
             push!(lines, "| --- | --- | --- | ---: | ---: | ---: |")
         end
         for row_idx in pending
@@ -2968,7 +2972,7 @@ function write_live_comparison_report(log_path::String, report_path::String)
     push!(lines, "")
     push!(lines, "- A row is correct for point accuracy only by its absolute error against the locked target observation.")
     push!(lines, "- A row is correct for probabilistic coverage only if the observation falls inside the locked interval.")
-    push!(lines, "- The served forecast is the dashboard headline when served columns are present; judge it against reference v2 and baselines on the same verified rows.")
+    push!(lines, "- V2 is the dashboard forecast; judge it against the pre-upgrade audit baseline and physical baselines on the same verified rows.")
     push!(lines, "- Pending rows are not evidence for or against the model.")
 
     dir = dirname(report_path)
@@ -2988,9 +2992,9 @@ function summarize_log(log_path::String)
     df = CSV.read(log_path, DataFrame)
     println("Live forecast log: $log_path")
     served_active = String(:served_pred_dst_nt) in names(df)
-    v2_label = served_active ? "Reference V2" : "Operational v2"
+    v2_label = served_active ? "Pre-upgrade baseline" : "V2"
     model_specs = Pair{String,Symbol}[
-        "Served industrial V2" => :served_pred_dst_nt,
+        "V2" => :served_pred_dst_nt,
         v2_label => :v2_pred_dst_nt,
         "SINDy v1" => :v1_pred_dst_nt,
         "Persistence" => :persistence_dst_nt,

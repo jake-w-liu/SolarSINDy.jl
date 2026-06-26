@@ -1,8 +1,8 @@
 "use strict";
 // Space-Weather Threat Monitor — dashboard logic.
-// Fetches the backend JSON API and renders an honest, calibrated view: the forecast is
-// always shown with its 90% interval, lead time is stated against the physical L1 ceiling,
-// and calibration is reported with full baseline + per-method breakdown (no overclaiming).
+// Fetches the backend JSON API and renders an honest, calibrated view: V2 is
+// shown with its 90% interval, lead time is stated against the physical L1 ceiling,
+// and calibration is reported with relevant comparators.
 
 const WONG = { obs: "#e69f00", fcst: "#0072b2", band: "rgba(0,114,178,0.20)" };
 const TIER_COLORS = ["#2e9e6b", "#c9a227", "#d55e00", "#c0392b", "#8e44ad"];
@@ -83,7 +83,7 @@ function renderThreat(st) {
   } else { wf.classList.add("hidden"); }
 
   $("model-line").textContent =
-    `Served forecast: industrial V2 (${st.model_version || "v2"} reference + L1/regime-aware tail) · `
+    `Forecast: V2 (${st.model_version || "v2"} · L1 look-ahead, regime-aware tail, inertia guard) · `
     + `live interval method: ${(st.calibration||{}).current_interval_source || "—"} · `
     + `status generated ${relTime(st.generated_utc)} · latest solar wind ${relTime(st.latest_solar_wind_utc)}.`;
 }
@@ -122,16 +122,16 @@ function observedSeries(history) {
 }
 
 function forecastTrack(history, cutoffMs) {
-  // The locked v2 forecast that was issued for each PAST target hour, at the shortest
-  // available lead (the most-informed estimate for that hour). One point per timestamp —
-  // so the chart shows, continuously, what we predicted vs what actually happened.
+  // The locked V2 forecast that was issued for each PAST target hour, at the
+  // shortest available lead (the most-informed estimate for that hour).
   const best = new Map();
   for (const r of (history.rows || [])) {
-    if (r.pred_dst_nt == null || !r.target_utc) continue;
+    const y = r.pred_dst_nt;
+    if (y == null || !r.target_utc) continue;
     if (cutoffMs) { const ms = Date.parse(r.target_utc); if (!Number.isNaN(ms) && ms < cutoffMs) continue; }
     const lead = Math.abs(r.horizon_hours == null ? 1e9 : r.horizon_hours);
     const cur = best.get(r.target_utc);
-    if (!cur || lead < cur.lead) best.set(r.target_utc, { lead, pred: r.pred_dst_nt });
+    if (!cur || lead < cur.lead) best.set(r.target_utc, { lead, pred: y });
   }
   const xs = [...best.keys()].sort();
   return { x: xs, y: xs.map(t => best.get(t).pred) };
@@ -147,10 +147,9 @@ async function renderForecast(forecast, history, status) {
   const H = forecast.horizons;
   const anchorT = forecast.anchor_dst_time_utc, anchorY = forecast.anchor_dst_nt;
   const fx = H.map(h => h.target_utc);
-  const pred = H.map(h => h.pred_dst_nt);                       // v2 reference
-  const served = H.map(h => h.served_dst_nt != null ? h.served_dst_nt : h.pred_dst_nt);   // promoted: v2 + industrial tail
-  const lo = H.map(h => h.served_ci05_dst_nt != null ? h.served_ci05_dst_nt : h.ci05_dst_nt);  // served 90% band
-  const hi = H.map(h => h.served_ci95_dst_nt != null ? h.served_ci95_dst_nt : h.ci95_dst_nt);
+  const v2 = H.map(h => h.pred_dst_nt);
+  const lo = H.map(h => h.ci05_dst_nt);
+  const hi = H.map(h => h.ci95_dst_nt);
 
   // observed (past) context, last ~36 h. Merge the verified-row observations with the log's recent latest_dst
   // feed so the line is continuous up to the forecast anchor (verified rows lag by the verification delay).
@@ -163,20 +162,19 @@ async function renderForecast(forecast, history, status) {
   const oi = obs.x.map((t,i)=>i).filter(i => { const ms = Date.parse(obs.x[i]); return !Number.isNaN(ms) && ms >= cutoff; });
   const ox = oi.map(i=>obs.x[i]), oy = oi.map(i=>obs.y[i]);
 
-  // what we FORECAST for those same past hours (locked v2 prediction + its 90% band),
+  // what we forecast for those same past hours,
   // so the chart continuously shows prediction vs realized observation
   const track = forecastTrack(history, cutoff);
 
   // lines connect from the anchor observation
   const px = (anchorT ? [anchorT] : []).concat(fx);
-  const py = (anchorT ? [anchorY] : []).concat(pred);          // v2 reference
-  const svy = (anchorT ? [anchorY] : []).concat(served);       // promoted served forecast
+  const v2y = (anchorT ? [anchorY] : []).concat(v2);
 
-  // sub-hour model trajectory (display only): served forecast integrated at sub-hour steps
+  // sub-hour model trajectory (display only): V2 integrated at sub-hour steps
   const traj = (forecast.subhour_trajectory || []).filter(p => p && p.dst_nt != null && p.target_utc);
   const trajX = traj.map(p => p.target_utc), trajY = traj.map(p => p.dst_nt);
 
-  const ally = [...oy, ...lo, ...hi, ...py, ...svy, ...trajY, ...track.y]
+  const ally = [...oy, ...lo, ...hi, ...v2y, ...trajY, ...track.y]
     .filter(v => v != null && !Number.isNaN(v));
   const ymin = ally.length ? Math.min(...ally) : -50, ymax = ally.length ? Math.max(...ally) : 20;
   const { shapes, anns } = thresholdShapes(ymin, ymax);
@@ -197,44 +195,39 @@ async function renderForecast(forecast, history, status) {
     name:"90% interval", hoverinfo:"skip" });
   // what we forecast for the past hours (dotted), drawn under the observed reality
   if (track.x.length) traces.push({ x: track.x, y: track.y, mode:"lines",
-    name:"Forecast (past, locked)", line:{color:WONG.fcst, width:1.6, dash:"dot"}, opacity:0.9,
-    hovertemplate:"predicted %{y:.0f} nT<extra></extra>" });
+    name:"Past locked V2", line:{color:WONG.fcst, width:1.6, dash:"dot"}, opacity:0.9,
+    hovertemplate:"V2 %{y:.0f} nT<extra></extra>" });
   // observed reality (on top)
   if (ox.length) traces.push({ x: ox, y: oy, mode:"lines+markers", name:"Observed Dst",
     line:{color:WONG.obs, width:2}, marker:{size:5} });
-  // v2 reference, thin dashed.
-  traces.push({ x: px, y: py, mode:"lines", name:"v2 reference",
-    line:{color:"rgba(0,114,178,0.45)", width:1.4, dash:"dash"}, opacity:0.85,
-    hovertemplate:"v2 %{y:.0f} nT<extra></extra>" });
-  // PROMOTED served forecast = v2 + industrial L1/regime-aware tail, drawn at 15-min SUB-HOUR resolution when the trajectory is
-  // available (falls back to the hourly points). The forecast line ITSELF carries the sub-hour resolution, so
-  // zooming the forecast region resolves it into 4 points/hour.
+  // V2 forecast, drawn at 15-min sub-hour resolution when available. The
+  // forecast line itself carries the sub-hour resolution, so zooming the
+  // forecast region resolves it into 4 points/hour.
   const useTraj = trajX.length && anchorT != null && anchorY != null;   // guard null anchor before prepending
   const fcx = useTraj ? [anchorT].concat(trajX) : px;
-  const fcy = useTraj ? [anchorY].concat(trajY) : svy;
+  const fcy = useTraj ? [anchorY].concat(trajY) : v2y;
   // 15-min markers: medium blue, size 5 (matches the other series); distinguished from the hourly markers by
   // shade (medium vs dark) and size (5 vs 7). Zooming separates them, so no per-zoom resize.
-  traces.push({ x: fcx, y: fcy, mode:"lines+markers", name:"Forecast Dst (v2 industrial, 15-min)",
+  traces.push({ x: fcx, y: fcy, mode:"lines+markers", name:"V2 forecast",
     line:{color:WONG.fcst, width:2.2}, marker:{size:5, color:"#3f8fd0", line:{color:"#0b1020", width:0.5}},
-    hovertemplate:"forecast %{y:.1f} nT (15-min)<extra></extra>" });
+    hovertemplate:"V2 %{y:.1f} nT<extra></extra>" });
   // markers at the issued hourly horizons (the scored targets): darker + larger to flag the scored points.
-  traces.push({ x: px, y: svy, mode:"markers", name:"issued horizons",
+  traces.push({ x: px, y: v2y, mode:"markers", name:"issued horizons",
     marker:{size:7, color:"#004e7a", line:{color:"#cfe3f5", width:1}},
     hovertemplate:"issued %{y:.1f} nT<extra></extra>" });
 
   const layout = Object.assign(PLOT_LAYOUT(), { shapes, annotations: anns });
   // Keep the default view fully zoomed out over the plotted Dst window. Plotly
   // autorange spans recent observations, locked past forecasts, and the current
-  // served forecast; users can zoom manually without refresh forcing a narrow
+  // V2 forecast; users can zoom manually without refresh forcing a narrow
   // forecast-window range.
   await Plotly.react("forecast-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
 
   const src = forecast.interval_source || "—";
-  cap.innerHTML = `Solid blue: the served forecast (v2 industrial tail) issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
+  cap.innerHTML = `Solid blue: V2 issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
     + `<span data-reltime="${forecast.latest_solar_wind_utc}">${relTime(forecast.latest_solar_wind_utc)}</span>. L1 look-ahead drives target hours already measured upstream; beyond the L1-known window, Bz/By relax toward quiet with a longer timescale during rapid Dst deepening. `
     + `Shaded: the calibrated 90% interval (${src}); the severity scale uses its lower bound. `
-    + `Dashed blue: the v2 reference — severity uses the deeper of reference and served values so the industrial tail never under-warns. `
-    + `Dotted blue: forecasts already locked for past hours, plotted against the observed Dst (orange) that has since arrived. `
+    + `Dotted blue: V2 forecasts already locked for past hours, plotted against the observed Dst (orange) that has since arrived. `
     + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Genuine new-disturbance lead is the L1 transit (~30–60 min).`;
 }
 
@@ -263,7 +256,7 @@ async function renderHistory(history) {
   layout.margin.t = 10;
   await Plotly.react("history-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
 
-  cap.innerHTML = `Last ${fmt(history.hours,0)} h of forecasts, scored after observation. `
+  cap.innerHTML = `Last ${fmt(history.hours,0)} h of V2 forecasts, scored after observation. `
     + `Green = observation fell inside the 90% interval, red = outside. `
     + `Empirical coverage ${fmt(history.coverage_90,3)} vs nominal 0.90.`;
 }
@@ -273,13 +266,11 @@ function renderCalib(status) {
   const el = $("calib");
   if (!c || c.n_verified == null || c.n_verified === 0) { el.innerHTML = `<p class="caption">Calibration accrues once forecasts are verified.</p>`; return; }
   const bse = (v) => v == null ? "—" : `${fmt(v,2)}`;
-  const servedRmse = c.served_rmse_nt != null ? c.served_rmse_nt : c.rmse_nt;
-  const referenceRmse = c.served_reference_rmse_nt != null ? c.served_reference_rmse_nt : c.rmse_nt;
-  const servedCov = c.served_coverage_90 != null ? c.served_coverage_90 : c.coverage_90;
-  const servedN = c.served_n_verified != null && c.served_n_verified > 0 ? c.served_n_verified : c.n_verified;
+  const v2Rmse = c.v2_rmse_nt != null ? c.v2_rmse_nt : c.rmse_nt;
+  const v2Cov = c.v2_coverage_90 != null ? c.v2_coverage_90 : c.coverage_90;
+  const v2N = c.v2_n_verified != null && c.v2_n_verified > 0 ? c.v2_n_verified : c.n_verified;
   const rows = [
-    ["Served industrial V2", servedRmse, true],
-    ["Reference v2 (same rows)", referenceRmse, false],
+    ["V2", v2Rmse, true],
     ["Persistence", c.rmse_persistence_nt, false],
     ["O'Brien (physics)", c.rmse_obrien_nt, false],
   ];
@@ -288,9 +279,9 @@ function renderCalib(status) {
   const best = vals.length ? Math.min(...vals) : null;
 
   let html = `<div class="big">
-      <div class="stat"><div class="v">${fmt(servedCov,3)}</div><div class="k">served 90% coverage</div></div>
-      <div class="stat"><div class="v">${bse(servedRmse)}</div><div class="k">served RMSE nT</div></div>
-      <div class="stat"><div class="v">${servedN}</div><div class="k">served verified</div></div>
+      <div class="stat"><div class="v">${fmt(v2Cov,3)}</div><div class="k">V2 90% coverage</div></div>
+      <div class="stat"><div class="v">${bse(v2Rmse)}</div><div class="k">V2 RMSE nT</div></div>
+      <div class="stat"><div class="v">${v2N}</div><div class="k">V2 verified</div></div>
     </div>
     <table><thead><tr><th>point forecast</th><th>RMSE [nT]</th></tr></thead><tbody>`;
   for (const [name, v, isV2] of rows) {
@@ -302,7 +293,7 @@ function renderCalib(status) {
   // honest interval-method note
   const liveSrc = c.current_interval_source || "—";
   const nLive = c.n_verified_current_source != null ? c.n_verified_current_source : 0;
-  let note = `The headline score is the served industrial V2 forecast when served rows are available; reference v2 is retained for audit. Live intervals use <strong>${liveSrc}</strong> (online, distribution-free). `;
+  let note = `The headline score is V2. Live intervals use <strong>${liveSrc}</strong> (online, distribution-free). `;
   if (nLive === 0) note += `Its forecasts are still pending verification (0 scored so far); the coverage above is over all `
     + `${c.n_verified} verified forecasts, mostly the prior interval method. `;
   if (c.deepest_obs_dst_nt != null) note += `This live period has been geomagnetically quiet — deepest observed Dst `
