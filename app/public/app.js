@@ -122,8 +122,8 @@ function observedSeries(history) {
 }
 
 function forecastTrack(history, cutoffMs) {
-  // The locked V2 forecast that was issued for each PAST target hour, at the
-  // shortest available lead (the most-informed estimate for that hour).
+  // Previously issued V2 forecasts for target hours that now have observations,
+  // at the shortest available lead (the most-informed estimate for that hour).
   const best = new Map();
   for (const r of (history.rows || [])) {
     const y = r.pred_dst_nt;
@@ -193,9 +193,9 @@ async function renderForecast(forecast, history, status) {
   traces.push({ x: fx, y: hi, mode:"lines", line:{width:0}, hoverinfo:"skip", showlegend:false });
   traces.push({ x: fx, y: lo, mode:"lines", line:{width:0}, fill:"tonexty", fillcolor:WONG.band,
     name:"90% interval", hoverinfo:"skip" });
-  // what we forecast for the past hours (dotted), drawn under the observed reality
+  // previously issued V2 for verified hours (dotted), drawn under the observed reality
   if (track.x.length) traces.push({ x: track.x, y: track.y, mode:"lines",
-    name:"Past locked V2", line:{color:WONG.fcst, width:1.6, dash:"dot"}, opacity:0.9,
+    name:"Verified V2", line:{color:WONG.fcst, width:1.6, dash:"dot"}, opacity:0.9,
     hovertemplate:"V2 %{y:.0f} nT<extra></extra>" });
   // observed reality (on top)
   if (ox.length) traces.push({ x: ox, y: oy, mode:"lines+markers", name:"Observed Dst",
@@ -227,7 +227,7 @@ async function renderForecast(forecast, history, status) {
   cap.innerHTML = `Solid blue: V2 issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
     + `<span data-reltime="${forecast.latest_solar_wind_utc}">${relTime(forecast.latest_solar_wind_utc)}</span>. L1 look-ahead drives target hours already measured upstream; beyond the L1-known window, Bz/By relax toward quiet with a longer timescale during rapid Dst deepening. `
     + `Shaded: the calibrated 90% interval (${src}); the severity scale uses its lower bound. `
-    + `Dotted blue: V2 forecasts already locked for past hours, plotted against the observed Dst (orange) that has since arrived. `
+    + `Dotted blue: previously issued V2 forecasts for hours that now have observed Dst (orange). `
     + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Genuine new-disturbance lead is the L1 transit (~30–60 min).`;
 }
 
