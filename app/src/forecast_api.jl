@@ -162,6 +162,8 @@ function calibration_summary(df::DataFrame)
     v = verified_rows(df)
     n = nrow(v)
     n == 0 && return (n_verified=0, coverage_90=nothing, rmse_nt=nothing,
+                      served_n_verified=0, served_coverage_90=nothing, served_rmse_nt=nothing,
+                      served_reference_rmse_nt=nothing,
                       rmse_persistence_nt=nothing, rmse_obrien_nt=nothing,
                       current_interval_source=live_src, n_verified_current_source=0,
                       deepest_obs_dst_nt=nothing, n_storm_verified=0, by_source=[])
@@ -171,6 +173,26 @@ function calibration_summary(df::DataFrame)
     ci95  = Float64.(_ci95.(eachrow(v)))
     inside = (obs .>= ci05) .& (obs .<= ci95)
     rmse(p) = sqrt(mean((obs .- p).^2))
+    served_mask = falses(n)
+    if all(c -> c in names(v), ("served_pred_dst_nt", "served_pred_dst_ci05_nt", "served_pred_dst_ci95_nt"))
+        served_mask .= [jnum(v[i, :served_pred_dst_nt]) !== nothing &&
+                        jnum(v[i, :served_pred_dst_ci05_nt]) !== nothing &&
+                        jnum(v[i, :served_pred_dst_ci95_nt]) !== nothing for i in 1:n]
+    end
+    served_n = count(served_mask)
+    served_cov = nothing
+    served_rmse = nothing
+    served_ref_rmse = nothing
+    if served_n > 0
+        spred = Float64.(v[served_mask, :served_pred_dst_nt])
+        slo = Float64.(v[served_mask, :served_pred_dst_ci05_nt])
+        shi = Float64.(v[served_mask, :served_pred_dst_ci95_nt])
+        sobs = obs[served_mask]
+        sinside = (sobs .>= slo) .& (sobs .<= shi)
+        served_cov = jnum(round(mean(sinside); digits=3))
+        served_rmse = jnum(round(sqrt(mean((sobs .- spred).^2)); digits=2))
+        served_ref_rmse = jnum(round(sqrt(mean((sobs .- pred[served_mask]).^2)); digits=2))
+    end
     pers = "persistence_dst_nt" in names(v) ? collect(v.persistence_dst_nt) : fill(missing, n)
     obri = "obrien_dst_nt" in names(v) ? collect(v.obrien_dst_nt) : fill(missing, n)
     rmse_opt(col) = begin
@@ -190,6 +212,10 @@ function calibration_summary(df::DataFrame)
     return (n_verified=n,
             coverage_90=jnum(round(mean(inside); digits=3)),
             rmse_nt=jnum(round(rmse(pred); digits=2)),
+            served_n_verified=served_n,
+            served_coverage_90=served_cov,
+            served_rmse_nt=served_rmse,
+            served_reference_rmse_nt=served_ref_rmse,
             rmse_persistence_nt=(x = rmse_opt(pers); x === nothing ? nothing : round(x; digits=2)),
             rmse_obrien_nt=(x = rmse_opt(obri); x === nothing ? nothing : round(x; digits=2)),
             current_interval_source=live_src,
@@ -332,11 +358,12 @@ function build_history(df::DataFrame, hours::Real=72)
     for r in eachrow(v)
         t = r.target_time_utc_dt
         (t === missing || t < cutoff) && continue
-        obs = jnum(r.observation_dst_nt); p = jnum(_pred(r))
-        lo = jnum(_ci05(r)); hi = jnum(_ci95(r))
+        obs = jnum(r.observation_dst_nt); p = jnum(_served(r))
+        lo = jnum(_sc05(r)); hi = jnum(_sc95(r))
         inside = (obs !== nothing && lo !== nothing && hi !== nothing) ? (obs >= lo && obs <= hi) : nothing
         push!(rows, (target_utc=jdt(t), horizon_hours=jnum(r.horizon_hours),
                      observed_dst_nt=obs, pred_dst_nt=p, ci05_dst_nt=lo, ci95_dst_nt=hi,
+                     reference_v2_dst_nt=jnum(_pred(r)),
                      inside_90ci=inside))
     end
     sort!(rows, by=x -> something(x.target_utc, ""))
@@ -350,7 +377,8 @@ function build_history(df::DataFrame, hours::Real=72)
     cal = calibration_summary(df)
     return (rows=rows, hours=hours, n=length(rows),
             coverage_90=win_cov, rmse_nt=win_rmse,
-            coverage_90_all=cal.coverage_90, rmse_nt_all=cal.rmse_nt)
+            coverage_90_all=something(cal.served_coverage_90, cal.coverage_90),
+            rmse_nt_all=something(cal.served_rmse_nt, cal.rmse_nt))
 end
 
 """Active alert summary derived from the current threat status."""

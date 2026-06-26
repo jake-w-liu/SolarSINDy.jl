@@ -241,14 +241,14 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test occursin("Verified rows used: 2", text)
             @test occursin("Invalid verified rows excluded: 0", text)
             @test occursin("Pending rows: 1", text)
-            @test occursin("Same-row v2 comparison rows: 2", text)
+            @test occursin("Same-row forecast comparison rows: 2", text)
             @test occursin("## Same-Row Model Comparison", text)
             @test occursin("| Operational v2 | 2 |", text)
             @test occursin("| SINDy v1 | 2 |", text)
             @test occursin("## Pending Rows", text)
             @test occursin("2026-06-06T10:00:00", text)
             @test occursin("| v2 |", text)
-            @test occursin("## Worst Operational V2 Misses", text)
+            @test occursin("## Worst Operational v2 Misses", text)
             @test occursin("## Operational V2 Audit", text)
             @test !occursin("| Operational v2 | 3 |", text)
             @test !occursin("| Selected |", text)
@@ -781,8 +781,50 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test result.rows == [1, 2]
             @test nrow(df) == 2
             @test all(!ismissing, df.observation_dst_nt)
-            @test occursin("Same-row v2 comparison rows: 2", text)
+            @test occursin("Same-row forecast comparison rows: 2", text)
             @test occursin("Operational v2 is the upgraded method", text)
+        end
+    end
+
+    @testset "C0-3: live report headlines served industrial V2 when available" begin
+        mktempdir() do dir
+            log_path = joinpath(dir, "served_log.csv")
+            report_path = joinpath(dir, "served_report.md")
+            df = DataFrame(
+                issue_time_utc=["2026-06-06T09:00:00", "2026-06-06T10:00:00"],
+                latest_dst_time_utc=["2026-06-06T09:00:00", "2026-06-06T10:00:00"],
+                target_time_utc=["2026-06-06T11:00:00", "2026-06-06T12:00:00"],
+                model_version=["v2", "v2"],
+                wall_clock_lead_hours=[2.0, 2.0],
+                horizon_hours=[2.0, 2.0],
+                pred_dst_nt=[-40.0, -45.0],
+                pred_dst_ci05_nt=[-50.0, -55.0],
+                pred_dst_ci95_nt=[-30.0, -35.0],
+                observation_dst_nt=[-48.0, -49.0],
+                residual_dst_nt=[-8.0, -4.0],
+                observed_in_90ci=[true, true],
+                v1_pred_dst_nt=[-38.0, -43.0],
+                v2_pred_dst_nt=[-40.0, -45.0],
+                v2_pred_dst_ci05_nt=[-50.0, -55.0],
+                v2_pred_dst_ci95_nt=[-30.0, -35.0],
+                served_pred_dst_nt=[-47.0, -50.0],
+                served_pred_dst_ci05_nt=[-57.0, -60.0],
+                served_pred_dst_ci95_nt=[-37.0, -40.0],
+                served_residual_dst_nt=[-1.0, 1.0],
+                served_observed_in_90ci=[true, true],
+                v2_selected_component=["v2", "v2"],
+                persistence_dst_nt=[-39.0, -44.0],
+                burton_dst_nt=[-41.0, -44.0],
+                burton_full_dst_nt=[-41.0, -44.0],
+                obrien_dst_nt=[-46.0, -48.0],
+            )
+            CSV.write(log_path, df)
+            write_live_comparison_report(log_path, report_path)
+            text = read(report_path, String)
+            @test occursin("Served industrial V2 is the dashboard-served experimental method", text)
+            @test occursin("Served industrial V2 90% interval coverage", text)
+            @test occursin("| Served industrial V2 | 2 |", text)
+            @test occursin("reference v2 pred", text)
         end
     end
 

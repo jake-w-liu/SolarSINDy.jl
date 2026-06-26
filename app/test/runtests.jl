@@ -94,6 +94,39 @@ end
         @test _swpc_row_field(idx, ["2026-06-26T00:00:00Z", "460.5"], "bz_gsm") === nothing
     end
 
+    @testset "forecast API scores served industrial V2 when present" begin
+        issue1 = now(UTC) - Hour(3)
+        issue2 = now(UTC) - Hour(2)
+        df = DataFrame(
+            issue_time_utc_dt=[issue1, issue2],
+            latest_solar_wind_utc_dt=[issue1, issue2],
+            latest_dst_time_utc_dt=[issue1 - Hour(1), issue2 - Hour(1)],
+            target_time_utc_dt=[issue1 + Hour(1), issue2 + Hour(1)],
+            horizon_hours=[1.0, 1.0],
+            latest_dst_nt=[-45.0, -50.0],
+            observation_dst_nt=[-52.0, -60.0],
+            v2_pred_dst_nt=[-40.0, -45.0],
+            v2_pred_dst_ci05_nt=[-50.0, -55.0],
+            v2_pred_dst_ci95_nt=[-30.0, -35.0],
+            served_pred_dst_nt=[-51.0, -59.0],
+            served_pred_dst_ci05_nt=[-61.0, -69.0],
+            served_pred_dst_ci95_nt=[-41.0, -49.0],
+            persistence_dst_nt=[-45.0, -50.0],
+            obrien_dst_nt=[-50.0, -58.0],
+            interval_source=["aci", "aci"],
+            model_version=["v2", "v2"],
+        )
+        cal = calibration_summary(df)
+        @test cal.served_n_verified == 2
+        @test cal.served_rmse_nt < cal.rmse_nt
+        @test cal.served_reference_rmse_nt == cal.rmse_nt
+        @test cal.served_coverage_90 == 1.0
+        hist = build_history(df, 24)
+        @test hist.rmse_nt == cal.served_rmse_nt
+        @test hist.rows[1].pred_dst_nt == df.served_pred_dst_nt[1]
+        @test hist.rows[1].reference_v2_dst_nt == df.v2_pred_dst_nt[1]
+    end
+
     @testset "static file serving is traversal-guarded" begin
         ok = serve_static("/index.html")
         @test ok.status == 200

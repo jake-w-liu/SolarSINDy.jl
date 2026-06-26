@@ -2572,15 +2572,29 @@ function _coverage_fraction(df::DataFrame, rows::Vector{Int})
     return mean(flags)
 end
 
+function _interval_coverage_fraction(df::DataFrame, rows::Vector{Int}, ci05_col::Symbol, ci95_col::Symbol)
+    flags = Bool[]
+    for i in rows
+        value = _interval_contains(df, i, ci05_col, ci95_col)
+        ismissing(value) || push!(flags, Bool(value))
+    end
+    isempty(flags) && return missing
+    return mean(flags)
+end
+
 function _standard_model_columns(df::DataFrame)
-    specs = Pair{String,Symbol}[
+    specs = Pair{String,Symbol}[]
+    if String(:served_pred_dst_nt) in names(df)
+        push!(specs, "Served industrial V2" => :served_pred_dst_nt)
+    end
+    append!(specs, Pair{String,Symbol}[
         "Operational v2" => :v2_pred_dst_nt,
         "SINDy v1" => :v1_pred_dst_nt,
         "Persistence" => :persistence_dst_nt,
         "Burton" => :burton_dst_nt,
         "BurtonFull" => :burton_full_dst_nt,
         "OBrien" => :obrien_dst_nt,
-    ]
+    ])
     return [spec for spec in specs if String(last(spec)) in names(df)]
 end
 
@@ -2634,8 +2648,12 @@ function _interval_contains(df::DataFrame, row_idx::Int, ci05_col::Symbol, ci95_
 end
 
 function _v2_residual(df::DataFrame, row_idx::Int)
+    return _model_residual(df, row_idx, :v2_pred_dst_nt)
+end
+
+function _model_residual(df::DataFrame, row_idx::Int, pred_col::Symbol)
     observed = _optional_float(df, row_idx, :observation_dst_nt)
-    pred = _prediction_value(df, row_idx, :v2_pred_dst_nt)
+    pred = _prediction_value(df, row_idx, pred_col)
     if ismissing(observed) || ismissing(pred)
         return missing
     end
@@ -2651,7 +2669,14 @@ function write_live_comparison_report(log_path::String, report_path::String)
     pending = _pending_indices(df)
     model_specs = _standard_model_columns(df)
     comparison_rows = _same_row_model_indices(df, valid_verified, model_specs)
-    coverage = _coverage_fraction(df, comparison_rows)
+    served_active = any(last(spec) == :served_pred_dst_nt for spec in model_specs)
+    headline_name = served_active ? "Served industrial V2" : "Operational v2"
+    headline_col = served_active ? :served_pred_dst_nt : :v2_pred_dst_nt
+    headline_ci05 = served_active ? :served_pred_dst_ci05_nt : :v2_pred_dst_ci05_nt
+    headline_ci95 = served_active ? :served_pred_dst_ci95_nt : :v2_pred_dst_ci95_nt
+    coverage = served_active ?
+        _interval_coverage_fraction(df, comparison_rows, headline_ci05, headline_ci95) :
+        _coverage_fraction(df, comparison_rows)
 
     lines = String[]
     push!(lines, "# Locked Live Forecast Comparison Report")
@@ -2663,15 +2688,19 @@ function write_live_comparison_report(log_path::String, report_path::String)
     push!(lines, "Verified rows used: $(length(valid_verified))")
     push!(lines, "Invalid verified rows excluded: $(length(invalid_verified))")
     push!(lines, "Pending rows: $(length(pending))")
-    push!(lines, "Same-row v2 comparison rows: $(length(comparison_rows))")
+    push!(lines, "Same-row forecast comparison rows: $(length(comparison_rows))")
     if !ismissing(coverage)
-        push!(lines, "Operational v2 90% interval coverage: $(_fmt3(coverage))")
+        push!(lines, "$headline_name 90% interval coverage: $(_fmt3(coverage))")
     end
 
     push!(lines, "")
     push!(lines, "## Same-Row Model Comparison")
     push!(lines, "")
-    push!(lines, "Operational v2 is the upgraded method. This table compares v2, v1, and baselines on the identical verified rows.")
+    if served_active
+        push!(lines, "Served industrial V2 is the dashboard-served experimental method. Reference v2 is retained as an audit baseline; all rows are identical verified targets.")
+    else
+        push!(lines, "Operational v2 is the upgraded method. This table compares v2, v1, and baselines on identical verified rows.")
+    end
     push!(lines, "")
     push!(lines, "| model | n | RMSE nT | MAE nT | bias nT |")
     push!(lines, "| --- | ---: | ---: | ---: | ---: |")
@@ -2681,25 +2710,32 @@ function write_live_comparison_report(log_path::String, report_path::String)
     end
 
     push!(lines, "")
-    push!(lines, "## Verified Operational V2 Rows")
+    push!(lines, "## Verified $headline_name Rows")
     push!(lines, "")
-    push!(lines, "| issue UTC | target UTC | lead h | observed | operational v2 pred | v2 residual obs-pred | v2 abs error | v2 inside 90% CI | SINDy v1 pred | persistence | Burton | OBrien |")
-    push!(lines, "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |")
+    ref_header = served_active ? "reference v2 pred | " : ""
+    push!(lines, "| issue UTC | target UTC | lead h | observed | $(lowercase(headline_name)) pred | residual obs-pred | abs error | inside 90% CI | $(ref_header)SINDy v1 pred | persistence | Burton | OBrien |")
+    if served_active
+        push!(lines, "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |")
+    else
+        push!(lines, "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |")
+    end
     for row_idx in comparison_rows
         observed = _optional_float(df, row_idx, :observation_dst_nt)
-        pred = _prediction_value(df, row_idx, :v2_pred_dst_nt)
-        residual = _v2_residual(df, row_idx)
+        pred = _prediction_value(df, row_idx, headline_col)
+        residual = _model_residual(df, row_idx, headline_col)
         abs_error = ismissing(residual) ? missing : abs(residual)
         lead = _optional_float(df, row_idx, :wall_clock_lead_hours)
         if ismissing(lead)
             lead = _optional_float(df, row_idx, :horizon_hours)
         end
-        in_ci = _interval_contains(df, row_idx, :v2_pred_dst_ci05_nt, :v2_pred_dst_ci95_nt)
+        in_ci = _interval_contains(df, row_idx, headline_ci05, headline_ci95)
+        ref_cell = served_active ? "$(_fmt2(_prediction_value(df, row_idx, :v2_pred_dst_nt))) | " : ""
         push!(lines,
             "| $(_fmt_text(df[row_idx, :issue_time_utc])) | " *
             "$(_fmt_text(df[row_idx, :target_time_utc])) | " *
             "$(_fmt2(lead)) | $(_fmt2(observed)) | $(_fmt2(pred)) | " *
             "$(_fmt2(residual)) | $(_fmt2(abs_error)) | $(_fmt_bool(in_ci)) | " *
+            ref_cell *
             "$(_fmt2(_prediction_value(df, row_idx, :v1_pred_dst_nt))) | " *
             "$(_fmt2(_optional_float(df, row_idx, :persistence_dst_nt))) | " *
             "$(_fmt2(_optional_float(df, row_idx, :burton_dst_nt))) | " *
@@ -2726,38 +2762,53 @@ function write_live_comparison_report(log_path::String, report_path::String)
         push!(lines, "")
         push!(lines, "## Pending Rows")
         push!(lines, "")
-        push!(lines, "| issue UTC | target UTC | model | operational v2 pred | CI05 | CI95 |")
-        push!(lines, "| --- | --- | --- | ---: | ---: | ---: |")
+        if served_active
+            push!(lines, "| issue UTC | target UTC | model | served industrial V2 pred | reference v2 pred | CI05 | CI95 |")
+            push!(lines, "| --- | --- | --- | ---: | ---: | ---: | ---: |")
+        else
+            push!(lines, "| issue UTC | target UTC | model | operational v2 pred | CI05 | CI95 |")
+            push!(lines, "| --- | --- | --- | ---: | ---: | ---: |")
+        end
         for row_idx in pending
             model_version = _row_model_version(df, row_idx)
-            pred = _prediction_value(df, row_idx, :v2_pred_dst_nt)
+            pred = _prediction_value(df, row_idx, headline_col)
             ismissing(pred) && (pred = _optional_float(df, row_idx, :pred_dst_nt))
-            ci05 = _optional_float(df, row_idx, :v2_pred_dst_ci05_nt)
+            ci05 = _optional_float(df, row_idx, headline_ci05)
             ismissing(ci05) && (ci05 = _optional_float(df, row_idx, :pred_dst_ci05_nt))
-            ci95 = _optional_float(df, row_idx, :v2_pred_dst_ci95_nt)
+            ci95 = _optional_float(df, row_idx, headline_ci95)
             ismissing(ci95) && (ci95 = _optional_float(df, row_idx, :pred_dst_ci95_nt))
-            push!(lines,
-                "| $(_fmt_text(df[row_idx, :issue_time_utc])) | " *
-                "$(_fmt_text(df[row_idx, :target_time_utc])) | " *
-                "$(_fmt_text(model_version)) | " *
-                "$(_fmt2(pred)) | $(_fmt2(ci05)) | $(_fmt2(ci95)) |"
-            )
+            ref_pred = _prediction_value(df, row_idx, :v2_pred_dst_nt)
+            if served_active
+                push!(lines,
+                    "| $(_fmt_text(df[row_idx, :issue_time_utc])) | " *
+                    "$(_fmt_text(df[row_idx, :target_time_utc])) | " *
+                    "$(_fmt_text(model_version)) | " *
+                    "$(_fmt2(pred)) | $(_fmt2(ref_pred)) | $(_fmt2(ci05)) | $(_fmt2(ci95)) |"
+                )
+            else
+                push!(lines,
+                    "| $(_fmt_text(df[row_idx, :issue_time_utc])) | " *
+                    "$(_fmt_text(df[row_idx, :target_time_utc])) | " *
+                    "$(_fmt_text(model_version)) | " *
+                    "$(_fmt2(pred)) | $(_fmt2(ci05)) | $(_fmt2(ci95)) |"
+                )
+            end
         end
     end
 
     if !isempty(comparison_rows)
-        worst = sort(comparison_rows; by=i -> abs(_v2_residual(df, i)), rev=true)
+        worst = sort(comparison_rows; by=i -> abs(_model_residual(df, i, headline_col)), rev=true)
         push!(lines, "")
-        push!(lines, "## Worst Operational V2 Misses")
+        push!(lines, "## Worst $headline_name Misses")
         push!(lines, "")
-        push!(lines, "| target UTC | observed | operational v2 pred | residual obs-pred | abs error |")
+        push!(lines, "| target UTC | observed | $(lowercase(headline_name)) pred | residual obs-pred | abs error |")
         push!(lines, "| --- | ---: | ---: | ---: | ---: |")
         for row_idx in worst[1:min(10, length(worst))]
-            residual = _v2_residual(df, row_idx)
+            residual = _model_residual(df, row_idx, headline_col)
             push!(lines,
                 "| $(_fmt_text(df[row_idx, :target_time_utc])) | " *
                 "$(_fmt2(_optional_float(df, row_idx, :observation_dst_nt))) | " *
-                "$(_fmt2(_prediction_value(df, row_idx, :v2_pred_dst_nt))) | " *
+                "$(_fmt2(_prediction_value(df, row_idx, headline_col))) | " *
                 "$(_fmt2(residual)) | $(_fmt2(abs(residual))) |"
             )
         end
@@ -2787,7 +2838,7 @@ function write_live_comparison_report(log_path::String, report_path::String)
     push!(lines, "")
     push!(lines, "- A row is correct for point accuracy only by its absolute error against the locked target observation.")
     push!(lines, "- A row is correct for probabilistic coverage only if the observation falls inside the locked interval.")
-    push!(lines, "- Operational v2 is the upgraded method; judge it against v1 and baselines on the same verified rows.")
+    push!(lines, "- The served forecast is the dashboard headline when served columns are present; judge it against reference v2 and baselines on the same verified rows.")
     push!(lines, "- Pending rows are not evidence for or against the model.")
 
     dir = dirname(report_path)
@@ -2806,14 +2857,17 @@ function summarize_log(log_path::String)
     isfile(log_path) || error("No forecast log exists at $log_path")
     df = CSV.read(log_path, DataFrame)
     println("Live forecast log: $log_path")
-    for (name, col) in (
-        ("Operational v2", :v2_pred_dst_nt),
-        ("SINDy v1", :v1_pred_dst_nt),
-        ("Persistence", :persistence_dst_nt),
-        ("Burton", :burton_dst_nt),
-        ("BurtonFull", :burton_full_dst_nt),
-        ("OBrienMcP", :obrien_dst_nt),
-    )
+    model_specs = Pair{String,Symbol}[
+        "Served industrial V2" => :served_pred_dst_nt,
+        "Operational v2" => :v2_pred_dst_nt,
+        "SINDy v1" => :v1_pred_dst_nt,
+        "Persistence" => :persistence_dst_nt,
+        "Burton" => :burton_dst_nt,
+        "BurtonFull" => :burton_full_dst_nt,
+        "OBrienMcP" => :obrien_dst_nt,
+    ]
+    for (name, col) in model_specs
+        String(col) in names(df) || continue
         preds, obs = _metric_rows(df, col)
         if isempty(preds) && col == :v1_pred_dst_nt
             preds, obs = _metric_rows(df, :pred_dst_nt)

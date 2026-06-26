@@ -18,39 +18,16 @@
 # and the state self-derivative ∂(Θξ)/∂Dst* is obtained by a central difference
 # of the library evaluation (robust to the term set, no per-term hand Jacobian).
 #
-# OPERATIONAL STATUS: the EKF predict/update math is verified. A first check
-# (validation/assimilation_forecast_value.jl) found adaptation NOT helping, but it was confounded
-# (minimal 3-term library + coefficients least-squares-fit on the test storm itself, both biasing
-# toward "no help"). The FAIR test (validation/assimilation_fair_test.jl) removes both confounds —
-# full operational library + the DEPLOYED discovery coefficients (fit on train-split cycles 20-23,
-# hence out-of-sample for the cycle-25 storms tested) — and REVERSES the conclusion: online adaptation
-# of the decay coefficient robustly improves the one-step Dst* forecast on held-out storms (mean RMSE
-# 17.60 -> 15.98 nT, and EVERY process-noise q in the sweep beats fixed, so it is not cherry-picked).
-# So online adaptation has real value on the raw v1 one-step forecast. The remaining question — does it
-# add value ON TOP of the v2 residual-correction layer (which already adapts online)? — is now RESOLVED
-# by the powered, multi-step test (validation/assimilation_redundancy_power.jl: n=31 cycle-25 test storms,
-# a BROAD leakage-free v2 calibration, horizons 1/2/3/6 h). Conclusion: do NOT deploy the unconstrained EKF
-# for the operational (multi-step) forecast.
-#   * 1-step: REDUNDANT. On top of v2 the EKF adds -0.01 ± 0.27 nT over 31 storms — the v2 correction already
-#     captures the 1-step drift. (The earlier n=6 "+1.22" was an artifact of a storms-only noisy calibration.)
-#   * multi-step: HARMFUL, worse with horizon, UNANIMOUS by 6 h (B-D = -3.2/-7.5/-35.6 nT at 2/3/6 h; 0/31
-#     storms favour the EKF at 6 h; the May 2024 flagship blows up by ~-394 nT at 6 h).
-#   VERIFIED cause: the online filter drives the decay coefficient across [-0.51, +0.54] (the fixed,
-#   stable value is -0.048); a POSITIVE decay coefficient is a dynamically unstable ODE, so the free-running
-#   multi-step rollout diverges. Filter-optimal coefficients (re-anchored by each observation, which hides
-#   the instability) are NOT simulation-stable. The operational path is multi-step, so the EKF is
-#   redundant-or-harmful there.
-# Status: the UNCONSTRAINED filter is not deployable (above). The CONSTRAINED variant — supply
-# `coeff_bounds` so the adapted decay coefficient is held <= the discovered physical value -0.048 (free to
-# STRENGTHEN, never weaken) — IS validated (validation/assimilation_redundancy_constrained.jl): the box
-# binds (adapted decay range [-0.559, -0.048] vs the unconstrained [-0.51, +0.54]), which REMOVES the
-# multi-step divergence entirely (6 h B-D -35.56 -> +0.46; flagship -394 -> +7.6 nT) and adds a SIGNIFICANT
-# ~1 nT 1-step improvement on top of v2 (+0.99 ± 0.33 over 31 storms, 23/8). The multi-step result is NEUTRAL
-# AT THIS CAP specifically: a cap sweep shows weaker caps reintroduce significant multi-step harm (6 h B-D
-# -2.67 ± 0.42 at -0.001, -1.29 ± 0.39 at -0.02), so the constraint must be exactly coeff_bounds=[(-Inf,-0.048)]
-# (the discovered physical decay) — a weaker cap is NOT safe. The 1 h gain is robust across caps. So the
-# constrained EKF is deploy-worthy at this cap, its operational value concentrated at the 1 h horizon. Wiring
-# it into the live path is the recommended step; until wired, the operational forecast uses fixed v1 + v2.
+# OPERATIONAL STATUS: retired from the live forecast path. The EKF predict/update math
+# remains useful research infrastructure, but both deployment candidates failed the later
+# promotion gate recorded in live_forecasts/EKF_V3_DECISION.md:
+#   * decay-only constrained EKF: no lead/regime beat the stronger of {v2, persistence}
+#     with a positive 95% CI on the causal G4/G5 storm replay;
+#   * injection-adaptive EKF: worse than decay-only and robustly not promotable across
+#     the tested injection-walk variance sweep.
+# Keep this module for reproducible negative evidence and future assimilation experiments,
+# but do not wire EKF output into dashboard, daemon, alerting, or served forecast columns
+# without a new promotion report that passes the industrial gate.
 
 """
     AssimilationFilter

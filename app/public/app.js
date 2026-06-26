@@ -83,7 +83,8 @@ function renderThreat(st) {
   } else { wf.classList.add("hidden"); }
 
   $("model-line").textContent =
-    `Model ${st.model_version || "v2"} · live interval method: ${(st.calibration||{}).current_interval_source || "—"} · `
+    `Served forecast: industrial V2 (${st.model_version || "v2"} reference + L1/regime-aware tail) · `
+    + `live interval method: ${(st.calibration||{}).current_interval_source || "—"} · `
     + `status generated ${relTime(st.generated_utc)} · latest solar wind ${relTime(st.latest_solar_wind_utc)}.`;
 }
 
@@ -272,19 +273,24 @@ function renderCalib(status) {
   const el = $("calib");
   if (!c || c.n_verified == null || c.n_verified === 0) { el.innerHTML = `<p class="caption">Calibration accrues once forecasts are verified.</p>`; return; }
   const bse = (v) => v == null ? "—" : `${fmt(v,2)}`;
+  const servedRmse = c.served_rmse_nt != null ? c.served_rmse_nt : c.rmse_nt;
+  const referenceRmse = c.served_reference_rmse_nt != null ? c.served_reference_rmse_nt : c.rmse_nt;
+  const servedCov = c.served_coverage_90 != null ? c.served_coverage_90 : c.coverage_90;
+  const servedN = c.served_n_verified != null && c.served_n_verified > 0 ? c.served_n_verified : c.n_verified;
   const rows = [
-    ["Operational v2", c.rmse_nt, true],
+    ["Served industrial V2", servedRmse, true],
+    ["Reference v2 (same rows)", referenceRmse, false],
     ["Persistence", c.rmse_persistence_nt, false],
     ["O'Brien (physics)", c.rmse_obrien_nt, false],
   ];
-  // honest highlight: best (lowest) RMSE among the three
+  // honest highlight: best (lowest) RMSE among the displayed point forecasts
   const vals = rows.map(r => r[1]).filter(v => v != null);
   const best = vals.length ? Math.min(...vals) : null;
 
   let html = `<div class="big">
-      <div class="stat"><div class="v">${fmt(c.coverage_90,3)}</div><div class="k">90% coverage</div></div>
-      <div class="stat"><div class="v">${bse(c.rmse_nt)}</div><div class="k">v2 RMSE nT</div></div>
-      <div class="stat"><div class="v">${c.n_verified}</div><div class="k">verified</div></div>
+      <div class="stat"><div class="v">${fmt(servedCov,3)}</div><div class="k">served 90% coverage</div></div>
+      <div class="stat"><div class="v">${bse(servedRmse)}</div><div class="k">served RMSE nT</div></div>
+      <div class="stat"><div class="v">${servedN}</div><div class="k">served verified</div></div>
     </div>
     <table><thead><tr><th>point forecast</th><th>RMSE [nT]</th></tr></thead><tbody>`;
   for (const [name, v, isV2] of rows) {
@@ -296,7 +302,7 @@ function renderCalib(status) {
   // honest interval-method note
   const liveSrc = c.current_interval_source || "—";
   const nLive = c.n_verified_current_source != null ? c.n_verified_current_source : 0;
-  let note = `Live intervals use <strong>${liveSrc}</strong> (online, distribution-free). `;
+  let note = `The headline score is the served industrial V2 forecast when served rows are available; reference v2 is retained for audit. Live intervals use <strong>${liveSrc}</strong> (online, distribution-free). `;
   if (nLive === 0) note += `Its forecasts are still pending verification (0 scored so far); the coverage above is over all `
     + `${c.n_verified} verified forecasts, mostly the prior interval method. `;
   if (c.deepest_obs_dst_nt != null) note += `This live period has been geomagnetically quiet — deepest observed Dst `
