@@ -222,16 +222,10 @@ async function renderForecast(forecast, history, status) {
     hovertemplate:"issued %{y:.1f} nT<extra></extra>" });
 
   const layout = Object.assign(PLOT_LAYOUT(), { shapes, annotations: anns });
-  // Default the view to the forecast window (recent observed + the forecast/sub-hour), so the 15-min trace is
-  // front-and-centre instead of a thin slice inside 36 h of history. Autoscale (home button) restores full range.
-  const fEnd = trajX.length ? trajX[trajX.length-1] : (fx.length ? fx[fx.length-1] : null);
-  const vStart = anchorT || (fx.length ? fx[0] : null);
-  const vMs = vStart ? Date.parse(vStart) : NaN, eMs = fEnd ? Date.parse(fEnd) : NaN;
-  if (!Number.isNaN(vMs) && !Number.isNaN(eMs)) {     // guard unparseable timestamps -> skip range, keep autorange
-    layout.xaxis = Object.assign({}, layout.xaxis, {
-      range: [new Date(vMs - 6*3600*1000).toISOString(), new Date(eMs + 30*60*1000).toISOString()],
-      autorange: false });
-  }
+  // Keep the default view fully zoomed out over the plotted Dst window. Plotly
+  // autorange spans recent observations, locked past forecasts, and the current
+  // served forecast; users can zoom manually without refresh forcing a narrow
+  // forecast-window range.
   await Plotly.react("forecast-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
 
   const src = forecast.interval_source || "—";

@@ -65,8 +65,10 @@ The integrity rules of this project carry into the UI:
 - **No bare point forecasts.** Every forecast is shown with its calibrated 90% interval, and the
   threat "watch" flag is driven by the *worst credible* value within that band, not just the point.
 - **Lead time is stated against physics.** Forecast horizons beyond the last complete hour assume
-  solar-wind persistence; the genuine upstream lead for a *new* disturbance is the L1 advection
-  time (~30–60 min). Multi-day confident-severity lead needs CME models not yet in this system.
+  measured L1 look-ahead while the target-hour wind is already upstream-observed, then
+  regime-aware Bz/By relaxation beyond the L1-known window. The genuine upstream lead
+  for a *new* disturbance is the L1 advection time (~30–60 min). Multi-day
+  confident-severity lead needs CME models not yet in this system.
 - **Calibration is computed from the log, not asserted.** Coverage and RMSE are recomputed from the
   verified rows every load, with the full baseline set (persistence, O'Brien) and a per-method
   breakdown. The live interval method (adaptive conformal) is reported separately from historical

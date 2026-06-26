@@ -12,8 +12,9 @@ The package is organized as two layers:
    time series, alongside classical physical baselines.
 2. **Operational forecasting (v2).** A causal post-processing layer corrects the v1 point
    forecast, attaches **distribution-free conformal predictive intervals** with
-   finite-sample coverage, and selects a guarded fallback component — producing a
-   calibrated operational Dst forecast suitable for live use.
+   finite-sample coverage, applies the industrial served tail (measured L1 look-ahead,
+   then regime-aware Bz/By relaxation), and selects a guarded fallback component —
+   producing a calibrated operational Dst forecast suitable for live use.
 
 ## Capabilities
 
@@ -32,6 +33,9 @@ The package is organized as two layers:
 - stratified split-conformal predictive intervals with finite-sample coverage, stratified
   by lead time × geomagnetic activity regime
 - adaptive (online) conformal updating under distribution shift
+- industrial served tail: measured L1 look-ahead while target-hour wind is already
+  upstream-observed, then regime-aware Bz/By relaxation that lengthens during rapid
+  Dst deepening
 - guarded component selection over corrected SINDy, uncorrected SINDy v1, persistence,
   Burton, Burton-full, and O'Brien–McPherron, deployed only after chronological validation
 - online assimilation of the ring-current state
@@ -73,6 +77,7 @@ discovered physics auditable while letting the operational forecast adapt:
 ```
 issue-time drivers ──▶ v1 SINDy point forecast ──▶ v2 correction (causal, β·z)
                                                  └─▶ conformal interval (stratified)
+                                                 └─▶ served tail (L1 look-ahead + regime-aware relaxation)
                                                  └─▶ guarded component selection
                                                           │
                                                           ▼
