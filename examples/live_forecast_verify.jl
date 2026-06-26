@@ -1057,6 +1057,8 @@ function _select_model_prediction(model::Symbol, calibration,
 end
 
 function _replay_anchor_hours(plasma::DataFrame, mag::DataFrame, dst_times, replay_hours::Int)
+    (isempty(plasma) || isempty(mag) || isempty(dst_times)) &&
+        error("No finite OMNI/Dst rows inside replay window")
     dst_dt = DateTime[_parse_dt(t) for t in dst_times]
     latest_complete_sw = _floor_hour(min(maximum(plasma.time_tag), maximum(mag.time_tag)))
     first_complete_sw = _floor_hour(max(minimum(plasma.time_tag), minimum(mag.time_tag))) + Hour(1)

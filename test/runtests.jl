@@ -272,6 +272,7 @@ using DataFrames
     include("test_data_pipeline_cleaning.jl")
     include("test_realtime_monitor.jl")
     include("test_v2_broad_replay.jl")
+    include("test_v2_gscale_replay.jl")
 
     # Bundled operational dashboard (app/): golden-vector forecaster<->export contract,
     # traversal guard, physical regimes. Network-free (local models + mocks).
