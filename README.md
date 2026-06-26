@@ -49,9 +49,10 @@ The package is organized as two layers:
 
 ## V2 forecast status
 
-The dashboard and live monitor show a single V2 forecast. Historical log columns named
-`served_*` carry that upgraded V2 product; the earlier V2 correction remains only as a
-pre-upgrade audit baseline for same-row comparisons.
+The dashboard and live monitor show a single V2 forecast. The live log keeps
+historical schema compatibility internally, but the dashboard, API, reports, and
+paper present the upgraded product simply as V2. The earlier V2 correction remains
+only as a pre-upgrade audit baseline for same-row comparisons.
 
 EKF-on-SINDy is retained as research infrastructure only. Both tested deployment paths
 (decay-only and injection-adaptive EKF) failed promotion gates, so they are not exposed
@@ -90,7 +91,7 @@ discovered physics auditable while letting the operational forecast adapt:
 ```
 issue-time drivers ──▶ v1 SINDy point forecast ──▶ v2 correction (causal, β·z)
                                                  └─▶ conformal interval (stratified)
-                                                 └─▶ served tail (L1 look-ahead + regime-aware relaxation)
+                                                 └─▶ V2 tail (L1 look-ahead + regime-aware relaxation)
                                                  └─▶ guarded component selection
                                                           │
                                                           ▼

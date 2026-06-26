@@ -150,11 +150,10 @@ forecast; the internal `v2_selected_component` field is audit metadata, not a
 separate headline model.
 
 The logged pre-upgrade baseline remains available for audit and model-comparison
-scores. The product V2 columns (`served_*` and `sub_hourly_*`, retained under
-their historical names for schema compatibility) add the multi-hour tail:
-target hours already measured at L1 use the upstream look-ahead, and later
-hours relax Bz/By toward quiet with a longer timescale during rapid Dst
-deepening. The dashboard displays this upgraded V2 as the single forecast.
+scores. The V2 product fields add the multi-hour tail: target hours already
+measured at L1 use the upstream look-ahead, and later hours relax Bz/By toward
+quiet with a longer timescale during rapid Dst deepening. The dashboard displays
+this upgraded V2 as the single forecast.
 
 Fit the calibration from a prior replay or locked live log:
 
