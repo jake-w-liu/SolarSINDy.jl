@@ -544,17 +544,43 @@ function _subhour_trajectory(coef_csv, ens_csv, latest_dst_time::DateTime, ancho
     return pts
 end
 
-function _append_forecast!(log_path::String, row::DataFrame)
+function _append_forecast!(log_path::String, row::DataFrame; return_status::Bool=false)
     dir = dirname(log_path)
     !isempty(dir) && mkpath(dir)
     if isfile(log_path)
         df = CSV.read(log_path, DataFrame)
+        dup_idx = _pending_duplicate_forecast_row(df, row)
+        if dup_idx !== nothing
+            println(
+                "Skipped duplicate pending forecast row $dup_idx: " *
+                "latest_dst=$(row[1, :latest_dst_time_utc]) target=$(row[1, :target_time_utc]) " *
+                "model=$(row[1, :model_version])"
+            )
+            return return_status ? (; row_idx=dup_idx, appended=false) : dup_idx
+        end
         df = vcat(df, row; cols=:union)
     else
         df = row
     end
     _atomic_csv(log_path, df)
-    return nrow(df)
+    return return_status ? (; row_idx=nrow(df), appended=true) : nrow(df)
+end
+
+function _pending_duplicate_forecast_row(df::DataFrame, row::DataFrame)
+    required = (:latest_dst_time_utc, :target_time_utc, :model_version, :observation_dst_nt)
+    all(String(c) in names(df) for c in required) || return nothing
+    all(String(c) in names(row) for c in required[1:3]) || return nothing
+    latest = _parse_dt(row[1, :latest_dst_time_utc])
+    target = _parse_dt(row[1, :target_time_utc])
+    model = String(row[1, :model_version])
+    for i in 1:nrow(df)
+        ismissing(df[i, :observation_dst_nt]) || continue
+        _parse_dt(df[i, :latest_dst_time_utc]) == latest || continue
+        _parse_dt(df[i, :target_time_utc]) == target || continue
+        String(df[i, :model_version]) == model || continue
+        return i
+    end
+    return nothing
 end
 
 function _set_value!(df::DataFrame, row_idx::Int, col::Symbol, value)
@@ -2187,7 +2213,8 @@ function issue_forecast(cfg::LiveVerifyConfig)
         served_residual_dst_nt=[missing],
         served_observed_in_90ci=[missing],
     )
-    row_idx = _append_forecast!(cfg.log_path, row)
+    append_result = _append_forecast!(cfg.log_path, row; return_status=true)
+    row_idx = append_result.row_idx
 
     # Sub-hour model trajectory (display only) for the latest cycle; overwritten each issue (idempotent).
     try
@@ -2203,12 +2230,16 @@ function issue_forecast(cfg::LiveVerifyConfig)
         @warn "sub-hour trajectory write failed" exception=(e, catch_backtrace())
     end
 
-    println("Logged live forecast row $row_idx: $(cfg.log_path)")
+    if append_result.appended
+        println("Logged live forecast row $row_idx: $(cfg.log_path)")
+    else
+        println("Using existing pending forecast row $row_idx: $(cfg.log_path)")
+    end
     println("Issue UTC: $issue_time")
     println("Latest SWPC solar wind: $latest_common_sw")
     println("Latest observed Kyoto Dst: $latest_dst_time = $latest_dst nT")
     println("Target observation UTC: $target_time")
-    model_label = selected.model_version == "v2" ? "Operational v2" : "SINDy v1"
+    model_label = selected.model_version == "v2" ? "Reference V2" : "SINDy v1"
     println("Forecast model: $model_label")
     println("Lead time: $(round(wall_horizon; digits=3)) hr wall-clock, $model_steps model steps")
     println("Forecast Dst*: $(round(result.dst_predicted; digits=2)) nT")
@@ -2217,6 +2248,10 @@ function issue_forecast(cfg::LiveVerifyConfig)
         "[$(round(ci05_dst; digits=2)), $(round(ci95_dst; digits=2))]"
     )
     if selected.model_version == "v2"
+        println(
+            "Served industrial V2 Dst: $(round(served_pred_dst; digits=2)) nT; 90% CI " *
+            "[$(round(served_ci05_dst; digits=2)), $(round(served_ci95_dst; digits=2))]"
+        )
         println(
             "SINDy-v1 Dst: $(round(v1_pred_dst; digits=2)) nT; " *
             "v2 correction=$(round(selected.v2_correction; digits=2)) nT; " *
@@ -2584,11 +2619,13 @@ end
 
 function _standard_model_columns(df::DataFrame)
     specs = Pair{String,Symbol}[]
-    if String(:served_pred_dst_nt) in names(df)
+    served_active = String(:served_pred_dst_nt) in names(df)
+    if served_active
         push!(specs, "Served industrial V2" => :served_pred_dst_nt)
     end
+    v2_label = served_active ? "Reference V2" : "Operational v2"
     append!(specs, Pair{String,Symbol}[
-        "Operational v2" => :v2_pred_dst_nt,
+        v2_label => :v2_pred_dst_nt,
         "SINDy v1" => :v1_pred_dst_nt,
         "Persistence" => :persistence_dst_nt,
         "Burton" => :burton_dst_nt,
@@ -2857,9 +2894,11 @@ function summarize_log(log_path::String)
     isfile(log_path) || error("No forecast log exists at $log_path")
     df = CSV.read(log_path, DataFrame)
     println("Live forecast log: $log_path")
+    served_active = String(:served_pred_dst_nt) in names(df)
+    v2_label = served_active ? "Reference V2" : "Operational v2"
     model_specs = Pair{String,Symbol}[
         "Served industrial V2" => :served_pred_dst_nt,
-        "Operational v2" => :v2_pred_dst_nt,
+        v2_label => :v2_pred_dst_nt,
         "SINDy v1" => :v1_pred_dst_nt,
         "Persistence" => :persistence_dst_nt,
         "Burton" => :burton_dst_nt,

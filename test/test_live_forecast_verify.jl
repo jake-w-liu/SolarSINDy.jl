@@ -158,6 +158,31 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         end
     end
 
+    @testset "C0-4: pending duplicate forecast rows are idempotent" begin
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "live_forecast_log.csv")
+            row = DataFrame(
+                issue_time_utc=["2026-06-06T04:10:00"],
+                latest_dst_time_utc=["2026-06-06T04:00:00"],
+                target_time_utc=["2026-06-06T06:00:00"],
+                model_version=["v2"],
+                pred_dst_nt=[-20.0],
+                pred_dst_ci05_nt=[-30.0],
+                pred_dst_ci95_nt=[-10.0],
+                observation_dst_nt=[missing],
+            )
+
+            @test _append_forecast!(log_path, row) == 1
+            duplicate = copy(row)
+            duplicate.issue_time_utc .= "2026-06-06T04:11:00"
+
+            @test _append_forecast!(log_path, duplicate) == 1
+            written = CSV.read(log_path, DataFrame)
+            @test nrow(written) == 1
+            @test string(written[1, :issue_time_utc]) == "2026-06-06T04:10:00"
+        end
+    end
+
     @testset "A/D: refresh_observations! reconciles revised Dst without changing predictions" begin
         mktempdir() do tmp
             log_path = joinpath(tmp, "live_forecast_log.csv")
@@ -824,6 +849,8 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test occursin("Served industrial V2 is the dashboard-served experimental method", text)
             @test occursin("Served industrial V2 90% interval coverage", text)
             @test occursin("| Served industrial V2 | 2 |", text)
+            @test occursin("| Reference V2 | 2 |", text)
+            @test !occursin("| Operational v2 | 2 |", text)
             @test occursin("reference v2 pred", text)
         end
     end

@@ -7,8 +7,8 @@ forecast **with its calibrated 90% uncertainty band**, a **rolling forecast-vs-o
 statement, the verified track record, and the Sun → grid warning chain.
 
 This dashboard ships **as part of [`SolarSINDy.jl`](../)** — it is the operational front-end over
-the package's forecaster. A Julia REST backend (no web framework — just `HTTP.jl`) serving a
-Plotly UI. Single origin, no build step.
+the package's served industrial V2 forecaster. A Julia REST backend (no web framework — just
+`HTTP.jl`) serving a Plotly UI. Single origin, no build step.
 
 > Research tool, not an operational authority. For official alerts use **NOAA SWPC**.
 
@@ -70,9 +70,9 @@ The integrity rules of this project carry into the UI:
   for a *new* disturbance is the L1 advection time (~30–60 min). Multi-day
   confident-severity lead needs CME models not yet in this system.
 - **Calibration is computed from the log, not asserted.** Coverage and RMSE are recomputed from the
-  verified rows every load, with the full baseline set (persistence, O'Brien) and a per-method
-  breakdown. The live interval method (adaptive conformal) is reported separately from historical
-  coverage when it has few verified rows, so the UI never credits it with a number it has not earned.
+  verified rows every load, with the full baseline set (reference V2, SINDy v1, persistence,
+  O'Brien) and a per-method breakdown. The served industrial V2 rows are scored on the same verified
+  targets as the reference V2 audit path, so the UI never compares methods on mismatched samples.
 
 ## Threat scale
 
@@ -93,8 +93,10 @@ These thresholds are the widely used scheme across the geomagnetic-storm literat
 
 ## Data & provenance
 
-- **Dst forecast**: the project's operational **v2** nowcaster (interpretable discovered sparse
-  equation + correction + online adaptive-conformal intervals), written hourly to the locked log.
+- **Dst forecast**: the project's served industrial **V2** nowcaster: interpretable discovered
+  sparse equation, causal reference V2 correction, online adaptive-conformal intervals, measured L1
+  look-ahead, regime-aware Bz/By relaxation, and guarded fallback selection. Reference V2 remains in
+  the log for same-row audit; served industrial V2 is the dashboard headline when available.
 - **Solar wind (L1)**: NOAA SWPC real-time products (`solar-wind/plasma-7-day`, `mag-7-day`) for live
   issuance; the NASA OMNI archive (CDAWeb) is used for offline calibration and historical replay.
   **Dst**: Kyoto WDC (via NOAA SWPC `kyoto-dst`). **Ground dB/dt** (future layer): USGS/INTERMAGNET.

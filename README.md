@@ -10,11 +10,11 @@ The package is organized as two layers:
 1. **Discovery (v1).** Sparse identification of nonlinear dynamics (SINDy) recovers a
    closed-form solar wind–magnetosphere coupling equation for the Dst index from storm
    time series, alongside classical physical baselines.
-2. **Operational forecasting (v2).** A causal post-processing layer corrects the v1 point
-   forecast, attaches **distribution-free conformal predictive intervals** with
-   finite-sample coverage, applies the industrial served tail (measured L1 look-ahead,
-   then regime-aware Bz/By relaxation), and selects a guarded fallback component —
-   producing a calibrated operational Dst forecast suitable for live use.
+2. **Operational forecasting (v2).** A causal reference post-processing layer corrects
+   the v1 point forecast and attaches **distribution-free conformal predictive
+   intervals** with finite-sample coverage. The served industrial V2 layer then applies
+   measured L1 look-ahead, regime-aware Bz/By relaxation, and guarded fallback selection,
+   producing the calibrated Dst forecast used by the live monitor and dashboard.
 
 ## Capabilities
 
@@ -38,13 +38,27 @@ The package is organized as two layers:
   Dst deepening
 - guarded component selection over corrected SINDy, uncorrected SINDy v1, persistence,
   Burton, Burton-full, and O'Brien–McPherron, deployed only after chronological validation
-- online assimilation of the ring-current state
+- online assimilation utilities for reproducibility and shadow experiments; EKF-on-SINDy
+  failed promotion gates and is not part of the served forecast
 - forecast skill metrics (RMSE, correlation, skill score, prediction efficiency, Wilcoxon)
 
 **Real-time**
 
 - NOAA SWPC plasma / magnetic-field / Dst fetchers
 - a rolling monitor loop with calibrated storm-severity alarms
+
+## Industrial served forecast status
+
+The dashboard and live monitor use the served industrial V2 columns whenever they are
+present in the locked forecast log. The reference V2 correction remains in the log for
+same-row audit and fallback comparison; the served industrial V2 output is the headline
+forecast shown to users.
+
+EKF-on-SINDy is retained as research infrastructure only. Both tested deployment paths
+(decay-only and injection-adaptive EKF) failed promotion gates, so they are not exposed
+through the dashboard, daemon, alerting path, or served forecast columns. Recent
+lower-RMSE relaxed-tail variants also remain diagnostic until they avoid severe-storm
+under-warning in sustained southward-Bz stress rows.
 
 ## Installation
 
@@ -234,7 +248,7 @@ end to end with no external paths.
 **Metrics** — `rmse`, `correlation`, `skill_score`, `prediction_efficiency`,
 `metrics_summary`, `wilcoxon_signed_rank_p`
 
-**Forecast (v1 + operational v2)** — `ForecastState`, `ForecastResult`, `init_forecast`,
+**Forecast (v1 + reference/served operational v2)** — `ForecastState`, `ForecastResult`, `init_forecast`,
 `step_forecast!`, `forecast_ahead`, `OperationalV2Calibration`,
 `default_operational_v2_calibration`, `operational_v2_feature_tuple`,
 `fit_operational_v2_calibration`, `operational_v2_predict`, `score_operational_v2`,
@@ -245,7 +259,7 @@ end to end with no external paths.
 `write_conformal_calibration`, `read_conformal_calibration`, `AdaptiveConformal`,
 `init_adaptive_conformal`, `adaptive_conformal_step!`, `run_adaptive_conformal`
 
-**Online assimilation** — `AssimilationFilter`, `init_assimilation`, `assimilation_predict!`,
+**Online assimilation (research/shadow only)** — `AssimilationFilter`, `init_assimilation`, `assimilation_predict!`,
 `assimilation_update!`, `run_assimilation`, `current_dst`, `current_coeffs`, `dst_variance`
 
 **Alarms** — `StormSeverity` (`QUIET`, `MODERATE`, `INTENSE`, `SUPERINTENSE`), `Alarm`,
