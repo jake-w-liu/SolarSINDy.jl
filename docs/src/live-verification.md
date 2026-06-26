@@ -149,6 +149,15 @@ baseline component on noise. The issued operational v2 output is one upgraded
 forecast; the internal `v2_selected_component` field is audit metadata, not a
 separate headline model.
 
+The logged v2 reference forecast remains the calibrated point and interval used
+for audit and model-comparison scores. The operationally served forecast
+columns (`served_*` and `sub_hourly_*`) add the industrial multi-hour tail:
+target hours already measured at L1 use the upstream look-ahead, and later
+hours relax Bz/By toward quiet with a longer timescale during rapid Dst
+deepening. The dashboard severity calculation uses the deeper of the v2
+reference and served forecast, so the served tail can escalate but not
+under-warn relative to v2.
+
 Fit the calibration from a prior replay or locked live log:
 
 ```bash
@@ -211,7 +220,9 @@ When the sidecar is present, `--model=v2` issuance sources the logged 90%
 interval from the conformal half-width for the row's horizon and activity
 regime, instead of the v1-ensemble-spread interval scale. Each row records an
 `interval_source` column (`conformal` or `interval_scale`) for audit. The point
-forecast is unchanged; only the uncertainty band changes.
+forecast is unchanged; only the uncertainty band changes. The served forecast
+band is shifted by the same offset as the served point forecast, preserving the
+calibrated v2 half-width while tracking the industrial served tail.
 
 To populate the horizon strata, build the conformal calibration table with
 multiple lead times via `--replay-horizons`:

@@ -438,46 +438,107 @@ function _atomic_csv(path::AbstractString, df)
 end
 
 const L1_DIST_KM = 1.5e6   # L1 standoff [km]; solar-wind transit lag to Earth = L1_DIST_KM / V / 3600 h
+const V2_TAIL_TAU0_H = 3.0
+const V2_TAIL_R0_NT_PER_H = 7.5
+const V2_TAIL_TAU_MAX_H = 48.0
+
+_blend_drivers(frac::Real, measured, recent) = (
+    V = Float64(frac) * measured.V + (1 - Float64(frac)) * recent.V,
+    Bz = Float64(frac) * measured.Bz + (1 - Float64(frac)) * recent.Bz,
+    By = Float64(frac) * measured.By + (1 - Float64(frac)) * recent.By,
+    n = Float64(frac) * measured.n + (1 - Float64(frac)) * recent.n,
+    Pdyn = Float64(frac) * measured.Pdyn + (1 - Float64(frac)) * recent.Pdyn,
+)
+
+function _v2_tail_tau(dst_rate_nt_per_h::Real;
+                      tau0::Real=V2_TAIL_TAU0_H,
+                      r0::Real=V2_TAIL_R0_NT_PER_H,
+                      tau_max::Real=V2_TAIL_TAU_MAX_H)
+    rate = Float64(dst_rate_nt_per_h)
+    scale = 1.0 + (isfinite(rate) ? max(0.0, -rate) / Float64(r0) : 0.0)
+    return min(Float64(tau_max), Float64(tau0) * scale)
+end
+
+function _relaxed_tail_driver(last_known, hours_since_l1::Integer, dst_rate_nt_per_h::Real)
+    hours_since_l1 <= 0 && return last_known
+    tau = _v2_tail_tau(dst_rate_nt_per_h)
+    relax = exp(-Float64(hours_since_l1) / tau)
+    return (
+        V=last_known.V,
+        Bz=last_known.Bz * relax,
+        By=last_known.By * relax,
+        n=last_known.n,
+        Pdyn=last_known.Pdyn,
+    )
+end
+
+function _shift_interval_to_center(center::Real, reference_center::Real,
+                                   reference_ci05::Real, reference_ci95::Real)
+    vals = Float64[center, reference_center, reference_ci05, reference_ci95]
+    all(isfinite, vals) || throw(ArgumentError(
+        "cannot shift non-finite forecast interval: center/reference/ci05/ci95=$(vals)"
+    ))
+    c, rc, lo, hi = vals
+    return (c + (lo - rc), c + (hi - rc))
+end
 
 # Minute (sub-hourly) layer: for a frozen-tail forecast step, drive it with the 1-min L1 wind that PROPAGATES
 # into that Earth-hour and is ALREADY measured by issue time. Leakage-safe by construction: the source window is
 # capped at `latest_common_sw` (the freshest sample available at issue), so only measured wind enters. Reduces
 # to the frozen `recent` driver (== v2) when no measured wind maps into the step (continuity). Blends the
 # measured sub-window with the frozen driver by the known fraction f, mirroring the validated sub-hourly-A.
-function _subhourly_driver(plasma::DataFrame, mag::DataFrame, step_time::DateTime, recent, latest_common_sw::DateTime)
+function _subhourly_driver_with_status(plasma::DataFrame, mag::DataFrame,
+                                       step_time::DateTime, recent,
+                                       latest_common_sw::DateTime)
     V = max(recent.V, 1.0)
     lag = Millisecond(round(Int, (L1_DIST_KM / V / 3600.0) * 3_600_000))   # transit L1 -> Earth
     src_lo = step_time - Hour(1) - lag
     src_hi = min(step_time - lag, latest_common_sw)                        # only minutes measured at L1 by issue
-    src_hi <= src_lo && return recent                                      # nothing measured maps here -> v2
+    src_hi <= src_lo && return (driver=recent, l1_measured=false)          # nothing measured maps here -> v2/B tail
     f = clamp(Dates.value(src_hi - src_lo) / 3_600_000.0, 0.0, 1.0)
     meas = _drivers_for_window(plasma, mag, src_lo, src_hi; fallback=recent)
-    return (V = f*meas.V + (1-f)*recent.V, Bz = f*meas.Bz + (1-f)*recent.Bz,
-            By = f*meas.By + (1-f)*recent.By, n = f*meas.n + (1-f)*recent.n,
-            Pdyn = f*meas.Pdyn + (1-f)*recent.Pdyn)
+    return (driver=_blend_drivers(f, meas, recent), l1_measured=true)
 end
 
+_subhourly_driver(plasma::DataFrame, mag::DataFrame, step_time::DateTime,
+                  recent, latest_common_sw::DateTime) =
+    _subhourly_driver_with_status(plasma, mag, step_time, recent, latest_common_sw).driver
+
 # Sub-hour MODEL TRAJECTORY for the near term: the served forecast integrated at a sub-hour step (default 15 min)
-# with the same per-hour drivers (observed / L1 look-ahead / frozen). This is DISPLAY ONLY and is a model
+# with the same per-hour drivers (observed / L1 look-ahead / regime-aware tail). This is DISPLAY ONLY and is a model
 # trajectory, not a validated sub-hour forecast: Dst is published only hourly (no sub-hour ground truth) and the
 # discovered ODE is fit on hourly data, so the curve is the hourly-scale model's own interpolation. It tracks the
 # hourly forecast closely because the ring current has little sub-hour structure.
 function _subhour_trajectory(coef_csv, ens_csv, latest_dst_time::DateTime, anchor_dst_star::Float64,
                              plasma::DataFrame, mag::DataFrame, recent, latest_complete_hour::DateTime,
-                             latest_common_sw::DateTime, v2_correction::Float64;
+                             latest_common_sw::DateTime, v2_correction;
+                             dst_rate_nt_per_h::Real=0.0,
                              window_h::Int=6, substeps::Int=4)
     st = init_forecast(; coefficients_csv=coef_csv, ensemble_csv=ens_csv, t0=latest_dst_time,
                          dst0=anchor_dst_star, dt=1.0 / substeps)
     pts = NamedTuple[]
+    correction = ismissing(v2_correction) ? 0.0 : Float64(v2_correction)
+    last_known = recent
+    hours_since_l1 = 0
     for k in 1:window_h
         hstart = latest_dst_time + Hour(k - 1)
-        drv = hstart < latest_complete_hour ?
-            _drivers_for_window(plasma, mag, hstart, hstart + Hour(1); fallback=recent) :
-            _subhourly_driver(plasma, mag, latest_dst_time + Hour(k), recent, latest_common_sw)
+        drv = if hstart < latest_complete_hour
+            hours_since_l1 = 0
+            last_known = _drivers_for_window(plasma, mag, hstart, hstart + Hour(1); fallback=recent)
+        else
+            s = _subhourly_driver_with_status(plasma, mag, latest_dst_time + Hour(k), recent, latest_common_sw)
+            if s.l1_measured
+                hours_since_l1 = 0
+                last_known = s.driver
+            else
+                hours_since_l1 += 1
+                _relaxed_tail_driver(last_known, hours_since_l1, dst_rate_nt_per_h)
+            end
+        end
         for s in 1:substeps
             t = latest_dst_time + Millisecond(round(Int, ((k - 1) + s / substeps) * 3_600_000))
             res = step_forecast!(st, t, drv.V, drv.Bz, drv.By, drv.n, drv.Pdyn)
-            push!(pts, (t=string(t), dst=_dst_from_dst_star(res.dst_predicted, drv.Pdyn) + v2_correction))   # per-step target-time Pdyn
+            push!(pts, (t=string(t), dst=_dst_from_dst_star(res.dst_predicted, drv.Pdyn) + correction))   # per-step target-time Pdyn
         end
     end
     return pts
@@ -539,7 +600,7 @@ function _score_row!(df::DataFrame, row_idx::Int, observed_dst::Float64)
         end
     end
 
-    # Score the promoted served forecast (v2 + L1 look-ahead) alongside v2, so its live skill is tracked.
+    # Score the promoted served forecast (v2 + industrial L1/regime-aware tail) alongside v2, so its live skill is tracked.
     served_pred = _optional_float(df, row_idx, :served_pred_dst_nt)
     if !ismissing(served_pred)
         _set_value!(df, row_idx, :served_residual_dst_nt, observed_dst - served_pred)
@@ -1978,51 +2039,71 @@ function issue_forecast(cfg::LiveVerifyConfig)
         end
     end
     # Reflect the deployed interval in the v2 CI columns the report scores.
-    v2_ci05_log = interval_source in ("conformal", "aci") ? ci05_dst : selected.v2_ci05_dst
-    v2_ci95_log = interval_source in ("conformal", "aci") ? ci95_dst : selected.v2_ci95_dst
-    # Guard: a non-finite resolved interval falls back to the v2 baseline band so no NaN reaches the log/served band.
-    (isfinite(v2_ci05_log) && isfinite(v2_ci95_log)) || (v2_ci05_log = selected.v2_ci05_dst; v2_ci95_log = selected.v2_ci95_dst)
+    if selected.model_version == "v2"
+        v2_ci05_log = interval_source in ("conformal", "aci") ? ci05_dst : selected.v2_ci05_dst
+        v2_ci95_log = interval_source in ("conformal", "aci") ? ci95_dst : selected.v2_ci95_dst
+        # Guard: a non-finite resolved interval falls back to the v2 baseline band so no NaN reaches the log/served band.
+        (isfinite(v2_ci05_log) && isfinite(v2_ci95_log)) || (v2_ci05_log = selected.v2_ci05_dst; v2_ci95_log = selected.v2_ci95_dst)
+    else
+        v2_ci05_log = missing
+        v2_ci95_log = missing
+    end
 
-    # ---- Direction B (driver relaxation) removed ----
-    # The multi-hour driver is unobserved and not predictable at issue time. A regime-aware relaxation of the
-    # frozen southward field (Direction B) was evaluated and does not beat freezing on the broad backtest (it
-    # under-predicts the depth of actively intensifying storms), so it is not used. The improved_* columns are
-    # retained equal to v2 for CSV-schema stability (legacy). The served_* columns are PROMOTED below to the L1
-    # look-ahead forecast (v2 + Direction A), which lowers RMSE at every backtested lead; severity floors them
-    # against v2 (build_status) so the look-ahead can only escalate, never under-warn.
-    # ponytail: improved_* kept == v2 for schema stability; drop the column in a log migration if desired.
+    # ---- Legacy schema stability ----
+    # The improved_* columns are retained equal to v2 for CSV-schema stability. The served_* columns are promoted
+    # below to the industrial v2 tail: L1 look-ahead while measured wind is mapped to the target hour, then
+    # regime-aware relaxation after the L1-known window.
     improved_pred_dst = selected.v2_pred_dst; improved_ci05 = v2_ci05_log; improved_ci95 = v2_ci95_log
 
-    # ---- L1 look-ahead layer (Direction A) ----
-    # Same discovered ODE and v2 residual correction, but the frozen-driver tail is driven by the 1-min L1 wind
-    # propagating into each Earth-hour and already measured by issue time (leakage-safe; reduces to v2 where no
-    # measured wind maps in). Backtested on the storm set (live_forecasts/validate_ballistic_subhourly.jl):
-    # continuity to v2 = 0, and lower RMSE than v2 at every lead (15.9/28.7/38.8/67.5 vs 18.0/30.2/40.1/68.3 nT),
-    # so it is PROMOTED to the served forecast.
-    sub_hourly_pred_dst = selected.v2_pred_dst
+    # ---- Industrial served tail: L1 look-ahead (A) + regime-aware relaxation (B) ----
+    # The L1-measured portion is leakage-safe because it is capped at latest_common_sw. Once no measured L1 wind
+    # maps into the target hour, Bz/By relax toward quiet conditions; the relaxation time lengthens during rapid
+    # Dst deepening to avoid the shallow severe-storm bias found in the plain-B replay.
+    reference_pred_dst = selected.model_version == "v2" ? selected.v2_pred_dst : pred_dst
+    reference_ci05_dst = selected.model_version == "v2" ? v2_ci05_log : ci05_dst
+    reference_ci95_dst = selected.model_version == "v2" ? v2_ci95_log : ci95_dst
+    sub_hourly_pred_dst = reference_pred_dst
+    dst_rate_nt_per_h = memory_features.dst_delta_1h_nt
     try
         sstate = init_forecast(; coefficients_csv=coef_csv, ensemble_csv=ens_csv, t0=latest_dst_time, dst0=anchor_dst_star)
         sresult = nothing; sst = latest_dst_time + Hour(1); sdrv = recent
+        last_known = recent
+        hours_since_l1 = 0
         while sst <= target_time
             sh = sst - Hour(1)
-            sdrv = sh < latest_complete_hour ?
-                _drivers_for_window(plasma, mag, sh, sh + Hour(1); fallback=recent) :   # observed hour (== v2)
-                _subhourly_driver(plasma, mag, sst, recent, latest_common_sw)           # L1 look-ahead on the tail
+            sdrv = if sh < latest_complete_hour
+                hours_since_l1 = 0
+                last_known = _drivers_for_window(plasma, mag, sh, sh + Hour(1); fallback=recent)   # observed hour (== v2)
+            else
+                s = _subhourly_driver_with_status(plasma, mag, sst, recent, latest_common_sw)      # L1 look-ahead on the tail
+                if s.l1_measured
+                    hours_since_l1 = 0
+                    last_known = s.driver
+                else
+                    hours_since_l1 += 1
+                    _relaxed_tail_driver(last_known, hours_since_l1, dst_rate_nt_per_h)
+                end
+            end
             sresult = step_forecast!(sstate, sst, sdrv.V, sdrv.Bz, sdrv.By, sdrv.n, sdrv.Pdyn)
             sst += Hour(1)
         end
         if sresult !== nothing && isfinite(sresult.dst_predicted)
             sv1 = _dst_from_dst_star(sresult.dst_predicted, sdrv.Pdyn)   # target-step Pdyn (sub-hourly tail), not the stale v2 driver
-            sub_hourly_pred_dst = sv1 + selected.v2_correction
+            # v2 mode adds the residual correction; v1 mode (no correction) serves the raw L1 prediction (avoid sv1+missing).
+            sub_hourly_pred_dst = ismissing(selected.v2_correction) ? sv1 : sv1 + selected.v2_correction
         end
     catch e
-        @warn "L1 look-ahead forecast failed; serving v2" exception=(e, catch_backtrace())
+        @warn "industrial L1/regime-aware tail failed; serving base forecast" exception=(e, catch_backtrace())
     end
-    sub_hourly_ci05 = sub_hourly_pred_dst + (v2_ci05_log - selected.v2_pred_dst)
-    sub_hourly_ci95 = sub_hourly_pred_dst + (v2_ci95_log - selected.v2_pred_dst)
+    sub_hourly_ci05, sub_hourly_ci95 = _shift_interval_to_center(
+        sub_hourly_pred_dst,
+        reference_pred_dst,
+        reference_ci05_dst,
+        reference_ci95_dst,
+    )
 
-    # ---- PROMOTED served forecast = v2 + L1 look-ahead. Severity (build_status) applies a depth-safe floor
-    # min(v2, served) so the look-ahead can only escalate, never under-warn, relative to frozen v2.
+    # ---- PROMOTED served forecast = v2 + industrial L1/regime-aware tail. Severity (build_status) applies a
+    # depth-safe floor min(v2, served) so the served tail can only escalate, never under-warn, relative to v2.
     served_pred_dst = sub_hourly_pred_dst
     served_ci05_dst = sub_hourly_ci05
     served_ci95_dst = sub_hourly_ci95
@@ -2038,7 +2119,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
         horizon_hours=[wall_horizon],
         wall_clock_lead_hours=[wall_horizon],
         model_step_hours=[model_steps],
-        driver_assumption=["observed_solar_wind_until_latest_complete_hour_then_latest_60min_persistence"],
+        driver_assumption=["observed_solar_wind_until_latest_complete_hour_then_l1_measured_lookahead_then_regime_aware_relaxation"],
         driver_data_gap=[driver_data_gap],
         n_speed_finite_trailing_hour=[n_speed_finite],
         n_bz_finite_trailing_hour=[n_bz_finite],
@@ -2092,7 +2173,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
         served_pred_dst_nt=[served_pred_dst],
         served_pred_dst_ci05_nt=[served_ci05_dst],
         served_pred_dst_ci95_nt=[served_ci95_dst],
-        sub_hourly_model_version=["v2+L1A"],
+        sub_hourly_model_version=[selected.model_version == "v2" ? "v2+L1A+Bregime" : "v1+L1A+Bregime"],
         sub_hourly_pred_dst_nt=[sub_hourly_pred_dst],
         sub_hourly_pred_dst_ci05_nt=[sub_hourly_ci05],
         sub_hourly_pred_dst_ci95_nt=[sub_hourly_ci95],
@@ -2111,7 +2192,8 @@ function issue_forecast(cfg::LiveVerifyConfig)
     # Sub-hour model trajectory (display only) for the latest cycle; overwritten each issue (idempotent).
     try
         traj = _subhour_trajectory(coef_csv, ens_csv, latest_dst_time, anchor_dst_star, plasma, mag, recent,
-                                   latest_complete_hour, latest_common_sw, selected.v2_correction)
+                                   latest_complete_hour, latest_common_sw, selected.v2_correction;
+                                   dst_rate_nt_per_h=dst_rate_nt_per_h)
         open(joinpath(dirname(cfg.log_path), "subhour_trajectory.json"), "w") do io
             JSON3.write(io, Dict("issue_time_utc" => string(issue_time),
                                  "anchor_time_utc" => string(latest_dst_time),

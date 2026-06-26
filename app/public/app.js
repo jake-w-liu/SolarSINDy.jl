@@ -146,8 +146,8 @@ async function renderForecast(forecast, history, status) {
   const H = forecast.horizons;
   const anchorT = forecast.anchor_dst_time_utc, anchorY = forecast.anchor_dst_nt;
   const fx = H.map(h => h.target_utc);
-  const pred = H.map(h => h.pred_dst_nt);                       // v2 frozen-driver (reference)
-  const served = H.map(h => h.served_dst_nt != null ? h.served_dst_nt : h.pred_dst_nt);   // promoted: v2 + L1 look-ahead
+  const pred = H.map(h => h.pred_dst_nt);                       // v2 reference
+  const served = H.map(h => h.served_dst_nt != null ? h.served_dst_nt : h.pred_dst_nt);   // promoted: v2 + industrial tail
   const lo = H.map(h => h.served_ci05_dst_nt != null ? h.served_ci05_dst_nt : h.ci05_dst_nt);  // served 90% band
   const hi = H.map(h => h.served_ci95_dst_nt != null ? h.served_ci95_dst_nt : h.ci95_dst_nt);
 
@@ -201,11 +201,11 @@ async function renderForecast(forecast, history, status) {
   // observed reality (on top)
   if (ox.length) traces.push({ x: ox, y: oy, mode:"lines+markers", name:"Observed Dst",
     line:{color:WONG.obs, width:2}, marker:{size:5} });
-  // v2 (frozen-driver) reference, thin dashed.
-  traces.push({ x: px, y: py, mode:"lines", name:"v2 (frozen-driver)",
+  // v2 reference, thin dashed.
+  traces.push({ x: px, y: py, mode:"lines", name:"v2 reference",
     line:{color:"rgba(0,114,178,0.45)", width:1.4, dash:"dash"}, opacity:0.85,
     hovertemplate:"v2 %{y:.0f} nT<extra></extra>" });
-  // PROMOTED served forecast = v2 + L1 look-ahead, drawn at 15-min SUB-HOUR resolution when the trajectory is
+  // PROMOTED served forecast = v2 + industrial L1/regime-aware tail, drawn at 15-min SUB-HOUR resolution when the trajectory is
   // available (falls back to the hourly points). The forecast line ITSELF carries the sub-hour resolution, so
   // zooming the forecast region resolves it into 4 points/hour.
   const useTraj = trajX.length && anchorT != null && anchorY != null;   // guard null anchor before prepending
@@ -213,7 +213,7 @@ async function renderForecast(forecast, history, status) {
   const fcy = useTraj ? [anchorY].concat(trajY) : svy;
   // 15-min markers: medium blue, size 5 (matches the other series); distinguished from the hourly markers by
   // shade (medium vs dark) and size (5 vs 7). Zooming separates them, so no per-zoom resize.
-  traces.push({ x: fcx, y: fcy, mode:"lines+markers", name:"Forecast Dst (v2 + L1 look-ahead, 15-min)",
+  traces.push({ x: fcx, y: fcy, mode:"lines+markers", name:"Forecast Dst (v2 industrial, 15-min)",
     line:{color:WONG.fcst, width:2.2}, marker:{size:5, color:"#3f8fd0", line:{color:"#0b1020", width:0.5}},
     hovertemplate:"forecast %{y:.1f} nT (15-min)<extra></extra>" });
   // markers at the issued hourly horizons (the scored targets): darker + larger to flag the scored points.
@@ -235,10 +235,10 @@ async function renderForecast(forecast, history, status) {
   await Plotly.react("forecast-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
 
   const src = forecast.interval_source || "—";
-  cap.innerHTML = `Solid blue: the served forecast (v2 + L1 look-ahead) issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
-    + `<span data-reltime="${forecast.latest_solar_wind_utc}">${relTime(forecast.latest_solar_wind_utc)}</span>. The L1 look-ahead drives the near term with the 1-min upstream wind already measured at L1; beyond it the driver is held constant. `
+  cap.innerHTML = `Solid blue: the served forecast (v2 industrial tail) issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
+    + `<span data-reltime="${forecast.latest_solar_wind_utc}">${relTime(forecast.latest_solar_wind_utc)}</span>. L1 look-ahead drives target hours already measured upstream; beyond the L1-known window, Bz/By relax toward quiet with a longer timescale during rapid Dst deepening. `
     + `Shaded: the calibrated 90% interval (${src}); the severity scale uses its lower bound. `
-    + `Dashed blue: the v2 frozen-driver reference — the solid line tracks it except where fresh upstream wind sharpens the first hours; severity uses the deeper of the two so the look-ahead never under-warns. `
+    + `Dashed blue: the v2 reference — severity uses the deeper of reference and served values so the industrial tail never under-warns. `
     + `Dotted blue: forecasts already locked for past hours, plotted against the observed Dst (orange) that has since arrived. `
     + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Genuine new-disturbance lead is the L1 transit (~30–60 min).`;
 }

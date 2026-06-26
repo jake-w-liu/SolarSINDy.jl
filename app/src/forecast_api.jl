@@ -98,10 +98,9 @@ end
 _pred(row)  = _col(row, :v2_pred_dst_nt,      :pred_dst_nt)
 _ci05(row)  = _col(row, :v2_pred_dst_ci05_nt, :pred_dst_ci05_nt)
 _ci95(row)  = _col(row, :v2_pred_dst_ci95_nt, :pred_dst_ci95_nt)
-# The served forecast is the v2 frozen-driver model (Direction B removed). _pred/_ci05/_ci95 are the single
-# source of truth for the point forecast, the 90% conformal band, and the threat assessment.
-# Served (promoted) forecast = v2 + L1 look-ahead. _pred/_ci05/_ci95 stay v2 (the reference scored for the
-# continuous track record); severity uses the depth-safe min(v2, served). Falls back to v2 for legacy rows.
+# The scored v2 reference point and band stay in _pred/_ci05/_ci95. The operationally served forecast lives in
+# _served/_sc05/_sc95: v2 plus the industrial L1 look-ahead / regime-aware tail. Severity uses the depth-safe
+# min(v2, served), so the overlay can escalate but not under-warn relative to v2. Falls back to v2 for legacy rows.
 # 3-tier fallback served -> v2 -> legacy (pred_dst_*), so rows from any schema era resolve to a finite value.
 _served(row) = (x = _col(row, :served_pred_dst_nt,      :v2_pred_dst_nt);      x === missing ? _pred(row) : x)
 _sc05(row)   = (x = _col(row, :served_pred_dst_ci05_nt, :v2_pred_dst_ci05_nt); x === missing ? _ci05(row) : x)
@@ -243,10 +242,10 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
     for r in eachrow(cyc)
         push!(horizons, (target_utc=jdt(r.target_time_utc_dt),
                          horizon_hours=jnum(r.horizon_hours),
-                         pred_dst_nt=jnum(_pred(r)),          # v2 frozen-driver (reference)
+                         pred_dst_nt=jnum(_pred(r)),          # v2 reference
                          ci05_dst_nt=jnum(_ci05(r)),
                          ci95_dst_nt=jnum(_ci95(r)),
-                         served_dst_nt=jnum(_served(r)),      # promoted served forecast (v2 + L1 look-ahead)
+                         served_dst_nt=jnum(_served(r)),      # promoted served forecast (v2 + industrial tail)
                          served_ci05_dst_nt=jnum(_sc05(r)),
                          served_ci95_dst_nt=jnum(_sc95(r))))
     end
@@ -293,7 +292,7 @@ function build_status(df::DataFrame)
                 message="No forecast rows in log yet.", calibration=cal)
     end
     r1 = first(cyc)
-    # Depth-safe severity: the L1 look-ahead can escalate but never under-warn vs frozen v2. Per horizon take the
+    # Depth-safe severity: the industrial tail can escalate but never under-warn vs v2. Per horizon take the
     # deeper (more negative) of {v2, served}, then the most negative across horizons.
     dmin(a, b) = (a === nothing && b === nothing) ? nothing : min(something(a, b), something(b, a))
     preds = filter(!isnothing, [dmin(jnum(_pred(r)), jnum(_served(r))) for r in eachrow(cyc)])
@@ -316,7 +315,7 @@ function build_status(df::DataFrame)
                     point_min_dst_nt=point_min, worst_credible_dst_nt=worst_cred,
                     basis="Dst storm-intensity scale (-30/-50/-100/-200 nT)"),
             lead_time=(forecast_horizon_hours=horizon_max,
-                       driver_assumption="solar-wind persistence beyond last complete hour",
+                       driver_assumption="L1 measured look-ahead, then regime-aware relaxation beyond the L1-known window",
                        physical_upstream_lead_min=[30, 60],
                        note="Genuine upstream lead for new severity is the L1 advection time (~30-60 min). " *
                             "Multi-day lead requires CME eruption/propagation models, not yet in this system."),

@@ -560,7 +560,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
                 pred[end] + 3.0,
                 _v2_features(pred[end] - 1.0, (; V=420.0, Bz=bz[end], By=1.0, n=5.0, Pdyn=1.5)),
             )
-            @test pred_v2.pred_dst ≈ observed[end] atol=0.5
+            @test pred_v2.pred_dst == observed[end]
 
             # N1: a conformal calibration sidecar is written and round-trips.
             conformal_path = replace(cal_path, r"\.csv$" => "_conformal.csv")
@@ -880,6 +880,37 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         @test _assert_issuable_model(:v1, 1) === nothing    # single-step v1 is fine
         @test _assert_issuable_model(:v2, 6) === nothing    # v2 serves a conformal band
         @test _assert_issuable_model(:v2, 1) === nothing
+    end
+
+    @testset "V2 industrial tail: regime-aware relaxation and finite interval shift" begin
+        driver = (V=420.0, Bz=-12.0, By=4.0, n=6.0, Pdyn=2.5)
+        tau_recovery = _v2_tail_tau(5.0)
+        tau_deepening = _v2_tail_tau(-30.0)
+        @test tau_deepening > tau_recovery
+        @test tau_deepening <= V2_TAIL_TAU_MAX_H
+
+        relaxed_recovery = _relaxed_tail_driver(driver, 1, 5.0)
+        relaxed_deepening = _relaxed_tail_driver(driver, 1, -30.0)
+        # Recovery relaxes transverse IMF toward quiet; active deepening preserves
+        # more southward/east-west field from the same last-known driver.
+        @test relaxed_recovery.V == driver.V
+        @test relaxed_recovery.n == driver.n
+        @test relaxed_recovery.Pdyn == driver.Pdyn
+        @test abs(relaxed_recovery.Bz) < abs(driver.Bz)
+        @test abs(relaxed_recovery.By) < abs(driver.By)
+        @test abs(relaxed_deepening.Bz) > abs(relaxed_recovery.Bz)
+        @test abs(relaxed_deepening.By) > abs(relaxed_recovery.By)
+
+        lo, hi = _shift_interval_to_center(-90.0, -80.0, -100.0, -60.0)
+        @test (lo, hi) == (-110.0, -70.0)
+        @test_throws ArgumentError _shift_interval_to_center(NaN, -80.0, -100.0, -60.0)
+
+        t0 = DateTime(2026, 6, 6, 0)
+        plasma = DataFrame(time_tag=[t0 + Minute(5)], speed=[410.0], density=[5.0])
+        mag = DataFrame(time_tag=[t0 + Minute(5)], bz_gsm=[-3.0], by_gsm=[1.0])
+        s = _subhourly_driver_with_status(plasma, mag, t0 + Hour(2), driver, t0)
+        @test !s.l1_measured
+        @test s.driver == driver
     end
 
     @testset "F3: anchor-aware split keeps issue_time sets pairwise disjoint" begin

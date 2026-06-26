@@ -44,6 +44,7 @@ generate_multistorm_dataset
 prepare_sindy_data
 identify_storm_phases
 download_omni2
+prepare_omni_data
 extract_omni2_columns
 parse_omni2
 load_omni2_csv
@@ -64,6 +65,7 @@ correlation
 skill_score
 prediction_efficiency
 metrics_summary
+wilcoxon_signed_rank_p
 ```
 
 ## Forecasting And Alarms
@@ -72,6 +74,7 @@ metrics_summary
 ForecastState
 ForecastResult
 OperationalV2Calibration
+operational_v2_feature_tuple
 init_forecast
 step_forecast!
 forecast_ahead
@@ -87,8 +90,40 @@ alarm_print
 alarm_log
 fetch_swpc_plasma
 fetch_swpc_mag
+fetch_swpc_dst
 fetch_realtime_solar_wind
 run_monitor
+recover_shadow_state
+DEFAULT_FEED_DEADMAN_THRESHOLD
+feed_deadman_tripped
+```
+
+## Conformal Calibration
+
+```@docs
+ConformalCalibration
+ConformalStratum
+fit_conformal
+conformal_stratum
+conformal_halfwidth
+conformal_interval
+conformal_coverage
+write_conformal_calibration
+read_conformal_calibration
+AdaptiveConformal
+init_adaptive_conformal
+adaptive_conformal_step!
+run_adaptive_conformal
+```
+
+## Online Assimilation
+
+```@docs
+AssimilationFilter
+init_assimilation
+assimilation_predict!
+assimilation_update!
+run_assimilation
 ```
 
 ## Utilities
