@@ -87,6 +87,13 @@ end
         @test Float64.(cmo.beta) != Float64.(frd.beta)
     end
 
+    @testset "SWPC row parsing tolerates partial public-feed rows" begin
+        idx = Dict("speed" => 2, "density" => 3)
+        @test _swpc_row_field(idx, ["2026-06-26T00:00:00Z", "460.5", "1.7"], "speed") == 460.5
+        @test _swpc_row_field(idx, ["2026-06-26T00:00:00Z", "460.5"], "density") === nothing
+        @test _swpc_row_field(idx, ["2026-06-26T00:00:00Z", "460.5"], "bz_gsm") === nothing
+    end
+
     @testset "static file serving is traversal-guarded" begin
         ok = serve_static("/index.html")
         @test ok.status == 200

@@ -20,6 +20,12 @@ const _SWPC_LOCK = ReentrantLock()
 _pf(x) = x === nothing ? nothing : (x isa Number ? Float64(x) :
          (try parse(Float64, strip(String(x))) catch; nothing end))
 
+function _swpc_row_field(idx, row, name)
+    i = get(idx, name, nothing)
+    (i === nothing || i > length(row)) && return nothing
+    return jnum(_pf(row[i]))
+end
+
 # SWPC times: "2026-06-20 10:52:00.000" or "2026-06-20T06:00:00"
 function _swpc_dt(s)
     (s === nothing || s === missing) && return missing
@@ -46,11 +52,8 @@ function swpc_solar_wind()
     if mag !== nothing && length(mag) > 1
         h = String.(collect(mag[1])); idx = Dict(h[i] => i for i in eachindex(h))
         row = mag[end]
-        # Use a `nothing` sentinel (not 0): row[0] would throw BoundsError (1-based) and unwind
-        # to swpc_snapshot's catch, nulling the WHOLE snapshot instead of just the absent field.
-        _field(name) = (i = get(idx, name, nothing); i === nothing ? nothing : jnum(_pf(row[i])))
-        sw[:bz_gsm_nt] = _field("bz_gsm")
-        sw[:bt_nt]     = _field("bt")
+        sw[:bz_gsm_nt] = _swpc_row_field(idx, row, "bz_gsm")
+        sw[:bt_nt]     = _swpc_row_field(idx, row, "bt")
         sw[:mag_time_utc] = jdt(_swpc_dt(row[1]))
         sw[:available] = true
     end
@@ -58,9 +61,8 @@ function swpc_solar_wind()
     if pls !== nothing && length(pls) > 1
         h = String.(collect(pls[1])); idx = Dict(h[i] => i for i in eachindex(h))
         row = pls[end]
-        _field(name) = (i = get(idx, name, nothing); i === nothing ? nothing : jnum(_pf(row[i])))
-        sw[:speed_kms]   = _field("speed")
-        sw[:density_cm3] = _field("density")
+        sw[:speed_kms]   = _swpc_row_field(idx, row, "speed")
+        sw[:density_cm3] = _swpc_row_field(idx, row, "density")
         sw[:plasma_time_utc] = jdt(_swpc_dt(row[1]))
     end
     return sw
