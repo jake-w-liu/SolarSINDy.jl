@@ -274,6 +274,7 @@ using DataFrames
     include("test_v2_broad_replay.jl")
     include("test_v2_gscale_replay.jl")
     include("test_noaa_kp_forecast_replay.jl")
+    include("test_temerin_dst_archive_replay.jl")
 
     # Bundled operational dashboard (app/): golden-vector forecaster<->export contract,
     # traversal guard, physical regimes. Network-free (local models + mocks).
