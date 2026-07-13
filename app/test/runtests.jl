@@ -209,4 +209,178 @@ end
             @test (extreme.out_of_validated_range || extreme.saturated)
         end
     end
+
+    @testset "RTSW solar-wind parser: named keys, active flag, null/out-of-bounds rejection" begin
+        # Captured-schema sample of /json/rtsw/rtsw_mag_1m.json: array of OBJECTS, interleaved
+        # spacecraft (SOLAR1/ACE), duplicate time_tags, deliberately out of order. The parser must
+        # select by named keys + newest time_tag, prefer active=true, and skip null/out-of-bounds.
+        payload = """
+        [
+          {"time_tag":"2026-07-13T02:38:00","active":false,"source":"ACE","bt":4.5,"bz_gsm":0.5},
+          {"time_tag":"2026-07-13T02:40:00","active":true,"source":"SOLAR1","bt":4.7,"bz_gsm":-0.8},
+          {"time_tag":"2026-07-13T02:40:00","active":false,"source":"ACE","bt":4.4,"bz_gsm":-0.3},
+          {"time_tag":"2026-07-13T02:39:00","active":true,"source":"SOLAR1","bt":null,"bz_gsm":-0.5},
+          {"time_tag":"2026-07-13T02:41:00","active":true,"source":"SOLAR1","bt":9.0e9,"bz_gsm":-1.0}
+        ]"""
+        arr = JSON3.read(payload)
+        row = _rtsw_latest(arr, [:bz_gsm, :bt];
+                           bounds = Dict(:bt => (0.0, 1.0e3), :bz_gsm => (-1.0e3, 1.0e3)))
+        @test row !== nothing
+        @test String(row.time_tag) == "2026-07-13T02:40:00"   # newest active, in-bounds, non-null
+        @test _rtsw_field(row, :bz_gsm) == -0.8
+        @test _rtsw_active(row) == true
+        # only inactive rows present -> fall back to the newest valid inactive source
+        only_inactive = JSON3.read("""[{"time_tag":"2026-07-13T02:30:00","active":false,"source":"ACE","bt":5.0,"bz_gsm":1.2}]""")
+        r2 = _rtsw_latest(only_inactive, [:bz_gsm, :bt])
+        @test r2 !== nothing && _rtsw_field(r2, :bz_gsm) == 1.2
+        # empty / nothing payloads never throw
+        @test _rtsw_latest(JSON3.read("[]"), [:bz_gsm]) === nothing
+        @test _rtsw_latest(nothing, [:bz_gsm]) === nothing
+        # wind schema uses different named keys; out-of-bounds speed is rejected
+        wind = JSON3.read("""[{"time_tag":"2026-07-13T02:40:00","active":true,"proton_speed":461.0,"proton_density":2.7}]""")
+        wrow = _rtsw_latest(wind, [:proton_speed, :proton_density];
+                            bounds = Dict(:proton_speed => (50.0, 5.0e3)))
+        @test _rtsw_field(wrow, :proton_speed) == 461.0
+    end
+
+    @testset "latest_cycle keys on issue epoch, not solar-wind vintage (L1 stall)" begin
+        # Two hourly issue cycles that share ONE frozen solar-wind vintage (the L1-stall pattern):
+        # keying on that vintage would merge them; keying on issue time must serve only the newest.
+        sw_vintage = now(UTC) - Hour(3)
+        iss_old = now(UTC) - Minute(90)
+        iss_new = now(UTC) - Minute(30)
+        df = DataFrame(
+            issue_time_utc_dt = [iss_old, iss_old, iss_new, iss_new],
+            latest_solar_wind_utc_dt = fill(sw_vintage, 4),
+            latest_dst_time_utc_dt = [iss_old - Hour(1), iss_old - Hour(1), iss_new - Hour(1), iss_new - Hour(1)],
+            target_time_utc_dt = [iss_old + Hour(1), iss_old + Hour(2), iss_new + Hour(1), iss_new + Hour(2)],
+            horizon_hours = [1.0, 2.0, 1.0, 2.0],
+            latest_dst_nt = [-10.0, -10.0, -20.0, -20.0],
+            observation_dst_nt = [missing, missing, missing, missing],
+            served_pred_dst_nt = [-5.0, -6.0, -15.0, -16.0],
+            served_pred_dst_ci05_nt = [-99.0, -98.0, -40.0, -42.0],   # superseded cycle is DEEPER
+            served_pred_dst_ci95_nt = [0.0, -1.0, -5.0, -6.0],
+            interval_source = fill("aci", 4),
+            model_version = fill("v2", 4),
+        )
+        cyc = latest_cycle(df)
+        @test nrow(cyc) == 2
+        @test all(==(iss_new), cyc.issue_time_utc_dt)
+        st = build_status(df)
+        @test st.available == true
+        @test st.forecast_issue_utc == string(iss_new) * "Z"          # newest issue, not superseded
+        @test st.latest_observation.dst_nt == -20.0                   # anchor from newest cycle
+        @test st.threat.worst_credible_dst_nt == -42.0               # min over newest cycle, not -99
+        fc = build_forecast(df)
+        @test length(fc.horizons) == 2
+        @test fc.issue_time_utc == string(iss_new) * "Z"
+    end
+
+    @testset "staleness gate: expired cycle suppresses live status and alerts" begin
+        old = now(UTC) - Day(10)
+        df = DataFrame(
+            issue_time_utc_dt = [old], latest_solar_wind_utc_dt = [old],
+            latest_dst_time_utc_dt = [old - Hour(1)], target_time_utc_dt = [old + Hour(1)],
+            horizon_hours = [1.0], latest_dst_nt = [-60.0], observation_dst_nt = [missing],
+            served_pred_dst_nt = [-70.0], served_pred_dst_ci05_nt = [-90.0], served_pred_dst_ci95_nt = [-50.0],
+            interval_source = ["aci"], model_version = ["v2"],
+        )
+        st = build_status(df)
+        @test st.available == false
+        @test st.stale == true
+        @test st.expired == true
+        @test st.age_hours > 200                     # ~240 h old
+        @test build_alerts(df).active == false       # no forecast/watch alerts from an expired cycle
+        cs = compute_alert_state(st, (available=false,), nothing)
+        @test cs.level == 0
+        # a fresh cycle is neither stale nor expired
+        fresh = now(UTC) - Minute(20)
+        df2 = DataFrame(
+            issue_time_utc_dt = [fresh], latest_solar_wind_utc_dt = [fresh],
+            latest_dst_time_utc_dt = [fresh - Hour(1)], target_time_utc_dt = [fresh + Hour(2)],
+            horizon_hours = [2.0], latest_dst_nt = [-20.0], observation_dst_nt = [missing],
+            served_pred_dst_nt = [-25.0], served_pred_dst_ci05_nt = [-35.0], served_pred_dst_ci95_nt = [-15.0],
+            interval_source = ["aci"], model_version = ["v2"],
+        )
+        st2 = build_status(df2)
+        @test st2.available == true && st2.stale == false && st2.expired == false
+    end
+
+    @testset "served pipeline label exposed from sub_hourly_model_version" begin
+        iss = now(UTC) - Minute(20)
+        df = DataFrame(
+            issue_time_utc_dt = [iss], latest_solar_wind_utc_dt = [iss],
+            latest_dst_time_utc_dt = [iss - Hour(1)], target_time_utc_dt = [iss + Hour(1)],
+            horizon_hours = [1.0], latest_dst_nt = [-20.0], observation_dst_nt = [missing],
+            served_pred_dst_nt = [-25.0], served_pred_dst_ci05_nt = [-35.0], served_pred_dst_ci95_nt = [-15.0],
+            interval_source = ["aci"], model_version = ["v2"],
+            sub_hourly_model_version = ["v2+L1A+Bregime+Pinertia"],
+        )
+        fc = build_forecast(df); st = build_status(df)
+        @test fc.served_model_version == "v2+L1A+Bregime+Pinertia"
+        @test fc.model_version == "v2"                              # core-model contract unchanged
+        @test st.served_model_version == "v2+L1A+Bregime+Pinertia"
+        @test st.model_version == "v2"
+        df2 = select(df, Not(:sub_hourly_model_version))           # legacy row -> "v2" fallback
+        @test build_forecast(df2).served_model_version == "v2"
+    end
+
+    @testset "missing log degrades gracefully; NaN hours falls back to 72" begin
+        missing_path = joinpath(mktempdir(), "does_not_exist.csv")
+        _LOG_CACHE[] = nothing
+        g = get_log(missing_path)
+        @test g isa DataFrame && nrow(g) == 0                      # absent file -> empty frame, no throw
+        h = make_handler(missing_path)
+        # log-independent-but-log-backed endpoints must not 500 when the log is absent
+        @test h(HTTP.Request("GET", "/api/forecast")).status == 200
+        @test h(HTTP.Request("GET", "/api/history?hours=72")).status == 200
+        # NaN hours reaches the crash path only with verified rows present -> use a real temp log
+        now0 = floor(now(UTC), Hour)
+        vdf = DataFrame(
+            issue_time_utc = [string(now0 - Hour(2))],
+            latest_solar_wind_utc = [string(now0 - Hour(2))],
+            latest_dst_time_utc = [string(now0 - Hour(2))],
+            target_time_utc = [string(now0 - Hour(1))],
+            horizon_hours = [1.0], latest_dst_nt = [-20.0], observation_dst_nt = [-22.0],
+            served_pred_dst_nt = [-21.0], served_pred_dst_ci05_nt = [-31.0], served_pred_dst_ci95_nt = [-11.0],
+            v2_pred_dst_nt = [-21.0], v2_pred_dst_ci05_nt = [-31.0], v2_pred_dst_ci95_nt = [-11.0],
+            model_version = ["v2"], interval_source = ["aci"],
+        )
+        logfile = joinpath(mktempdir(), "log.csv"); CSV.write(logfile, vdf)
+        _LOG_CACHE[] = nothing
+        h2 = make_handler(logfile)
+        rn = h2(HTTP.Request("GET", "/api/history?hours=NaN"))
+        @test rn.status == 200
+        body = JSON3.read(String(rn.body))
+        @test body.hours == 72.0 && body.n >= 1                    # NaN -> 72, verified row scored
+        _LOG_CACHE[] = nothing                                      # leave the cache clean for other tests
+    end
+
+    @testset "sub-hour trajectory served only for the matching cycle" begin
+        dir = mktempdir(); logf = joinpath(dir, "log.csv")
+        iss = DateTime("2026-06-30T23:59:50.122")
+        write(joinpath(dir, "subhour_trajectory.json"),
+              """{"points":[{"t":"2026-06-30T22:00:00","dst":1.0},{"t":"2026-06-30T23:15:00","dst":0.5},""" *
+              """{"t":"2026-07-01T00:00:00","dst":-1.0}],"anchor_time_utc":"2026-06-30T23:00:00",""" *
+              """"issue_time_utc":"2026-06-30T23:59:50.122","anchor_dst_nt":0.0}""")
+        matched = _subhour_traj(logf; cycle_issue = iss)           # anchor drops the 22:00 point
+        @test length(matched) == 2
+        @test _subhour_traj(logf; cycle_issue = iss + Hour(1)) |> isempty   # log advanced -> stale sidecar
+        @test length(_subhour_traj(logf)) == 2                     # no cycle context -> back-compat
+    end
+
+    @testset "geoelectric current is edge-trimmed; max spans the trailing 30 min" begin
+        tt = collect(1:120)
+        xv = Vector{Any}(20.0 .* tt .+ 3.0 .* sin.(tt ./ 3.0))     # rising ramp + wiggle (storm onset)
+        yv = Vector{Any}(fill(5.0, 120))
+        g = _geoe_nowcast(xv, yv, 60.0)
+        @test g !== nothing
+        # recompute the pipeline independently and pin the two behavioral changes
+        xs = [_num(xv[i]) for i in 1:120]; ys = [_num(yv[i]) for i in 1:120]
+        xf = _interp_gaps(xs); yf = _interp_gaps(ys)
+        ex, ey = geoelectric_field(_detrend(xf), _detrend(yf), 60.0; rho_ohm_m=1000.0)
+        emag = sqrt.(ex.^2 .+ ey.^2); m = length(emag)
+        @test isapprox(g.current, emag[max(1, m - 3)]; atol=1e-9)                       # trimmed, not emag[end]
+        @test isapprox(g.max, maximum(emag[max(min(4, m), m - 32):max(1, m - 3)]); atol=1e-9)  # last ~30 min
+    end
 end

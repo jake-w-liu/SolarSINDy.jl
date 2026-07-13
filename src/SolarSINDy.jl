@@ -31,12 +31,14 @@ include("monitor.jl")
 export # Utils
        numerical_derivative, smooth_moving_average, pressure_correct_dst,
        halfwave_rectify, imf_clock_angle, get_data_dir,
+       # Canonical Dst*/pressure helpers
+       dynamic_pressure, dst_to_dst_star, dst_star_to_dst, resolve_pdyn,
        # Library
        CandidateLibrary, build_solar_wind_library, build_minimal_library,
        evaluate_library, get_term_names,
        # SINDy
        stlsq, sindy_discover, ensemble_sindy, sindy_predict,
-       simulate_sindy, sweep_lambda,
+       simulate_sindy, sweep_lambda, collinearity_diagnostics,
        # Baselines
        burton_model, burton_model_full, newell_coupling, obrien_mcpherron_model,
        simulate_burton, simulate_burton_full, simulate_obrien,
@@ -74,7 +76,7 @@ export # Utils
        # Alarm
        StormSeverity, QUIET, MODERATE, INTENSE, SUPERINTENSE,
        Alarm, AlarmConfig, default_alarm_config,
-       check_alarm, classify_severity, alarm_print, alarm_log,
+       check_alarm, maybe_fire_horizon_alarm!, classify_severity, alarm_print, alarm_log,
        # Real-time
        fetch_swpc_plasma, fetch_swpc_mag, fetch_swpc_dst, fetch_realtime_solar_wind,
        recover_shadow_state, feed_deadman_tripped, DEFAULT_FEED_DEADMAN_THRESHOLD,

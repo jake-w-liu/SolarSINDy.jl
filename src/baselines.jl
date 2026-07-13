@@ -1,39 +1,45 @@
 # Baseline coupling function models
 
 """
-    burton_model(V, Bs, Dst_star; α=4.559e-3, τ=7.7)
+    burton_model(V, Bs, Dst_star; α=5.4e-3, τ=7.7)
 
-Burton et al. (1975) ring-current model in the simplified injection/decay form:
+Threshold-free simplification of the Burton et al. (1975) ring-current model:
 
   dDst*/dt = -α·V·Bs - Dst*/τ
 
-where `Dst* = Dst - 7.26√Pdyn + 11` is the pressure-corrected index and `V·Bs`
-is the rectified solar-wind driving (V in km/s, Bs in nT).
+where `Dst* = Dst - 7.26√Pdyn + 11` is the pressure-corrected index (the
+pressure-correction constants 7.26 nT·nPa^(-1/2) and 11 nT are from
+O'Brien & McPherron (2000), not Burton 1975) and `V·Bs` is the rectified
+solar-wind driving (V in km/s, Bs in nT).
+
+This variant drops Burton's injection threshold (Ey > 0.5 mV/m); the published,
+threshold-continuous injection is in `burton_model_full`.
 
 Parameters:
-- `α = 4.559e-3` nT/hr per (km/s·nT): injection efficiency.
-- `τ = 7.7` hr: ring-current decay timescale, so the decay rate is
-  `1/τ ≈ 0.13` hr⁻¹.
+- `α = 5.4e-3` nT/hr per (km/s·nT): Burton's injection slope
+  `d = 1.5e-3` nT/s per mV/m = 5.4 nT/h per mV/m, expressed in V·Bs units.
+- `τ = 7.7` hr: ring-current decay timescale (Burton 1975 `a = 3.6e-5 s⁻¹`),
+  so the decay rate is `1/τ ≈ 0.13` hr⁻¹.
 
 `Dst*` is supplied directly (already pressure-corrected); `Pdyn` is not an
-argument here. See `burton_model_full` for the injection-threshold variant.
+argument here.
 """
 function burton_model(V::AbstractVector, Bs::AbstractVector,
                       Dst_star::AbstractVector;
-                      α::Real=4.559e-3, τ::Real=7.7)
+                      α::Real=5.4e-3, τ::Real=7.7)
     # dDst*/dt = -α * V * Bs - Dst* / τ
     # α in nT/(km/s · nT) per hour, τ in hours
     return -α .* V .* Bs .- Dst_star ./ τ
 end
 
 """
-    simulate_burton(V, Bs, dt; α=4.559e-3, τ=7.7, Dst0=0.0)
+    simulate_burton(V, Bs, dt; α=5.4e-3, τ=7.7, Dst0=0.0)
 
-Forward Euler simulation of Burton model.
-dt in hours. Returns Dst* time series.
+Forward Euler simulation of the threshold-free Burton model
+(see `burton_model`). dt in hours. Returns Dst* time series.
 """
 function simulate_burton(V::AbstractVector, Bs::AbstractVector, dt::Real;
-                         α::Real=4.559e-3, τ::Real=7.7, Dst0::Real=0.0)
+                         α::Real=5.4e-3, τ::Real=7.7, Dst0::Real=0.0)
     n = length(V)
     Dst_star = zeros(n)
     Dst_star[1] = Dst0
@@ -85,35 +91,43 @@ function obrien_mcpherron_model(V::AbstractVector, Bs::AbstractVector,
 end
 
 """
-    burton_model_full(V, Bs, Dst_star; α=4.559e-3, τ=7.7)
+    burton_model_full(V, Bs, Dst_star; α=5.4e-3, τ=7.7, vbs_crit=500.0)
 
-Full Burton et al. (1975) Dst model with injection suppression threshold:
+Published Burton et al. (1975) Dst model with the threshold-continuous
+injection F(Ey) = d·(Ey − 0.5) for Ey > 0.5 mV/m, else 0:
+
   Ey = V·Bs / 1000 [mV/m]
-  Q = Ey > 0.5 ? -α·V·Bs : 0.0
+  Q  = V·Bs > 500 ? -α·(V·Bs − 500) : 0.0     (= -d·(Ey − 0.5), d = 5.4 nT/h per mV/m)
   dDst*/dt = Q - Dst*/τ
+
+The `−500` offset (= 1000·0.5 mV/m in V·Bs units) makes the injection continuous
+at the threshold; omitting it (the earlier `-α·V·Bs` form) introduced a spurious
+~2.3 nT/h step at Ey = 0.5.
 """
 function burton_model_full(V::AbstractVector, Bs::AbstractVector,
                            Dst_star::AbstractVector;
-                           α::Real=4.559e-3, τ::Real=7.7)
-    Ey = V .* Bs ./ 1000.0  # mV/m
-    Q = [Ey[k] > 0.5 ? -α * V[k] * Bs[k] : 0.0 for k in eachindex(V)]
+                           α::Real=5.4e-3, τ::Real=7.7, vbs_crit::Real=500.0)
+    Q = [(V[k] * Bs[k]) > vbs_crit ? -α * (V[k] * Bs[k] - vbs_crit) : 0.0
+         for k in eachindex(V)]
     return Q .- Dst_star ./ τ
 end
 
 """
-    simulate_burton_full(V, Bs, dt; α=4.559e-3, τ=7.7, Dst0=0.0)
+    simulate_burton_full(V, Bs, dt; α=5.4e-3, τ=7.7, vbs_crit=500.0, Dst0=0.0)
 
-Forward Euler simulation of the full Burton model with injection suppression
-threshold (Ey ≤ 0.5 mV/m → Q = 0).
+Forward Euler simulation of the published Burton model with the
+threshold-continuous injection (Ey ≤ 0.5 mV/m → Q = 0; above threshold the
+injection subtracts the threshold, F = d·(Ey − 0.5)).
 """
 function simulate_burton_full(V::AbstractVector, Bs::AbstractVector, dt::Real;
-                              α::Real=4.559e-3, τ::Real=7.7, Dst0::Real=0.0)
+                              α::Real=5.4e-3, τ::Real=7.7, vbs_crit::Real=500.0,
+                              Dst0::Real=0.0)
     n = length(V)
     Dst_star = zeros(n)
     Dst_star[1] = Dst0
     for k in 1:n-1
-        Ey = V[k] * Bs[k] / 1000.0  # mV/m
-        Q = Ey > 0.5 ? -α * V[k] * Bs[k] : 0.0
+        vbs = V[k] * Bs[k]
+        Q = vbs > vbs_crit ? -α * (vbs - vbs_crit) : 0.0
         dDdt = Q - Dst_star[k] / τ
         dDdt = clamp(dDdt, -200.0, 200.0)
         Dst_star[k+1] = clamp(Dst_star[k] + dDdt * dt, -2000.0, 50.0)

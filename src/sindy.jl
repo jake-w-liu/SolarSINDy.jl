@@ -43,7 +43,12 @@ function stlsq(Θ::AbstractMatrix, dx::AbstractVector;
     ξ = Θn \ dx
 
     for iter in 1:max_iter
-        # Threshold small coefficients
+        # Threshold small coefficients. NOTE: each (normalized) coefficient is
+        # thresholded independently, with no collinearity or joint-contribution
+        # guard, so STLSQ can retain a block of near-collinear columns whose large
+        # opposite-sign coefficients cancel to a near-null net contribution (an
+        # individually non-identifiable, numerically fragile combination). Use
+        # `collinearity_diagnostics` on the returned fit to surface such a block.
         small_inds = abs.(ξ) .< λ
         ξ[small_inds] .= 0.0
 
@@ -65,17 +70,27 @@ function stlsq(Θ::AbstractMatrix, dx::AbstractVector;
         ξ = ξ_new
     end
 
-    # Final threshold + resolve so the returned support always satisfies the STLSQ
-    # contract (sub-λ coefficients zeroed) regardless of how the loop exited. When the
-    # loop converged on a stable support this is a no-op (every active |ξ_j| ≥ λ, so the
-    # resolve reproduces ξ); it only corrects the max_iter-exhaustion path, which would
-    # otherwise return the last re-solve with a possibly sub-threshold coefficient.
-    ξ[abs.(ξ) .< λ] .= 0.0
-    active_final = findall(ξ .!= 0.0)
-    if !isempty(active_final)
-        ξ_final = zeros(p)
-        ξ_final[active_final] = Θn[:, active_final] \ dx
-        ξ = ξ_final
+    # Final thresholding fixed point. A single threshold+resolve is NOT a fixed
+    # point: the closing least-squares refit can push a surviving coefficient back
+    # below λ (reachable on the max_iter-exhaustion path, e.g. libraries with more
+    # than max_iter columns). Repeat threshold-then-refit until no active
+    # coefficient is sub-λ, so the returned support ALWAYS satisfies the STLSQ
+    # contract (every returned nonzero normalized |ξ_j| ≥ λ) regardless of how the
+    # main loop exited. The active set is monotone non-increasing — each pass drops
+    # at least one term or stops — so this terminates in at most p passes; on an
+    # already-stable support (the converged case, and every in-repo call where
+    # p < max_iter) it exits without an extra solve, reproducing the prior result.
+    while true
+        active_final = findall(!=(0.0), ξ)
+        isempty(active_final) && break
+        below = active_final[abs.(ξ[active_final]) .< λ]
+        isempty(below) && break
+        ξ[below] .= 0.0
+        active_final = findall(!=(0.0), ξ)
+        isempty(active_final) && break
+        ξ_new = zeros(p)
+        ξ_new[active_final] = Θn[:, active_final] \ dx
+        ξ = ξ_new
     end
 
     # Undo normalization
@@ -111,17 +126,123 @@ function sindy_discover(data::Dict{String,Vector{Float64}},
 end
 
 """
-    ensemble_sindy(data, lib, target; λ=0.1, n_models=100,
-                   subsample_frac=0.8, seed=42)
+    collinearity_diagnostics(Θ, ξ; groups=nothing, cond_warn=100.0)
 
-Ensemble SINDy via bagging: subsample data, run STLSQ, aggregate.
-Returns median coefficients and inclusion probabilities.
+Post-STLSQ conditioning / joint-contribution diagnostics for a discovered sparse
+model `dx ≈ Θ ξ`. STLSQ thresholds each (normalized) coefficient independently, so
+it can keep a block of near-collinear library columns whose large opposite-sign
+coefficients cancel to a small net contribution — a numerically fragile,
+individually non-identifiable combination. This routine surfaces that situation
+WITHOUT altering the fit (`cond_warn` only sets the `warn` flag).
+
+`Θ` is the evaluated library matrix (`n × p`, e.g. from [`evaluate_library`](@ref))
+and `ξ` the discovered coefficients (`length p`). Condition numbers are computed on
+UNIT-NORMALIZED columns so scale differences between terms do not masquerade as
+collinearity; net/gross contributions are in the physical units of `dx`, evaluated
+over the supplied rows of `Θ`.
+
+Returns a NamedTuple with
+- `active`       — indices of nonzero coefficients;
+- `block_cond`   — condition number of the unit-normalized active-column block
+  (`κ ≫ 1` signals collinearity among retained terms; `Inf` if singular);
+- `net_range`    — `(min, max)` of the active net contribution `Θ_active ξ_active`;
+- `net_absmax`   — maximum absolute net contribution;
+- `gross_absmax` — `max_i Σ_j |Θ_ij ξ_j|` over active terms (sum of per-term
+  magnitudes); `gross_absmax ≫ net_absmax` means the retained terms largely cancel;
+- `cancellation` — `gross_absmax / max(net_absmax, eps())`, a cancellation ratio;
+- `warn`         — `block_cond > cond_warn`;
+- `groups`       — per-group NamedTuples (`indices`, `cond`, `net_range`,
+  `net_absmax`, `gross_absmax`, `cancellation`) when `groups` is supplied.
+
+`groups` is an optional vector of index vectors naming candidate collinear blocks
+(e.g. a trig/clock-angle block); each is reported separately.
+"""
+function collinearity_diagnostics(Θ::AbstractMatrix, ξ::AbstractVector;
+                                  groups::Union{Nothing,AbstractVector}=nothing,
+                                  cond_warn::Real=100.0)
+    n, p = size(Θ)
+    length(ξ) == p ||
+        throw(DimensionMismatch("ξ length $(length(ξ)) != $(p) library columns"))
+
+    _block_cond(idx) = begin
+        isempty(idx) && return 1.0
+        B = Θ[:, idx]
+        norms = [norm(@view B[:, j]) for j in 1:size(B, 2)]
+        norms[norms .== 0] .= 1.0
+        s = svdvals(B ./ norms')
+        smin = minimum(s)
+        smin == 0 ? Inf : maximum(s) / smin
+    end
+    _net(idx) = isempty(idx) ? Float64[] : Θ[:, idx] * ξ[idx]
+    _gross_absmax(idx) = isempty(idx) ? 0.0 :
+        maximum(vec(sum(abs.(Θ[:, idx] .* reshape(ξ[idx], 1, :)), dims=2)))
+    _absmax(v) = isempty(v) ? 0.0 : maximum(abs, v)
+    _range(v) = isempty(v) ? (0.0, 0.0) : (minimum(v), maximum(v))
+
+    active = findall(!=(0.0), ξ)
+    net = _net(active)
+    net_absmax = _absmax(net)
+    gross_absmax = _gross_absmax(active)
+
+    group_reports = NamedTuple[]
+    if groups !== nothing
+        for g in groups
+            gv = collect(g)
+            gnet = _net(gv)
+            g_absmax = _absmax(gnet)
+            g_gross = _gross_absmax(gv)
+            push!(group_reports, (
+                indices = gv,
+                cond = _block_cond(gv),
+                net_range = _range(gnet),
+                net_absmax = g_absmax,
+                gross_absmax = g_gross,
+                cancellation = g_gross / max(g_absmax, eps()),
+            ))
+        end
+    end
+
+    block_cond = _block_cond(active)
+    return (
+        active = active,
+        block_cond = block_cond,
+        net_range = _range(net),
+        net_absmax = net_absmax,
+        gross_absmax = gross_absmax,
+        cancellation = gross_absmax / max(net_absmax, eps()),
+        warn = block_cond > cond_warn,
+        groups = group_reports,
+    )
+end
+
+"""
+    ensemble_sindy(data, lib, target; λ=0.1, n_models=500,
+                   subsample_frac=0.8, seed=42, bootstrap=false)
+
+Ensemble SINDy: repeatedly resample the rows, run STLSQ on each resample, and
+aggregate. Returns `(median_ξ, inclusion_prob, all_ξ)` where `inclusion_prob[j]` is
+the fraction of resamples that selected term `j`, `median_ξ[j]` is the median over
+the resamples in which term `j` was selected (nonzero), and `all_ξ` is the full
+`p × n_models` draw matrix.
+
+Resampling mode:
+- `bootstrap=false` (default): m-out-of-n subsampling WITHOUT replacement, with
+  `m = round(subsample_frac · n)` (subagging). This is the shipped default and the
+  mode that produced the persisted inclusion/CI artifacts. Quantiles of m-out-of-n
+  subsample coefficients are NOT bootstrap coefficient-σ estimates: the per-draw
+  spread scales like `√((n-m)/(n·m))` rather than the full-sample `√(1/n)`, so a CI
+  half-width read as `±z·σ` (see `init_forecast`) understates the full-sample
+  coefficient σ and should not be relabeled a bootstrap CI.
+- `bootstrap=true`: classical n-out-of-n resampling WITH replacement (bagging),
+  matching the ensemble-SINDy bootstrap literature; use this when a bootstrap
+  coefficient-σ interpretation is required. `subsample_frac` is then ignored.
 """
 function ensemble_sindy(data::Dict{String,Vector{Float64}},
                         lib::CandidateLibrary,
                         target::AbstractVector;
                         λ::Real=0.1, n_models::Int=500,
-                        subsample_frac::Real=0.8, seed::Int=42)
+                        subsample_frac::Real=0.8, seed::Int=42,
+                        bootstrap::Bool=false)
     rng = MersenneTwister(seed)
     Θ = evaluate_library(lib, data)
     n, p = size(Θ)
@@ -129,7 +250,10 @@ function ensemble_sindy(data::Dict{String,Vector{Float64}},
 
     all_ξ = zeros(p, n_models)
     for m in 1:n_models
-        idx = sort(randperm(rng, n)[1:n_sub])
+        # Default: subsample m<n rows without replacement (subagging). Optional:
+        # true n-out-of-n bootstrap (with replacement). Keeping the default path
+        # byte-identical preserves the shipped inclusion/CI artifacts.
+        idx = bootstrap ? rand(rng, 1:n, n) : sort(randperm(rng, n)[1:n_sub])
         all_ξ[:, m] = stlsq(Θ[idx, :], target[idx]; λ=λ, normalize=true)
     end
 

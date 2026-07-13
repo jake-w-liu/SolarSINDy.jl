@@ -298,8 +298,12 @@ println("=" ^ 60)
 ξ_main  = haskey(phase_results, "main")  ? phase_results["main"].ξ  : zeros(length(lib))
 ξ_recov = haskey(phase_results, "recovery") ? phase_results["recovery"].ξ : zeros(length(lib))
 
-# Load single-equation ξ from Phase B
-sindy_coef = CSV.read(joinpath(DATA_DIR, "real_sindy_coefficients.csv"), DataFrame)
+# Load single-equation ξ from Phase B (finding coupled_discovery.jl:354, same
+# defect here). Use the clean best-λ discovery fit, NOT the ensemble
+# median-over-nonzero vector (real_sindy_coefficients.csv), which injects phantom
+# rarely-selected terms (e.g. a +1.43 nT/hr constant at inclusion 0.008) that no
+# single STLSQ fit produced and that bias the single-index "switching" comparator.
+sindy_coef = CSV.read(joinpath(DATA_DIR, "real_sindy_discovery_coefficients.csv"), DataFrame)
 ξ_single = sindy_coef.coefficient
 
 # Evaluate on validation + test sets

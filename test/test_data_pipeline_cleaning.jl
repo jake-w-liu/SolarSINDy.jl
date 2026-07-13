@@ -177,32 +177,35 @@ using DataFrames
         end
     end
 
-    @testset "NF-DATA-01: gap-filled Pdyn keeps the n·V² identity (not independently interpolated)" begin
+    @testset "NF-DATA-01: Pdyn is proton-only from filled n·V² (OMNI word-29 not kept)" begin
         # n, V, and Pdyn share a 2-hour interior gap. After cleaning, n and V are
-        # interpolated and Pdyn is recomputed from them, so the n·V² identity must
-        # hold on the gap rows — it does NOT under an independent Pdyn interpolation
-        # (Pdyn is quadratic in V, so linear Pdyn interpolation drifts from n·V²).
+        # interpolated and Pdyn is recomputed proton-only from them (the n·V²
+        # identity holds on every row); the native OMNI word-29 pressure is dropped
+        # so training and serving share the proton-only convention.
         df = DataFrame(
             datetime = [DateTime(2021, 1, 1) + Hour(i - 1) for i in 1:5],
             V   = [400.0, NaN, NaN, 700.0, 800.0],
             Bz  = fill(-5.0, 5),
             By  = fill(1.0, 5),
             n   = [5.0, NaN, NaN, 11.0, 12.0],
-            Pdyn = [NaN, NaN, NaN, NaN, 13.0],   # row 5 native Pdyn is preserved
+            Pdyn = [NaN, NaN, NaN, NaN, 13.0],   # native (alpha-inclusive) value is NOT kept
             T   = fill(1.0e5, 5),
             Dst = [-30.0, -32.0, -34.0, -36.0, -38.0],
             AE  = fill(100.0, 5), AL = fill(-50.0, 5), AU = fill(80.0, 5),
         )
         clean_omni_data!(df)
-        for i in 1:4   # rows 1–4 had NaN Pdyn → recomputed from (interpolated) n, V
+        for i in 1:5   # every row: proton-only from (interpolated) n, V
             @test df.Pdyn[i] ≈ 1.6726e-6 * df.n[i] * df.V[i]^2 atol=1e-12
         end
-        @test df.Pdyn[5] == 13.0   # native OMNI Pdyn untouched (alpha-inclusive)
+        # Row 5's native 13.0 is overwritten with the proton-only value (≈12.85).
+        @test df.Pdyn[5] ≈ 1.6726e-6 * 12.0 * 800.0^2 atol=1e-12
+        @test df.Pdyn[5] != 13.0
     end
 
-    @testset "NF-DATA-02: Pdyn=NaN Dst* fallback keeps the +11 baseline" begin
-        # Trailing n/V gap → not interpolated → Pdyn stays NaN → Dst* fallback drops
-        # only the pressure term, keeping the +11 baseline (level-continuous).
+    @testset "NF-DATA-02: Pdyn-missing Dst* fallback carries the last known pressure forward" begin
+        # Trailing n/V gap → not interpolated → Pdyn stays NaN → Dst* uses the
+        # carried-forward last known pressure (row-1 proton-only), NOT a +11-only
+        # (Pdyn=0) baseline. The corrected fallback sits strictly below Dst + 11.
         df = DataFrame(
             datetime = [DateTime(2021, 2, 1) + Hour(i - 1) for i in 1:3],
             V   = [400.0, NaN, NaN],
@@ -216,8 +219,31 @@ using DataFrames
         )
         clean_omni_data!(df)
         @test isnan(df.Pdyn[2]); @test isnan(df.Pdyn[3])
-        @test df.Dst_star[2] ≈ df.Dst[2] + 11.0 atol=1e-12
-        @test df.Dst_star[3] ≈ df.Dst[3] + 11.0 atol=1e-12
+        pdyn1 = 1.6726e-6 * 5.0 * 400.0^2               # row-1 proton-only pressure, carried forward
+        @test df.Pdyn[1] ≈ pdyn1 atol=1e-12
+        @test df.Dst_star[2] ≈ -40.0 - 7.26 * sqrt(pdyn1) + 11.0 atol=1e-9
+        @test df.Dst_star[3] ≈ -50.0 - 7.26 * sqrt(pdyn1) + 11.0 atol=1e-9
+        @test df.Dst_star[2] < df.Dst[2] + 11.0          # not the physically-impossible Pdyn=0 fallback
+    end
+
+    @testset "NF-DATA-02b: quiet-pressure default when no prior Pdyn is available" begin
+        # No finite Pdyn anywhere (plasma out from the start) → the fallback reverts
+        # to the climatological quiet-time default, not +11 (Pdyn=0).
+        df = DataFrame(
+            datetime = [DateTime(2021, 3, 1) + Hour(i - 1) for i in 1:2],
+            V   = [NaN, NaN],
+            Bz  = fill(-5.0, 2),
+            By  = fill(1.0, 2),
+            n   = [NaN, NaN],
+            Pdyn = [NaN, NaN],
+            T   = fill(1.0e5, 2),
+            Dst = [-30.0, -40.0],
+            AE  = fill(100.0, 2), AL = fill(-50.0, 2), AU = fill(80.0, 2),
+        )
+        clean_omni_data!(df)
+        q = SolarSINDy.QUIET_PDYN_NPA
+        @test df.Dst_star[1] ≈ -30.0 - 7.26 * sqrt(q) + 11.0 atol=1e-9
+        @test df.Dst_star[2] ≈ -40.0 - 7.26 * sqrt(q) + 11.0 atol=1e-9
     end
 
     @testset "NF-DATA-03: AU/AL fill threshold preserves real values in [9999,99999)" begin
@@ -236,5 +262,60 @@ using DataFrames
             @test isnan(df.AU[2])        # 99999 fill → NaN
             @test isnan(df.AL[2])        # -99999 fill → NaN (abscheck)
         end
+    end
+
+    @testset "CACHE-1: _last_valid_omni_date skips trailing fill padding" begin
+        # NASA pads the current year to Dec 31 with fill rows, so the file's last
+        # row always reads as full-year coverage. The cache validator must instead
+        # find the last row whose Dst is a real observation.
+        mktempdir() do tmp
+            # Raw archive form: whitespace-separated, Dst is word 41, fill 99999.
+            raw = joinpath(tmp, "raw.dat")
+            open(raw, "w") do io
+                r1 = collect(1:54); r1[1]=2025; r1[2]=100; r1[3]=5;  r1[41]=-42
+                r2 = collect(1:54); r2[1]=2025; r2[2]=100; r2[3]=6;  r2[41]=-55
+                f1 = collect(1:54); f1[1]=2025; f1[2]=100; f1[3]=7;  f1[41]=99999
+                f2 = collect(1:54); f2[1]=2025; f2[2]=365; f2[3]=23; f2[41]=99999
+                for r in (r1, r2, f1, f2); println(io, join(r, ' ')); end
+            end
+            @test SolarSINDy._last_valid_omni_date(raw; delim=nothing, dst_field=41) ==
+                  DateTime(2025, 1, 1) + Day(99) + Hour(6)
+
+            # Extracted CSV form: comma-separated, Dst is column 10, header skipped.
+            csv = joinpath(tmp, "ex.csv")
+            open(csv, "w") do io
+                println(io, "year,doy,hour,By,Bz,T,n,V,Pdyn,Dst,AE,AL,AU")
+                println(io, "2025,100,5,1,-2,5e5,4,450,3.5,-42,120,-80,90")
+                println(io, "2025,100,6,1,-2,5e5,4,450,3.5,99999,9999,-99999,99999")
+            end
+            @test SolarSINDy._last_valid_omni_date(csv; delim=',', dst_field=10) ==
+                  DateTime(2025, 1, 1) + Day(99) + Hour(5)
+
+            # An all-fill tail yields nothing (treated as unverifiable → stale).
+            allfill = joinpath(tmp, "allfill.csv")
+            open(allfill, "w") do io
+                println(io, "year,doy,hour,By,Bz,T,n,V,Pdyn,Dst,AE,AL,AU")
+                println(io, "2025,1,0,1,-2,5e5,4,450,3.5,99999,9999,-99999,99999")
+            end
+            @test SolarSINDy._last_valid_omni_date(allfill; delim=',', dst_field=10) === nothing
+        end
+    end
+
+    @testset "CACHE-2: _omni_cache_stale re-fetches only when coverage is short" begin
+        now_utc = DateTime(2026, 3, 15, 12)
+        old   = DateTime(2025, 11, 1)   # cache fetched long ago
+        fresh = DateTime(2026, 3, 14)   # cache fetched yesterday
+
+        # Completed past year fully covered through its final hour → keep cache.
+        @test SolarSINDy._omni_cache_stale(DateTime(2025, 12, 31, 23), 2025, now_utc, old) == false
+        # Completed past year covered only to October, stale cache → re-fetch.
+        @test SolarSINDy._omni_cache_stale(DateTime(2025, 10, 1), 2025, now_utc, old) == true
+        # Same short coverage but a freshly fetched file → do not thrash.
+        @test SolarSINDy._omni_cache_stale(DateTime(2025, 10, 1), 2025, now_utc, fresh) == false
+        # Current year: coverage end unknowable, gate on freshness.
+        @test SolarSINDy._omni_cache_stale(DateTime(2026, 3, 4, 19), 2026, now_utc, old) == true
+        @test SolarSINDy._omni_cache_stale(DateTime(2026, 3, 4, 19), 2026, now_utc, fresh) == false
+        # No readable Dst record → always stale.
+        @test SolarSINDy._omni_cache_stale(nothing, 2025, now_utc, fresh) == true
     end
 end

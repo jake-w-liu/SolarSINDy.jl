@@ -377,6 +377,57 @@ end
         a, _ = check_alarm(config, r_now, future_clock)
         @test a !== nothing   # fires; under the bug (elapsed = -6h < cooldown) it was suppressed
     end
+
+    @testset "D: cooldown boundary is closed at exactly cooldown_hours" begin
+        # A target sitting precisely `cooldown_hours` after the last alarm must be
+        # suppressed (closed upper bound), otherwise a fixed forecast-horizon offset
+        # equal to the cooldown re-fires on every poll cycle.
+        config = AlarmConfig(
+            Dict(MODERATE => -50.0, INTENSE => -100.0, SUPERINTENSE => -200.0),
+            false, x -> nothing, 6,
+        )
+        r = ForecastResult(DateTime(2026, 1, 1, 6), -80.0, -80.0, -90.0, -70.0, NaN)
+        a, _ = check_alarm(config, r, DateTime(2026, 1, 1, 0))  # elapsed == 6 h == cooldown
+        @test a === nothing
+        # Strictly beyond the cooldown still fires.
+        r2 = ForecastResult(DateTime(2026, 1, 1, 7), -80.0, -80.0, -90.0, -70.0, NaN)
+        a2, _ = check_alarm(config, r2, DateTime(2026, 1, 1, 0))  # elapsed == 7 h > cooldown
+        @test a2 !== nothing
+    end
+
+    @testset "D: maybe_fire_horizon_alarm! dedups per target hour and escalates" begin
+        fired = Alarm[]
+        config = AlarmConfig(
+            Dict(MODERATE => -50.0, INTENSE => -100.0, SUPERINTENSE => -200.0),
+            true, a -> push!(fired, a), 6,
+        )
+        seen = Dict{DateTime, StormSeverity}()
+        t = DateTime(2026, 1, 1, 6)
+        fr_mod = ForecastResult(t, -60.0, -60.0, -70.0, -50.0, NaN)
+
+        # First evaluation fires once.
+        a1 = maybe_fire_horizon_alarm!(config, fr_mod, seen)
+        @test a1 !== nothing && a1.severity == MODERATE
+
+        # Re-evaluating the SAME target at the SAME severity across poll cycles is
+        # suppressed (this is the alarm-storm the finding reported).
+        for _ in 1:5
+            @test maybe_fire_horizon_alarm!(config, fr_mod, seen) === nothing
+        end
+        @test length(fired) == 1
+
+        # Escalation to a more severe tier for the same target re-announces once.
+        fr_int = ForecastResult(t, -120.0, -120.0, -130.0, -110.0, NaN)
+        a2 = maybe_fire_horizon_alarm!(config, fr_int, seen)
+        @test a2 !== nothing && a2.severity == INTENSE
+        @test maybe_fire_horizon_alarm!(config, fr_int, seen) === nothing
+        @test length(fired) == 2
+
+        # A quiet forecast never fires and never records a target.
+        fr_quiet = ForecastResult(DateTime(2026, 1, 1, 9), -10.0, -10.0, -20.0, 0.0, NaN)
+        @test maybe_fire_horizon_alarm!(config, fr_quiet, seen) === nothing
+        @test !haskey(seen, fr_quiet.t)
+    end
 end
 
 @testset "Baselines — Full Models" begin
@@ -398,16 +449,22 @@ end
             @test dDdt_full[k] > dDdt_simple[k]  # full lacks injection, so more positive
         end
 
-        # Hand-calculated: full = -(-10)/7.7 = +1.2987, simple = -0.004559·300·1 + 1.2987 = -0.069
+        # Hand-calculated: full = -(-10)/7.7 = +1.2987 (Q=0 below threshold),
+        # simple = -5.4e-3·300·1 + 1.2987 = -0.321 (threshold-free injection).
         @test isapprox(dDdt_full[1], 10.0 / 7.7, atol=1e-10)  # exact: only decay
-        @test isapprox(dDdt_simple[1], -4.559e-3 * 300.0 * 1.0 + 10.0 / 7.7, atol=1e-10)
+        @test isapprox(dDdt_simple[1], -5.4e-3 * 300.0 * 1.0 + 10.0 / 7.7, atol=1e-10)
 
-        # Above threshold: both should agree
+        # Above threshold the published full model subtracts the injection threshold
+        # (Q = -d·(V·Bs − 500)), so it injects LESS than the threshold-free simple
+        # model by exactly d·500 = 2.7 nT/h — they must NOT coincide.
         V_high = 600.0 .* ones(n)
-        Bs_high = 10.0 .* ones(n)  # Ey = 6 mV/m >> 0.5
+        Bs_high = 10.0 .* ones(n)  # V·Bs = 6000, Ey = 6 mV/m >> 0.5
         dDdt_full2 = burton_model_full(V_high, Bs_high, Dst)
         dDdt_simple2 = burton_model(V_high, Bs_high, Dst)
-        @test isapprox(dDdt_full2, dDdt_simple2, rtol=1e-12)
+        for k in 1:n
+            @test dDdt_full2[k] > dDdt_simple2[k]   # threshold offset ⇒ less injection
+        end
+        @test isapprox(dDdt_full2[1] - dDdt_simple2[1], 5.4e-3 * 500.0, atol=1e-10)
     end
 
     @testset "A: O'Brien-McPherron — known analytical values" begin
@@ -495,5 +552,31 @@ end
 
     @testset "E: Error handling — smooth_moving_average even window" begin
         @test_throws AssertionError smooth_moving_average([1.0, 2.0, 3.0], 4)
+    end
+
+    @testset "Baseline threshold boundaries and degenerate IMF (mutation guards)" begin
+        # Burton-full injection is threshold-continuous with the -500 (V·Bs) offset. At Ey = 0.5 mV/m
+        # exactly (V·Bs = 500) the injection is zero, so the tendency is recovery-only; a regression
+        # dropping the -500 offset (the old -α·V·Bs form) would inject a spurious step here instead.
+        @test burton_model_full([500.0], [1.0], [-50.0])[1] ≈ 50.0 / 7.7 atol = 1e-12   # Q == 0
+        @test burton_model_full([500.0], [1.001], [-50.0])[1] < 50.0 / 7.7              # Ey just > 0.5 → Q < 0
+
+        # O'Brien injection is continuous at Ec_crit = 0.49 (so >/>= are identical there); bracket the
+        # threshold rather than probing exact equality. With Dst* = 0 the tendency equals Q exactly.
+        @test obrien_mcpherron_model([489.0], [1.0], [0.0])[1] == 0.0                     # Ec = 0.489 < crit
+        @test obrien_mcpherron_model([491.0], [1.0], [0.0])[1] ≈ -4.4 * 0.001 atol = 1e-9 # Ec = 0.491 > crit
+
+        # Degenerate IMF: BT = 0 (quiet solar wind) must not NaN — the max(BT, 1e-10) guard holds —
+        # and with θ_c = 0 the Newell coupling is exactly zero.
+        nc = newell_coupling([500.0], [0.0], [0.0])
+        @test nc[1] == 0.0
+        @test !isnan(nc[1])
+
+        # Clock-angle quadrant convention θ_c = atan(|By|, Bz): the exported utility feeds the SINDy
+        # θ_c / B_T features, so pin all four quadrants against a sign/argument-order flip.
+        @test imf_clock_angle([0.0], [5.0])[1] ≈ 0.0 atol = 1e-12       # due north
+        @test imf_clock_angle([0.0], [-5.0])[1] ≈ π atol = 1e-12        # due south
+        @test imf_clock_angle([5.0], [5.0])[1] ≈ π / 4 atol = 1e-12     # north-east
+        @test imf_clock_angle([5.0], [-5.0])[1] ≈ 3π / 4 atol = 1e-12   # south-east
     end
 end

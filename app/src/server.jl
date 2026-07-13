@@ -68,19 +68,22 @@ function serve_static(path::AbstractString)
 end
 
 function api_handler(path::AbstractString, query::AbstractString, log_path::AbstractString)
-    df = get_log(log_path)
+    # The log is loaded lazily, only inside the branches that use it. /api/swpc, /api/dbdt,
+    # /api/network, and /api/storm_replay have no log dependency and must stay up (and degrade
+    # to their own available=false payloads) even when the forecast log is missing.
     if path == "/api/status"
         snap = swpc_snapshot_cached_or_refresh()
-        return json_response(merge(build_status(df),
+        return json_response(merge(build_status(get_log(log_path)),
                                    (upstream = snap, upstream_status = upstream_assessment(snap))))
     elseif path == "/api/swpc"
         return json_response(swpc_snapshot())
     elseif path == "/api/dbdt"
         q = HTTP.queryparams(query)
         station = uppercase(get(q, "station", "FRD"))
-        # Reject empty (?station=) and non-letter input: all(...) is vacuously true on "",
-        # which would otherwise pass an empty station code downstream.
-        (isempty(station) || !all(c -> 'A' <= c <= 'Z', station)) && (station = "FRD")
+        # Whitelist against the known observatory set: bounds the _DBDT_CACHE and the outbound
+        # USGS request rate against arbitrary station codes. The bundled front-end never sends a
+        # station param, and NET_STATIONS covers both forecaster models (FRD, CMO) and the map.
+        station in NET_STATIONS || (station = "FRD")
         nc = usgs_dbdt(; station=station)
         fc = nothing                                             # calibrated next-30-min forecast (paper3 conformal)
         if getproperty(nc, :available) == true
@@ -89,20 +92,39 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
             if sw !== nothing && get(sw, :available, false)
                 fc = forecast_dbdt([s.dbdt for s in nc.series], get(sw, :speed_kms, nothing),
                                    get(sw, :bz_gsm_nt, nothing); station=station)
+                if fc !== nothing
+                    # A reachable-but-stalled L1 feed must not drive a "reliable" 30-min forecast
+                    # from frozen inputs: flag stale inputs and demote reliability.
+                    age = solar_wind_input_age_min(sw)
+                    stale_inputs = age !== nothing && age > SW_INPUT_MAX_AGE_MIN
+                    fc = merge(fc, (stale_inputs = stale_inputs,
+                                    input_age_min = (age === nothing ? nothing : round(age; digits=1)),
+                                    mag_time_utc = get(sw, :mag_time_utc, nothing),
+                                    plasma_time_utc = get(sw, :plasma_time_utc, nothing)))
+                    stale_inputs && (fc = merge(fc, (reliable = false,)))
+                end
             end
         end
         return json_response(fc === nothing ? nc : merge(nc, (forecast = fc,)))
     elseif path == "/api/network"
         return json_response(usgs_network())
     elseif path == "/api/forecast"
-        return json_response(build_forecast(df, log_path))
+        return json_response(build_forecast(get_log(log_path), log_path))
     elseif path == "/api/storm_replay"
         return json_response(build_storm_replay(log_path))
     elseif path == "/api/history"
         q = HTTP.queryparams(query)
-        hours = try clamp(parse(Float64, get(q, "hours", "72")), 1, 24*30) catch; 72.0 end
-        return json_response(build_history(df, hours))
+        # Validate finiteness before clamping: parse(Float64, "NaN") succeeds and clamp(NaN,…)
+        # returns NaN (never triggering the catch), which then throws in Hour(round(Int, NaN)).
+        hours = try
+            h = parse(Float64, get(q, "hours", "72"))
+            isfinite(h) ? clamp(h, 1.0, 24.0 * 30) : 72.0
+        catch
+            72.0
+        end
+        return json_response(build_history(get_log(log_path), hours))
     elseif path == "/api/alerts"
+        df = get_log(log_path)
         snap = swpc_snapshot_cached_or_refresh()
         combined = compute_alert_state(build_status(df), upstream_assessment(snap), usgs_dbdt())
         return json_response(merge(build_alerts(df),
@@ -120,7 +142,12 @@ function make_handler(log_path::AbstractString)
             if path == "/api/health"
                 ok = isfile(log_path)
                 age = ok ? round((time() - mtime(log_path)) / 60; digits=1) : nothing
-                return json_response((status = ok ? "ok" : "no_log",
+                # The daemon rewrites the log every cycle, so a file mtime older than the
+                # staleness window means it has stopped issuing — report "stale" (dashboard dot
+                # turns red), not "ok", instead of implying a live feed behind frozen data.
+                status = !ok ? "no_log" :
+                         (age !== nothing && age > STALE_CYCLE_HOURS * 60 ? "stale" : "ok")
+                return json_response((status = status,
                                       log_path=log_path, log_age_min=age,
                                       server_time_utc=string(now(UTC)) * "Z"))
             elseif startswith(path, "/api/")
@@ -129,8 +156,10 @@ function make_handler(log_path::AbstractString)
                 return serve_static(path)
             end
         catch e
+            # Log the full exception server-side, but never echo it (and its absolute log path)
+            # to clients — return a generic detail.
             @error "request failed" path=path exception=(e, catch_backtrace())
-            return json_response((error="internal error", detail=string(e)); status=500)
+            return json_response((error="internal error",); status=500)
         end
     end
 end

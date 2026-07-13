@@ -9,10 +9,14 @@
 
 using HTTP, JSON3, Dates
 
+# A stale status (issue time beyond the staleness threshold, or an expired cycle) must not
+# escalate the webhook: its threat reflects a forecast issued hours-to-days ago, not now.
+_status_stale(status) = hasproperty(status, :stale) && getproperty(status, :stale) == true
+
 # Overall alert state = max severity across the live layers, with human-readable reasons.
 function compute_alert_state(status, upstream_status, dbdt)
     level = 0; reasons = String[]
-    if getproperty(status, :available) == true
+    if getproperty(status, :available) == true && !_status_stale(status)
         th = status.threat
         if th.level >= 1; level = max(level, th.level); push!(reasons, "Dst forecast $(th.label)"); end
         if th.watch; level = max(level, th.watch_level); push!(reasons, "90% band reaches $(th.watch_label)"); end

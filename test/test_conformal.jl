@@ -65,19 +65,58 @@ using Statistics
                                        hw_dist_short, hw_dist_long])
     end
 
-    @testset "robustness: sparse stratum falls back to global pool" begin
+    @testset "robustness: sparse disturbed stratum falls back monotone-safe" begin
         rng = MersenneTwister(99)
-        # Big quiet pool + a 3-row disturbed stratum (< min_stratum_n).
-        n = 400
-        pts = zeros(n + 3); obs = vcat(5.0 .* randn(rng, n), [100.0, -90.0, 95.0])
-        hor = fill(1.0, n + 3)
-        dst = vcat(fill(0.0, n), fill(-90.0, 3))
+        # Short-lead quiet (narrow) + long-lead quiet (wide), both well-populated,
+        # plus a 3-row long-lead DISTURBED stratum (< min_stratum_n). The pooled
+        # global band sits BETWEEN the two quiet bands, so a naive global fallback
+        # for the sparse disturbed cell would be NARROWER than the same-lead quiet
+        # band — the inversion this fix removes (cf. shipped sidecar: global
+        # 13.98 nT < 6 h quiet 16.51 nT). The fallback must instead be the widest of
+        # {global, same-lead quiet, shorter-lead disturbed}.
+        nq = 600
+        pts = zeros(2nq + 3)
+        obs = vcat(3.0 .* randn(rng, nq),        # short-lead quiet, narrow
+                   18.0 .* randn(rng, nq),       # long-lead quiet, wide
+                   [120.0, -110.0, 115.0])       # long-lead disturbed, sparse
+        hor = vcat(fill(1.0, nq), fill(6.0, nq), fill(6.0, 3))
+        dst = vcat(fill(0.0, nq), fill(0.0, nq), fill(-90.0, 3))
+        cc = fit_conformal(pts, obs, hor, dst; coverage=0.90, min_stratum_n=20,
+                           horizon_edges=[0.0, 3.0, Inf])
+        hw_q_long = conformal_halfwidth(cc, 6.0, 0.0)     # long-lead quiet (wide)
+        hw_d_long = conformal_halfwidth(cc, 6.0, -90.0)   # sparse long-lead disturbed
+        # Monotone-safe: disturbed is never narrower than same-lead quiet or global.
+        @test hw_d_long >= hw_q_long
+        @test hw_d_long >= cc.global_stratum.half_width
+        # The pooled global band is genuinely narrower than the long-lead quiet band
+        # here (the inversion), so the fallback must pick the quiet band, not global.
+        @test cc.global_stratum.half_width < hw_q_long
+        @test hw_d_long == hw_q_long
+        # Populated quiet cell is still resolved to itself.
+        @test conformal_stratum(cc, 6.0, 0.0).key == :h2_quiet
+    end
+
+    @testset "width monotonicity: disturbed ≥ quiet at every lead (sparse disturbed)" begin
+        rng = MersenneTwister(1234)
+        # Well-populated quiet strata across 4 leads with increasing residual scale;
+        # every disturbed stratum is deliberately sparse (< min_stratum_n) so every
+        # disturbed query takes the monotone-safe fallback. Assert the module's own
+        # premise — disturbed intervals are never narrower than same-lead quiet.
+        leads = [1.0, 2.0, 3.0, 6.0]
+        scales = [4.0, 6.0, 9.0, 15.0]
+        pts = Float64[]; obs = Float64[]; hor = Float64[]; dst = Float64[]
+        for (h, σ) in zip(leads, scales)
+            append!(pts, zeros(500)); append!(obs, σ .* randn(rng, 500))
+            append!(hor, fill(h, 500)); append!(dst, zeros(500))
+            # 3 disturbed rows per lead (sparse), residuals near the quiet scale.
+            append!(pts, zeros(3)); append!(obs, σ .* randn(rng, 3))
+            append!(hor, fill(h, 3)); append!(dst, fill(-90.0, 3))
+        end
         cc = fit_conformal(pts, obs, hor, dst; coverage=0.90, min_stratum_n=20)
-        s_quiet = conformal_stratum(cc, 1.0, 0.0)
-        s_dist = conformal_stratum(cc, 1.0, -90.0)
-        @test s_quiet.key != :global          # quiet stratum is populated
-        @test s_dist.key == :global           # sparse disturbed → global fallback
-        @test conformal_halfwidth(cc, 1.0, -90.0) == cc.global_stratum.half_width
+        for h in leads
+            @test conformal_halfwidth(cc, h, -90.0) >= conformal_halfwidth(cc, h, 0.0)
+            @test conformal_halfwidth(cc, h, -90.0) >= cc.global_stratum.half_width
+        end
     end
 
     @testset "persistence round-trip preserves all strata" begin

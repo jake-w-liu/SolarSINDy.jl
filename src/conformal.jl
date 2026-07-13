@@ -32,8 +32,11 @@ end
     ConformalCalibration
 
 Stratified split-conformal calibration. Holds one [`ConformalStratum`](@ref) per
-occupied (horizon-bin × activity-regime) cell plus a pooled global fallback used
-when a stratum has fewer than `min_stratum_n` calibration points.
+occupied (horizon-bin × activity-regime) cell plus a pooled global fallback. An
+under-populated cell (fewer than `min_stratum_n` calibration points) resolves via
+the monotone-safe fallback in [`conformal_stratum`](@ref) — the widest of the
+global band and the strata the query dominates — not blindly to the (possibly
+narrower) global band.
 """
 struct ConformalCalibration
     coverage::Float64                      # nominal target, e.g. 0.90
@@ -164,28 +167,65 @@ function fit_conformal(points::AbstractVector{<:Real},
                                 min_stratum_n, max_horizon, strata, global_stratum)
 end
 
+# Widest (largest half-width) stratum among `candidate_keys` that meets the
+# population floor, or the pooled global band when none qualifies or is wider.
+# Used so an under-populated cell never resolves to a band NARROWER than a
+# better-populated stratum that the query dominates (regime/lead monotonicity).
+function _widest_stratum(cal::ConformalCalibration, candidate_keys)
+    best = cal.global_stratum
+    for k in candidate_keys
+        s = get(cal.strata, k, nothing)
+        (s === nothing || s.n < cal.min_stratum_n) && continue
+        s.half_width > best.half_width && (best = s)
+    end
+    return best
+end
+
 """
     conformal_stratum(cal, horizon, latest_dst)
 
-Resolve the [`ConformalStratum`](@ref) used for a `(horizon, latest_dst)` query:
-the matching cell when it has `≥ min_stratum_n` calibration points, otherwise the
-pooled global fallback.
+Resolve the [`ConformalStratum`](@ref) used for a `(horizon, latest_dst)` query.
+The matching cell is used when it has `≥ min_stratum_n` calibration points.
+Otherwise the fallback is MONOTONE-SAFE: because storm-time residuals are
+heavier-tailed than quiet-time residuals and longer leads carry larger error, an
+under-populated cell must never receive a band narrower than a better-populated
+stratum that the query dominates. The fallback therefore returns the widest of the
+pooled global band, the same-lead quiet counterpart (for a disturbed query), and
+any populated disturbed stratum at an equal-or-shorter lead — never blindly the
+(possibly narrower) global band. This preserves `disturbed ≥ quiet` at a fixed lead
+even when the disturbed stratum is sparse.
 
 A query horizon beyond the largest calibrated lead time (`max_horizon`) is
 out-of-support: the top horizon bin `[edges[end-1], Inf)` was only ever fit on
 horizons up to `max_horizon`, so reusing its half-width for, e.g., a 24 h query
 calibrated only to 6 h would silently understate the interval. Such queries fall
-back to the wider global band instead.
+back to the pooled global band instead (kept as the deliberate out-of-support
+policy; see the F4 regression test).
 """
 function conformal_stratum(cal::ConformalCalibration, horizon::Real, latest_dst::Real)
-    # Out-of-support horizon → widest available (global) band, not the top-bin
-    # half-width fit on shorter leads. Defaults harmlessly when max_horizon=Inf
-    # (e.g. a legacy sidecar with no recorded max), preserving prior behavior.
+    # Out-of-support horizon → pooled global band, not the top-bin half-width fit
+    # on shorter leads. Defaults harmlessly when max_horizon=Inf (e.g. a legacy
+    # sidecar with no recorded max), preserving prior behavior.
     (isfinite(horizon) && horizon > cal.max_horizon) && return cal.global_stratum
-    key = _stratum_key(_horizon_bin(horizon, cal.horizon_edges),
-                       _activity_regime(latest_dst, cal.activity_threshold_nt))
+    hbin = _horizon_bin(horizon, cal.horizon_edges)
+    regime = _activity_regime(latest_dst, cal.activity_threshold_nt)
+    key = _stratum_key(hbin, regime)
     s = get(cal.strata, key, nothing)
-    return (s !== nothing && s.n >= cal.min_stratum_n) ? s : cal.global_stratum
+    (s !== nothing && s.n >= cal.min_stratum_n) && return s
+    # Under-populated cell: fall back monotone-safely rather than to the pooled
+    # global band, which in a real sidecar can be NARROWER than the same-lead quiet
+    # band (observed inversion: global 13.98 nT < 6 h quiet 16.51 nT). A disturbed
+    # query is guarded by its same-lead quiet counterpart and any populated
+    # disturbed stratum at an equal-or-shorter lead; a quiet query only needs the
+    # global pool (it is already the narrower regime).
+    candidates = Symbol[]
+    if regime === :disturbed
+        push!(candidates, _stratum_key(hbin, :quiet))
+        for b in 1:hbin
+            push!(candidates, _stratum_key(b, :disturbed))
+        end
+    end
+    return _widest_stratum(cal, candidates)
 end
 
 """
@@ -219,9 +259,25 @@ end
 #   α_{t+1}      = α_t + γ (α* - err_t),   err_t = 1 if y_t fell outside, else 0
 #
 # with target miscoverage α* = 1 - coverage. A miss lowers α_t (widening the next
-# interval); a hit raises it (tightening). The realized time-average miscoverage
-# satisfies |mean(err) - α*| ≤ (α_1 + γ)/(γ T) → α*, regardless of how the
-# residual distribution drifts.
+# interval); a hit raises it (tightening).
+#
+# Coverage guarantee — scope. The Gibbs & Candès (2021) distribution-free bound
+# |mean(err) - α*| ≤ (α_1 + γ)/(γ T) → α* holds for the IDEALIZED recursion in
+# which α_t is UNCLAMPED and the prediction set SATURATES to the whole real line
+# whenever α_t ≤ 0 (and to the empty set when α_t ≥ 1). The telescoping proof needs
+# exactly that: during a miss burst α_t must be allowed to go negative and the band
+# to become infinite so the accumulated miscoverage "debt" is repaid later.
+#
+# This implementation deliberately trades that worst-case guarantee for BOUNDED,
+# operationally usable bands: α_t is clamped to [0, 1] (line ~310) and the widest
+# band is the empirical sample maximum (`_empirical_halfwidth` at level ≥ 1), never
+# an infinite interval. Under sustained, unprecedented drift the clamp discards
+# miscoverage debt, so the (α_1 + γ)/(γ T) bound is NOT guaranteed as written;
+# realized coverage is instead validated empirically (unit tests + live
+# monitoring). Merely widening the α_t range would not restore the bound while the
+# band is still capped at the sample max — restoring the theorem would require
+# serving an infinite interval whenever α_t ≤ 0, which is useless for a forecast
+# product. The bounded-band behavior is the intended, safer operational choice.
 # ---------------------------------------------------------------------------
 
 """

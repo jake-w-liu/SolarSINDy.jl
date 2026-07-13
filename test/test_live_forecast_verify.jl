@@ -221,6 +221,49 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         end
     end
 
+    @testset "C0-7: verify_pending! re-reads under the lock; a concurrent append is not lost" begin
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "live_forecast_log.csv")
+            lock_dir = log_path * ".lock"
+            past = DateTime(2026, 6, 6, 5)
+            future = DateTime(2026, 6, 6, 9)
+            row(target) = DataFrame(
+                issue_time_utc=["2026-06-06T04:00:00"],
+                latest_dst_time_utc=["2026-06-06T04:00:00"],
+                target_time_utc=[string(target)],
+                model_version=["v2"],
+                pred_dst_nt=[-30.0], pred_dst_ci05_nt=[-50.0], pred_dst_ci95_nt=[-10.0],
+                observation_dst_nt=[missing],
+            )
+            CSV.write(log_path, row(past))                       # P1, pending
+
+            # Simulate an in-progress locked writer (e.g. the live monitor appending a forecast) that
+            # already holds the directory lock. verify_pending! must block on it, then re-read the log.
+            mkdir(lock_dir)
+            task = @async verify_pending!(LiveVerifyConfig(; log_path=log_path);
+                                          dst_times=[past], dst_vals=[-40.0])
+            sleep(0.3)                                           # let the async verify reach the lock poll loop
+            @test !istaskdone(task)                              # blocked on the held lock (did not clobber yet)
+
+            # Concurrent append of P2 while the lock is held here.
+            df2 = vcat(CSV.read(log_path, DataFrame), row(future); cols=:union)
+            _atomic_csv(log_path, df2)
+            rm(lock_dir; recursive=true, force=true)             # release: verify now proceeds
+            verified = fetch(task)
+
+            out = CSV.read(log_path, DataFrame)
+            @test verified == 1                                  # P1 scored
+            @test nrow(out) == 2                                 # P2 survived — no lost update
+            # CSV round-trips target_time_utc back to DateTime, so match by parsed time.
+            tgt = _parse_dt.(out.target_time_utc)
+            p1 = out[tgt .== past, :]
+            p2 = out[tgt .== future, :]
+            @test nrow(p1) == 1 && nrow(p2) == 1
+            @test p1.observation_dst_nt[1] == -40.0              # P1 got the observation
+            @test ismissing(p2.observation_dst_nt[1])            # P2 still pending, not clobbered
+        end
+    end
+
     @testset "A/D: refresh_observations! reconciles revised Dst without changing predictions" begin
         mktempdir() do tmp
             log_path = joinpath(tmp, "live_forecast_log.csv")
@@ -522,9 +565,17 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         @test nrow(h1) == 3                       # anchors t0+1..t0+3, target +1 present
         @test nrow(h2) == 2                       # anchors t0+1..t0+2, target +2 present
         @test sort(h1.pred_dst_nt) ≈ sort(df.pred_dst_nt) atol = 1e-9
-        # Longer lead departs further from the anchor persistence value.
-        for r in eachrow(h2)
-            @test isfinite(r.pred_dst_nt)
+        # Longer lead departs STRICTLY further from the anchor persistence value. A regression that
+        # returns the 1-step forecast for every horizon (e.g. fc[1] instead of fc[n_steps], or a
+        # dropped primary-trajectory update) leaves h=2 == h=1, so a finiteness-only check would miss
+        # it; the strict inequality on the matching anchors pins the multi-step propagation.
+        for r2 in eachrow(h2)
+            @test isfinite(r2.pred_dst_nt)
+            r1 = h1[h1.issue_time_utc .== r2.issue_time_utc, :]
+            @test nrow(r1) == 1
+            dep2 = abs(r2.pred_dst_nt - r2.persistence_dst_nt)
+            dep1 = abs(r1.pred_dst_nt[1] - r1.persistence_dst_nt[1])
+            @test dep2 > dep1
         end
         @test_throws ArgumentError replay_recent_table(plasma, mag, times, dst_vals;
                                                        replay_hours=24, horizons=Int[])
@@ -611,6 +662,7 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test :gate_pass in propertynames(selection)
             @test :acceptance_gate_pass in propertynames(selection)
             @test :holdout_coverage in propertynames(selection)
+            @test :beats_preupgrade in propertynames(selection)
             @test :beats_persistence in propertynames(selection)
             @test :holdout_shrink_alpha ∉ propertynames(selection)
             @test any(selection.selected_by_validation)
@@ -816,7 +868,8 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
                     obrien_dst_nt=[-31.0],
                 )
                 idx = _append_forecast!(log_path, row)
-                return (; row_idx=idx, target_time=target, pred_dst=pred,
+                return (; row_idx=idx, latest_dst_time=DateTime("2026-06-06T09:00:00"),
+                        target_time=target, pred_dst=pred,
                         ci05_dst=pred - 10.0, ci95_dst=pred + 10.0,
                         model_version="v2")
             end
@@ -910,11 +963,16 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         # Missing column → zero, never an error.
         @test _window_finite_count(plasma, :bz_gsm, t0, t1) == 0
 
-        # Gap classification (the issue/refuse decision, isolated for testing).
+        # Gap classification (the issue/refuse decision, isolated for testing). Matches the paper's
+        # safety contract: a missing speed OR a missing Bz window refuses issuance (:hard), because
+        # either primary driver falling back to a quiet default can under-warn a fast storm; only a
+        # secondary (density/By) gap issues a flagged row (:partial).
         @test _driver_gap_status(3, 2) == :ok
-        @test _driver_gap_status(0, 2) == :partial
-        @test _driver_gap_status(3, 0) == :partial
+        @test _driver_gap_status(0, 2) == :hard      # missing speed alone → refuse (was :partial)
+        @test _driver_gap_status(3, 0) == :hard      # missing Bz alone → refuse (was :partial)
         @test _driver_gap_status(0, 0) == :hard
+        @test _driver_gap_status(3, 2, 0, 1) == :partial   # density-only gap → issue but flag
+        @test _driver_gap_status(3, 2, 1, 0) == :partial   # By-only gap → issue but flag
     end
 
     @testset "P1-1: an all-NaN density/By trailing window flags a driver gap" begin
@@ -996,6 +1054,13 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         @test tau_deepening <= V2_TAIL_TAU_MAX_H
         @test V2_SERVED_TAIL_VERSION == "v2+L1A+Bregime+Pinertia"
 
+        # Closed-form tau law (all exactly representable, so == is safe): recovery => no scaling,
+        # deepening => tau0*(1+|rate|/r0), saturation => cap. Pins the formula SHAPE and constants so
+        # a sqrt-shape or an r0/tau0 rescale (which preserve the orderings above) is caught.
+        @test _v2_tail_tau(5.0) == 3.0                       # V2_TAIL_TAU0_H
+        @test _v2_tail_tau(-30.0) == 15.0                    # 3*(1 + 30/7.5)
+        @test _v2_tail_tau(-10_000.0) == V2_TAIL_TAU_MAX_H   # cap saturation
+
         relaxed_recovery = _relaxed_tail_driver(driver, 1, 5.0)
         relaxed_deepening = _relaxed_tail_driver(driver, 1, -30.0)
         # Recovery relaxes transverse IMF toward quiet; active deepening preserves
@@ -1007,12 +1072,18 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         @test abs(relaxed_recovery.By) < abs(driver.By)
         @test abs(relaxed_deepening.Bz) > abs(relaxed_recovery.Bz)
         @test abs(relaxed_deepening.By) > abs(relaxed_recovery.By)
+        # Exact e-folding: relax = exp(-hours/tau); pins the hours exponent and tau together.
+        @test relaxed_deepening.Bz ≈ driver.Bz * exp(-1 / 15) atol = 1e-12
+        @test relaxed_deepening.By ≈ driver.By * exp(-1 / 15) atol = 1e-12
+        @test _relaxed_tail_driver(driver, 2, -30.0).Bz ≈ driver.Bz * exp(-2 / 15) atol = 1e-12
 
         lo, hi = _shift_interval_to_center(-90.0, -80.0, -100.0, -60.0)
         @test (lo, hi) == (-110.0, -70.0)
         @test_throws ArgumentError _shift_interval_to_center(NaN, -80.0, -100.0, -60.0)
         @test _near_term_extreme_inertia_guard(-250.0, 1)
         @test _near_term_extreme_inertia_guard(-250.0, 2)
+        @test _near_term_extreme_inertia_guard(-240.0, 2)      # exact inclusive (<=) threshold boundary
+        @test !_near_term_extreme_inertia_guard(-250.0, 0)     # 0 < model_steps lower bound
         @test !_near_term_extreme_inertia_guard(-250.0, 3)
         @test !_near_term_extreme_inertia_guard(-239.9, 2)
 
@@ -1022,6 +1093,88 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         s = _subhourly_driver_with_status(plasma, mag, t0 + Hour(2), driver, t0)
         @test !s.l1_measured
         @test s.driver == driver
+    end
+
+    @testset "V2 tail: L1 look-ahead measured branch blends the ballistic source window" begin
+        # recent.V = 500 km/s gives an exact ballistic lag of 50 min (L1_DIST_KM/V/3600 = 0.8333 h).
+        recent = (V=500.0, Bz=-2.0, By=1.0, n=5.0, Pdyn=1.6726e-6 * 5.0 * 500.0^2)
+        step_time = DateTime(2026, 6, 6, 3)
+        # Source window for the step is [step_time-1h-lag, min(step_time-lag, latest_common_sw)).
+        # latest_common_sw = step_time-80min caps src_hi so the window is [01:10, 01:40) → 30 min → f=0.5.
+        latest_common_sw = step_time - Minute(80)
+        inside = [DateTime(2026, 6, 6, 1, 15), DateTime(2026, 6, 6, 1, 25), DateTime(2026, 6, 6, 1, 35)]
+        # Leakage bait: rows at/after latest_common_sw with wild values must never enter the result.
+        outside = [DateTime(2026, 6, 6, 1, 45), DateTime(2026, 6, 6, 2, 0)]
+        plasma = DataFrame(time_tag=vcat(inside, outside),
+                           speed=vcat(fill(600.0, 3), fill(9999.0, 2)),
+                           density=vcat(fill(8.0, 3), fill(999.0, 2)))
+        mag = DataFrame(time_tag=vcat(inside, outside),
+                        bz_gsm=vcat(fill(-10.0, 3), fill(50.0, 2)),
+                        by_gsm=vcat(fill(3.0, 3), fill(-40.0, 2)))
+
+        s = _subhourly_driver_with_status(plasma, mag, step_time, recent, latest_common_sw)
+        @test s.l1_measured
+        f = 0.5
+        @test s.driver.V ≈ f * 600.0 + (1 - f) * recent.V atol = 1e-9     # 550
+        @test s.driver.Bz ≈ f * (-10.0) + (1 - f) * recent.Bz atol = 1e-9  # -6
+        @test s.driver.By ≈ f * 3.0 + (1 - f) * recent.By atol = 1e-9      # 2
+        @test s.driver.n ≈ f * 8.0 + (1 - f) * recent.n atol = 1e-9        # 6.5
+        # Pdyn is a blend of Pdyn VALUES (window mean Pdyn, then blend), not Pdyn of the blended V,n.
+        meas_pdyn = 1.6726e-6 * 8.0 * 600.0^2
+        @test s.driver.Pdyn ≈ f * meas_pdyn + (1 - f) * recent.Pdyn atol = 1e-9
+
+        # Leakage guard: dropping the post-latest_common_sw rows leaves the result bitwise identical.
+        plasma_clean = DataFrame(time_tag=inside, speed=fill(600.0, 3), density=fill(8.0, 3))
+        mag_clean = DataFrame(time_tag=inside, bz_gsm=fill(-10.0, 3), by_gsm=fill(3.0, 3))
+        s_clean = _subhourly_driver_with_status(plasma_clean, mag_clean, step_time, recent, latest_common_sw)
+        @test s_clean.driver == s.driver
+
+        # Full coverage: latest_common_sw >= step_time-lag makes f→1, so the driver is the pure window mean.
+        full_common = step_time                                   # well past step_time - lag
+        wide = [DateTime(2026, 6, 6, 1, 30), DateTime(2026, 6, 6, 2, 0)]  # inside [step_time-110min, step_time-50min)=[01:10,02:10)
+        plasma_full = DataFrame(time_tag=wide, speed=fill(700.0, 2), density=fill(9.0, 2))
+        mag_full = DataFrame(time_tag=wide, bz_gsm=fill(-14.0, 2), by_gsm=fill(5.0, 2))
+        s_full = _subhourly_driver_with_status(plasma_full, mag_full, step_time, recent, full_common)
+        @test s_full.l1_measured
+        @test s_full.driver.V ≈ 700.0 atol = 1e-9                 # pure window mean at f=1
+        @test s_full.driver.Bz ≈ -14.0 atol = 1e-9
+    end
+
+    @testset "M-mem: memory features and freshest-pair tail rate degrade loudly on Dst gaps" begin
+        t = DateTime(2026, 6, 6, 5)
+        dst_times = [t - Hour(3), t - Hour(2), t - Hour(1), t]
+        dst_vals = [-20.0, -25.0, -40.0, -70.0]                  # deepening series
+        drv = (V=450.0, Bz=-8.0, By=2.0, n=6.0, Pdyn=1.6726e-6 * 6.0 * 450.0^2)
+        plasma = DataFrame(time_tag=[t - Minute(30)], speed=[450.0], density=[6.0])
+        mag = DataFrame(time_tag=[t - Minute(30)], bz_gsm=[-8.0], by_gsm=[2.0])
+
+        # Signs/values pinned against the training-side _lagged_difference convention (v[t]-v[t-lag]).
+        m = _live_v2_memory_features(plasma, mag, dst_times, dst_vals, t, drv)
+        @test m.dst_delta_1h_nt == -30.0                         # -70 - (-40)
+        @test m.dst_delta_3h_nt == -50.0                         # -70 - (-20)
+        @test m.dst_delta_3h_nt != m.dst_delta_1h_nt
+
+        # Interior gap at t-3h zeros the calibrated memory tuple (guard), and the 3h delta is NOT
+        # silently forced equal to the 1h delta by a cascading fallback (the documented regression).
+        gap3_t = [t - Hour(2), t - Hour(1), t]
+        gap3_v = [-25.0, -40.0, -70.0]
+        z = _live_v2_memory_features(plasma, mag, gap3_t, gap3_v, t, drv)
+        @test z == _zero_v2_memory_features()
+        @test z.dst_delta_1h_nt == 0.0 && z.dst_delta_3h_nt == 0.0
+
+        # The tail relaxation rate is DECOUPLED from that zeroing: the freshest contiguous pair
+        # (t, t-1h) still yields the true -30 nT/h even when t-3h is missing, so tau stays long
+        # (> tau0) for a deepening storm instead of collapsing to the quiet default.
+        @test _freshest_dst_rate(gap3_t, gap3_v, t) == -30.0
+        @test _v2_tail_tau(_freshest_dst_rate(gap3_t, gap3_v, t)) > V2_TAIL_TAU0_H
+        @test _dst_memory_fallback(gap3_t, gap3_v, t)            # interior gap is flagged (logged/warned)
+        @test !_dst_memory_fallback(dst_times, dst_vals, t)      # complete history is not flagged
+
+        # Missing t-1h: freshest pair scans back to (t-2h, t-3h) = -25-(-20) = -5 nT/h; still finite.
+        gap1_t = [t - Hour(3), t - Hour(2), t]
+        @test _freshest_dst_rate(gap1_t, [-20.0, -25.0, -70.0], t) == -5.0
+        # No contiguous pair at all → 0.0 fallback.
+        @test _freshest_dst_rate([t], [-70.0], t) == 0.0
     end
 
     @testset "F3: anchor-aware split keeps issue_time sets pairwise disjoint" begin
@@ -1106,23 +1259,58 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
 
     @testset "F6: gate metrics share one finite-row mask across baselines" begin
         # A scored validation frame with one `missing` and one `NaN` baseline row.
-        # Per-column finite filters would give v2 more rows than persistence/O'Brien
-        # (unpaired); the common-mask metrics must report equal n across all three.
+        # Per-column finite filters would give v2 more rows than the baseline
+        # comparators (unpaired); the common-mask metrics must report equal n.
         scored = DataFrame(
             observation_dst_nt=[-30.0, -31.0, -32.0, -33.0],
             v2_pred_dst_nt=[-29.0, -30.0, -31.0, -32.0],
+            pred_dst_nt=[-29.5, -30.5, -31.5, -32.5],
             latest_dst_nt=Union{Missing,Float64}[-28.0, missing, -33.0, -34.0],
             obrien_dst_nt=[-27.0, -29.0, NaN, -35.0],
         )
         metrics = _paired_gate_metrics(
-            scored, Symbol[:v2_pred_dst_nt, :latest_dst_nt, :obrien_dst_nt],
+            scored, Symbol[:v2_pred_dst_nt, :pred_dst_nt, :latest_dst_nt, :obrien_dst_nt],
         )
         # Rows 2 (missing persistence) and 3 (NaN O'Brien) drop from ALL metrics.
         @test metrics[:v2_pred_dst_nt].n == 2
-        @test metrics[:v2_pred_dst_nt].n == metrics[:latest_dst_nt].n ==
+        @test metrics[:v2_pred_dst_nt].n == metrics[:pred_dst_nt].n ==
+              metrics[:latest_dst_nt].n ==
               metrics[:obrien_dst_nt].n
         # The surviving rows are exactly the fully finite ones (rows 1 and 4).
         @test metrics[:v2_pred_dst_nt].rmse ≈ 1.0 atol = 1e-12
+    end
+
+    @testset "F7: promotion gate requires strict pre-upgrade baseline improvement" begin
+        @test !_v2_gate_pass((rmse=1.0, mae=1.0), (rmse=1.0, mae=1.0))
+
+        n = 20
+        pred = collect(-50.0:1.0:-31.0)
+        replay = DataFrame(
+            issue_time_utc=[string(DateTime(2026, 1, 1) + Hour(i)) for i in 1:n],
+            pred_dst_nt=pred,
+            pred_dst_ci05_nt=pred .- 3.0,
+            pred_dst_ci95_nt=pred .+ 3.0,
+            observation_dst_nt=vcat(pred[1:14] .+ 2.0, pred[15:end]),
+            v1_pred_dst_nt=pred,
+            v1_pred_dst_ci05_nt=pred .- 3.0,
+            v1_pred_dst_ci95_nt=pred .+ 3.0,
+            latest_dst_nt=pred .+ 10.0,
+            V_kms=fill(420.0, n),
+            Bz_nt=collect(-10.0:1.0:9.0),
+            By_nt=fill(1.0, n),
+            n_cm3=fill(5.0, n),
+            Pdyn_npa=fill(1.5, n),
+        )
+        df = SolarSINDy.add_operational_v2_features!(_v2_base_prediction_table(replay))
+        selection = _select_validated_v2_calibration(
+            df[1:14, :],
+            df[15:20, :],
+            LiveVerifyConfig(; v2_ridge_grid=[0.0], v2_ridge=0.0),
+        )
+        @test :beats_preupgrade in propertynames(selection.candidates)
+        @test !selection.row.beats_preupgrade
+        @test selection.row.beats_persistence
+        @test !selection.row.gate_pass
     end
 
     @testset "ACI interval: lead-keyed (model_step) and regime-conditional" begin
@@ -1157,6 +1345,35 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test d !== nothing
             hw_d = (d[2] - d[1]) / 2
             @test hw_d > 3 * hw_q                           # storm regime band is far wider than quiet
+        end
+    end
+
+    @testset "ACI interval: residual pool is keyed on the issued model (v1 vs v2)" begin
+        # A v1 issuance must be banded from v1 residuals, not the v2-calibrated pool. Build a log
+        # whose v1 and v2 residual magnitudes differ sharply and confirm the band tracks the queried
+        # column.
+        mktempdir() do dir
+            log = joinpath(dir, "log.csv")
+            n = 45                                            # > warmup+5 = 35
+            obs = zeros(n)
+            v2_pred = [isodd(k) ? -3.0 : 3.0 for k in 1:n]    # |v2 residual| = 3
+            v1_pred = [isodd(k) ? -15.0 : 15.0 for k in 1:n]  # |v1 residual| = 15
+            iss = ["2026-01-01T" * lpad(string(i ÷ 60), 2, '0') * ":" * lpad(string(i % 60), 2, '0') * ":00" for i in 1:n]
+            CSV.write(log, DataFrame(model_step_hours=fill(1.0, n),
+                                     v1_pred_dst_nt=v1_pred, v2_pred_dst_nt=v2_pred,
+                                     observation_dst_nt=obs, latest_dst_nt=fill(-10.0, n),
+                                     issue_time_utc=iss))
+            b_v2 = _aci_interval_from_log(log, 0.0, 1; latest_dst=-10.0, pred_col=:v2_pred_dst_nt)
+            b_v1 = _aci_interval_from_log(log, 0.0, 1; latest_dst=-10.0, pred_col=:v1_pred_dst_nt)
+            @test b_v2 !== nothing && b_v1 !== nothing
+            hw_v2 = (b_v2[2] - b_v2[1]) / 2
+            hw_v1 = (b_v1[2] - b_v1[1]) / 2
+            @test hw_v1 > 2 * hw_v2                           # v1 band tracks the larger v1 residuals
+            # A log lacking the requested column returns nothing (no cross-model borrowing).
+            CSV.write(log, DataFrame(model_step_hours=fill(1.0, n), v2_pred_dst_nt=v2_pred,
+                                     observation_dst_nt=obs, latest_dst_nt=fill(-10.0, n),
+                                     issue_time_utc=iss))
+            @test _aci_interval_from_log(log, 0.0, 1; latest_dst=-10.0, pred_col=:v1_pred_dst_nt) === nothing
         end
     end
 end

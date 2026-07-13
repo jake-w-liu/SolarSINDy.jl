@@ -57,6 +57,18 @@ function setError(msg) {
 }
 
 // ---- renderers -------------------------------------------------------------------------
+// Human-readable capability list for a served-pipeline label (e.g. "v2+L1A+Bregime+Pinertia").
+// Unknown tokens fall back to showing the raw label so a reduced/future pipeline is never
+// silently described with capabilities it does not have.
+const PIPELINE_CAPS = { L1A: "L1 look-ahead", Bregime: "regime-aware tail", Pinertia: "inertia guard" };
+function pipelineCapabilities(label) {
+  if (!label) return "";
+  const named = String(label).split("+")
+    .filter(p => p && p !== "v2" && p !== "v1")
+    .map(p => PIPELINE_CAPS[p]).filter(Boolean);
+  return named.length ? named.join(", ") : String(label);
+}
+
 function renderThreat(st) {
   const el = $("threat");
   THREAT_CLASSES.forEach(c => el.classList.remove(c));
@@ -82,10 +94,15 @@ function renderThreat(st) {
     wf.classList.remove("hidden");
   } else { wf.classList.add("hidden"); }
 
+  const served = st.served_model_version || st.model_version || "v2";
+  const caps = pipelineCapabilities(served);
+  const staleNote = st.stale
+    ? ` · STALE: issued ${st.age_hours != null ? fmt(st.age_hours, 1) + " h" : ""} ago`
+    : "";
   $("model-line").textContent =
-    `Forecast: V2 (${st.model_version || "v2"} · L1 look-ahead, regime-aware tail, inertia guard) · `
+    `Forecast: V2 (${served}${caps ? " · " + caps : ""}) · `
     + `live interval method: ${(st.calibration||{}).current_interval_source || "—"} · `
-    + `status generated ${relTime(st.generated_utc)} · latest solar wind ${relTime(st.latest_solar_wind_utc)}.`;
+    + `status generated ${relTime(st.generated_utc)} · latest solar wind ${relTime(st.latest_solar_wind_utc)}${staleNote}.`;
 }
 
 function thresholdShapes(ymin, ymax) {
@@ -386,7 +403,10 @@ async function renderDbdt(dbdt) {
     fcEl.innerHTML = `<span class="fc-label">forecast · next ${fc.horizon_min} min</span>`
       + `<span class="fc-pt">${fmt(fc.point_dbdt, 1)} nT/min</span>`
       + `<span class="fc-ub">90% ≤ ${fmt(fc.ub90_dbdt, 1)}</span>`
-      + `<span class="fc-exc">P(exceed): ${exc}</span>`;
+      + `<span class="fc-exc">P(exceed): ${exc}</span>`
+      + (fc.stale_inputs
+          ? `<span class="fc-stale" style="color:var(--t2)">⚠ L1 inputs ${fmt(fc.input_age_min, 0)} min old — unreliable</span>`
+          : "");
   } else { fcEl.innerHTML = ""; }
 
   if (await ensurePlotly() && dbdt.series && dbdt.series.length) {
@@ -496,9 +516,12 @@ async function refresh() {
   $("health-dot").className = "dot " + (health && health.status === "ok" ? "dot-ok" : "dot-bad");
   if (status) {
     setError(null);
+    // Show forecast ISSUE age, not the status generation time: a stale cycle would otherwise
+    // read "updated seconds ago" because generated_utc is always now.
     const upd = $("updated");
-    upd.dataset.reltime = status.generated_utc; upd.dataset.relprefix = "updated ";
-    upd.textContent = "updated " + relTime(status.generated_utc);
+    const issued = status.forecast_issue_utc || status.generated_utc;
+    upd.dataset.reltime = issued; upd.dataset.relprefix = "forecast issued ";
+    upd.textContent = "forecast issued " + relTime(issued);
     try { renderThreat(status); browserNotify(status); renderUpstream(status); renderCalib(status); renderPipeline(status, dbdt); }
     catch (e) { console.error(e); }
   } else {

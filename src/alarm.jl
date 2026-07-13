@@ -88,9 +88,12 @@ function check_alarm(config::AlarmConfig, result::ForecastResult,
 
     # Check cooldown. Guard the lower bound so a future-dated last_alarm_time (e.g. set by a
     # forecast-horizon alarm whose result.t is ahead of wall clock) cannot make `elapsed`
-    # negative and silently suppress a genuine present-time alarm.
+    # negative and silently suppress a genuine present-time alarm. The upper bound is closed
+    # (`<=`): a cooldown of N hours suppresses repeats up to and including exactly N hours
+    # apart, so a target that sits precisely `cooldown_hours` from the last alarm does not
+    # re-fire on every subsequent poll cycle.
     elapsed = result.t - last_alarm_time
-    if Millisecond(0) <= elapsed < Hour(config.cooldown_hours)
+    if Millisecond(0) <= elapsed <= Hour(config.cooldown_hours)
         return (nothing, last_alarm_time)
     end
 
@@ -99,6 +102,35 @@ function check_alarm(config::AlarmConfig, result::ForecastResult,
 
     config.callback(alarm)
     return (alarm, result.t)
+end
+
+"""
+    maybe_fire_horizon_alarm!(config, result, seen)
+
+Fire the alarm callback for a forecast-horizon row only when its target hour has
+not already been announced at an equal-or-greater severity. `seen` is a persistent
+`Dict{DateTime,StormSeverity}` recording the highest severity already announced per
+target hour; it is updated in place. Returns the `Alarm` that fired, or `nothing`.
+
+Unlike [`check_alarm`](@ref), this does not consult the present-time cooldown clock:
+horizon rows carry future timestamps, so a `result.t`-based cooldown is meaningless and
+would either fire every poll cycle (an alarm storm) or block indefinitely. Deduplicating
+on `(target hour, severity)` announces each future crossing once and re-announces only on
+escalation to a more severe tier. The caller is responsible for pruning stale `seen`
+entries (targets earlier than the current issue time) to bound memory.
+"""
+function maybe_fire_horizon_alarm!(config::AlarmConfig, result::ForecastResult,
+                                   seen::Dict{DateTime,StormSeverity})
+    dst_check = config.use_worst_case ? result.dst_ci_05 : result.dst_predicted
+    severity = classify_severity(dst_check, config.thresholds)
+    severity == QUIET && return nothing
+    # Already announced this target hour at an equal-or-greater severity → suppress.
+    severity > get(seen, result.t, QUIET) || return nothing
+    seen[result.t] = severity
+    msg = _alarm_message(severity, result)
+    alarm = Alarm(result.t, severity, result.dst_predicted, result.dst_ci_05, msg)
+    config.callback(alarm)
+    return alarm
 end
 
 function _alarm_message(severity::StormSeverity, result::ForecastResult)

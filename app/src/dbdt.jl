@@ -81,8 +81,13 @@ function _geoe_nowcast(xv, yv, dt_s; rho=1000.0, window=120)
     (xf === nothing || yf === nothing || length(xf) < 16) && return nothing
     ex, ey = geoelectric_field(_detrend(xf), _detrend(yf), dt_s; rho_ohm_m=rho)
     emag = sqrt.(ex.^2 .+ ey.^2); m = length(emag)
-    inner = emag[min(4, m):max(1, m-3)]                       # trim edge ringing for the max
-    return (current = emag[end], max = isempty(inner) ? maximum(emag) : maximum(inner), rho = rho)
+    # The circular DFT/IDFT concentrates wraparound ringing at the window edges, so the raw
+    # endpoint emag[end] is edge-contaminated (biased low on a rising ramp). Serve the last
+    # edge-trimmed sample as "current", and take the reported max over the trailing ~30 interior
+    # samples (the "30-min max" the dashboard shows), excluding the 3 edge-ringing samples.
+    hi = max(1, m - 3)
+    inner = emag[max(min(4, m), m - 32):hi]
+    return (current = emag[hi], max = isempty(inner) ? maximum(emag) : maximum(inner), rho = rho)
 end
 
 function _compute_dbdt(station::AbstractString, minutes::Int)

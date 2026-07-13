@@ -3,35 +3,49 @@
 using Dates
 
 """
-    clean_omni_data!(df::DataFrame)
+    clean_omni_data!(df::DataFrame; causal::Bool=false)
 
 In-place cleaning of raw OMNI2 DataFrame:
 1. Remove rows with missing critical variables (V, Bz, Dst)
-2. Interpolate short gaps (≤3 hours) in secondary variables
-3. Compute derived quantities: Bs, θ_c, Pdyn (if missing), Dst*
+2. Fill short gaps (≤3 hours) in the measured columns
+3. Compute derived quantities: Bs, θ_c, proton-only Pdyn, Dst*
 4. Add quality flag column
+
+Short-gap filling depends on `causal`:
+- `causal=false` (default, offline/training preprocessing): centered linear
+  interpolation, which uses the post-gap bound.
+- `causal=true` (replay/serving inputs): forward-fill (last-observation-carried-
+  forward). No gap hour is ever filled with a value measured *after* it, so
+  issue-time replay inputs stay strictly causal. `Dst` is never causally filled
+  (a missing target/anchor Dst is left NaN rather than persisted).
+
+Dynamic pressure is always recomputed proton-only (`1.6726e-6·n·V²`) via
+[`dynamic_pressure`](@ref); the OMNI word-29 alpha-inclusive pressure is not kept,
+so training and serving share one convention. The Dst* pressure correction falls
+back to a physically-defensible pressure (carried-forward last known Pdyn, else
+the quiet-time default) when Pdyn is unavailable.
 
 Returns the modified DataFrame.
 """
-function clean_omni_data!(df::DataFrame)
+function clean_omni_data!(df::DataFrame; causal::Bool=false)
     n_raw = nrow(df)
 
-    # --- Interpolate short gaps (≤3 consecutive NaN) for the measured columns.
-    #     Pdyn is intentionally NOT interpolated as an independent column; it is
-    #     recomputed from the interpolated n, V below so it keeps the n·V² identity,
-    #     mirroring the real-time path (an independently interpolated Pdyn drifts
-    #     from n·V² at gap edges because Pdyn is quadratic in V). ---
-    for col in [:V, :Bz, :By, :n, :T, :Dst, :AE, :AL, :AU]
-        _interp_short_gaps!(df[!, col], 3)
+    # --- Short-gap (≤3 h) filling of the measured columns. Pdyn is NOT filled as
+    #     an independent column; it is recomputed from the filled n, V below so it
+    #     keeps the n·V² identity (an independently interpolated Pdyn drifts from
+    #     n·V² at gap edges because Pdyn is quadratic in V). In causal mode Dst is
+    #     left unfilled so a missing anchor/target is dropped, never persisted. ---
+    fill_cols = causal ? [:V, :Bz, :By, :n, :T, :AE, :AL, :AU] :
+                         [:V, :Bz, :By, :n, :T, :Dst, :AE, :AL, :AU]
+    for col in fill_cols
+        causal ? _ffill_short_gaps!(df[!, col], 3) : _interp_short_gaps!(df[!, col], 3)
     end
 
-    # --- Dynamic pressure: keep native OMNI Pdyn where present; for any row lacking
-    #     a native value, recompute proton-only from the (interpolated) n, V. ---
+    # --- Dynamic pressure: always proton-only from the filled n, V (drop the OMNI
+    #     word-29 alpha-inclusive value so training matches the proton-only serve
+    #     convention; real-time SWPC feeds carry no alpha data). ---
     for i in 1:nrow(df)
-        if isnan(df.Pdyn[i])
-            df.Pdyn[i] = (isnan(df.n[i]) || isnan(df.V[i])) ? NaN :
-                         1.6726e-6 * df.n[i] * df.V[i]^2
-        end
+        df.Pdyn[i] = dynamic_pressure(df.n[i], df.V[i])
     end
 
     # --- Quality flag: 1 = all critical vars present, 0 = any critical missing ---
@@ -47,18 +61,26 @@ function clean_omni_data!(df::DataFrame)
     df[!, :theta_c] = [isnan(by) || isnan(bz) ? NaN : atan(abs(by), bz) for (by, bz) in zip(df.By, df.Bz)]
     df[!, :BT] = [isnan(by) || isnan(bz) ? NaN : sqrt(by^2 + bz^2) for (by, bz) in zip(df.By, df.Bz)]
 
-    # Dst*: use pressure correction where Pdyn available, raw Dst otherwise
+    # Dst*: pressure-correct where Pdyn is available; when it is missing use a
+    # physically-defensible fallback (carry the last known Pdyn forward over a
+    # short outage, else the climatological quiet-time default) rather than the
+    # old +11-only fallback, which implied Pdyn=0 and left outage rows 7–30 nT
+    # above their pressure-corrected neighbours.
     df[!, :Dst_star] = Vector{Float64}(undef, nrow(df))
+    last_pdyn = NaN
+    last_pdyn_age = PDYN_CARRY_MAX_AGE_H + 1
     for i in 1:nrow(df)
+        if isfinite(df.Pdyn[i])
+            last_pdyn = df.Pdyn[i]
+            last_pdyn_age = 0
+        else
+            last_pdyn_age = min(last_pdyn_age + 1, PDYN_CARRY_MAX_AGE_H + 1)
+        end
         if isnan(df.Dst[i])
             df.Dst_star[i] = NaN
-        elseif isnan(df.Pdyn[i])
-            # Fallback when Pdyn is unavailable: drop only the pressure term, but
-            # keep the +11 baseline so fallback rows stay level-continuous with the
-            # pressure-corrected rows (matches the real-time serve path).
-            df.Dst_star[i] = df.Dst[i] + 11.0
         else
-            df.Dst_star[i] = df.Dst[i] - 7.26 * sqrt(max(df.Pdyn[i], 0.0)) + 11.0
+            pdyn_eff = resolve_pdyn(df.Pdyn[i], last_pdyn, last_pdyn_age)
+            df.Dst_star[i] = dst_to_dst_star(df.Dst[i], pdyn_eff)
         end
     end
 
@@ -96,6 +118,38 @@ function _interp_short_gaps!(x::AbstractVector{Float64}, max_gap::Int)
                 for j in gap_start:gap_end
                     frac = (j - gap_start + 1) / (gap_len + 1)
                     x[j] = v0 + frac * (v1 - v0)
+                end
+            end
+        else
+            i += 1
+        end
+    end
+end
+
+"""
+    _ffill_short_gaps!(x, max_gap)
+
+Causal forward-fill for gaps of ≤ `max_gap` consecutive NaN values in-place:
+each short gap is filled with the last finite value BEFORE the gap
+(last-observation-carried-forward). Uses no post-gap (future) value, so replay/
+serving inputs stay strictly causal. Longer gaps, and leading gaps with no prior
+value, remain NaN.
+"""
+function _ffill_short_gaps!(x::AbstractVector{Float64}, max_gap::Int)
+    n = length(x)
+    i = 1
+    while i <= n
+        if isnan(x[i])
+            gap_start = i
+            while i <= n && isnan(x[i])
+                i += 1
+            end
+            gap_end = i - 1
+            gap_len = gap_end - gap_start + 1
+            if gap_len <= max_gap && gap_start > 1 && !isnan(x[gap_start - 1])
+                v0 = x[gap_start - 1]
+                for j in gap_start:gap_end
+                    x[j] = v0
                 end
             end
         else

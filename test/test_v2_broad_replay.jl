@@ -53,3 +53,53 @@ include(joinpath(@__DIR__, "..", "..", "live_forecasts", "v2_broad_replay.jl"))
         @test_throws ErrorException _validate_broad_rows(broken)
     end
 end
+
+@testset "V2 forecast-layer oracles (_v2_forecast)" begin
+    # Wire the shipped behavioral oracles (continuity to the pre-upgrade baseline,
+    # regime awareness, recovery relaxation, near-term extreme inertia) into Pkg.test.
+    @test _selftest_v2()
+
+    lib, ξ0, _ = _shadow_library()
+    cal = _load_calibration_for_model(LiveVerifyConfig(model = :v2))
+    anchor = -150.0; latest = -148.0
+    slow = (V = 300.0, Bz = -10.0, By = 1.0, n = 6.0, Pdyn = 2.0)      # Δ≈1.39 h ⇒ kΔ=1 (look-ahead fires at k=1)
+    fast = (V = 800.0, Bz = -10.0, By = 1.0, n = 6.0, Pdyn = 2.0)      # Δ≈0.52 h ⇒ kΔ=0 (no look-ahead)
+    fut_slow = (V = 320.0, Bz = -22.0, By = 0.0, n = 8.0, Pdyn = 3.0)  # slow, stronger southward ⇒ admissible at k=1
+    fut_fast = (V = 800.0, Bz = -30.0, By = 0.0, n = 9.0, Pdyn = 4.0)  # fast (accelerated) ⇒ transit<1 h ⇒ rejected
+
+    # CAUSALITY — fast wind (kΔ=0): no L1-known window, so the forecast is invariant to the future
+    # closure. Shifting/replacing future drivers must not change the forecast.
+    for h in (1, 2, 3, 6)
+        f_a = _v2_forecast(lib, ξ0, anchor, fast, _ -> fut_slow, latest, cal, h, -5.0)
+        f_b = _v2_forecast(lib, ξ0, anchor, fast, _ -> fut_fast, latest, cal, h, -5.0)
+        f_0 = _v2_forecast(lib, ξ0, anchor, fast, _ -> nothing,  latest, cal, h, -5.0)
+        @test f_a == f_b == f_0
+    end
+
+    # ACCELERATION GUARD — slow issue wind (kΔ=1) but the arrival-hour record is FAST (transit<1 h):
+    # it left L1 after issue, so it is rejected and the forecast equals the no-look-ahead (frozen) case.
+    for h in (1, 3, 6)
+        leaked = _v2_forecast(lib, ξ0, anchor, slow, _ -> fut_fast, latest, cal, h, -5.0)
+        frozen = _v2_forecast(lib, ξ0, anchor, slow, _ -> nothing,  latest, cal, h, -5.0)
+        @test leaked == frozen
+    end
+
+    # ADMISSION — slow issue wind with a SLOW arrival record (transit≥1 h): the record is L1-known at
+    # k=1, so a stronger incoming southward driver deepens the forecast below the no-look-ahead case.
+    la1 = _v2_forecast(lib, ξ0, anchor, slow, _ -> fut_slow, latest, cal, 1, -5.0)[1]
+    fr1 = _v2_forecast(lib, ξ0, anchor, slow, _ -> nothing,  latest, cal, 1, -5.0)[1]
+    @test la1 < fr1
+
+    # PERSISTENCE-LIMIT — once observed Dst is already in the extreme core, 1–2 h forecasts serve
+    # persistence exactly; longer leads retain the model tail.
+    @test _v2_forecast(lib, ξ0, -250.0, slow, _ -> nothing, -250.0, cal, 1, +10.0)[2] == -250.0
+    @test _v2_forecast(lib, ξ0, -250.0, slow, _ -> nothing, -250.0, cal, 2, +10.0)[2] == -250.0
+    @test _v2_forecast(lib, ξ0, -250.0, slow, _ -> nothing, -250.0, cal, 3, +10.0)[2] != -250.0
+
+    # RATE GAP-GUARD neutrality — a NaN recent rate (the replay sentinel for a >1 h Dst gap) is neutral,
+    # identical to a zero rate, so a gap-misread multi-hour delta can never lengthen the relaxation tail.
+    for h in (1, 3, 6)
+        @test _v2_forecast(lib, ξ0, anchor, slow, _ -> nothing, latest, cal, h, NaN) ==
+              _v2_forecast(lib, ξ0, anchor, slow, _ -> nothing, latest, cal, h, 0.0)
+    end
+end

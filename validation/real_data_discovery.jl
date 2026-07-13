@@ -32,12 +32,23 @@ mkpath(FIGS_DIR)
 """
     _concat_storm_data(df, entries)
 
-Extract storms, prepare for SINDy, concatenate, and remove NaN.
-Returns (concat_data::Dict, dDst_clean::Vector, n_storms_used::Int).
+Extract storms, prepare for SINDy, concatenate, and remove NaN AND fill-fabricated
+rows. Returns (concat_data::Dict, dDst_clean::Vector, n_storms_used::Int).
+
+Fabricated-row exclusion (finding real_data_discovery.jl:69): `extract_storm_data`
+forward/backward-fills every driver, so by the time the concatenated arrays are
+built there is no NaN left for a post-fill `isnan` filter to catch — the old filter
+was dead code and up to ~40% fill-fabricated (and, at window heads, future-copied)
+driver hours entered the SINDy regression. The fix carries a PRE-FILL validity mask
+straight from the cleaned DataFrame (which still holds the original NaNs) for each
+storm window and drops those rows. Density and Pdyn are checked explicitly because
+`clean_omni_data!`'s `:quality` flag covers only V/Bz/Dst, yet n and Pdyn drive
+active discovered terms (n·V, n·Bs, n·V·Bs, n·V², Pdyn·Bs).
 """
 function _concat_storm_data(df::DataFrame, entries::Vector{StormCatalogEntry})
     all_data_dicts = Dict{String,Vector{Float64}}[]
     all_dDst = Float64[]
+    all_rawvalid = Bool[]   # per-row PRE-FILL driver validity, aligned to all_dDst
     n_used = 0
 
     for entry in entries
@@ -47,8 +58,18 @@ function _concat_storm_data(df::DataFrame, entries::Vector{StormCatalogEntry})
             if count(!isnan, dDst_dt) < 20
                 continue
             end
+            # Pre-fill validity: rows whose model drivers were originally present.
+            # extract_storm_data set swd.t = 0:(n_pts-1) over exactly these rows, and
+            # prepare_sindy_data preserves length, so the mask aligns 1:1 with
+            # dDst_dt / data_dict. A row filled by _fillnan (forward OR backward, the
+            # latter copying future values into leading gaps) has raw_valid = false.
+            rows = entry.onset_idx:entry.end_idx
+            raw_valid = .!(isnan.(df.V[rows]) .| isnan.(df.Bz[rows]) .|
+                           isnan.(df.By[rows]) .| isnan.(df.n[rows]) .|
+                           isnan.(df.Pdyn[rows]) .| isnan.(df.Dst_star[rows]))
             push!(all_data_dicts, data_dict)
             append!(all_dDst, dDst_dt)
+            append!(all_rawvalid, raw_valid)
             n_used += 1
         catch
             continue
@@ -65,8 +86,10 @@ function _concat_storm_data(df::DataFrame, entries::Vector{StormCatalogEntry})
         concat[key] = vcat([d[key] for d in all_data_dicts]...)
     end
 
-    # Remove NaN rows
-    valid = .!isnan.(all_dDst)
+    # Drop rows that are NaN in the target/drivers (derivative/smoothing edges) OR
+    # that were fabricated by gap-filling (all_rawvalid). The pre-fill mask is the
+    # load-bearing part: without it the isnan checks alone never fire on filled rows.
+    valid = .!isnan.(all_dDst) .& all_rawvalid
     for key in keys(concat)
         valid .&= .!isnan.(concat[key])
     end
@@ -198,13 +221,29 @@ for nt in sort(unique([r.n_terms for r in sweep_results]))
     println("  $(nt) terms: RMSE=$(round(best.rmse, digits=4)), λ=$(round(best.λ, sigdigits=3))")
 end
 
-# --- B1b: Ensemble SINDy (500 bootstraps) ---
+# --- B1b: Ensemble SINDy (500 subsample ensembles) ---
 # λ selection procedure (documented in paper §2.4):
 #   Sweep over logarithmic λ grid, then select the minimum-RMSE λ within
 #   the Pareto-optimal range of 4–8 active terms. On the 1963–2025 OMNI
 #   dataset (61,494 points), this yields λ ≈ 236. The value is data-dependent;
 #   re-downloading OMNI data may produce a slightly different λ.
 # Target: 4–8 active terms (physically motivated: Dst* decay + injection + trig)
+#
+# DELIBERATE λ MISMATCH (finding real_data_discovery.jl:261). The uncertainty
+# ensemble here is fit in the SPARSER 4–8-term regime, whereas the DEPLOYED point
+# fit (ξ_best below) is selected in the 8–10-term regime. The two therefore live in
+# different sparsity regimes by construction, with two consequences the operational
+# uncertainty path inherits: (1) deployed-active terms selected only in the denser
+# fit (e.g. n·Bs, n·V·Bs) appear in ≤1 subsample here, so their persisted CI is
+# degenerate (ci_025 == ci_975 ⇒ width 0 ⇒ σ = 0 in init_forecast); (2) the
+# surviving terms' spreads are estimated around ensemble point values that differ
+# ~30% from the deployed ones. A degenerate-CI audit runs after ξ_best is fit
+# (below) to make this mismatch visible. The served V2 interval is ACI/conformal and
+# does not consume these ensemble widths, so the shipped CI semantics are left
+# unchanged; the mismatch is documented rather than silently rebalanced.
+#
+# NOTE (finding sindy.jl:132): ensemble_sindy draws are 80% subsamples WITHOUT
+# replacement (subagging), not n-out-of-n bootstraps — hence "subsample ensembles".
 ensemble_λ = 100.0  # default
 for target_range in [4:8, 3:10, 2:12]
     kr = filter(r -> r.n_terms in target_range, sweep_results)
@@ -213,7 +252,7 @@ for target_range in [4:8, 3:10, 2:12]
         break
     end
 end
-println("\n--- Ensemble SINDy (500 bootstraps, λ=$(round(ensemble_λ, sigdigits=3))) ---")
+println("\n--- Ensemble SINDy (500 subsample ensembles, λ=$(round(ensemble_λ, sigdigits=3))) ---")
 @time median_ξ, inclusion_prob, all_ξ = ensemble_sindy(
     concat_data, lib, dDst_clean;
     λ=ensemble_λ, n_models=500, subsample_frac=0.8, seed=42
@@ -273,6 +312,42 @@ println("Best λ: $(round(best_λ, sigdigits=3)) → $(best_n_terms) terms")
 println("Discovered equation (dDst*/dt):")
 for (name, coef) in sort(collect(active_terms), by=x->abs(x[2]), rev=true)
     println("  $(round(coef, sigdigits=4)) × $(name)")
+end
+
+# --- Persist the served point fit + provenance (finding real_data_discovery.jl:271)
+# The operationally served ODE reads data/real_sindy_discovery_coefficients.csv, but
+# that file previously had no generator: ξ_best was printed and thrown away, so the
+# deployed equation was not reproducible or traceable to code. Write it here with the
+# same (term, coefficient) schema the readers (init_forecast, generate_real_figures)
+# expect, index-aligned to get_term_names(lib). A companion provenance row records
+# best_λ, the active-term count, the training span/size, and the run date so a later
+# audit can tell whether a regenerated fit still matches the shipped, version-pinned
+# artifact (which is frozen by a package regression test).
+discovery_coef_df = DataFrame(term=term_names, coefficient=ξ_best)
+CSV.write(joinpath(DATA_DIR, "real_sindy_discovery_coefficients.csv"), discovery_coef_df)
+provenance_df = DataFrame(
+    field = ["best_lambda", "n_active_terms", "n_train_storms_used",
+             "n_train_points", "omni_year_start", "omni_year_end",
+             "library_terms", "generated_date"],
+    value = [string(best_λ), string(count(ξ_best .!= 0)), string(n_storms_used),
+             string(length(dDst_clean)), "1963", "2025",
+             string(length(lib)), string(Dates.today())]
+)
+CSV.write(joinpath(DATA_DIR, "real_sindy_discovery_provenance.csv"), provenance_df)
+println("Saved: real_sindy_discovery_coefficients.csv + provenance sidecar")
+
+# --- Degenerate-CI audit for the deliberate ensemble/deployed λ mismatch
+# (finding real_data_discovery.jl:261). Flag every deployed-active term whose
+# ensemble CI is degenerate (single-draw ci_025 == ci_975) or absent, i.e. terms
+# that would receive exactly zero coefficient spread in the operational ensemble.
+println("\nEnsemble-CI coverage of deployed-active terms (λ mismatch audit):")
+for (i, name) in enumerate(term_names)
+    ξ_best[i] == 0.0 && continue
+    width = ensemble_df.ci_975[i] - ensemble_df.ci_025[i]
+    incl = inclusion_prob[i]
+    flag = width <= 0 ? "  ⚠ DEGENERATE CI (σ→0 in ensemble)" : ""
+    println("  $(rpad(name, 20)) π=$(round(incl, digits=3))  " *
+            "CI width=$(round(width, sigdigits=3))$(flag)")
 end
 
 # ============================================================
@@ -445,7 +520,8 @@ println("\n" * "=" ^ 60)
 println("Phase B Complete")
 println("=" ^ 60)
 println("Outputs:")
-for f in ["real_sindy_coefficients.csv", "real_ensemble_inclusion.csv",
+for f in ["real_sindy_coefficients.csv", "real_sindy_discovery_coefficients.csv",
+          "real_sindy_discovery_provenance.csv", "real_ensemble_inclusion.csv",
           "real_lambda_sweep.csv", "real_holdout_metrics.csv",
           "may2024_reconstruction.csv", "cross_cycle_metrics.csv"]
     fp = joinpath(DATA_DIR, f)

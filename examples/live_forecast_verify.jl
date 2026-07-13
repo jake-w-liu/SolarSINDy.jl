@@ -18,9 +18,9 @@ using Statistics
 const KYOTO_DST_JSON_URL = "https://services.swpc.noaa.gov/products/kyoto-dst.json"
 const DEFAULT_LOG_PATH = joinpath("live_forecasts", "live_forecast_log.csv")
 const DEFAULT_REPORT_PATH = joinpath("live_forecasts", "live_comparison_report.md")
-const DEFAULT_V2_CALIBRATION_PATH = joinpath(
-    "live_forecasts", "operational_v2_calibration.csv"
-)
+const DEFAULT_V2_CALIBRATION_PATH = normpath(joinpath(
+    @__DIR__, "..", "..", "live_forecasts", "operational_v2_calibration.csv"
+))
 const DEFAULT_OMNI_EXTRACTED_PATH = normpath(joinpath(
     @__DIR__, "..", "data", "omni_extracted.csv"
 ))
@@ -334,21 +334,37 @@ function _next_hourly_target(issue_time::DateTime, horizon_hours::Int,
     return target_time
 end
 
-function _fetch_dst()
-    resp = HTTP.get(KYOTO_DST_JSON_URL; connect_timeout=15, readtimeout=30)
-    resp.status == 200 || error("Kyoto Dst HTTP status $(resp.status)")
-    rows = JSON3.read(String(resp.body))
-    times = DateTime[]; dst = Float64[]
-    for r in rows
-        tt = get(r, :time_tag, nothing); tt === nothing && continue
-        t = tryparse(DateTime, String(tt)); t === nothing && continue
-        dv = get(r, :dst, nothing)
-        v = dv === nothing ? nothing : tryparse(Float64, string(dv))
-        (v === nothing || !isfinite(v) || abs(v) > 9000) && continue   # reject null / fill sentinel (real Dst |x| ≪ 9000)
-        push!(times, t); push!(dst, v)
+# Bounded-retry Kyoto Dst fetch. _fetch_dst gates every issuance, verification, refresh, and the
+# wait/campaign polling loop, so a single transient network hiccup must not abort the cycle while
+# the sibling solar-wind fetchers retry. The catch-all retries connect/read timeouts and truncated
+# JSON alike; the finite/sentinel filter (|Dst| < 9000, drop null) is kept so a feed outage cannot
+# anchor the monitor at a nonphysical value.
+function _fetch_dst(; max_retries::Int=3, retry_delay_sec::Real=1.0)
+    max_retries >= 1 || throw(ArgumentError("max_retries must be >= 1"))
+    last_error = nothing
+    for attempt in 1:max_retries
+        try
+            resp = HTTP.get(KYOTO_DST_JSON_URL; connect_timeout=15, readtimeout=30)
+            resp.status == 200 || error("Kyoto Dst HTTP status $(resp.status)")
+            rows = JSON3.read(String(resp.body))
+            times = DateTime[]; dst = Float64[]
+            for r in rows
+                tt = get(r, :time_tag, nothing); tt === nothing && continue
+                t = tryparse(DateTime, String(tt)); t === nothing && continue
+                dv = get(r, :dst, nothing)
+                v = dv === nothing ? nothing : tryparse(Float64, string(dv))
+                (v === nothing || !isfinite(v) || abs(v) > 9000) && continue   # reject null / fill sentinel (real Dst |x| ≪ 9000)
+                push!(times, t); push!(dst, v)
+            end
+            isempty(dst) && error("Kyoto Dst feed returned no finite values")
+            return times, dst
+        catch e
+            last_error = e
+            attempt == max_retries && rethrow(e)
+            sleep(retry_delay_sec)
+        end
     end
-    isempty(dst) && error("Kyoto Dst feed returned no finite values")
-    return times, dst
+    error("Kyoto Dst fetch failed after $max_retries attempts: " * sprint(showerror, last_error))
 end
 
 function _dst_lookup(dst_times, dst_vals)
@@ -413,18 +429,20 @@ end
 
 Classify solar-wind coverage of the trailing forecast window over all four
 drivers that `_drivers_for_window` would otherwise silently replace with quiet
-defaults (speed→400, density→5, Bz→0, By→0). `:hard` (no finite speed AND no
-finite Bz — refuse to issue), `:partial` (ANY of the four trailing counts is
-empty so at least one driver fell back to a default — issue but flag), `:ok`
-when all four have at least one finite sample. The density/By counts default to
-a nonzero sentinel so legacy two-argument callers keep their original meaning.
-Pure function so the data-gap decision is unit-testable without the live feeds.
+defaults (speed→400, density→5, Bz→0, By→0). Matches the documented safety
+contract: `:hard` (refuse to issue) when the speed OR the magnetic-field (Bz)
+window is absent, because fabricating a quiet default for either of the two
+primary drivers can under-warn during a fast-storm interval; `:partial` (issue
+but flag) when only density or By is absent (a secondary driver falls back to a
+quiet default); `:ok` when all four have at least one finite sample. The
+density/By counts default to a nonzero sentinel so legacy two-argument callers
+keep their original meaning. Pure function so the data-gap decision is
+unit-testable without the live feeds.
 """
 function _driver_gap_status(n_speed_finite::Int, n_bz_finite::Int,
                             n_density_finite::Int=1, n_by_finite::Int=1)
-    (n_speed_finite == 0 && n_bz_finite == 0) && return :hard
-    (n_speed_finite == 0 || n_bz_finite == 0 ||
-     n_density_finite == 0 || n_by_finite == 0) && return :partial
+    (n_speed_finite == 0 || n_bz_finite == 0) && return :hard
+    (n_density_finite == 0 || n_by_finite == 0) && return :partial
     return :ok
 end
 
@@ -549,7 +567,8 @@ function _subhour_trajectory(coef_csv, ens_csv, latest_dst_time::DateTime, ancho
         for s in 1:substeps
             t = latest_dst_time + Millisecond(round(Int, ((k - 1) + s / substeps) * 3_600_000))
             res = step_forecast!(st, t, drv.V, drv.Bz, drv.By, drv.n, drv.Pdyn)
-            push!(pts, (t=string(t), dst=_dst_from_dst_star(res.dst_predicted, drv.Pdyn) + correction))   # per-step target-time Pdyn
+            # Eq. (13) projection Π_[-2000,50] on the display trajectory point (per-step target-time Pdyn).
+            push!(pts, (t=string(t), dst=clamp(_dst_from_dst_star(res.dst_predicted, drv.Pdyn) + correction, -2000.0, 50.0)))
         end
     end
     return pts
@@ -664,6 +683,23 @@ function _pending_duplicate_forecast_row(df::DataFrame, row::DataFrame)
         _parse_dt(df[i, :latest_dst_time_utc]) == latest || continue
         _parse_dt(df[i, :target_time_utc]) == target || continue
         String(df[i, :model_version]) == model || continue
+        return i
+    end
+    return nothing
+end
+
+# Locate a forecast row by its identity key (latest_dst_time, target_time, model_version), returning
+# the row index or nothing. Positional row indices go stale across processes once a concurrent
+# writer rewrites the log, so cross-process score-and-write paths re-locate by identity under the
+# lock rather than trusting a stored index.
+function _locate_forecast_row(df::DataFrame, latest_dst_time::DateTime,
+                              target_time::DateTime, model_version::AbstractString)
+    required = (:latest_dst_time_utc, :target_time_utc, :model_version)
+    all(String(c) in names(df) for c in required) || return nothing
+    for i in 1:nrow(df)
+        _parse_dt(df[i, :latest_dst_time_utc]) == latest_dst_time || continue
+        _parse_dt(df[i, :target_time_utc]) == target_time || continue
+        String(df[i, :model_version]) == model_version || continue
         return i
     end
     return nothing
@@ -875,6 +911,29 @@ function _live_v2_memory_features(plasma::DataFrame, mag::DataFrame,
     )
 end
 
+# True whenever _live_v2_memory_features would fall back to neutral (zeroed) memory because the Dst
+# history at latest, latest-1h, or latest-3h is missing — the interior-gap condition an operator
+# needs flagged, since it collapses the regime-aware tail rate to the quiet default.
+function _dst_memory_fallback(dst_times, dst_vals, latest_dst_time::DateTime)
+    dst_map = _dst_lookup(dst_times, dst_vals)
+    return !all(haskey(dst_map, t) for t in
+                (latest_dst_time, latest_dst_time - Hour(1), latest_dst_time - Hour(3)))
+end
+
+# Freshest 1-hour Dst rate [nT/h] for the tail relaxation: scan back from latest_dst_time for the
+# newest hour t (within max_age_h) that has both t and t-1h present, returning Dst(t) - Dst(t-1h);
+# 0.0 when no contiguous pair exists. Decoupled from the calibrated memory-feature tuple (which
+# zeros out on any interior gap and would collapse tau to the quiet default during a rapid-deepening
+# storm with a one-hour provisional-Dst gap — the shallow-bias failure the regime relaxation removes).
+function _freshest_dst_rate(dst_times, dst_vals, latest_dst_time::DateTime; max_age_h::Int=6)
+    dst_map = _dst_lookup(dst_times, dst_vals)
+    for age in 0:max_age_h
+        t = latest_dst_time - Hour(age)
+        (haskey(dst_map, t) && haskey(dst_map, t - Hour(1))) && return dst_map[t] - dst_map[t - Hour(1)]
+    end
+    return 0.0
+end
+
 function _v2_features(latest_dst::Real, drivers;
                       memory=_zero_v2_memory_features(),
                       baselines=nothing,
@@ -928,6 +987,7 @@ _aci_regime(latest_dst::Real, thr::Real=_ACI_ACTIVITY_THRESHOLD_NT) =
 function _aci_interval_from_log(log_path::AbstractString, center::Real,
                                 horizon_steps::Integer;
                                 latest_dst::Real=NaN,
+                                pred_col::Symbol=:v2_pred_dst_nt,
                                 activity_threshold::Real=_ACI_ACTIVITY_THRESHOLD_NT,
                                 target_coverage::Float64=0.90, gamma::Float64=0.03,
                                 warmup::Int=30)
@@ -939,7 +999,9 @@ function _aci_interval_from_log(log_path::AbstractString, center::Real,
         # not horizon_hours (wall-clock target − issue). The two differ whenever the
         # anchor Dst lags the issue time, which silently routed long leads to a
         # different / empty residual pool and through to the over-wide fallback.
-        all(c -> c in cols, ("model_step_hours", "v2_pred_dst_nt",
+        # The residual pool is keyed on `pred_col`, the SAME model whose center is being
+        # queried, so a v1 issuance is not banded from a v2-calibrated residual distribution.
+        all(c -> c in cols, ("model_step_hours", String(pred_col),
                              "observation_dst_nt", "issue_time_utc", "latest_dst_nt")) || return nothing
         h = Int(horizon_steps)
         cur_regime = _aci_regime(Float64(latest_dst), activity_threshold)
@@ -948,7 +1010,7 @@ function _aci_interval_from_log(log_path::AbstractString, center::Real,
         collect_idx(regime_match::Bool) = begin
             out = Int[]
             for i in 1:nrow(df)
-                hv = df[i, :model_step_hours]; pv = df[i, :v2_pred_dst_nt]
+                hv = df[i, :model_step_hours]; pv = df[i, pred_col]
                 ov = df[i, :observation_dst_nt]; ld = df[i, :latest_dst_nt]
                 (ismissing(hv) || ismissing(pv) || ismissing(ov)) && continue
                 (round(Int, Float64(hv)) == h) || continue
@@ -971,7 +1033,7 @@ function _aci_interval_from_log(log_path::AbstractString, center::Real,
         ac = init_adaptive_conformal(; target_coverage=target_coverage,
                                      gamma=gamma, warmup=warmup)
         for i in idx
-            adaptive_conformal_step!(ac, Float64(df[i, :v2_pred_dst_nt]),
+            adaptive_conformal_step!(ac, Float64(df[i, pred_col]),
                                      Float64(df[i, :observation_dst_nt]))
         end
         s = adaptive_conformal_step!(ac, Float64(center), NaN)  # predict-only (gap path)
@@ -1360,28 +1422,44 @@ function _omni_replay_inputs(path::String, year_start::Int, year_end::Int)
         "OMNI CSV not found: $path. Run the OMNI extraction workflow or pass --omni=PATH."
     )
     df = parse_omni2(path; year_start=year_start, year_end=year_end)
-    clean_omni_data!(df)
+    # Replay drivers are issue-time inputs: use the strictly causal (forward-fill)
+    # cleaning so no gap hour is filled with a value measured after it.
+    clean_omni_data!(df; causal=true)
     required = [:datetime, :V, :Bz, :By, :n, :Pdyn, :Dst]
     _require_live_columns(df, required)
-    valid = trues(nrow(df))
-    for col in (:V, :Bz, :By, :n, :Pdyn, :Dst)
-        valid .&= isfinite.(Float64.(df[!, col]))
+
+    # Split the validity masks. Anchors need finite DRIVERS (an anchor cannot be issued without
+    # observed solar wind — leakage-safe), so the plasma/mag frames keep the joint driver filter
+    # (identical to the previous behavior: `quality==1` already requires V/Bz/Dst present). A TARGET
+    # hour, however, only needs a finite observed Dst to be scored: gating the returned Dst series on
+    # driver completeness silently dropped known-Dst target hours during archive-era driver outages
+    # (e.g. severe-storm main phases with V/n fill), biasing pooled skill toward easier hours. The
+    # target Dst series is therefore built from all finite-Dst rows, independent of driver presence.
+    driver_valid = trues(nrow(df))
+    for col in (:V, :Bz, :By, :n, :Pdyn)
+        driver_valid .&= isfinite.(Float64.(df[!, col]))
     end
-    String(:quality) in names(df) && (valid .&= df.quality .== 1)
-    df = df[valid, :]
-    sort!(df, :datetime)
-    nrow(df) >= 3 || error("Need at least 3 finite OMNI rows for replay")
+    String(:quality) in names(df) && (driver_valid .&= df.quality .== 1)
+    dst_valid = isfinite.(Float64.(df.Dst))
+
+    df_drivers = df[driver_valid, :]
+    sort!(df_drivers, :datetime)
+    nrow(df_drivers) >= 3 || error("Need at least 3 finite-driver OMNI rows for replay")
+    df_dst = df[dst_valid, :]
+    sort!(df_dst, :datetime)
+    nrow(df_dst) >= 3 || error("Need at least 3 finite-Dst OMNI rows for replay")
+
     plasma = DataFrame(
-        time_tag=DateTime.(df.datetime),
-        speed=Float64.(df.V),
-        density=Float64.(df.n),
+        time_tag=DateTime.(df_drivers.datetime),
+        speed=Float64.(df_drivers.V),
+        density=Float64.(df_drivers.n),
     )
     mag = DataFrame(
-        time_tag=DateTime.(df.datetime),
-        bz_gsm=Float64.(df.Bz),
-        by_gsm=Float64.(df.By),
+        time_tag=DateTime.(df_drivers.datetime),
+        bz_gsm=Float64.(df_drivers.Bz),
+        by_gsm=Float64.(df_drivers.By),
     )
-    return plasma, mag, DateTime.(df.datetime), Float64.(df.Dst)
+    return plasma, mag, DateTime.(df_dst.datetime), Float64.(df_dst.Dst)
 end
 
 function run_replay_omni(cfg::LiveVerifyConfig)
@@ -1497,7 +1575,7 @@ function _chronological_train_validation_test(df::DataFrame,
             split_of[a] = i <= na_train ? 1 : (i <= na_train + na_validation ? 2 : 3)
         end
         s = [split_of[a] for a in df.issue_time_utc]
-        return df[s .== 1, :], df[s .== 2, :], df[s .== 3, :]
+        return _embargo_splits(df[s .== 1, :], df[s .== 2, :], df[s .== 3, :])
     end
 
     n_train = clamp(floor(Int, train_fraction * n), 1, n - 2)
@@ -1505,6 +1583,25 @@ function _chronological_train_validation_test(df::DataFrame,
     train = df[1:n_train, :]
     validation = df[n_train + 1:n_train + n_validation, :]
     holdout = df[n_train + n_validation + 1:end, :]
+    return _embargo_splits(train, validation, holdout)
+end
+
+# Purged/embargoed split: drop later-split rows whose target observation time is not strictly after
+# the previous split's last target time. Without this, a boundary anchor's multi-hour target (at
+# T+h) is used both to fit the ridge residual correction (train) and to score/gate it
+# (validation/holdout) — standard time-series leakage across split boundaries. Single-horizon tables
+# are unaffected (target times already increase monotonically with the anchor). A no-op when the
+# frame carries no target_time_utc column.
+function _embargo_splits(train::DataFrame, validation::DataFrame, holdout::DataFrame)
+    col = :target_time_utc
+    _max_target(d) = (nrow(d) == 0 || !(String(col) in names(d))) ? nothing :
+        maximum(_parse_dt(x) for x in d[!, col] if !ismissing(x); init=typemin(DateTime))
+    _after(d, t) = (t === nothing || nrow(d) == 0 || !(String(col) in names(d))) ? d :
+        d[[(!ismissing(x) && _parse_dt(x) > t) for x in d[!, col]], :]
+    tr_max = _max_target(train)
+    validation = _after(validation, tr_max)
+    va_max = _max_target(validation)
+    holdout = _after(holdout, va_max)
     return train, validation, holdout
 end
 
@@ -1532,10 +1629,11 @@ end
 Compute metrics for several predictor columns over a SINGLE common finite-row
 mask: a row counts only when its observation and EVERY listed prediction are
 present and finite (`isfinite`, not just `!ismissing`). F6: the validation gate
-compares v2 against persistence and O'Brien, so a missing/NaN baseline row must
-drop the whole comparison row from all metrics, otherwise the comparison is
-unpaired (different n per column) and a baseline can look artificially better or
-worse than v2. Returns a `Dict{Symbol,NamedTuple}` keyed by predictor column.
+compares v2 against the pre-upgrade baseline, persistence, and O'Brien, so a
+missing/NaN baseline row must drop the whole comparison row from all metrics.
+Otherwise the comparison is unpaired (different n per column) and a baseline can
+look artificially better or worse than v2. Returns a `Dict{Symbol,NamedTuple}`
+keyed by predictor column.
 """
 function _paired_gate_metrics(scored::DataFrame, pred_cols::Vector{Symbol})
     cols = Symbol[c for c in pred_cols if String(c) in names(scored)]
@@ -1606,8 +1704,8 @@ function _calibration_with_forced_component(cal::OperationalV2Calibration,
     return _calibration_with_validation_selector(cal, selector; label=label)
 end
 
-function _v2_gate_pass(v2_metric, v1_metric)
-    return v2_metric.rmse <= v1_metric.rmse && v2_metric.mae <= v1_metric.mae
+function _v2_gate_pass(v2_metric, baseline_metric)
+    return v2_metric.rmse < baseline_metric.rmse && v2_metric.mae <= baseline_metric.mae
 end
 
 function _selection_path(calibration_path::String)
@@ -1684,9 +1782,11 @@ function _select_validated_v2_calibration(train::DataFrame,
                     validation_rmse_nt=NaN,
                     validation_mae_nt=NaN,
                     validation_bias_nt=NaN,
+                    validation_preupgrade_rmse_nt=NaN,
                     validation_persistence_rmse_nt=NaN,
                     validation_obrien_rmse_nt=NaN,
                     validation_coverage=NaN,
+                    beats_preupgrade=false,
                     beats_persistence=false,
                     beats_obrien=false,
                     coverage_ok=false,
@@ -1696,25 +1796,28 @@ function _select_validated_v2_calibration(train::DataFrame,
                 continue
             end
 
-            # Evaluate purely on the held-out validation split. F6: v2,
-            # persistence, and O'Brien metrics share ONE common finite-row mask so
-            # the gate comparison is paired (equal n); a missing/NaN baseline row
-            # drops from all three rather than only its own column.
+            # Evaluate purely on the held-out validation split. F6: v2, the
+            # pre-upgrade baseline, persistence, and O'Brien metrics share ONE
+            # common finite-row mask so the gate comparison is paired (equal n);
+            # a missing/NaN baseline row drops from all columns rather than only
+            # its own column.
             vs = score_operational_v2(validation, cal)
             has_obrien = String(:obrien_dst_nt) in names(vs)
             gate_cols = has_obrien ?
-                Symbol[:v2_pred_dst_nt, :latest_dst_nt, :obrien_dst_nt] :
-                Symbol[:v2_pred_dst_nt, :latest_dst_nt]
+                Symbol[:v2_pred_dst_nt, :pred_dst_nt, :latest_dst_nt, :obrien_dst_nt] :
+                Symbol[:v2_pred_dst_nt, :pred_dst_nt, :latest_dst_nt]
             gate_metrics = _paired_gate_metrics(vs, gate_cols)
             v2m = gate_metrics[:v2_pred_dst_nt]
+            basem = gate_metrics[:pred_dst_nt]
             # Persistence forecast = latest observed Dst at issue time.
             persm = gate_metrics[:latest_dst_nt]
             obrm = has_obrien ? gate_metrics[:obrien_dst_nt] : nothing
             cov = nrow(vs) == 0 ? NaN : mean(Bool.(vs.v2_observed_in_90ci))
+            beats_base = _v2_gate_pass(v2m, basem)
             beats_pers = _v2_gate_pass(v2m, persm)
             beats_obr = obrm === nothing ? true : _v2_gate_pass(v2m, obrm)
             cov_ok = isfinite(cov) && cov >= cfg.v2_coverage_floor
-            gate = beats_pers && beats_obr && cov_ok
+            gate = beats_base && beats_pers && beats_obr && cov_ok
             row = (
                 feature_set=feature_set,
                 ridge=ridge,
@@ -1723,9 +1826,11 @@ function _select_validated_v2_calibration(train::DataFrame,
                 validation_rmse_nt=v2m.rmse,
                 validation_mae_nt=v2m.mae,
                 validation_bias_nt=v2m.bias,
+                validation_preupgrade_rmse_nt=basem.rmse,
                 validation_persistence_rmse_nt=persm.rmse,
                 validation_obrien_rmse_nt=(obrm === nothing ? NaN : obrm.rmse),
                 validation_coverage=cov,
+                beats_preupgrade=beats_base,
                 beats_persistence=beats_pers,
                 beats_obrien=beats_obr,
                 coverage_ok=cov_ok,
@@ -1751,9 +1856,17 @@ end
 
 function fit_v2_calibration!(cfg::LiveVerifyConfig)
     isfile(cfg.table_path) || error("Replay table not found: $(cfg.table_path)")
-    df = SolarSINDy.add_operational_v2_features!(
-        _v2_base_prediction_table(CSV.read(cfg.table_path, DataFrame))
-    )
+    raw_table = _v2_base_prediction_table(CSV.read(cfg.table_path, DataFrame))
+    # Force a fresh, timestamp-based recompute of the derived memory features: add_operational_v2_
+    # features! skips columns already present, so a persisted table written before the row-lag→hour-lag
+    # fix would otherwise deploy hour-mislabeled coefficients. Dropping them guarantees fit-time and
+    # live-issuance memory features share the true-hourly-delta semantics.
+    for c in (:dst_delta_1h_nt, :dst_delta_3h_nt, :dst_delta_6h_nt, :Bz_delta_1h_nt,
+              :VBsouth_delta_1h_mvm, :VBsouth_mean_3h_mvm, :VBsouth_mean_6h_mvm,
+              :Bsouth_mean_3h_nt, :Bsouth_mean_6h_nt)
+        String(c) in names(raw_table) && select!(raw_table, Not(c))
+    end
+    df = SolarSINDy.add_operational_v2_features!(raw_table)
     nrow(df) >= 8 || error("Need at least 8 replay rows to fit/select/test v2 calibration")
     train, validation, holdout = _chronological_train_validation_test(
         df,
@@ -1805,10 +1918,11 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
         ""
     end
 
-    # Acceptance gate decides deployment. A v2 candidate that does not beat
-    # persistence and O'Brien on validation, has too thin a validation split, or
-    # whose SERVED conformal interval under-covers the holdout is NOT shipped; a
-    # v1-equivalent (zero-correction) fallback is deployed instead.
+    # Acceptance gate decides deployment. A v2 candidate that does not strictly
+    # beat the pre-upgrade baseline and persistence on validation, fails O'Brien,
+    # has too thin a validation split, or whose SERVED conformal interval
+    # under-covers the holdout is NOT shipped; a v1-equivalent (zero-correction)
+    # fallback is deployed instead.
     cal = if deploy
         candidate_cal
     else
@@ -1898,7 +2012,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     else
         @warn(
             "Best v2 candidate failed the acceptance gate " *
-            "(validation beat + thick-enough validation split + V2 conformal " *
+            "(validation baseline beats + thick-enough validation split + V2 conformal " *
             "interval holdout coverage ≥ floor); deployed v1-equivalent fallback.",
             block_reason=deploy_block_reason,
             best_validation_rmse=selection.validation_rmse,
@@ -1977,8 +2091,12 @@ function issue_forecast(cfg::LiveVerifyConfig)
 
     latest_common_sw = min(maximum(plasma.time_tag), maximum(mag.time_tag))
     latest_complete_hour = _floor_hour(latest_common_sw)
-    latest_dst_time = dst_times[end]
-    latest_dst = dst_vals[end]
+    # Anchor on the newest Dst hour by timestamp, not feed position: an out-of-order feed or a
+    # trailing stale record must not silently anchor the forecast (and the Dst* state) to an old
+    # hour, mirroring the replay path's maximum(dst_dt).
+    dst_anchor_idx = argmax(dst_times)
+    latest_dst_time = dst_times[dst_anchor_idx]
+    latest_dst = dst_vals[dst_anchor_idx]
     target_time = _next_hourly_target(issue_time, cfg.horizon_hours, latest_dst_time)
     @assert target_time > issue_time
     @assert target_time > latest_dst_time
@@ -2021,9 +2139,9 @@ function issue_forecast(cfg::LiveVerifyConfig)
     gap_status = _driver_gap_status(n_speed_finite, n_bz_finite, n_density_finite, n_by_finite)
     if gap_status == :hard
         error(
-            "Solar-wind data gap: no finite speed or Bz samples in the trailing " *
-            "hour [$recent_start, $latest_common_sw]. Refusing to issue a forecast " *
-            "built on quiet-time fallback drivers."
+            "Solar-wind data gap: the trailing hour [$recent_start, $latest_common_sw] is missing " *
+            "all finite speed samples ($n_speed_finite) or all finite Bz samples ($n_bz_finite). " *
+            "Refusing to issue a forecast built on quiet-time fallback drivers for a primary driver."
         )
     end
     driver_data_gap = gap_status != :ok
@@ -2032,8 +2150,13 @@ function issue_forecast(cfg::LiveVerifyConfig)
         n_speed_finite, n_bz_finite, n_density_finite, n_by_finite,
         recent_start, latest_common_sw
     )
+    # Convert the anchor Dst to Dst* with the TRAILING wind hour [t-1h, t), matching the replay
+    # convention the deployed β-calibration was fit under (_forecast_one_replay uses source window
+    # [anchor-1h, anchor)); the previous following-hour window [t, t+1) applied a slightly different
+    # input convention than training at dynamic-pressure jumps. The trailing hour is fully elapsed at
+    # issue time (Dst lags the wind feed), so it stays causal and is more reliably populated.
     anchor_drivers = _drivers_for_window(
-        plasma, mag, latest_dst_time, latest_dst_time + Hour(1);
+        plasma, mag, latest_dst_time - Hour(1), latest_dst_time;
         fallback=recent,
     )
     anchor_dst_star = pressure_correct_dst([latest_dst], [anchor_drivers.Pdyn])[1]
@@ -2111,6 +2234,16 @@ function issue_forecast(cfg::LiveVerifyConfig)
         latest_dst_time,
         used_drivers,
     )
+    # Loud degradation: flag (and warn) when the calibrated memory features fell back to neutral
+    # because of an interior Kyoto-Dst gap. The regime-aware tail rate is taken from the freshest
+    # contiguous Dst pair instead, so a one-hour provisional-Dst gap during a rapid-deepening storm
+    # no longer silently collapses tau to the quiet default and under-predicts storm depth.
+    dst_memory_fallback = _dst_memory_fallback(dst_times, dst_vals, latest_dst_time)
+    dst_memory_fallback && @warn(
+        "Kyoto Dst memory features fell back to neutral (interior hour gap at latest/-1h/-3h); " *
+        "tail relaxation rate taken from the freshest available Dst pair.",
+        latest_dst_time
+    )
     features = _v2_features(
         latest_dst,
         used_drivers;
@@ -2147,7 +2280,11 @@ function issue_forecast(cfg::LiveVerifyConfig)
     # interval drops (≈0.84 on broad replay vs 0.89 for ACI). The ACI state is
     # derived per horizon from the verified log. Fail-safe: insufficient history or
     # any error keeps the static interval above; the point forecast is unchanged.
-    let aci = _aci_interval_from_log(cfg.log_path, pred_dst, model_steps; latest_dst=latest_dst)
+    # Key the ACI residual pool on the SAME model whose center is being banded (v1 residuals for a
+    # v1 issuance), so a v1 point forecast is never handed a v2-calibrated band tagged "aci".
+    aci_pred_col = selected.model_version == "v2" ? :v2_pred_dst_nt : :v1_pred_dst_nt
+    let aci = _aci_interval_from_log(cfg.log_path, pred_dst, model_steps;
+                                     latest_dst=latest_dst, pred_col=aci_pred_col)
         if aci !== nothing
             ci05_dst, ci95_dst, interval_source = aci[1], aci[2], "aci"
         end
@@ -2180,7 +2317,9 @@ function issue_forecast(cfg::LiveVerifyConfig)
     reference_ci05_dst = selected.model_version == "v2" ? v2_ci05_log : ci05_dst
     reference_ci95_dst = selected.model_version == "v2" ? v2_ci95_log : ci95_dst
     sub_hourly_pred_dst = reference_pred_dst
-    dst_rate_nt_per_h = memory_features.dst_delta_1h_nt
+    # Tail relaxation rate from the freshest contiguous Dst pair (not the zeroed memory tuple), so an
+    # interior provisional-Dst gap does not collapse the deepening-storm tail to the quiet default.
+    dst_rate_nt_per_h = _freshest_dst_rate(dst_times, dst_vals, latest_dst_time)
     try
         sstate = init_forecast(; coefficients_csv=coef_csv, ensemble_csv=ens_csv, t0=latest_dst_time, dst0=anchor_dst_star)
         sresult = nothing; sst = latest_dst_time + Hour(1); sdrv = recent
@@ -2216,12 +2355,29 @@ function issue_forecast(cfg::LiveVerifyConfig)
        _near_term_extreme_inertia_guard(latest_dst, model_steps)
         sub_hourly_pred_dst = latest_dst
     end
+    # Eq. (13) projection Π_[-2000,50] on the served (non-guard) center, matching Algorithm 1 and the
+    # replay operator (v2_replay.jl); the served path otherwise leaves the center unbounded above +50 nT
+    # under extreme dynamic-pressure compression plus a positive correction. Applied before the interval
+    # shift so the served band centers on the projected value.
+    sub_hourly_pred_dst = clamp(sub_hourly_pred_dst, -2000.0, 50.0)
     sub_hourly_ci05, sub_hourly_ci95 = _shift_interval_to_center(
         sub_hourly_pred_dst,
         reference_pred_dst,
         reference_ci05_dst,
         reference_ci95_dst,
     )
+    # Served-band honesty: once enough verified served rows exist at this lead/regime, calibrate the
+    # served 90% band on the served model's OWN residuals (pool served_pred_dst_nt, ACI step centered
+    # on the served center) rather than transplanting the pre-upgrade v2 band — the exchangeability
+    # premise breaks exactly where the L1/relaxation/inertia tail moves the center (storm onsets).
+    # Fail-safe to the shifted pre-upgrade band while served history is insufficient (returns nothing).
+    if selected.model_version == "v2"
+        served_aci = _aci_interval_from_log(cfg.log_path, sub_hourly_pred_dst, model_steps;
+                                            latest_dst=latest_dst, pred_col=:served_pred_dst_nt)
+        if served_aci !== nothing && isfinite(served_aci[1]) && isfinite(served_aci[2])
+            sub_hourly_ci05, sub_hourly_ci95 = served_aci[1], served_aci[2]
+        end
+    end
 
     # ---- V2 product forecast = pre-upgrade baseline + L1/regime-aware/inertia tail.
     served_pred_dst = sub_hourly_pred_dst
@@ -2241,6 +2397,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
         model_step_hours=[model_steps],
         driver_assumption=["observed_solar_wind_until_latest_complete_hour_then_l1_measured_lookahead_then_regime_aware_relaxation_then_extreme_inertia_guard"],
         driver_data_gap=[driver_data_gap],
+        dst_memory_fallback=[dst_memory_fallback],
         n_speed_finite_trailing_hour=[n_speed_finite],
         n_bz_finite_trailing_hour=[n_bz_finite],
         n_density_finite_trailing_hour=[n_density_finite],
@@ -2372,58 +2529,64 @@ function issue_forecast(cfg::LiveVerifyConfig)
         "Pdyn=$(round(used_drivers.Pdyn; digits=3)) nPa"
     )
 
-    return (; row_idx, target_time, pred_dst, ci05_dst, ci95_dst,
+    return (; row_idx, latest_dst_time, target_time, pred_dst, ci05_dst, ci95_dst,
             model_version=selected.model_version)
 end
 
 function verify_pending!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=nothing)
     isfile(cfg.log_path) || error("No forecast log exists at $(cfg.log_path)")
-    df = CSV.read(cfg.log_path, DataFrame)
+    # Fetch the observation feed BEFORE taking the lock so network latency does not sit inside the
+    # 30 s lock window. Then hold the same directory lock the appends take, re-read under the lock,
+    # mutate, and atomically write — so a concurrent locked append (e.g. the live monitor issuing a
+    # forecast) cannot be clobbered by this read-modify-write.
     if dst_times === nothing || dst_vals === nothing
         dst_times, dst_vals = _fetch_dst()
     end
-
-    verified = 0
-    for row_idx in 1:nrow(df)
-        if String(:observation_dst_nt) in names(df) && !ismissing(df[row_idx, :observation_dst_nt])
-            continue
+    verified = _with_forecast_log_lock(cfg.log_path) do
+        df = CSV.read(cfg.log_path, DataFrame)
+        n = 0
+        for row_idx in 1:nrow(df)
+            if String(:observation_dst_nt) in names(df) && !ismissing(df[row_idx, :observation_dst_nt])
+                continue
+            end
+            target = _parse_dt(df[row_idx, :target_time_utc])
+            idx = findfirst(==(target), dst_times)
+            idx === nothing && continue
+            _score_row!(df, row_idx, Float64(dst_vals[idx]))
+            n += 1
         end
-        target = _parse_dt(df[row_idx, :target_time_utc])
-        idx = findfirst(==(target), dst_times)
-        idx === nothing && continue
-        _score_row!(df, row_idx, Float64(dst_vals[idx]))
-        verified += 1
+        n > 0 && _atomic_csv(cfg.log_path, df)
+        n
     end
-
-    verified > 0 && _atomic_csv(cfg.log_path, df)
     println("Verified $verified pending forecast row(s).")
     return verified
 end
 
 function refresh_observations!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=nothing)
     isfile(cfg.log_path) || error("No forecast log exists at $(cfg.log_path)")
-    df = CSV.read(cfg.log_path, DataFrame)
+    # Fetch outside the lock, then read-modify-write under the shared log lock (see verify_pending!).
     if dst_times === nothing || dst_vals === nothing
         dst_times, dst_vals = _fetch_dst()
     end
     dst_map = _dst_lookup(dst_times, dst_vals)
-
-    updated = 0
-    changed = 0
-    for row_idx in 1:nrow(df)
-        String(:target_time_utc) in names(df) || continue
-        target = _parse_dt(df[row_idx, :target_time_utc])
-        haskey(dst_map, target) || continue
-        observed = Float64(dst_map[target])
-        old_observed = _optional_float(df, row_idx, :observation_dst_nt)
-        if ismissing(old_observed) || Float64(old_observed) != observed
-            !ismissing(old_observed) && (changed += 1)
-            _score_row!(df, row_idx, observed)
-            updated += 1
+    updated, changed = _with_forecast_log_lock(cfg.log_path) do
+        df = CSV.read(cfg.log_path, DataFrame)
+        u = 0; c = 0
+        for row_idx in 1:nrow(df)
+            String(:target_time_utc) in names(df) || continue
+            target = _parse_dt(df[row_idx, :target_time_utc])
+            haskey(dst_map, target) || continue
+            observed = Float64(dst_map[target])
+            old_observed = _optional_float(df, row_idx, :observation_dst_nt)
+            if ismissing(old_observed) || Float64(old_observed) != observed
+                !ismissing(old_observed) && (c += 1)
+                _score_row!(df, row_idx, observed)
+                u += 1
+            end
         end
+        u > 0 && _atomic_csv(cfg.log_path, df)
+        (u, c)
     end
-
-    updated > 0 && _atomic_csv(cfg.log_path, df)
     println(
         "Refreshed $updated observation row(s); " *
         "$changed previously scored row(s) changed."
@@ -2452,30 +2615,32 @@ only missing ones are filled (a documented approximation for legacy rows).
 """
 function backfill_baselines!(log_path::String)
     isfile(log_path) || error("No forecast log exists at $log_path")
-    df = CSV.read(log_path, DataFrame)
-    updated = 0
+    # Read-modify-write under the shared log lock so a concurrent locked append is not clobbered.
+    updated = _with_forecast_log_lock(log_path) do
+        df = CSV.read(log_path, DataFrame)
+        u = 0
+        for row_idx in 1:nrow(df)
+            required = (:anchor_dst_star_nt, :latest_dst_nt, :target_time_utc,
+                        :latest_dst_time_utc, :V_kms, :Bz_nt, :By_nt, :n_cm3, :Pdyn_npa)
+            all(String(col) in names(df) for col in required) || continue
+            baseline = _baseline_predictions_from_row(df, row_idx)
 
-    for row_idx in 1:nrow(df)
-        required = (:anchor_dst_star_nt, :latest_dst_nt, :target_time_utc,
-                    :latest_dst_time_utc, :V_kms, :Bz_nt, :By_nt, :n_cm3, :Pdyn_npa)
-        all(String(col) in names(df) for col in required) || continue
-        baseline = _baseline_predictions_from_row(df, row_idx)
+            filled = false
+            filled |= _set_if_missing!(df, row_idx, :persistence_dst_nt, baseline.persistence)
+            filled |= _set_if_missing!(df, row_idx, :burton_dst_nt, baseline.burton)
+            filled |= _set_if_missing!(df, row_idx, :burton_full_dst_nt, baseline.burton_full)
+            filled |= _set_if_missing!(df, row_idx, :obrien_dst_nt, baseline.obrien)
+            filled |= _set_if_missing!(df, row_idx, :model_step_hours, baseline.model_steps)
 
-        filled = false
-        filled |= _set_if_missing!(df, row_idx, :persistence_dst_nt, baseline.persistence)
-        filled |= _set_if_missing!(df, row_idx, :burton_dst_nt, baseline.burton)
-        filled |= _set_if_missing!(df, row_idx, :burton_full_dst_nt, baseline.burton_full)
-        filled |= _set_if_missing!(df, row_idx, :obrien_dst_nt, baseline.obrien)
-        filled |= _set_if_missing!(df, row_idx, :model_step_hours, baseline.model_steps)
-
-        observed = _optional_float(df, row_idx, :observation_dst_nt)
-        if filled && !ismissing(observed)
-            _score_row!(df, row_idx, observed)
+            observed = _optional_float(df, row_idx, :observation_dst_nt)
+            if filled && !ismissing(observed)
+                _score_row!(df, row_idx, observed)
+            end
+            filled && (u += 1)
         end
-        filled && (updated += 1)
+        u > 0 && _atomic_csv(log_path, df)
+        u
     end
-
-    updated > 0 && _atomic_csv(log_path, df)
     println("Backfilled baseline forecasts for $updated row(s) (fill-if-missing).")
     return updated
 end
@@ -2487,20 +2652,33 @@ function wait_for_observation(cfg::LiveVerifyConfig, forecast)
     while true
         times, dst = _fetch_dst()
         idx = findfirst(==(target), times)
-        latest = times[end]
+        latest = times[argmax(times)]
 
         if idx !== nothing
-            df = CSV.read(cfg.log_path, DataFrame)
-            result = _score_row!(df, forecast.row_idx, Float64(dst[idx]))
-            _atomic_csv(cfg.log_path, df)
-            in_ci = df[forecast.row_idx, :observed_in_90ci]
-            println("Observed target Dst arrived: $target = $(result.observed_dst) nT")
+            observed = Float64(dst[idx])
+            # Score-and-write under the shared log lock, and re-locate the row by its identity key
+            # rather than the stored positional index (a concurrent writer may have rewritten the
+            # log, so the index can be stale — mis-scoring the wrong row).
+            scored = _with_forecast_log_lock(cfg.log_path) do
+                df = CSV.read(cfg.log_path, DataFrame)
+                ridx = _locate_forecast_row(df, forecast.latest_dst_time, target, forecast.model_version)
+                ridx === nothing && error(
+                    "wait_for_observation: forecast row not found by identity " *
+                    "(latest_dst=$(forecast.latest_dst_time), target=$target, model=$(forecast.model_version)) " *
+                    "in $(cfg.log_path)"
+                )
+                r = _score_row!(df, ridx, observed)
+                in_ci = df[ridx, :observed_in_90ci]
+                _atomic_csv(cfg.log_path, df)
+                (; observed_dst=r.observed_dst, residual=r.residual, in_ci)
+            end
+            println("Observed target Dst arrived: $target = $(scored.observed_dst) nT")
             println(
                 "Prediction: $(round(forecast.pred_dst; digits=2)) nT; " *
-                "residual obs-pred = $(round(result.residual; digits=2)) nT; " *
-                "in 90% CI = $in_ci"
+                "residual obs-pred = $(round(scored.residual; digits=2)) nT; " *
+                "in 90% CI = $(scored.in_ci)"
             )
-            return result
+            return (; observed_dst=scored.observed_dst, residual=scored.residual)
         end
 
         now(UTC) >= deadline && error(
@@ -2543,26 +2721,40 @@ function _copy_config(cfg::LiveVerifyConfig; kwargs...)
     return LiveVerifyConfig(; values...)
 end
 
-function _rows_verified(log_path::String, row_indices::Vector{Int})
+# Re-locate a campaign forecast's current log row by identity (latest_dst_time, target,
+# model_version) when those fields are present, else fall back to the stored positional row_idx.
+# Identity is robust to a concurrent writer having rewritten the log, where a positional index goes
+# stale across processes and would mis-score the wrong row.
+function _forecast_row_index(df::DataFrame, f)
+    if all(hasproperty(f, k) for k in (:latest_dst_time, :target_time, :model_version))
+        ridx = _locate_forecast_row(df, f.latest_dst_time, f.target_time, String(f.model_version))
+        ridx !== nothing && return ridx
+    end
+    return hasproperty(f, :row_idx) ? Int(f.row_idx) : nothing
+end
+
+function _campaign_all_verified(log_path::String, forecasts)
     isfile(log_path) || return false
     df = CSV.read(log_path, DataFrame)
     String(:observation_dst_nt) in names(df) || return false
-    for row_idx in row_indices
-        if row_idx > nrow(df) || ismissing(df[row_idx, :observation_dst_nt])
-            return false
-        end
+    for f in forecasts
+        ridx = _forecast_row_index(df, f)
+        (ridx === nothing || ridx > nrow(df) || ismissing(df[ridx, :observation_dst_nt])) && return false
     end
     return true
 end
 
-function _pending_row_indices(log_path::String, row_indices::Vector{Int})
-    isfile(log_path) || return copy(row_indices)
+# Positions (1-based, into `forecasts`) of campaign forecasts whose target is still unscored.
+function _campaign_pending_positions(log_path::String, forecasts)
+    isfile(log_path) || return collect(1:length(forecasts))
     df = CSV.read(log_path, DataFrame)
-    String(:observation_dst_nt) in names(df) || return copy(row_indices)
-    return [
-        row_idx for row_idx in row_indices
-        if row_idx > nrow(df) || ismissing(df[row_idx, :observation_dst_nt])
-    ]
+    String(:observation_dst_nt) in names(df) || return collect(1:length(forecasts))
+    out = Int[]
+    for (i, f) in enumerate(forecasts)
+        ridx = _forecast_row_index(df, f)
+        (ridx === nothing || ridx > nrow(df) || ismissing(df[ridx, :observation_dst_nt])) && push!(out, i)
+    end
+    return out
 end
 
 function run_campaign(cfg::LiveVerifyConfig;
@@ -2586,17 +2778,17 @@ function run_campaign(cfg::LiveVerifyConfig;
 
     report_fn(cfg.log_path, cfg.report_path)
     deadline = clock_fn() + Millisecond(round(Int, cfg.timeout_hours * 3600 * 1000))
-    while !_rows_verified(cfg.log_path, row_indices)
+    while !_campaign_all_verified(cfg.log_path, forecasts)
         verified = verify_fn(cfg)
         report_fn(cfg.log_path, cfg.report_path)
-        pending = _pending_row_indices(cfg.log_path, row_indices)
+        pending = _campaign_pending_positions(cfg.log_path, forecasts)
         println(
             "Campaign verification pass: newly_verified=$verified, " *
             "campaign_pending=$(length(pending))"
         )
         isempty(pending) && break
         clock_fn() >= deadline && error(
-            "Timed out waiting for campaign rows $(join(pending, ",")); " *
+            "Timed out waiting for $(length(pending)) campaign forecast(s); " *
             "report written to $(cfg.report_path)"
         )
         sleep_fn(cfg.poll_seconds)
@@ -2796,12 +2988,72 @@ function _model_residual(df::DataFrame, row_idx::Int, pred_col::Symbol)
     return observed - pred
 end
 
+# Forecast identity key (latest_dst_time, target_time, model_version) as strings, coalescing a
+# missing model_version to "v1" (matching _row_model_version), or nothing when the time fields are
+# absent/missing. Used to deduplicate scored rows in pooled metrics.
+function _forecast_identity_key(df::DataFrame, i::Int)
+    (String(:latest_dst_time_utc) in names(df) && String(:target_time_utc) in names(df)) || return nothing
+    (ismissing(df[i, :latest_dst_time_utc]) || ismissing(df[i, :target_time_utc])) && return nothing
+    return (String(string(df[i, :latest_dst_time_utc])),
+            String(string(df[i, :target_time_utc])),
+            _row_model_version(df, i))
+end
+
+# Deduplicate scored rows by forecast identity (latest_dst_time, target_time, model_version),
+# keeping the earliest issue_time. A handful of pre-2026-06-26 rows predate the append-time
+# pending-dedup guard, so duplicate (anchor,target,model) pairs remain in the raw log and would be
+# double-counted in pooled RMSE/MAE/coverage; scoring-time dedup removes that overweighting without
+# mutating the raw log. Rows lacking a usable identity key are kept as-is. Returns (kept_indices in
+# input order, n_dropped).
+function _dedup_scored_indices(df::DataFrame, indices::Vector{Int})
+    earliest = Dict{Tuple{String,String,String},Tuple{Int,String}}()
+    for i in indices
+        key = _forecast_identity_key(df, i)
+        key === nothing && continue
+        issue = String(string(_optional_text(df, i, :issue_time_utc)))
+        if haskey(earliest, key)
+            issue < earliest[key][2] && (earliest[key] = (i, issue))
+        else
+            earliest[key] = (i, issue)
+        end
+    end
+    kept_set = Set(v[1] for v in values(earliest))
+    kept = Int[]; dropped = 0
+    for i in indices
+        key = _forecast_identity_key(df, i)
+        if key === nothing || i in kept_set
+            push!(kept, i)
+        else
+            dropped += 1
+        end
+    end
+    return kept, dropped
+end
+
+_optional_text(df::DataFrame, i::Int, col::Symbol) =
+    (String(col) in names(df) && !ismissing(df[i, col])) ? string(df[i, col]) : ""
+
+# Newest issue_time_utc in the log as a DateTime, or nothing when absent/unparseable.
+function _newest_issue_time(df::DataFrame)
+    String(:issue_time_utc) in names(df) || return nothing
+    latest = nothing
+    for s in df.issue_time_utc
+        ismissing(s) && continue
+        t = try _parse_dt(s) catch; nothing end
+        t === nothing && continue
+        (latest === nothing || t > latest) && (latest = t)
+    end
+    return latest
+end
+
 function write_live_comparison_report(log_path::String, report_path::String)
     isfile(log_path) || error("No forecast log exists at $log_path")
     df = CSV.read(log_path, DataFrame)
     verified = _verified_indices(df)
-    valid_verified = [i for i in verified if _row_is_strictly_future(df, i)]
-    invalid_verified = setdiff(verified, valid_verified)
+    strictly_future = [i for i in verified if _row_is_strictly_future(df, i)]
+    invalid_verified = setdiff(verified, strictly_future)
+    # Exclude pre-guard duplicate (anchor,target,model) scored rows from pooled metrics/coverage.
+    valid_verified, n_duplicate_dropped = _dedup_scored_indices(df, strictly_future)
     pending = _pending_indices(df)
     model_specs = _standard_model_columns(df)
     comparison_rows = _same_row_model_indices(df, valid_verified, model_specs)
@@ -2820,9 +3072,21 @@ function write_live_comparison_report(log_path::String, report_path::String)
     push!(lines, "Source log: `$log_path`")
     push!(lines, "Evidence tier: locked-live forecast, scored only after target observation publication.")
     push!(lines, "Generated UTC: $(Dates.format(now(UTC), dateformat"yyyy-mm-ddTHH:MM:SS"))Z")
+    # Issuance-freshness header: the age of the newest issued row vs wall clock, so a frozen
+    # issuance path (e.g. a retired upstream feed) cannot read healthy just because pending==0.
+    let newest = _newest_issue_time(df)
+        if newest === nothing
+            push!(lines, "Newest issued forecast: none")
+        else
+            age_h = (now(UTC) - newest) / Millisecond(3_600_000)
+            flag = age_h > 3 ? "  **[STALE ISSUANCE]**" : ""
+            push!(lines, "Newest issued forecast UTC: $(newest) ($(round(age_h; digits=1)) h ago)$flag")
+        end
+    end
     push!(lines, "")
     push!(lines, "Verified rows used: $(length(valid_verified))")
     push!(lines, "Invalid verified rows excluded: $(length(invalid_verified))")
+    push!(lines, "Duplicate (anchor,target,model) scored rows excluded: $(n_duplicate_dropped)")
     push!(lines, "Pending rows: $(length(pending))")
     push!(lines, "Same-row forecast comparison rows: $(length(comparison_rows))")
     if !ismissing(coverage)
@@ -3004,17 +3268,21 @@ function summarize_log(log_path::String)
         "BurtonFull" => :burton_full_dst_nt,
         "OBrienMcP" => :obrien_dst_nt,
     ]
+    # Deduplicate scored rows by (anchor,target,model) so a handful of pre-guard duplicate rows do
+    # not double-count in the pooled metrics/coverage (see _dedup_scored_indices).
+    verified = _verified_indices(df)
+    kept, n_duplicate_dropped = _dedup_scored_indices(df, verified)
+    n_duplicate_dropped > 0 && println(
+        "(excluded $n_duplicate_dropped duplicate (anchor,target,model) scored row(s) from pooled metrics)")
     for (name, col) in model_specs
-        String(col) in names(df) || continue
-        preds, obs = _metric_rows(df, col)
-        if isempty(preds) && col == :v1_pred_dst_nt
-            preds, obs = _metric_rows(df, :pred_dst_nt)
-        end
+        (col == :v1_pred_dst_nt || String(col) in names(df)) || continue
+        preds, obs = _metric_rows_for_indices(df, col, kept)
         _print_metric(name, preds, obs)
     end
     if String(:observed_in_90ci) in names(df)
         flags = Bool[]
-        for value in df.observed_in_90ci
+        for i in kept
+            value = df[i, :observed_in_90ci]
             ismissing(value) || push!(flags, Bool(value))
         end
         isempty(flags) || println("SINDy 90% coverage n=$(length(flags)) coverage=$(round(mean(flags); digits=3))")

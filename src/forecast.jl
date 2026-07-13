@@ -286,6 +286,100 @@ function _rolling_mean(values::Vector{Float64}, order::Vector{Int}, width::Int)
     return out
 end
 
+# Per-row anchor DateTime from the issue/latest time column, or `nothing` when no
+# usable time axis exists (e.g. the single-row serving feature frame).
+function _anchor_times(df::DataFrame)
+    for col in (:issue_time_utc, :latest_dst_time_utc)
+        String(col) in names(df) || continue
+        times = Vector{DateTime}(undef, nrow(df))
+        ok = true
+        for (i, x) in enumerate(df[!, col])
+            if ismissing(x)
+                ok = false
+                break
+            end
+            times[i] = x isa DateTime ? x : DateTime(String(x))
+        end
+        ok && return times
+    end
+    return nothing
+end
+
+# Mean of `v` over the hourly window {t, t-1h, ..., t-(w-1)h} via the anchor
+# time→row map `idx_at`; a missing/non-finite window hour falls back to `current`,
+# mirroring the live rolling mean's current-driver fallback.
+function _window_time_mean(v::Vector{Float64}, idx_at::Dict{DateTime,Int},
+                           t::DateTime, w::Int, current::Float64)
+    s = 0.0
+    for h in 0:w-1
+        j = get(idx_at, t - Hour(h), nothing)
+        s += (j === nothing || !isfinite(v[j])) ? current : v[j]
+    end
+    return s / w
+end
+
+# Memory features (Dst/Bz/VBsouth deltas and VBsouth/Bsouth rolling means)
+# computed by TIMESTAMP, so tied multi-horizon issue times and gap-skipped anchors
+# resolve to the true hourly differences and every horizon row of one anchor gets
+# identical values. Mirrors _live_v2_memory_features: memory is neutral (0) unless
+# the Dst history at t-1h and t-3h is present. Falls back to the row-offset (neutral
+# for a lone row) computation when the frame has no usable time axis.
+function _add_memory_features!(df::DataFrame, latest::Vector{Float64}, bz::Vector{Float64})
+    vbsouth = Float64.(df.VBsouth_mvm)
+    bsouth = Float64.(df.Bsouth_nt)
+    anchor_times = _anchor_times(df)
+    if anchor_times === nothing
+        order = _chronological_order(df)
+        _maybe_add_column!(df, :dst_delta_1h_nt, _lagged_difference(latest, order, 1))
+        _maybe_add_column!(df, :dst_delta_3h_nt, _lagged_difference(latest, order, 3))
+        _maybe_add_column!(df, :dst_delta_6h_nt, _lagged_difference(latest, order, 6))
+        _maybe_add_column!(df, :Bz_delta_1h_nt, _lagged_difference(bz, order, 1))
+        _maybe_add_column!(df, :VBsouth_delta_1h_mvm, _lagged_difference(vbsouth, order, 1))
+        _maybe_add_column!(df, :VBsouth_mean_3h_mvm, _rolling_mean(vbsouth, order, 3))
+        _maybe_add_column!(df, :VBsouth_mean_6h_mvm, _rolling_mean(vbsouth, order, 6))
+        _maybe_add_column!(df, :Bsouth_mean_3h_nt, _rolling_mean(bsouth, order, 3))
+        _maybe_add_column!(df, :Bsouth_mean_6h_nt, _rolling_mean(bsouth, order, 6))
+        return df
+    end
+    idx_at = Dict{DateTime,Int}()
+    for i in 1:nrow(df)
+        get!(idx_at, anchor_times[i], i)   # first occurrence per anchor time
+    end
+    at(v, t) = (j = get(idx_at, t, nothing); j === nothing ? NaN : v[j])
+    n = nrow(df)
+    dst_d1 = zeros(n); dst_d3 = zeros(n); dst_d6 = zeros(n)
+    bz_d1 = zeros(n); vb_d1 = zeros(n)
+    vb_m3 = zeros(n); vb_m6 = zeros(n); bs_m3 = zeros(n); bs_m6 = zeros(n)
+    for i in 1:n
+        t = anchor_times[i]
+        l1 = at(latest, t - Hour(1))
+        l3 = at(latest, t - Hour(3))
+        (isfinite(latest[i]) && isfinite(l1) && isfinite(l3)) || continue  # neutral memory
+        l6 = at(latest, t - Hour(6))
+        dst_d1[i] = latest[i] - l1
+        dst_d3[i] = latest[i] - l3
+        dst_d6[i] = isfinite(l6) ? latest[i] - l6 : 0.0
+        bz1 = at(bz, t - Hour(1))
+        bz_d1[i] = (isfinite(bz[i]) && isfinite(bz1)) ? bz[i] - bz1 : 0.0
+        vbp = at(vbsouth, t - Hour(1))
+        vb_d1[i] = (isfinite(vbsouth[i]) && isfinite(vbp)) ? vbsouth[i] - vbp : 0.0
+        vb_m3[i] = _window_time_mean(vbsouth, idx_at, t, 3, vbsouth[i])
+        vb_m6[i] = _window_time_mean(vbsouth, idx_at, t, 6, vbsouth[i])
+        bs_m3[i] = _window_time_mean(bsouth, idx_at, t, 3, bsouth[i])
+        bs_m6[i] = _window_time_mean(bsouth, idx_at, t, 6, bsouth[i])
+    end
+    _maybe_add_column!(df, :dst_delta_1h_nt, dst_d1)
+    _maybe_add_column!(df, :dst_delta_3h_nt, dst_d3)
+    _maybe_add_column!(df, :dst_delta_6h_nt, dst_d6)
+    _maybe_add_column!(df, :Bz_delta_1h_nt, bz_d1)
+    _maybe_add_column!(df, :VBsouth_delta_1h_mvm, vb_d1)
+    _maybe_add_column!(df, :VBsouth_mean_3h_mvm, vb_m3)
+    _maybe_add_column!(df, :VBsouth_mean_6h_mvm, vb_m6)
+    _maybe_add_column!(df, :Bsouth_mean_3h_nt, bs_m3)
+    _maybe_add_column!(df, :Bsouth_mean_6h_nt, bs_m6)
+    return df
+end
+
 function _column_float_or_default(df::DataFrame, col::Symbol, fallback::Vector{Float64})
     length(fallback) == nrow(df) ||
         throw(DimensionMismatch("fallback length $(length(fallback)) != $(nrow(df))"))
@@ -332,36 +426,7 @@ function add_operational_v2_features!(df::DataFrame)
     df[!, :clock_angle_sin2] = [f.clock_angle_sin2 for f in features]
     df[!, :sqrt_Pdyn_npa] = [f.sqrt_Pdyn_npa for f in features]
 
-    order = _chronological_order(df)
-    _maybe_add_column!(df, :dst_delta_1h_nt, _lagged_difference(latest, order, 1))
-    _maybe_add_column!(df, :dst_delta_3h_nt, _lagged_difference(latest, order, 3))
-    _maybe_add_column!(df, :dst_delta_6h_nt, _lagged_difference(latest, order, 6))
-    _maybe_add_column!(df, :Bz_delta_1h_nt, _lagged_difference(bz, order, 1))
-    _maybe_add_column!(
-        df,
-        :VBsouth_delta_1h_mvm,
-        _lagged_difference(Float64.(df.VBsouth_mvm), order, 1),
-    )
-    _maybe_add_column!(
-        df,
-        :VBsouth_mean_3h_mvm,
-        _rolling_mean(Float64.(df.VBsouth_mvm), order, 3),
-    )
-    _maybe_add_column!(
-        df,
-        :VBsouth_mean_6h_mvm,
-        _rolling_mean(Float64.(df.VBsouth_mvm), order, 6),
-    )
-    _maybe_add_column!(
-        df,
-        :Bsouth_mean_3h_nt,
-        _rolling_mean(Float64.(df.Bsouth_nt), order, 3),
-    )
-    _maybe_add_column!(
-        df,
-        :Bsouth_mean_6h_nt,
-        _rolling_mean(Float64.(df.Bsouth_nt), order, 6),
-    )
+    _add_memory_features!(df, latest, bz)
     if all(String(c) in names(df) for c in (:pred_dst_nt, :persistence_dst_nt))
         v1 = _column_float_or_nan(df, :pred_dst_nt)
         persistence = _column_float_or_nan(df, :persistence_dst_nt)
@@ -898,12 +963,50 @@ end
 Initialise a ForecastState from saved discovery results.
 
 - `coefficients_csv`: path to real_sindy_discovery_coefficients.csv
-- `ensemble_csv`: path to real_ensemble_inclusion.csv
+- `ensemble_csv`: path to real_ensemble_inclusion.csv (marginal per-term CIs)
+- `draws_csv`: path to the joint posterior-draws artifact
+  (real_sindy_ensemble_draws.csv; columns = library term names, one draw per row).
+  When present it is resampled and recentered on the deployed coefficients;
+  otherwise the ensemble falls back to marginal per-term sampling with a warning.
 - `t0`: initial DateTime (UTC)
 - `dst0`: initial Dst* value [nT]
 """
+# Build the coefficient uncertainty ensemble by resampling rows of a joint-draws
+# artifact (columns = library term names, one posterior draw per row), recentered
+# on the deployed point coefficients so it describes the model actually issued.
+# Only active (deployed-nonzero) terms carry spread; inactive terms stay zero.
+# Returns the n_ensemble×n_terms matrix, or `nothing` if the artifact carries no
+# usable active-term column (signalling the caller to fall back to marginal draws).
+function _ensemble_from_joint_draws(path::String, term_names::Vector{String},
+                                    ξ_primary::Vector{Float64}, n_ensemble::Int, rng)
+    draws = CSV.read(path, DataFrame)
+    D = nrow(draws)
+    D >= 1 || return nothing
+    colnames = names(draws)
+    colmap = Tuple{Int,Symbol}[]           # (library index, draw column) for active terms
+    for (idx, term) in enumerate(term_names)
+        (ξ_primary[idx] == 0.0 || !(term in colnames)) && continue
+        push!(colmap, (idx, Symbol(term)))
+    end
+    isempty(colmap) && return nothing
+    μ = Dict{Symbol,Float64}()             # per-term draw mean, for recentering on ξ_primary
+    for (_, c) in colmap
+        μ[c] = mean(Float64.(collect(skipmissing(draws[!, c]))))
+    end
+    ξ_ensemble = zeros(n_ensemble, length(ξ_primary))
+    for i in 1:n_ensemble
+        r = rand(rng, 1:D)                 # resample a joint draw (preserves cross-term covariance)
+        for (idx, c) in colmap
+            ξ_ensemble[i, idx] = ξ_primary[idx] + (Float64(draws[r, c]) - μ[c])
+        end
+    end
+    return ξ_ensemble
+end
+
 function init_forecast(; coefficients_csv::String,
                          ensemble_csv::String,
+                         draws_csv::String=joinpath(dirname(coefficients_csv),
+                                                    "real_sindy_ensemble_draws.csv"),
                          t0::DateTime,
                          dst0::Float64,
                          dt::Float64=1.0)
@@ -929,27 +1032,38 @@ function init_forecast(; coefficients_csv::String,
     # ξ_primary exactly); terms absent from ξ_primary stay zero. This fixes the
     # prior defects where the ensemble was centered on a different fit (the
     # ensemble CSV medians) and silently dropped active terms with π<0.9.
-    ens_df = CSV.read(ensemble_csv, DataFrame)
     n_ensemble = 500
     n_terms = length(lib)
-    ξ_ensemble = zeros(n_ensemble, n_terms)
     rng = MersenneTwister(42)
     z95 = 1.959963984540054   # standard normal 97.5th percentile
 
-    # Per-term standard deviation from the bootstrap CI width.
-    σ_term = zeros(n_terms)
-    for row in eachrow(ens_df)
-        idx = findfirst(==(row.term), term_names)
-        idx === nothing && continue
-        width = Float64(row.ci_975) - Float64(row.ci_025)
-        σ_term[idx] = width > 0 ? width / (2 * z95) : 0.0
-    end
+    # Preferred: resample rows of the joint posterior-draws artifact (preserves
+    # cross-term covariance), recentered on the deployed point coefficients.
+    ξ_ensemble = isfile(draws_csv) ?
+        _ensemble_from_joint_draws(draws_csv, term_names, ξ_primary, n_ensemble, rng) : nothing
 
-    for idx in 1:n_terms
-        ξ_primary[idx] == 0.0 && continue   # only active (deployed) terms get spread
-        σ = σ_term[idx]
-        for i in 1:n_ensemble
-            ξ_ensemble[i, idx] = ξ_primary[idx] + (σ > 0 ? σ * randn(rng) : 0.0)
+    if ξ_ensemble === nothing
+        isfile(draws_csv) &&
+            @warn "Joint-draws artifact present but unusable; using marginal per-term ensemble" draws_csv maxlog=1
+        isfile(draws_csv) ||
+            @warn "Joint-draws artifact not found; using marginal per-term ensemble" draws_csv maxlog=1
+        # Fallback: marginal per-term Gaussian spread from the bootstrap CI width
+        # (±z·σ, z=1.96 → σ = width/(2z)). Only active terms are perturbed.
+        ens_df = CSV.read(ensemble_csv, DataFrame)
+        σ_term = zeros(n_terms)
+        for row in eachrow(ens_df)
+            idx = findfirst(==(row.term), term_names)
+            idx === nothing && continue
+            width = Float64(row.ci_975) - Float64(row.ci_025)
+            σ_term[idx] = width > 0 ? width / (2 * z95) : 0.0
+        end
+        ξ_ensemble = zeros(n_ensemble, n_terms)
+        for idx in 1:n_terms
+            ξ_primary[idx] == 0.0 && continue   # only active (deployed) terms get spread
+            σ = σ_term[idx]
+            for i in 1:n_ensemble
+                ξ_ensemble[i, idx] = ξ_primary[idx] + (σ > 0 ? σ * randn(rng) : 0.0)
+            end
         end
     end
 

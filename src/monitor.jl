@@ -26,10 +26,22 @@ end
 """
     run_monitor(; poll_interval_min=5, forecast_horizon_hr=6,
                   alarm_config, coefficients_csv, ensemble_csv,
-                  log_file="monitor.log", display=true)
+                  log_file="monitor.log", display=true,
+                  history_cap=2000, max_log_bytes=5_000_000)
 
 Main monitoring loop. Fetches real-time solar wind data, runs the SINDy
 forecaster, checks alarms, and optionally displays status.
+
+The forecaster advances exactly one hour of ODE dynamics per new hourly data
+bin, not once per poll cycle: `poll_interval_min` controls how often the feed is
+refreshed and the display redrawn, while model time stays synchronized with wall
+clock. Between new bins the last forecast is reused for display and alarms.
+
+`history_cap` bounds the retained per-step forecast history (the monitor never
+reads it back, so it is a rolling window sized for daemon memory safety, ≈ a week
+of hourly steps by default). `max_log_bytes` triggers single-generation rotation
+of `log_file` so the append-only log cannot grow without bound; set it to `0` to
+disable rotation.
 
 Press Ctrl-C to stop.
 """
@@ -41,7 +53,9 @@ function run_monitor(; poll_interval_min::Int=5,
                        log_file::String="monitor.log",
                        display::Bool=true,
                        clock::Function=() -> now(UTC),
-                       staleness_threshold_hr::Real=3.0)
+                       staleness_threshold_hr::Real=3.0,
+                       history_cap::Int=2000,
+                       max_log_bytes::Int=5_000_000)
     # Observed Dst for anchoring (best-effort; monitor still runs if the feed fails)
     dst_feed = try
         fetch_swpc_dst()
@@ -77,18 +91,29 @@ function run_monitor(; poll_interval_min::Int=5,
 
     # Warm up: run through recent history to initialise state
     println("Initialising from $(length(t_tags)) hours of history...")
+    last_result::Union{Nothing,ForecastResult} = nothing
+    last_obs_time::Union{Nothing,DateTime} = nothing
     for i in eachindex(t_tags)
         (isnan(swd.V[i]) || isnan(swd.Bz[i])) && continue
         V_safe = _safe_val(swd.V[i], 400.0)
         n_safe = _safe_val(swd.n[i], 5.0)
         Pdyn_safe = _safe_val(swd.Pdyn[i], 1.6726e-6 * n_safe * V_safe^2)
-        step_forecast!(state, t_tags[i],
+        last_result = step_forecast!(state, t_tags[i],
                        V_safe, swd.Bz[i], _safe_val(swd.By[i], 0.0),
                        n_safe, Pdyn_safe;
                        dst_observed=swd.Dst_star[i])
+        isnan(swd.Dst_star[i]) || (last_obs_time = t_tags[i])
     end
+    _cap_history!(state, history_cap)
 
     last_alarm_time = DateTime(1970)
+    last_forecast = ForecastResult[]
+    last_alarm::Union{Nothing,Alarm} = nothing
+    last_horizon_alarm::Union{Nothing,Alarm} = nothing
+    # Persistent horizon-alarm dedup: highest severity already announced per target
+    # hour, so a future crossing that reappears every poll is announced once (and
+    # re-announced only on escalation). Pruned each cycle to bound memory.
+    horizon_seen = Dict{DateTime,StormSeverity}()
     consecutive_failures = 0
     println("Monitor started. Polling every $(poll_interval_min) min. Ctrl-C to stop.\n")
 
@@ -159,47 +184,88 @@ function run_monitor(; poll_interval_min::Int=5,
             n_val = _safe_val(swd_new.n[latest_idx], 5.0)
             Pdyn = _safe_val(swd_new.Pdyn[latest_idx], 1.6726e-6 * n_val * V^2)
 
-            # Re-anchor the forecaster to the most recent observed Dst* before
-            # projecting forward, so the displayed state tracks observations
-            # rather than drifting on a free-run.
-            obs_idx = findlast(i -> !isnan(swd_new.Dst_star[i]),
-                               eachindex(swd_new.Dst_star))
-            obs_idx === nothing || (state.dst_current = swd_new.Dst_star[obs_idx])
-
-            # Step forecast
-            result = step_forecast!(state, t_new[latest_idx],
-                                    V, Bz, By, n_val, Pdyn)
-
-            # Multi-hour forecast (persistence assumption)
-            forecast = forecast_ahead(state, V, Bz, By, n_val, Pdyn,
-                                       forecast_horizon_hr)
-
-            # Check alarms on current + forecast. Only the current-observation alarm advances
-            # the cooldown clock; forecast-horizon alarms have future timestamps, so letting
-            # them set last_alarm_time would push the cooldown into the future and suppress the
-            # next genuine present-time alarm. Their return value is intentionally discarded.
-            alarm, last_alarm_time = check_alarm(alarm_config, result,
-                                                  last_alarm_time)
-            for fr in forecast
-                check_alarm(alarm_config, fr, last_alarm_time)
-            end
-
-            # Display
-            if display
-                print_status(result, forecast, alarm, V, Bz, n_val;
-                             data_age=data_age, stale=stale)
-            end
-
-            # Log
-            try
-                open(log_file, "a") do io
-                    println(io, Dates.format(result.t, "yyyy-mm-dd HH:MM"),
-                            ",", round(result.dst_predicted, digits=1),
-                            ",", round(result.dst_ci_05, digits=1),
-                            ",", round(result.dst_ci_95, digits=1))
+            # Advance the model only when a genuinely new hourly bin has appeared.
+            # step_forecast! integrates a fixed state.dt (1 h) of ODE dynamics per
+            # call; re-stepping the same hourly bin every poll cycle (default 5 min)
+            # would compound one full model-hour per cycle. When the Dst feed is up
+            # this is masked by re-anchoring, but during a persistent Dst outage the
+            # unanchored forecaster would free-run ~12x faster than wall clock. Gate
+            # on a new bin so model time stays synchronized with wall clock, and reuse
+            # the previous forecast for display/alarms between bins.
+            new_bin = last_result === nothing || t_new[latest_idx] > state.t_current
+            if new_bin
+                # Re-anchor the forecaster to the most recent observed Dst* before
+                # projecting forward, so the displayed state tracks observations
+                # rather than drifting on a free-run.
+                obs_idx = findlast(i -> !isnan(swd_new.Dst_star[i]),
+                                   eachindex(swd_new.Dst_star))
+                if obs_idx !== nothing
+                    state.dst_current = swd_new.Dst_star[obs_idx]
+                    last_obs_time = t_new[obs_idx]
                 end
-            catch
-                # Non-critical — don't crash on log write failure
+
+                # Step forecast
+                result = step_forecast!(state, t_new[latest_idx],
+                                        V, Bz, By, n_val, Pdyn)
+                _cap_history!(state, history_cap)
+
+                # Multi-hour forecast (persistence assumption)
+                forecast = forecast_ahead(state, V, Bz, By, n_val, Pdyn,
+                                           forecast_horizon_hr)
+                last_result = result
+                last_forecast = forecast
+
+                # Check alarms on current + forecast. Only the current-observation alarm
+                # advances the cooldown clock; forecast-horizon alarms have future
+                # timestamps, so letting them set last_alarm_time would push the cooldown
+                # into the future and suppress the next genuine present-time alarm.
+                last_alarm, last_alarm_time = check_alarm(alarm_config, result,
+                                                          last_alarm_time)
+
+                # Prune horizon-alarm dedup entries that are now in the past, then
+                # announce each horizon crossing at most once per (target hour,
+                # severity) so a persistent future crossing does not alarm every cycle.
+                for target in collect(keys(horizon_seen))
+                    target < result.t && delete!(horizon_seen, target)
+                end
+                last_horizon_alarm = nothing
+                for fr in forecast
+                    a = maybe_fire_horizon_alarm!(alarm_config, fr, horizon_seen)
+                    a === nothing && continue
+                    if last_horizon_alarm === nothing || a.severity > last_horizon_alarm.severity
+                        last_horizon_alarm = a
+                    end
+                end
+
+                # Log only on a new bin so the file is not filled with duplicate
+                # same-timestamp rows. Rotate first so the append-only log is bounded.
+                try
+                    _rotate_log!(log_file, max_log_bytes)
+                    open(log_file, "a") do io
+                        println(io, Dates.format(result.t, "yyyy-mm-dd HH:MM"),
+                                ",", round(result.dst_predicted, digits=1),
+                                ",", round(result.dst_ci_05, digits=1),
+                                ",", round(result.dst_ci_95, digits=1))
+                    end
+                catch
+                    # Non-critical — don't crash on log write failure
+                end
+            else
+                # No new hourly bin: reuse the last forecast rather than re-integrating.
+                result = last_result
+                forecast = last_forecast
+            end
+
+            # Display. Surface the Dst-anchor age so an unanchored free-run (Dst feed
+            # outage) is visibly labeled rather than presented as a current state.
+            if display
+                anchor_age = last_obs_time === nothing ? nothing : clock() - last_obs_time
+                print_status(result, forecast, last_alarm, V, Bz, n_val;
+                             data_age=data_age, stale=stale,
+                             alarm_config=alarm_config,
+                             horizon_alarm=last_horizon_alarm,
+                             anchor_age=anchor_age,
+                             unanchored=(last_obs_time === nothing))
             end
 
             sleep(poll_interval_min * 60)
@@ -219,6 +285,36 @@ end
 Return x if finite, otherwise default.
 """
 _safe_val(x::Float64, default::Float64) = (isnan(x) || isinf(x)) ? default : x
+
+"""
+    _cap_history!(state, cap)
+
+Bound `state.history` to at most `cap` entries by dropping the oldest, matching the
+rolling-window pattern used for the conformal residual history. The monitor never
+reads `state.history`, so trimming it prevents unbounded memory growth in a
+long-running daemon. A non-positive `cap` disables trimming.
+"""
+function _cap_history!(state::ForecastState, cap::Int)
+    cap > 0 || return state
+    while length(state.history) > cap
+        popfirst!(state.history)
+    end
+    return state
+end
+
+"""
+    _rotate_log!(path, max_bytes)
+
+Rotate `path` to `path * ".1"` (overwriting any prior rotation) once it exceeds
+`max_bytes`, so an append-only monitor log cannot grow without bound. Keeps a single
+previous generation; total on-disk footprint stays below `2 * max_bytes`. A
+non-positive `max_bytes` disables rotation.
+"""
+function _rotate_log!(path::String, max_bytes::Int)
+    (max_bytes > 0 && isfile(path) && filesize(path) > max_bytes) || return nothing
+    mv(path, path * ".1"; force=true)
+    return nothing
+end
 
 """
     _latest_finite_VBz_idx(V, Bz)
@@ -253,18 +349,29 @@ function _fetch_with_retry(; hours::Int, max_retries::Int=3, delay_sec::Int=10,
 end
 
 """
-    print_status(result, forecast, alarm, V, Bz, n_val)
+    print_status(result, forecast, alarm, V, Bz, n_val;
+                 alarm_config=default_alarm_config(), horizon_alarm=nothing,
+                 anchor_age=nothing, unanchored=false)
 
 Print formatted monitoring status to terminal.
+
+The status banner is classified with the same rule the alarm path uses
+(`alarm_config.use_worst_case` selects the 5th percentile or the median, against
+`alarm_config.thresholds`), so the displayed severity cannot contradict the alarms
+actually raised for a custom-threshold configuration.
 """
 function print_status(result::ForecastResult,
                       forecast::Vector{ForecastResult},
                       alarm::Union{Nothing, Alarm},
                       V::Float64, Bz::Float64, n_val::Float64;
                       data_age::Union{Nothing,Period}=nothing,
-                      stale::Bool=false)
-    severity = classify_severity(result.dst_ci_05,
-                                 default_alarm_config().thresholds)
+                      stale::Bool=false,
+                      alarm_config::AlarmConfig=default_alarm_config(),
+                      horizon_alarm::Union{Nothing,Alarm}=nothing,
+                      anchor_age::Union{Nothing,Period}=nothing,
+                      unanchored::Bool=false)
+    dst_class = alarm_config.use_worst_case ? result.dst_ci_05 : result.dst_predicted
+    severity = classify_severity(dst_class, alarm_config.thresholds)
     status_str = severity == QUIET         ? "QUIET" :
                  severity == MODERATE      ? "MODERATE STORM" :
                  severity == INTENSE       ? "INTENSE STORM" :
@@ -302,11 +409,24 @@ function print_status(result::ForecastResult,
                 "  (data $(round(age_hr, digits=1)) h old)"
     end
 
+    # Dst-anchor annotation: the displayed state is a projection from the last
+    # observed Dst*. Label an unanchored free-run (Dst feed outage) loudly, and
+    # otherwise report how old the anchor is, so the nowcast is never mistaken for
+    # a fresh observation.
+    anchor_str = if unanchored
+        "  [UNANCHORED: no observed Dst*; forecaster free-run]"
+    elseif anchor_age === nothing
+        ""
+    else
+        "  (Dst anchor $(round(anchor_age / Hour(1), digits=1)) h old)"
+    end
+
     hline = repeat("─", BOX_W + 2)
     println("┌$(hline)┐")
     println(_boxline(""))
     println(_boxline("  SINDy Storm Monitor           $(time_str) UTC"))
     isempty(age_str) || println(_boxline(age_str))
+    isempty(anchor_str) || println(_boxline(anchor_str))
     println(_boxline(""))
     println("├$(hline)┤")
     # Build each line as a char buffer of exactly BOX_W characters.
@@ -340,6 +460,17 @@ function print_status(result::ForecastResult,
         println(_boxline("  $(msg)"))
     else
         println(_boxline("  Alarm: none"))
+    end
+
+    # Forecast-horizon alarm line. Rendered from the passed alarm rather than the
+    # callback so the strongest upcoming crossing stays visible after the terminal
+    # clear (the callback's stdout output is erased on the next redraw).
+    if horizon_alarm !== nothing
+        lab = horizon_alarm.severity == SUPERINTENSE ? "SUPER-INTENSE" :
+              horizon_alarm.severity == INTENSE      ? "INTENSE" : "MODERATE"
+        println(_boxline("  Fcst alarm: $(lab) by " *
+                         "$(Dates.format(horizon_alarm.time, "yyyy-mm-dd HH:MM")) " *
+                         "($(round(horizon_alarm.dst_ci_05, digits=1)) nT)"))
     end
     println("└$(hline)┘")
 end

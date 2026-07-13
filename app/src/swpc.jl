@@ -16,6 +16,10 @@ const SWPC_TTL = 50.0                       # seconds; SWPC products update ~1/m
 const _SWPC_CACHE = Ref{Any}(nothing)       # (fetch_time::Float64, snapshot)
 const _SWPC_LOCK = ReentrantLock()
 const _SWPC_REFRESHING = Ref(false)
+# Solar-wind inputs older than this no longer represent current upstream conditions for the
+# 30-min GIC forecast (RTSW products update ~1/min, and the physical L1 lead is ~30-60 min, so
+# a >15-min gap means the driver forecast would run on frozen values).
+const SW_INPUT_MAX_AGE_MIN = 15.0
 
 # parse a possibly-string numeric to Float64 or nothing
 _pf(x) = x === nothing ? nothing : (x isa Number ? Float64(x) :
@@ -46,27 +50,108 @@ function _swpc_get(path; readtimeout=1, connect_timeout=1)
 end
 
 # --- individual products ---------------------------------------------------------------
-# array-of-arrays with a header row: [time_tag, bx_gsm, by_gsm, bz_gsm, lon, lat, bt]
+# RTSW real-time solar wind (the retired /products/solar-wind/{mag,plasma}-1-day.json now 404).
+# Both feeds are ARRAYS OF OBJECTS with named keys (never positional columns):
+#   mag  (/json/rtsw/rtsw_mag_1m.json):  time_tag, active, source, bt, bz_gsm, ...
+#   wind (/json/rtsw/rtsw_wind_1m.json): time_tag, active, source, proton_speed, proton_density, ...
+# Records from several spacecraft (e.g. SOLAR1, ACE) are interleaved and can repeat a time_tag;
+# `active=true` marks the currently-designated primary L1 source. We keep only active,
+# physically-valid rows and take the newest by time_tag, so a trailing null row does not blank
+# the panel and a stale/secondary record cannot masquerade as the current reading.
+
+# Named-key numeric field from a JSON object (JSON3.Object or Dict), or nothing on
+# missing key / null / non-finite value.
+function _rtsw_field(obj, key::Symbol)
+    (obj === nothing || !haskey(obj, key)) && return nothing
+    return jnum(_pf(obj[key]))
+end
+
+# `active` flag: true when the key is absent (single-source feeds) or explicitly boolean-true;
+# any other encoding is treated as active so a schema surprise never silently drops every row.
+function _rtsw_active(obj)
+    haskey(obj, :active) || return true
+    a = obj[:active]
+    (a === nothing) && return true
+    return a isa Bool ? a : true
+end
+
+# Newest physically-valid RTSW record: schema-validated (all `reqkeys` present, finite, within
+# `bounds`), preferring the currently-active source and falling back to any valid source. Records
+# are documented newest-first but we select by parsed time_tag so ordering is not assumed.
+function _rtsw_latest(arr, reqkeys::Vector{Symbol};
+                      bounds::Dict{Symbol,Tuple{Float64,Float64}} = Dict{Symbol,Tuple{Float64,Float64}}())
+    (arr === nothing || length(arr) < 1) && return nothing
+    _valid(obj) = begin
+        t = _swpc_dt(haskey(obj, :time_tag) ? obj[:time_tag] : nothing)
+        t === missing && return (false, missing)
+        for k in reqkeys
+            v = _rtsw_field(obj, k)
+            v === nothing && return (false, missing)
+            if haskey(bounds, k)
+                lo, hi = bounds[k]
+                (v < lo || v > hi) && return (false, missing)
+            end
+        end
+        return (true, t)
+    end
+    for require_active in (true, false)          # prefer the active source, else any valid source
+        best = nothing; best_t = missing
+        for obj in arr
+            require_active && !_rtsw_active(obj) && continue
+            ok, t = _valid(obj)
+            ok || continue
+            if best_t === missing || t > best_t
+                best = obj; best_t = t
+            end
+        end
+        best !== nothing && return best
+    end
+    return nothing
+end
+
 function swpc_solar_wind()
     sw = Dict{Symbol,Any}(:available => false)
-    mag = _swpc_get("/products/solar-wind/mag-1-day.json")
-    if mag !== nothing && length(mag) > 1
-        h = String.(collect(mag[1])); idx = Dict(h[i] => i for i in eachindex(h))
-        row = mag[end]
-        sw[:bz_gsm_nt] = _swpc_row_field(idx, row, "bz_gsm")
-        sw[:bt_nt]     = _swpc_row_field(idx, row, "bt")
-        sw[:mag_time_utc] = jdt(_swpc_dt(row[1]))
-        sw[:available] = true
+    # The RTSW products are ~1-2 MB (the retired 1-day products were KB-scale), so the 1 s default
+    # read timeout is too tight for a cold-connection download + parse; 5 s tolerates it while
+    # still bounding a stalled feed (the snapshot is cached and fetched off the request lock).
+    mag = _swpc_get("/json/rtsw/rtsw_mag_1m.json"; readtimeout=5, connect_timeout=3)
+    # bt is a magnitude (>= 0); |B| components rarely exceed a few hundred nT at L1 — generous
+    # bounds only reject sentinel/garbage fill values, not real extreme-storm readings.
+    magrow = _rtsw_latest(mag, [:bz_gsm, :bt];
+                          bounds = Dict(:bt => (0.0, 1.0e3), :bz_gsm => (-1.0e3, 1.0e3)))
+    if magrow !== nothing
+        sw[:bz_gsm_nt]    = _rtsw_field(magrow, :bz_gsm)
+        sw[:bt_nt]        = _rtsw_field(magrow, :bt)
+        sw[:mag_time_utc] = jdt(_swpc_dt(magrow[:time_tag]))
+        sw[:mag_source]   = haskey(magrow, :source) && magrow[:source] !== nothing ? String(magrow[:source]) : nothing
+        sw[:available]    = true
     end
-    pls = _swpc_get("/products/solar-wind/plasma-1-day.json")
-    if pls !== nothing && length(pls) > 1
-        h = String.(collect(pls[1])); idx = Dict(h[i] => i for i in eachindex(h))
-        row = pls[end]
-        sw[:speed_kms]   = _swpc_row_field(idx, row, "speed")
-        sw[:density_cm3] = _swpc_row_field(idx, row, "density")
-        sw[:plasma_time_utc] = jdt(_swpc_dt(row[1]))
+    pls = _swpc_get("/json/rtsw/rtsw_wind_1m.json"; readtimeout=5, connect_timeout=3)
+    # Solar-wind speed spans ~200-1000 km/s in quiet-to-storm conditions, up to ~3000 in extreme
+    # events; density is a few to a few hundred cm^-3. Bounds gate obvious non-physical fills.
+    plsrow = _rtsw_latest(pls, [:proton_speed, :proton_density];
+                          bounds = Dict(:proton_speed => (50.0, 5.0e3), :proton_density => (0.0, 1.0e3)))
+    if plsrow !== nothing
+        sw[:speed_kms]       = _rtsw_field(plsrow, :proton_speed)
+        sw[:density_cm3]     = _rtsw_field(plsrow, :proton_density)
+        sw[:plasma_time_utc] = jdt(_swpc_dt(plsrow[:time_tag]))
+        sw[:plasma_source]   = haskey(plsrow, :source) && plsrow[:source] !== nothing ? String(plsrow[:source]) : nothing
     end
     return sw
+end
+
+# Age [min] of the OLDER of the mag/plasma feeds (both must be current for a valid driver
+# forecast). Returns nothing when neither timestamp is parseable.
+function solar_wind_input_age_min(sw)
+    ts = DateTime[]
+    for k in (:mag_time_utc, :plasma_time_utc)
+        v = get(sw, k, nothing)
+        v === nothing && continue
+        dt = parse_dt(v)
+        dt === missing || push!(ts, dt)
+    end
+    isempty(ts) && return nothing
+    return (now(UTC) - minimum(ts)) / Millisecond(60_000)
 end
 
 # array of objects {time_tag, Kp, a_running, station_count} — no header row

@@ -349,8 +349,16 @@ println("\n" * "=" ^ 60)
 println("D3: Coupled vs Single-Index Validation")
 println("=" ^ 60)
 
-# Load single-index coefficients from Phase B
-sindy_single_df = CSV.read(joinpath(DATA_DIR, "real_sindy_coefficients.csv"), DataFrame)
+# Load single-index coefficients from Phase B (finding coupled_discovery.jl:354).
+# Use the single best-λ STLSQ fit (real_sindy_discovery_coefficients.csv), NOT
+# real_sindy_coefficients.csv. The latter is the ensemble MEDIAN-OVER-NONZERO
+# vector: it mixes full-magnitude conditional medians of terms selected in as few as
+# 1 of 500 subsample fits (e.g. a +1.43 nT/hr constant at inclusion 0.008, n at
+# 0.002), a phantom coefficient set that no single STLSQ fit ever produced and that
+# biases the "Single-SINDy" comparator. The best-λ discovery fit is the clean,
+# self-consistent single-index model that is actually deployed. Both files share the
+# (term, coefficient) schema in get_term_names order, so std_lib indexing is aligned.
+sindy_single_df = CSV.read(joinpath(DATA_DIR, "real_sindy_discovery_coefficients.csv"), DataFrame)
 ξ_single = sindy_single_df.coefficient
 
 coupled_metrics_rows = []

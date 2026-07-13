@@ -71,17 +71,24 @@ function _load_log(path::AbstractString)
 end
 
 """Return the current forecast log as a DataFrame, reloading only when the file changes.
-On a read failure mid-append, serve the last good frame (raising only if none exists)."""
+When the file is absent, serve the last good frame if cached, else an empty frame so the
+log-backed endpoints degrade to `available=false` (never a 500). On a read failure mid-append,
+serve the last good frame (raising only if none exists)."""
 function get_log(path::AbstractString)
     lock(_LOG_LOCK) do
-        isfile(path) || error("forecast log not found: $path")
-        m = mtime(path)
         c = _LOG_CACHE[]
+        if !isfile(path)
+            # Absent (fresh install, before the daemon's first write, or log rotation): fall back
+            # to the cached frame, or an empty frame — do not throw, so /api/status et al. return
+            # available=false rather than propagating a 500 that also leaks the log path.
+            return c === nothing ? DataFrame() : c[2]
+        end
+        m = mtime(path)
         if c === nothing || c[1] != m
             try
                 _LOG_CACHE[] = (m, _load_log(path))
             catch e
-                c === nothing && rethrow(e)        # no fallback available
+                c === nothing && rethrow(e)        # genuine read error, no fallback available
                 @warn "log reload failed; serving cached copy" exception=(e, catch_backtrace())
             end
         end
@@ -105,25 +112,35 @@ _v2_pred(row) = (x = _col(row, :served_pred_dst_nt,      :v2_pred_dst_nt);      
 _v2_ci05(row) = (x = _col(row, :served_pred_dst_ci05_nt, :v2_pred_dst_ci05_nt); x === missing ? _audit_ci05(row) : x)
 _v2_ci95(row) = (x = _col(row, :served_pred_dst_ci95_nt, :v2_pred_dst_ci95_nt); x === missing ? _audit_ci95(row) : x)
 
-# Rows of the most recent forecast cycle = those sharing the freshest input-data vintage
-# (latest_solar_wind_utc). Returns a sub-DataFrame sorted by target time.
+# Rows of the most recent forecast cycle, defined by ISSUE epoch (not driver vintage). When the
+# L1 feed stalls across issue boundaries, several hourly cycles share one latest_solar_wind_utc;
+# keying on that vintage would merge superseded issues into one payload (conflicting horizons per
+# target, a stale issue/anchor, and threat minima computed over superseded forecasts). Per-row
+# issue timestamps within one cycle differ by seconds, so we keep rows whose issue time is within
+# a short tolerance of the newest. Returns a sub-DataFrame sorted by target time.
+const _CYCLE_TOL = Minute(5)   # intra-cycle issue-time spread is seconds; cycles are ~1 h apart
+
+_sort_by_target!(cyc) = (hasproperty(cyc, :target_time_utc_dt) && sort!(cyc, :target_time_utc_dt); cyc)
+
 function latest_cycle(df::DataFrame)
     nrow(df) == 0 && return df
-    sw = df.latest_solar_wind_utc_dt
-    valid = .!ismissing.(sw)
-    if !any(valid)
-        # No usable solar-wind timestamp; fall back to the newest issue time — but if those are
-        # all missing too, `maximum(skipmissing(...))` would throw on an empty collection, so
-        # return an empty sub-frame (downstream build_* already handle the no-cycle case).
-        isempty(collect(skipmissing(df.issue_time_utc_dt))) && return df[1:0, :]
-        cyc0 = df[coalesce.(df.issue_time_utc_dt .== maximum(skipmissing(df.issue_time_utc_dt)), false), :]
-        sort!(cyc0, :target_time_utc_dt)   # match the normal branch so horizons stay chronological
-        return cyc0
+    if hasproperty(df, :issue_time_utc_dt)
+        iss = df.issue_time_utc_dt
+        if !isempty(collect(skipmissing(iss)))
+            tmax = maximum(skipmissing(iss))
+            keep = coalesce.(iss .>= (tmax - _CYCLE_TOL), false)
+            return _sort_by_target!(df[keep, :])
+        end
     end
-    newest = maximum(skipmissing(sw))
-    cyc = df[coalesce.(sw .== newest, false), :]
-    sort!(cyc, :target_time_utc_dt)
-    return cyc
+    # No usable issue time (legacy schema): fall back to the freshest solar-wind vintage.
+    if hasproperty(df, :latest_solar_wind_utc_dt)
+        sw = df.latest_solar_wind_utc_dt
+        if !isempty(collect(skipmissing(sw)))
+            newest = maximum(skipmissing(sw))
+            return _sort_by_target!(df[coalesce.(sw .== newest, false), :])
+        end
+    end
+    return df[1:0, :]   # nothing usable; downstream build_* handle the no-cycle case
 end
 
 # Verified rows: a real forecast (target strictly AFTER both the issue time and the last observed Dst — a
@@ -252,17 +269,58 @@ end
 # Sub-hour MODEL trajectory (display only) written by the engine next to the log: V2 integrated
 # at a sub-hour step. Not a validated sub-hour forecast (Dst is observed hourly; the ODE is hourly-fit) — it is the
 # hourly model's own interpolation. Defensive: missing/unreadable/stale → [].
-function _subhour_traj(log_path::AbstractString)
+#
+# Staleness gate (documented contract): the engine writes the sidecar in a try/catch AFTER
+# appending the log row, so a failed trajectory computation leaves an old sidecar while the log
+# advances — which would draw a sub-hour curve from a different cycle than the served hourly
+# forecast. The sidecar records its own issue/anchor time; we serve it only when its issue time
+# matches the current cycle's, and drop any point that predates the cycle anchor.
+function _subhour_traj(log_path::AbstractString; cycle_issue=nothing)
     isempty(log_path) && return NamedTuple[]
     f = joinpath(dirname(log_path), "subhour_trajectory.json")
     isfile(f) || return NamedTuple[]
     try
         d = JSON3.read(read(f, String))
-        return [(target_utc = String(p.t) * "Z", dst_nt = jnum(p.dst)) for p in d.points]
+        if cycle_issue !== nothing && cycle_issue !== missing
+            sc_issue = haskey(d, :issue_time_utc) ? parse_dt(get(d, :issue_time_utc, nothing)) : missing
+            (sc_issue === missing || abs(sc_issue - cycle_issue) > _CYCLE_TOL) && return NamedTuple[]
+        end
+        anchor = haskey(d, :anchor_time_utc) ? parse_dt(get(d, :anchor_time_utc, nothing)) : missing
+        out = NamedTuple[]
+        for p in d.points
+            t = parse_dt(String(p.t))
+            t === missing && continue
+            (anchor !== missing && t < anchor) && continue
+            push!(out, (target_utc = String(p.t) * "Z", dst_nt = jnum(p.dst)))
+        end
+        return out
     catch
         return NamedTuple[]
     end
 end
+
+# Staleness of a served cycle: age since the newest issue time, and whether every target hour is
+# already in the past. A daemon crash or feed retirement freezes the log, so a cycle issued
+# hours-to-days ago must not be served as the current operational status without a machine-readable
+# flag. Threshold is tied to the hourly issue cadence.
+const STALE_CYCLE_HOURS = 3.0   # hourly issue cadence; flag stale after ~3 missed issue cycles
+
+function _cycle_staleness(cyc::DataFrame)
+    issue_max = (hasproperty(cyc, :issue_time_utc_dt) && !isempty(collect(skipmissing(cyc.issue_time_utc_dt)))) ?
+                maximum(skipmissing(cyc.issue_time_utc_dt)) : missing
+    age_hours = issue_max === missing ? nothing : (now(UTC) - issue_max) / Millisecond(3_600_000)
+    stale = age_hours !== nothing && age_hours > STALE_CYCLE_HOURS
+    tmax = (hasproperty(cyc, :target_time_utc_dt) && !isempty(collect(skipmissing(cyc.target_time_utc_dt)))) ?
+           maximum(skipmissing(cyc.target_time_utc_dt)) : missing
+    expired = tmax !== missing && tmax < now(UTC)
+    return (age_hours=age_hours, stale=stale, expired=expired, issue_max=issue_max)
+end
+
+# Served-pipeline label = the actually-executed tail path recorded per row in
+# sub_hourly_model_version (e.g. "v2+L1A+Bregime+Pinertia"); model_version stays "v2" for the
+# core-model contract. Falls back to "v2" when the column is absent (legacy rows).
+_served_model_version(cyc, r1) =
+    ("sub_hourly_model_version" in names(cyc) ? String(coalesce(r1.sub_hourly_model_version, "v2")) : "v2")
 
 """Forecast trajectory of the most recent cycle: anchor + per-horizon point and 90% band."""
 function build_forecast(df::DataFrame, log_path::AbstractString="")
@@ -278,14 +336,19 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
                          audit_baseline_dst_nt=jnum(_audit_pred(r))))
     end
     r1 = first(cyc)
+    stale = _cycle_staleness(cyc)
+    cycle_issue = r1.issue_time_utc_dt === missing ? nothing : r1.issue_time_utc_dt
     return (issue_time_utc=jdt(r1.issue_time_utc_dt),
             latest_solar_wind_utc=jdt(r1.latest_solar_wind_utc_dt),
             anchor_dst_nt=jnum(r1.latest_dst_nt),
             anchor_dst_time_utc=jdt(r1.latest_dst_time_utc_dt),
             interval_source=("interval_source" in names(cyc) ? String(coalesce(r1.interval_source, "unknown")) : "unknown"),
             model_version=("model_version" in names(cyc) ? String(coalesce(r1.model_version, "v2")) : "v2"),
+            served_model_version=_served_model_version(cyc, r1),
+            stale=stale.stale, expired=stale.expired,
+            age_hours=(stale.age_hours === nothing ? nothing : round(stale.age_hours; digits=2)),
             recent_observed=_recent_observed(df),
-            subhour_trajectory=_subhour_traj(log_path),
+            subhour_trajectory=_subhour_traj(log_path; cycle_issue=cycle_issue),
             horizons=horizons)
 end
 
@@ -320,6 +383,18 @@ function build_status(df::DataFrame)
                 message="No forecast rows in log yet.", calibration=cal)
     end
     r1 = first(cyc)
+    stale = _cycle_staleness(cyc)
+    if stale.expired
+        # Every target hour is in the past: the daemon has stopped issuing (crash or feed
+        # retirement). Serve available=false with an explicit stale/expired flag so build_alerts
+        # suppresses forecast/watch alerts and the dashboard does not present an expired forecast
+        # as the current threat.
+        return (generated_utc=jdt(now(UTC)), available=false, stale=true, expired=true,
+                age_hours=(stale.age_hours === nothing ? nothing : round(stale.age_hours; digits=2)),
+                forecast_issue_utc=jdt(stale.issue_max),
+                message="Latest forecast cycle expired; all target hours are in the past.",
+                calibration=cal)
+    end
     preds = filter(!isnothing, [jnum(_v2_pred(r)) for r in eachrow(cyc)])
     lbs   = filter(!isnothing, [jnum(_v2_ci05(r)) for r in eachrow(cyc)])
     point_min = isempty(preds) ? nothing : minimum(preds)
@@ -332,6 +407,8 @@ function build_status(df::DataFrame)
     horizon_max = (h = filter(!isnothing, jnum.(eachrow(cyc) .|> r -> r.horizon_hours)); isempty(h) ? nothing : maximum(h))
     return (generated_utc=jdt(now(UTC)),
             available=true,
+            stale=stale.stale, expired=false,
+            age_hours=(stale.age_hours === nothing ? nothing : round(stale.age_hours; digits=2)),
             latest_observation=(dst_nt=jnum(r1.latest_dst_nt), time_utc=jdt(r1.latest_dst_time_utc_dt)),
             latest_solar_wind_utc=jdt(r1.latest_solar_wind_utc_dt),
             forecast_issue_utc=jdt(r1.issue_time_utc_dt),
@@ -345,7 +422,8 @@ function build_status(df::DataFrame)
                        note="Genuine upstream lead for new severity is the L1 advection time (~30-60 min). " *
                             "Multi-day lead requires CME eruption/propagation models, not yet in this system."),
             calibration=cal,
-            model_version=("model_version" in names(cyc) ? String(coalesce(r1.model_version, "v2")) : "v2"))
+            model_version=("model_version" in names(cyc) ? String(coalesce(r1.model_version, "v2")) : "v2"),
+            served_model_version=_served_model_version(cyc, r1))
 end
 
 """Recent verified track record (observed vs predicted with band) for the last `hours`."""

@@ -83,6 +83,66 @@ using DataFrames
         @test abs(ξ_noisy[3] - 3.0) < 0.2
     end
 
+    @testset "STLSQ returns a thresholding fixed point (final-contract)" begin
+        # Finding sindy.jl:73 — a single final threshold+resolve is NOT a
+        # thresholding fixed point: on the max_iter-exhaustion path the closing
+        # refit can leave an active NORMALIZED coefficient below λ. The corrected
+        # loop guarantees every returned nonzero normalized |ξ_j·‖Θ_j‖| ≥ λ
+        # regardless of how the loop exited. Sweep forced-exhaustion (max_iter=1)
+        # instances on near-collinear columns — the surface where the pre-fix code
+        # violated the contract on a fraction of instances.
+        viol = 0
+        for s in 1:2000
+            rng = MersenneTwister(s)
+            n, p = 60, 6
+            b1 = randn(rng, n); b2 = randn(rng, n)
+            Θ = hcat(b1, b1 .+ 0.05 .* randn(rng, n), b2,
+                     b2 .+ 0.05 .* randn(rng, n), randn(rng, n), randn(rng, n))
+            y = Θ * [2.0, -1.5, 3.0, -2.0, 1.0, 0.0] .+ 0.1 .* randn(rng, n)
+            λ = 0.8
+            col_norms = [norm(Θ[:, j]) for j in 1:p]
+            ξ = stlsq(Θ, y; λ=λ, max_iter=1, normalize=true)  # forced exhaustion
+            for j in 1:p
+                (ξ[j] != 0.0 && abs(ξ[j]) * col_norms[j] < λ - 1e-9) && (viol += 1)
+            end
+        end
+        @test viol == 0
+        # The fixed-point loop must not change the converged (in-repo) result: with a
+        # generous max_iter every returned nonzero coefficient already satisfies the
+        # contract, so the loop exits without altering it.
+        rng = MersenneTwister(7)
+        n = 300; b1 = randn(rng, n); b2 = randn(rng, n)
+        Θ = hcat(b1, b1 .+ 0.03 .* randn(rng, n), b2, randn(rng, n))
+        y = Θ * [2.0, -1.0, 3.0, 0.0] .+ 0.05 .* randn(rng, n)
+        ξ = stlsq(Θ, y; λ=0.6, max_iter=50, normalize=true)
+        @test all(j -> ξ[j] == 0.0 || abs(ξ[j]) * norm(Θ[:, j]) >= 0.6 - 1e-9, 1:4)
+    end
+
+    @testset "collinearity_diagnostics flags a canceling collinear block" begin
+        # Finding sindy.jl:47 — surface a near-collinear block whose large
+        # opposite-sign coefficients cancel to a near-null net contribution.
+        rng = MersenneTwister(11)
+        n = 500
+        base = randn(rng, n)
+        c1 = base
+        c2 = base .+ 1e-3 .* randn(rng, n)   # near-collinear with c1
+        c3 = randn(rng, n)                    # independent, well-identified
+        Θ = hcat(c1, c2, c3)
+        ξ = [40.0, -40.0, 2.0]                # block (1,2) cancels; column 3 clean
+        diag = collinearity_diagnostics(Θ, ξ; groups=[[1, 2], [3]], cond_warn=50.0)
+        @test diag.active == [1, 2, 3]
+        @test diag.block_cond > 50.0          # active block is ill-conditioned
+        @test diag.warn == true
+        g12 = diag.groups[1]                  # canceling block: gross ≫ net
+        @test g12.cond > 100.0
+        @test g12.cancellation > 20.0
+        @test g12.net_absmax < 0.1 * g12.gross_absmax
+        g3 = diag.groups[2]                   # clean single column: no cancellation
+        @test g3.cond ≈ 1.0 atol = 1e-6
+        @test g3.cancellation ≈ 1.0 atol = 1e-6
+        @test_throws DimensionMismatch collinearity_diagnostics(Θ, [1.0, 2.0])
+    end
+
     @testset "Baselines" begin
         n = 100
         V = 500.0 .* ones(n)
@@ -266,9 +326,11 @@ using DataFrames
                        0.046; atol=0.002)
     end
 
+    include("test_discovery_provenance.jl")
     include("test_conformal.jl")
     include("test_assimilation.jl")
     include("test_forecast_alarm.jl")
+    include("test_v2_features_and_ensemble.jl")
     include("test_data_pipeline_cleaning.jl")
     include("test_realtime_monitor.jl")
     include("test_v2_broad_replay.jl")
@@ -279,8 +341,14 @@ using DataFrames
 
     # Bundled operational dashboard (app/): golden-vector forecaster<->export contract,
     # traversal guard, physical regimes. Network-free (local models + mocks).
+    # app/models/forecaster_FRD.json is a committed part of the package, so a missing artifact means
+    # the dashboard contract + traversal-guard security tests would be silently dropped while
+    # Pkg.test() still reports success — fail loudly instead of skipping without a record.
     let app_models = joinpath(@__DIR__, "..", "app", "models", "forecaster_FRD.json")
-        isfile(app_models) && include(joinpath(@__DIR__, "..", "app", "test", "runtests.jl"))
+        @testset "Bundled dashboard app suite" begin
+            @test isfile(app_models)
+            isfile(app_models) && include(joinpath(@__DIR__, "..", "app", "test", "runtests.jl"))
+        end
     end
 
     include("test_live_forecast_verify.jl")

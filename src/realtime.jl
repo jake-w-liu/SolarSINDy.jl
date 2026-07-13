@@ -3,12 +3,29 @@
 using HTTP
 using JSON3
 
-const SWPC_PLASMA_URL = "https://services.swpc.noaa.gov/products/solar-wind/plasma-7-day.json"
-const SWPC_MAG_URL = "https://services.swpc.noaa.gov/products/solar-wind/mag-7-day.json"
+# Real-time solar wind (RTSW) products. The former /products/solar-wind/{plasma,mag}-7-day.json
+# header + array-of-arrays feeds were retired by SWPC (they now return HTTP 404). The live
+# replacements are the RTSW 1-minute products, served as ARRAYS OF OBJECTS with named keys
+# (never positional columns). Names kept as *_PLASMA_/*_MAG_ for call-site compatibility.
+const SWPC_PLASMA_URL = "https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json"
+const SWPC_MAG_URL = "https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json"
 const KYOTO_DST_JSON_URL = "https://services.swpc.noaa.gov/products/kyoto-dst.json"
 
 const DEFAULT_SWPC_MAX_RETRIES = 3
 const DEFAULT_SWPC_RETRY_DELAY_SEC = 1.0
+
+# Dst fill-sentinel magnitude. Real Dst |x| ≪ 9000 nT (even great storms are a
+# few hundred nT), so any |value| beyond this is a feed fill/sentinel (e.g. 9999)
+# and must not anchor the forecaster. Matches the hardened live Kyoto parser.
+const DST_SENTINEL_ABS = 9000.0
+
+# Minimum finite 1-min samples for an hour bin to count as a measured hourly
+# average. The RTSW feed is 1-min cadence (≈60 samples/hour), so 10 is ≈17%
+# coverage: it rejects feed-brownout hours where 1–9 noisy minutes would
+# otherwise masquerade as the whole hour's average (the model was trained on
+# ≈60-min OMNI hourly means) while still admitting legitimately partial boundary
+# hours (a live sample showed ≥13 samples in every real hour).
+const MIN_HOURLY_DRIVER_SAMPLES = 10
 
 function _fetch_swpc_json(url::String;
                           max_retries::Int=DEFAULT_SWPC_MAX_RETRIES,
@@ -44,16 +61,42 @@ function _fetch_swpc_json(url::String;
     end
 end
 
-function _require_swpc_columns(row, ncols::Int, feed::String)
-    length(row) >= ncols || error("$feed row has $(length(row)) columns; expected at least $ncols")
-    return row
+# --- RTSW named-key parsing helpers ---------------------------------------------------
+# The RTSW feeds interleave records from several spacecraft (e.g. SOLAR1, ACE) that repeat a
+# time_tag; `active=true` marks the currently-designated primary L1 source. We keep only active,
+# physically-valid rows so a secondary/sentinel record cannot masquerade as the primary reading.
+
+# `active` flag: true when the key is absent (schema surprise -> keep, so a change never silently
+# drops every row) or explicitly boolean-true; any other encoding is treated as active.
+function _rtsw_active(obj)::Bool
+    (obj isa AbstractDict || obj isa JSON3.Object) || return true
+    haskey(obj, :active) || return true
+    a = obj[:active]
+    a === nothing && return true
+    return a isa Bool ? a : true
 end
+
+# Named-key numeric field parsed to Float64, or NaN when the key is missing/null/unparseable or
+# (when finite bounds are given) outside the physical range — a generous schema guard that rejects
+# sentinel/garbage fill without discarding real extreme-storm values.
+function _rtsw_num(obj, key::Symbol; lo::Float64=-Inf, hi::Float64=Inf)::Float64
+    ((obj isa AbstractDict || obj isa JSON3.Object) && haskey(obj, key)) || return NaN
+    v = _parse_swpc_float(obj[key])
+    (isfinite(v) && lo <= v <= hi) || return NaN
+    return v
+end
+
+_rtsw_time(obj) =
+    ((obj isa AbstractDict || obj isa JSON3.Object) && haskey(obj, :time_tag)) ?
+    _parse_swpc_time(String(string(obj[:time_tag]))) : nothing
 
 """
     fetch_swpc_plasma(; url=SWPC_PLASMA_URL, max_retries=3)
 
-Fetch real-time solar wind plasma data (V, n, T) from NOAA SWPC.
-Returns DataFrame with columns: time_tag, density, speed, temperature.
+Fetch real-time solar-wind plasma (V, n, T) from the NOAA SWPC RTSW wind product
+(`rtsw_wind_1m.json`, an array of named-key objects). Keeps only the currently-active L1
+source and rows whose speed and density are physically valid (both drive dynamic pressure).
+Returns a chronologically sorted DataFrame with columns: time_tag, density, speed, temperature.
 """
 function fetch_swpc_plasma(; url::String=SWPC_PLASMA_URL,
                              max_retries::Int=DEFAULT_SWPC_MAX_RETRIES,
@@ -66,26 +109,30 @@ function fetch_swpc_plasma(; url::String=SWPC_PLASMA_URL,
         http_get=http_get,
         fallback_url=fallback_url,
     )
-    rows = raw[2:end]  # skip header row
-
-    plasma_rows = [_require_swpc_columns(r, 4, "plasma") for r in rows]
-    # Tolerate a malformed/empty time_tag by dropping that row (mirrors the per-field NaN
-    # tolerance) rather than throwing and aborting the whole fetch cycle on one bad timestamp.
-    good = [(t, r) for (t, r) in ((_parse_swpc_time(String(r[1])), r) for r in plasma_rows) if t !== nothing]
-    df = DataFrame()
-    df.time_tag = DateTime[t for (t, _) in good]
-    df.density = [_parse_swpc_float(r[2]) for (_, r) in good]
-    df.speed = [_parse_swpc_float(r[3]) for (_, r) in good]
-    df.temperature = [_parse_swpc_float(r[4]) for (_, r) in good]
-
+    time_tag = DateTime[]; density = Float64[]; speed = Float64[]; temperature = Float64[]
+    for obj in raw
+        _rtsw_active(obj) || continue
+        t = _rtsw_time(obj); t === nothing && continue
+        V = _rtsw_num(obj, :proton_speed; lo=50.0, hi=5.0e3)
+        n = _rtsw_num(obj, :proton_density; lo=0.0, hi=1.0e3)
+        (isfinite(V) && isfinite(n)) || continue        # need both for Pdyn = k n V^2
+        push!(time_tag, t); push!(speed, V); push!(density, n)
+        push!(temperature, _rtsw_num(obj, :proton_temperature; lo=0.0, hi=1.0e9))
+    end
+    isempty(time_tag) && error("RTSW wind feed returned no active physically-valid rows")
+    df = DataFrame(; time_tag, density, speed, temperature)
+    sort!(df, :time_tag)                                 # RTSW is newest-first; downstream expects ascending
     return df
 end
 
 """
     fetch_swpc_mag(; url=SWPC_MAG_URL, max_retries=3)
 
-Fetch real-time IMF data (Bx, By, Bz) from NOAA SWPC.
-Returns DataFrame with columns: time_tag, bx_gsm, by_gsm, bz_gsm, bt.
+Fetch real-time IMF (Bx, By, Bz, Bt) from the NOAA SWPC RTSW magnetometer product
+(`rtsw_mag_1m.json`, an array of named-key objects). Keeps only the currently-active L1
+source and rows whose GSM Bz is physically valid; a null/out-of-range component is stored as
+NaN (downstream driver averaging tolerates it). Returns a chronologically sorted DataFrame with
+columns: time_tag, bx_gsm, by_gsm, bz_gsm, bt.
 """
 function fetch_swpc_mag(; url::String=SWPC_MAG_URL,
                           max_retries::Int=DEFAULT_SWPC_MAX_RETRIES,
@@ -98,18 +145,20 @@ function fetch_swpc_mag(; url::String=SWPC_MAG_URL,
         http_get=http_get,
         fallback_url=fallback_url,
     )
-    rows = raw[2:end]  # skip header row
-
-    mag_rows = [_require_swpc_columns(r, 7, "mag") for r in rows]
-    # Drop rows with an unparseable time_tag instead of throwing (see fetch_swpc_plasma).
-    good = [(t, r) for (t, r) in ((_parse_swpc_time(String(r[1])), r) for r in mag_rows) if t !== nothing]
-    df = DataFrame()
-    df.time_tag = DateTime[t for (t, _) in good]
-    df.bx_gsm = [_parse_swpc_float(r[2]) for (_, r) in good]
-    df.by_gsm = [_parse_swpc_float(r[3]) for (_, r) in good]
-    df.bz_gsm = [_parse_swpc_float(r[4]) for (_, r) in good]
-    df.bt = [_parse_swpc_float(r[7]) for (_, r) in good]
-
+    time_tag = DateTime[]; bx_gsm = Float64[]; by_gsm = Float64[]; bz_gsm = Float64[]; bt = Float64[]
+    for obj in raw
+        _rtsw_active(obj) || continue
+        t = _rtsw_time(obj); t === nothing && continue
+        bz = _rtsw_num(obj, :bz_gsm; lo=-1.0e3, hi=1.0e3)
+        isfinite(bz) || continue                          # Bz is the primary southward driver
+        push!(time_tag, t); push!(bz_gsm, bz)
+        push!(bx_gsm, _rtsw_num(obj, :bx_gsm; lo=-1.0e3, hi=1.0e3))
+        push!(by_gsm, _rtsw_num(obj, :by_gsm; lo=-1.0e3, hi=1.0e3))
+        push!(bt, _rtsw_num(obj, :bt; lo=0.0, hi=1.0e3))
+    end
+    isempty(time_tag) && error("RTSW mag feed returned no active physically-valid rows")
+    df = DataFrame(; time_tag, bx_gsm, by_gsm, bz_gsm, bt)
+    sort!(df, :time_tag)                                  # RTSW is newest-first; downstream expects ascending
     return df
 end
 
@@ -158,8 +207,12 @@ function fetch_swpc_dst(; url::String=KYOTO_DST_JSON_URL,
         tt === nothing && continue
         t = _parse_swpc_time(String(string(tt)))
         t === nothing && continue
+        v = _parse_swpc_float(dv)
+        # Reject null / numeric fill sentinels (e.g. 9999) so a feed outage cannot
+        # anchor the monitor at a nonphysical Dst; real Dst |x| ≪ DST_SENTINEL_ABS.
+        (isfinite(v) && abs(v) <= DST_SENTINEL_ABS) || continue
         push!(times, t)
-        push!(dst, _parse_swpc_float(dv))
+        push!(dst, v)
     end
     return times, dst
 end
@@ -185,30 +238,47 @@ end
     _hourly_dst_lookup(dst_times, dst_vals)
 
 Build a Dict mapping each observed Dst timestamp (floored to the hour) to its
-value, dropping non-finite entries. Used to anchor hourly forecast bins.
+value. Non-finite entries are dropped, and out-of-range fill sentinels
+(`|Dst| > DST_SENTINEL_ABS`, e.g. 9999) are rejected with a warning so a
+data-quality event cannot inject a nonphysical anchor into the forecast bins.
 """
 function _hourly_dst_lookup(dst_times, dst_vals)
     lookup = Dict{DateTime,Float64}()
+    n_rejected = 0
     for (t, v) in zip(dst_times, dst_vals)
         dt = t isa DateTime ? t : DateTime(String(t))
         val = Float64(v)
-        isfinite(val) && (lookup[DateTime(year(dt), month(dt), day(dt), hour(dt))] = val)
+        if !isfinite(val)
+            continue                       # legitimately missing hour
+        elseif abs(val) > DST_SENTINEL_ABS
+            n_rejected += 1                # numeric fill sentinel (e.g. 9999)
+            continue
+        end
+        lookup[DateTime(year(dt), month(dt), day(dt), hour(dt))] = val
     end
+    n_rejected > 0 &&
+        @warn "dropped $n_rejected out-of-range Dst sentinel value(s) (|Dst| > $DST_SENTINEL_ABS)" maxlog=1
     return lookup
 end
 
 """
-    fetch_realtime_solar_wind(; hours=168)
+    fetch_realtime_solar_wind(; hours=168, min_hourly_samples=MIN_HOURLY_DRIVER_SAMPLES)
 
 Fetch and merge real-time solar wind data from SWPC, averaged to hourly cadence.
 Returns SolarWindData struct ready for forecasting.
 
-Data covers the last `hours` hours (default 7 days).
+Data covers the last `hours` hours (default 7 days). An hour bin is treated as a
+measured hourly average only when it holds at least `min_hourly_samples` finite
+1-min samples for that driver; sparser bins are left as gaps (NaN) so a
+feed-brownout hour is interpolated or refused rather than served as a one-minute
+"average". Pass `min_hourly_samples=1` to reproduce the pre-gate averaging (used
+by fixtures that inject coarse synthetic series).
 """
 function fetch_realtime_solar_wind(; hours::Int=168,
                                     plasma::Union{Nothing,DataFrame}=nothing,
                                     mag::Union{Nothing,DataFrame}=nothing,
                                     dst::Union{Nothing,Tuple}=nothing,
+                                    min_hourly_samples::Int=MIN_HOURLY_DRIVER_SAMPLES,
                                     max_retries::Int=DEFAULT_SWPC_MAX_RETRIES,
                                     retry_delay_sec::Real=DEFAULT_SWPC_RETRY_DELAY_SEC,
                                     http_get::Function=HTTP.get)
@@ -258,22 +328,24 @@ function fetch_realtime_solar_wind(; hours::Int=168,
         t0, t1 = t_edges[i], t_edges[i+1]
         t_hr[i] = t0
 
-        # Plasma averages
+        # Plasma averages. A bin is only measured when it holds at least
+        # min_hourly_samples finite 1-min samples; below that it stays NaN (a
+        # gap), so a feed brownout is not served as a one-minute "hourly average".
         mask_p = (plasma_data.time_tag .>= t0) .& (plasma_data.time_tag .< t1)
         if any(mask_p)
             vals_v = filter(!isnan, plasma_data.speed[mask_p])
             vals_n = filter(!isnan, plasma_data.density[mask_p])
-            !isempty(vals_v) && (V_hr[i] = mean(vals_v))
-            !isempty(vals_n) && (n_hr[i] = mean(vals_n))
+            length(vals_v) >= min_hourly_samples && (V_hr[i] = mean(vals_v))
+            length(vals_n) >= min_hourly_samples && (n_hr[i] = mean(vals_n))
         end
 
-        # Mag averages
+        # Mag averages (same minimum-coverage gate).
         mask_m = (mag_data.time_tag .>= t0) .& (mag_data.time_tag .< t1)
         if any(mask_m)
             vals_bz = filter(!isnan, mag_data.bz_gsm[mask_m])
             vals_by = filter(!isnan, mag_data.by_gsm[mask_m])
-            !isempty(vals_bz) && (Bz_hr[i] = mean(vals_bz))
-            !isempty(vals_by) && (By_hr[i] = mean(vals_by))
+            length(vals_bz) >= min_hourly_samples && (Bz_hr[i] = mean(vals_bz))
+            length(vals_by) >= min_hourly_samples && (By_hr[i] = mean(vals_by))
         end
 
         # Observed Dst for this hour bin (anchoring)
@@ -285,17 +357,28 @@ function fetch_realtime_solar_wind(; hours::Int=168,
         _interp_short_gaps!(arr, 3)
     end
 
-    # Dynamic pressure recomputed from interpolated n, V so it keeps the
-    # n*V^2 identity (do not interpolate Pdyn independently).
-    Pdyn_hr = [isnan(n_hr[i]) || isnan(V_hr[i]) ? NaN :
-               1.6726e-6 * n_hr[i] * V_hr[i]^2 for i in 1:n_bins]
+    # Dynamic pressure recomputed proton-only from interpolated n, V so it keeps
+    # the n*V^2 identity (do not interpolate Pdyn independently).
+    Pdyn_hr = [dynamic_pressure(n_hr[i], V_hr[i]) for i in 1:n_bins]
 
-    # Pressure-corrected Dst* where an observed Dst and Pdyn are both available;
-    # NaN bins leave the forecaster unanchored for that step.
-    Dst_star_hr = [isnan(Dst_hr[i]) ? NaN :
-                   (isnan(Pdyn_hr[i]) ? Dst_hr[i] + 11.0 :
-                    Dst_hr[i] - 7.26 * sqrt(max(Pdyn_hr[i], 0.0)) + 11.0)
-                   for i in 1:n_bins]
+    # Pressure-corrected Dst*. When Pdyn is missing (plasma outage) use a
+    # physically-defensible pressure — carry the last known Pdyn forward over a
+    # short outage, else the climatological quiet-time default — instead of the
+    # old +11-only fallback (which implied Pdyn=0 and served outage-hour anchors
+    # ~10 nT too shallow). NaN Dst bins leave the forecaster unanchored.
+    Dst_star_hr = Vector{Float64}(undef, n_bins)
+    last_pdyn = NaN
+    last_pdyn_age = PDYN_CARRY_MAX_AGE_H + 1
+    for i in 1:n_bins
+        if isfinite(Pdyn_hr[i])
+            last_pdyn = Pdyn_hr[i]
+            last_pdyn_age = 0
+        else
+            last_pdyn_age = min(last_pdyn_age + 1, PDYN_CARRY_MAX_AGE_H + 1)
+        end
+        Dst_star_hr[i] = isnan(Dst_hr[i]) ? NaN :
+            dst_to_dst_star(Dst_hr[i], resolve_pdyn(Pdyn_hr[i], last_pdyn, last_pdyn_age))
+    end
 
     # Convert to hours from first timestamp
     t_hours = Float64[(t_hr[i] - t_hr[1]) / Hour(1) for i in 1:n_bins]
