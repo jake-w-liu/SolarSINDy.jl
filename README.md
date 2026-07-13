@@ -168,6 +168,58 @@ after the target hour is observed — is in
 [`examples/live_forecast_verify.jl`](examples/live_forecast_verify.jl). The realtime data
 path depends on external NOAA SWPC availability.
 
+## Running the live monitor
+
+[`examples/live_monitor.jl`](examples/live_monitor.jl) is the long-running accrual daemon. Each
+cycle it issues immutable V2 forecasts at 1/2/3/6 h leads, refreshes observations from the live
+Dst feed, scores any pending rows whose target hour has arrived, captures a prospective external
+Dst snapshot, and rewrites the comparison report. It runs from a fresh clone:
+
+```bash
+git clone https://github.com/jake-w-liu/SolarSINDy.jl.git
+julia --project=SolarSINDy.jl -e 'using Pkg; Pkg.instantiate()'
+
+# One cycle against the live feeds, writing into a chosen directory, then exit:
+SOLARSINDY_MONITOR_DIR=./live_forecasts \
+  julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_monitor.jl --once
+
+# Continuous daemon (default 3600 s cadence):
+SOLARSINDY_MONITOR_DIR=./live_forecasts \
+  julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_monitor.jl
+```
+
+Configuration is by environment variable:
+
+- `SOLARSINDY_MONITOR_DIR` — output/state directory for the log, comparison report, outage
+  sentinel, and external-Dst snapshots (default `live_forecasts`, resolved against the working
+  directory).
+- `SOLARSINDY_V2_CALIBRATION` — V2 calibration CSV (default `<dir>/operational_v2_calibration.csv`).
+  When the directory has no calibration, the monitor falls back to the bundled locked calibration
+  in [`deploy/`](deploy/) and emits a warning. The conformal interval sidecar is looked up next to
+  the calibration (`*_conformal.csv`), also bundled in `deploy/`.
+- `SOLARSINDY_MONITOR_ONCE=1` (or `--once`) — run exactly one cycle, then exit (CI/verification).
+- `LIVE_MONITOR_INTERVAL_SEC`, `LIVE_MONITOR_HORIZONS`, `LIVE_MONITOR_MAX_CYCLES`,
+  `LIVE_MONITOR_DEADMAN_CYCLES` — cadence, issued horizons, cycle cap, and issuance dead-man
+  threshold.
+
+### macOS launchd service
+
+[`deploy/com.example.solarsindy.live-monitor.plist`](deploy/com.example.solarsindy.live-monitor.plist)
+is a launchd template. Replace the `__PLACEHOLDER__` paths (julia binary, clone directory, working
+directory), copy it to `~/Library/LaunchAgents/`, and `launchctl load` it.
+
+### Artifact regeneration
+
+- **Joint ensemble draws** (`data/real_sindy_ensemble_draws.csv`) are local-only and gitignored.
+  When absent, `init_forecast` warns and falls back to the marginal per-term ensemble; regenerate
+  the joint draws with
+  [`validation/generate_ensemble_draws.jl`](validation/generate_ensemble_draws.jl).
+- **Conformal interval sidecar** — the primary live interval is the adaptive-conformal band
+  derived from the verified log; the stratified sidecar is a cold-start/fallback interval.
+  Regenerate it from a verified log with
+  [`validation/make_operational_conformal_sidecar.jl`](validation/make_operational_conformal_sidecar.jl)
+  (`SOLARSINDY_LIVE_LOG` / `SOLARSINDY_V2_CONFORMAL_SIDECAR` override the paths).
+
 ## Web dashboard
 
 A self-contained operational dashboard ships in [`app/`](app/): a minimal-dependency

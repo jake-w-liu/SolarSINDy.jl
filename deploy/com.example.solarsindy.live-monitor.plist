@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd template for the SolarSINDy live Dst forecast monitor (macOS).
+
+  Instantiate: replace every __PLACEHOLDER__ with an absolute path, then copy to
+  ~/Library/LaunchAgents/ and load with:
+    launchctl load ~/Library/LaunchAgents/com.example.solarsindy.live-monitor.plist
+
+    __JULIA_BIN__     absolute path to the julia executable (e.g. output of `which julia`)
+    __CLONE_DIR__     absolute path to the SolarSINDy.jl clone (the --project environment)
+    __WORKDIR__       working directory; the monitor writes into __WORKDIR__/live_forecasts
+                      unless SOLARSINDY_MONITOR_DIR is set below
+
+  The monitor writes its log, comparison report, calibration lookups, and external Dst
+  snapshots under SOLARSINDY_MONITOR_DIR (default "live_forecasts" relative to WorkingDirectory).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.solarsindy.live-monitor</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__JULIA_BIN__</string>
+    <string>--project=__CLONE_DIR__</string>
+    <string>__CLONE_DIR__/examples/live_monitor.jl</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__WORKDIR__</string>
+
+  <!-- Optional overrides; uncomment and edit as needed.
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SOLARSINDY_MONITOR_DIR</key>
+    <string>__WORKDIR__/live_forecasts</string>
+    <key>LIVE_MONITOR_INTERVAL_SEC</key>
+    <string>3600</string>
+  </dict>
+  -->
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+
+  <key>StandardOutPath</key>
+  <string>__WORKDIR__/live_forecasts/live_monitor.out</string>
+
+  <key>StandardErrorPath</key>
+  <string>__WORKDIR__/live_forecasts/live_monitor.err</string>
+</dict>
+</plist>

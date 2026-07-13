@@ -2,9 +2,15 @@ using Test
 using DataFrames
 using Dates
 
-include(joinpath(@__DIR__, "..", "..", "live_forecasts", "v2_broad_replay.jl"))
+const BROAD_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "..", "live_forecasts",
+                                              "v2_broad_replay.jl"))
 
 @testset "V2 broad historical replay helpers" begin
+    if !isfile(BROAD_REPLAY_SCRIPT)
+        @test_skip "research-workspace broad replay script is not present"
+    else
+        include(BROAD_REPLAY_SCRIPT)
+
     @testset "catalog threshold selection has fixed independent counts" begin
         cat = load_storm_catalog()
         @test nrow(cat) == 741
@@ -52,9 +58,15 @@ include(joinpath(@__DIR__, "..", "..", "live_forecasts", "v2_broad_replay.jl"))
         broken.target_utc[1] = broken.issue_utc[1]
         @test_throws ErrorException _validate_broad_rows(broken)
     end
+    end
 end
 
 @testset "V2 forecast-layer oracles (_v2_forecast)" begin
+    # The forecast-layer oracles live in the research-workspace replay scripts
+    # (v2_broad_replay.jl -> v2_replay.jl), alongside the workspace calibration.
+    if !isfile(BROAD_REPLAY_SCRIPT)
+        @test_skip "research-workspace broad replay script is not present"
+    else
     # Wire the shipped behavioral oracles (continuity to the pre-upgrade baseline,
     # regime awareness, recovery relaxation, near-term extreme inertia) into Pkg.test.
     @test _selftest_v2()
@@ -101,5 +113,6 @@ end
     for h in (1, 3, 6)
         @test _v2_forecast(lib, ξ0, anchor, slow, _ -> nothing, latest, cal, h, NaN) ==
               _v2_forecast(lib, ξ0, anchor, slow, _ -> nothing, latest, cal, h, 0.0)
+    end
     end
 end
