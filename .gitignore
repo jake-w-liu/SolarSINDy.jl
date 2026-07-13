@@ -12,3 +12,5 @@ figs/
 
 # bundled dashboard: vendored Plotly is large + regenerable (app/vendor-plotly.sh)
 app/public/vendor/plotly.min.js
+# dashboard server runtime log (local-only)
+app/server.log

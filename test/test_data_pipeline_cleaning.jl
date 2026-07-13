@@ -104,6 +104,51 @@ using DataFrames
         @test df.quality[6] == 0
     end
 
+    @testset "NF-CAUSAL-01: causal cleaning forward-fills with the pre-gap value only, never fills Dst" begin
+        # Short interior gaps in every measured column. Causal mode carries the
+        # last PRE-gap value forward (last-observation-carried-forward); it must
+        # never inject a post-gap or centered-interpolated value, so issue-time
+        # replay inputs stay strictly causal. Dst is excluded from causal filling:
+        # a missing anchor/target is left NaN, never persisted or interpolated.
+        df = DataFrame(
+            datetime = [DateTime(2022, 1, 1) + Hour(i - 1) for i in 1:4],
+            V    = [400.0, NaN, NaN, 700.0],
+            Bz   = [-5.0, NaN, -10.0, -10.0],
+            By   = [1.0, NaN, NaN, 4.0],
+            n    = [5.0, NaN, NaN, 8.0],
+            Pdyn = [2.0, NaN, NaN, 3.0],
+            T    = [1.0e5, NaN, NaN, 1.3e5],
+            Dst  = [-40.0, NaN, NaN, -55.0],
+            AE   = [100.0, NaN, NaN, 160.0],
+            AL   = [-50.0, NaN, NaN, -80.0],
+            AU   = [80.0, NaN, NaN, 120.0],
+        )
+
+        clean_omni_data!(df; causal=true)
+
+        # Every gap hour takes the pre-gap value (forward-fill), never the future bound.
+        @test df.V[2] == 400.0
+        @test df.V[3] == 400.0
+        @test df.By[2] == 1.0
+        @test df.By[3] == 1.0
+        @test df.Bz[2] == -5.0
+        # Mutation sensitivity: centered interpolation (the non-causal fallback)
+        # would use the post-gap bound and yield 500/600 (V) and -7.5 (Bz). If
+        # causal mode ever fell back to centered interpolation these would fire.
+        @test df.V[2] != 500.0        # centered value of the 400→700 gap at hour 2
+        @test df.V[3] != 600.0        # centered value of the 400→700 gap at hour 3
+        @test df.Bz[2] != -7.5        # centered value of the -5→-10 gap at hour 2
+        # Dst is never causally filled: the short gap stays NaN (not persisted,
+        # not interpolated), so the pressure-corrected Dst* is NaN on those rows.
+        @test isnan(df.Dst[2])
+        @test isnan(df.Dst[3])
+        @test isnan(df.Dst_star[2])
+        @test isnan(df.Dst_star[3])
+        # Rows with an observed Dst still yield a finite pressure-corrected Dst*.
+        @test isfinite(df.Dst_star[1])
+        @test isfinite(df.Dst_star[4])
+    end
+
     @testset "A/B: build_storm_catalog finds storm window and assigns split" begin
         n = 40
         df = DataFrame(
