@@ -89,7 +89,7 @@ CSV without adding that large data file to git:
 ```bash
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --replay-omni \
-  --omni=paper/data/omni_extracted.csv \
+  --omni=paper_v2_monitor/data/omni_extracted.csv \
   --omni-year-start=2024 \
   --omni-year-end=2025 \
   --replay-hours=4000 \
@@ -227,7 +227,7 @@ multiple lead times via `--replay-horizons`:
 ```bash
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --replay-omni \
-  --omni=paper/data/omni_extracted.csv \
+  --omni=paper_v2_monitor/data/omni_extracted.csv \
   --omni-year-start=2024 --omni-year-end=2025 \
   --replay-hours=4000 --replay-horizons=1,2,3,6 \
   --table=/private/tmp/solar_v2_omni_replay_multi.csv --table-limit=0

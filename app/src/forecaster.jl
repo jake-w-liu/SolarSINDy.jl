@@ -3,7 +3,7 @@
 # Turns the live dB/dt history (USGS) + live solar wind (SWPC) into a calibrated forecast of
 # the next-30-min MAX dB/dt: a point forecast, a 90% conformal upper bound, and exceedance
 # probabilities P(max dB/dt > threshold) at the Pulkkinen levels. Uses the artifact exported by
-# paper3/scripts/export_forecaster.jl (ridge point model + empirical conformal residual CDF).
+# paper_dbdt_alerts/scripts/export_forecaster.jl (ridge point model + empirical conformal residual CDF).
 #
 # This is the paper3 method applied live — a FORECAST, distinct from the observed dB/dt nowcast.
 

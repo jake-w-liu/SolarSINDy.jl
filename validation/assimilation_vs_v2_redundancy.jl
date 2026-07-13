@@ -22,7 +22,7 @@ using SolarSINDy, CSV, DataFrames, Statistics, LinearAlgebra, Printf, Dates
 
 const PKG  = pkgdir(SolarSINDy)
 const PROJ = normpath(joinpath(PKG, ".."))
-const EXTRACTED = joinpath(PROJ, "paper", "data", "omni_extracted.csv")
+const EXTRACTED = joinpath(PROJ, "paper_v2_monitor", "data", "omni_extracted.csv")
 const CATALOG   = joinpath(PKG, "data", "storm_catalog.csv")
 const COEFCSV   = joinpath(PKG, "data", "real_sindy_discovery_coefficients.csv")
 const QEKF = 1e-4   # the deployable single global process noise from the fair test

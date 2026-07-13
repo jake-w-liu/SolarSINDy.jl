@@ -17,7 +17,7 @@
 #     (the served fit stays the center) while the within/between-term correlation
 #     structure — in particular the clock-angle cancellation manifold — is preserved.
 #
-# It does NOT touch the deployed coefficient file or any paper/data artifact; it only
+# It does NOT touch the deployed coefficient file or any paper_v2_monitor/data artifact; it only
 # reads the cached OMNI archive + storm catalog and writes the new draws sidecar.
 
 using SolarSINDy
@@ -27,11 +27,11 @@ const PKG_DIR  = normpath(joinpath(@__DIR__, ".."))
 const DATA_DIR = joinpath(PKG_DIR, "data")
 
 # Resolve the cached OMNI archive (never re-download): package data/ first, then the
-# project's paper/data cache, then $OMNI_EXTRACTED.
+# project's paper_v2_monitor/data cache, then $OMNI_EXTRACTED.
 function _resolve_omni()
     cands = String[
         joinpath(DATA_DIR, "omni_extracted.csv"),
-        normpath(joinpath(PKG_DIR, "..", "paper", "data", "omni_extracted.csv")),
+        normpath(joinpath(PKG_DIR, "..", "paper_v2_monitor", "data", "omni_extracted.csv")),
     ]
     haskey(ENV, "OMNI_EXTRACTED") && pushfirst!(cands, ENV["OMNI_EXTRACTED"])
     for c in cands

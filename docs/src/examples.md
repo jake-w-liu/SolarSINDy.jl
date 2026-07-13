@@ -15,7 +15,7 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/storm_monitor.jl
 This example:
 
 - pulls near-real-time solar wind data from NOAA SWPC
-- loads the discovered SINDy coefficients from `paper/data/`
+- loads the discovered SINDy coefficients from `paper_v2_monitor/data/`
 - advances rolling forecasts with ensemble intervals
 - prints storm alarms based on configurable thresholds
 
