@@ -1,6 +1,18 @@
 using HTTP
+using Dates
 
 @testset "Realtime And Monitor" begin
+
+    @testset "Dst refresh retains the last successful feed" begin
+        refreshed = ([DateTime(2026, 1, 1)], [-40.0])
+        current = SolarSINDy._refresh_dst_feed(nothing, () -> refreshed)
+        @test current === refreshed
+        current = SolarSINDy._refresh_dst_feed(current, () -> error("transient"))
+        @test current === refreshed
+        @test_throws InterruptException SolarSINDy._refresh_dst_feed(
+            current, () -> throw(InterruptException()),
+        )
+    end
 
     @testset "A/B: fetch_realtime_solar_wind performs hourly averaging and interpolation" begin
         plasma = DataFrame(
@@ -50,6 +62,69 @@ using HTTP
         @test swd.V[3] ≈ 450.0 atol=1e-12
         @test swd.Pdyn[1] ≈ 1.6726e-6 * 6.0 * 410.0^2 atol=1e-12
         @test all(isnan, swd.Dst_star)
+    end
+
+    @testset "INGEST-01: one-pass hourly aggregation matches the mask oracle" begin
+        t0 = DateTime(2026, 1, 1)
+        times = [
+            t0 + Hour(1) + Minute(45), # deliberately unsorted
+            t0 - Minute(1),            # before the retained window
+            t0 + Minute(10),
+            t0 + Hour(3),              # right edge is excluded
+            t0 + Minute(50),
+            t0 + Hour(1),
+            t0 + Hour(2) + Minute(10),
+            t0 + Hour(1) + Minute(20),
+        ]
+        x = [9.0, 999.0, 1.0, 111.0, 3.0, 5.0, Inf, 7.0]
+        y = [8.0, 999.0, NaN, 111.0, 4.0, 6.0, 10.0, 2.0]
+        min_samples = 2
+
+        function mask_oracle(values)
+            return [begin
+                left = t0 + Hour(i - 1)
+                right = left + Hour(1)
+                selected = [Float64(values[j]) for j in eachindex(times)
+                            if left <= times[j] < right && isfinite(values[j])]
+                length(selected) >= min_samples ? mean(selected) : NaN
+            end for i in 1:3]
+        end
+
+        actual_x = fill(NaN, 3)
+        actual_y = fill(NaN, 3)
+        SolarSINDy._hourly_means!(actual_x, actual_y, times, x, y, t0, min_samples)
+        expected_x = mask_oracle(x)
+        expected_y = mask_oracle(y)
+        @test all(isequal.(actual_x, expected_x))
+        @test all(isequal.(actual_y, expected_y))
+    end
+
+    @testset "INGEST-01: hourly ingestion allocation scales linearly" begin
+        function dense_feed(n_hours)
+            t0 = DateTime(2026, 1, 1)
+            times = collect(t0:Minute(1):t0 + Hour(n_hours))
+            n = length(times)
+            plasma = DataFrame(time_tag=times, density=fill(5.0, n),
+                               speed=fill(400.0, n), temperature=fill(1.0e5, n))
+            mag = DataFrame(time_tag=times, bx_gsm=fill(1.0, n),
+                            by_gsm=fill(2.0, n), bz_gsm=fill(-5.0, n),
+                            bt=fill(5.5, n))
+            return plasma, mag
+        end
+
+        plasma_24, mag_24 = dense_feed(24)
+        plasma_168, mag_168 = dense_feed(168)
+        fetch_realtime_solar_wind(hours=24; plasma=plasma_24, mag=mag_24)
+        fetch_realtime_solar_wind(hours=168; plasma=plasma_168, mag=mag_168)
+        bytes_24 = @allocated fetch_realtime_solar_wind(
+            hours=24; plasma=plasma_24, mag=mag_24)
+        bytes_168 = @allocated fetch_realtime_solar_wind(
+            hours=168; plasma=plasma_168, mag=mag_168)
+
+        # Seven times the data/window should remain near-linear. The old
+        # full-feed mask per bin allocated 1,368,160 bytes for this 168 h case.
+        @test bytes_168 <= 8 * bytes_24
+        @test bytes_168 < 300_000
     end
 
     @testset "A/D: RTSW named-key parsers retry truncated JSON, keep active source, guard schema" begin
@@ -271,6 +346,29 @@ using HTTP
         @test swd1.V[2] ≈ 900.0 atol=1e-9
     end
 
+    @testset "freshness requires a coverage-qualified recent hour" begin
+        base = DateTime(2026, 1, 1)
+        covered = [base + Minute(5m) for m in 0:11]
+        brownout = base + Hour(5) + Minute(59)
+        times = vcat(reverse(covered), [brownout])
+        plasma = DataFrame(
+            time_tag=times, density=fill(5.0, length(times)),
+            speed=fill(400.0, length(times)),
+            temperature=fill(1.0e5, length(times)),
+        )
+        mag = DataFrame(
+            time_tag=times, bx_gsm=fill(1.0, length(times)),
+            by_gsm=fill(2.0, length(times)), bz_gsm=fill(-5.0, length(times)),
+            bt=fill(5.5, length(times)),
+        )
+        swd, _, fresh = fetch_realtime_solar_wind(
+            hours=6, plasma=plasma, mag=mag, min_hourly_samples=10,
+        )
+        @test fresh == base + Minute(55)
+        @test findlast(isfinite.(swd.V) .& isfinite.(swd.Bz)) == 1
+        @test DateTime(2026, 1, 1, 6) - fresh > Hour(5)
+    end
+
     @testset "SENT-1: fetch_swpc_dst rejects a numeric fill sentinel" begin
         # A 9999-type fill value in the Kyoto feed must not survive as a real Dst.
         sentinel_get(url; kwargs...) = (; status=200, body="""
@@ -291,6 +389,12 @@ using HTTP
             [DateTime(2026, 1, 1, 0), DateTime(2026, 1, 1, 1)], [-40.0, 9999.0])
         @test lookup[DateTime(2026, 1, 1, 0)] == -40.0
         @test !haskey(lookup, DateTime(2026, 1, 1, 1))     # sentinel not anchored
+        @test_throws DimensionMismatch SolarSINDy._hourly_dst_lookup(
+            [DateTime(2026, 1, 1, 0), DateTime(2026, 1, 1, 1)], [-40.0],
+        )
+        @test_throws DimensionMismatch SolarSINDy._hourly_dst_lookup(
+            [DateTime(2026, 1, 1, 0)], [-40.0, -50.0],
+        )
 
         plasma = DataFrame(
             time_tag = [DateTime(2026, 1, 1, 0, 0), DateTime(2026, 1, 1, 0, 30),
@@ -320,13 +424,9 @@ using HTTP
                                                         max_retries=1, retry_delay_sec=0.0)
     end
 
-    @testset "M1: unanchored re-stepping of one bin compounds (why run_monitor gates on new bins)" begin
-        # Root-cause guard for the poll-cadence bug: step_forecast! integrates a
-        # fixed hour of dynamics per call, so re-stepping the SAME hourly bin every
-        # poll cycle (12/hour at the 5-min default) free-runs the modeled Dst* ~12x
-        # faster than wall clock when no observation re-anchors it. run_monitor now
-        # steps only when a new hourly bin appears; this test pins the hazard that
-        # gating prevents.
+    @testset "M1: forecast stepping rejects duplicate or skipped model time" begin
+        # The state transition itself now enforces the hourly clock contract, so
+        # callers cannot accidentally compound a repeated bin or compress a gap.
         mktempdir() do tmp
             coef_path = joinpath(tmp, "coefficients.csv")
             ens_path = joinpath(tmp, "ensemble.csv")
@@ -342,22 +442,25 @@ using HTTP
             # One legitimate hourly step from the anchor.
             s1 = init_forecast(coefficients_csv = coef_path, ensemble_csv = ens_path,
                                t0 = t, dst0 = -50.0)
-            r1 = step_forecast!(s1, t, V, Bz, 0.0, n, Pd)  # unanchored (no dst_observed)
+            r1 = step_forecast!(s1, t + Hour(1), V, Bz, 0.0, n, Pd)
+            @test isfinite(r1.dst_predicted)
 
-            # Twelve poll cycles re-stepping the SAME bin timestamp, unanchored.
-            s12 = init_forecast(coefficients_csv = coef_path, ensemble_csv = ens_path,
-                                t0 = t, dst0 = -50.0)
-            local r12
-            for _ in 1:12
-                r12 = step_forecast!(s12, t, V, Bz, 0.0, n, Pd)
-            end
-            # Compounding: 12 same-bin steps drive Dst* far below one honest step.
-            @test r12.dst_predicted < r1.dst_predicted - 20.0
-            # The bin timestamp is unchanged across the 12 steps, so the gate
-            # `t_new[latest_idx] > state.t_current` is false after the first — the
-            # monitor reuses the prior result instead of taking any of these steps.
-            @test s12.t_current == t
+            @test_throws ArgumentError step_forecast!(s1, t + Hour(1), V, Bz, 0.0, n, Pd)
+            @test_throws ArgumentError step_forecast!(s1, t + Hour(3), V, Bz, 0.0, n, Pd)
         end
+    end
+
+    @testset "M1b: warm-up uses a past anchor inside the newest contiguous driver block" begin
+        times = [DateTime(2026, 1, 1) + Hour(i) for i in 0:5]
+        swd = SolarWindData(collect(0.0:5.0),
+            [400.0, 410.0, NaN, 430.0, 440.0, 450.0],
+            [-2.0, -3.0, NaN, -5.0, -6.0, -7.0], zeros(6), fill(5.0, 6),
+            fill(2.0, 6), fill(NaN, 6), [NaN, -90.0, NaN, NaN, -60.0, -55.0])
+        start, last, anchor = SolarSINDy._monitor_warmup_window(swd, times)
+        @test (start, last, anchor) == (4, 6, 5)
+        # The older observation at index 2 is separated by a driver gap and may
+        # not initialise the newer block.
+        @test anchor != 2
     end
 
     @testset "NEW-3: live-loop index selection requires finite V AND Bz" begin
@@ -373,6 +476,9 @@ using HTTP
 
         # All-Bz-NaN window must be skipped (return nothing), as warm-up does.
         @test SolarSINDy._latest_finite_VBz_idx([400.0, 450.0], [NaN, NaN]) === nothing
+        @test SolarSINDy._latest_finite_VBz_idx([400.0, Inf], [-5.0, -6.0]) == 1
+        @test SolarSINDy._latest_finite_VBz_idx([400.0, 450.0], [-5.0, Inf]) == 1
+        @test_throws DimensionMismatch SolarSINDy._latest_finite_VBz_idx([400.0], [-5.0, -6.0])
 
         # Behavioural consequence: stepping from the last finite-Bz bin keeps the
         # southward-driving signal, whereas the old Bz=0 substitution (what the
@@ -407,6 +513,66 @@ using HTTP
             # the spurious Bz=0 forecast the buggy selection would have produced.
             @test r_true.dst_predicted < r_bz0.dst_predicted
         end
+    end
+
+    @testset "NEW-3b: delayed Dst anchor replays every intervening hour" begin
+        lib = build_minimal_library() # [1, Dst_star, V*Bs]
+        ξ = [0.0, -0.1, 0.0]
+        state = ForecastState(DateTime(2025, 12, 31, 23), -5.0, lib,
+                              ξ, repeat(ξ', 5), 1.0, ForecastResult[])
+        times = [DateTime(2026, 1, 1) + Hour(h) for h in 0:3]
+        swd = SolarWindData(collect(0.0:3.0), fill(400.0, 4), fill(5.0, 4),
+                            zeros(4), fill(5.0, 4), fill(2.0, 4),
+                            [-100.0, NaN, NaN, NaN], [-100.0, NaN, NaN, NaN])
+        result = SolarSINDy._replay_monitor_from_anchor!(state, swd, times, 1, 4)
+        # Three hourly Euler updates from -100 with dDst/dt=-0.1*Dst:
+        # -100 -> -90 -> -81 -> -72.9. The old one-step path returned -90.
+        @test result.dst_predicted ≈ -72.9 atol=1e-12
+        @test state.dst_current ≈ -72.9 atol=1e-12
+        @test state.t_current == times[4]
+        @test length(state.history) == 3
+
+        # Without any Dst observation, a three-bin fetch gap must also take
+        # three steps from the existing state instead of only the newest bin.
+        free = ForecastState(times[1], -100.0, lib, ξ, repeat(ξ', 5), 1.0,
+                             ForecastResult[])
+        free_swd = SolarWindData(swd.t, swd.V, swd.Bz, swd.By, swd.n, swd.Pdyn,
+                                 fill(NaN, 4), fill(NaN, 4))
+        free_result = SolarSINDy._replay_monitor_from_anchor!(free, free_swd,
+                                                              times, nothing, 4)
+        @test free_result.dst_predicted ≈ -72.9 atol=1e-12
+        @test length(free.history) == 3
+
+        # A same-bin observation is an anchor, not another elapsed model hour.
+        same = ForecastState(times[1], -10.0, lib, ξ, repeat(ξ', 5), 1.0,
+                             ForecastResult[])
+        same_result = SolarSINDy._replay_monitor_from_anchor!(same, swd, times, 1, 1)
+        @test same_result.dst_predicted == -100.0
+        @test same.dst_current == -100.0
+        @test length(same.history) == 1
+
+        # Hourly row j contains the driver average for [t[j], t[j+1]). A
+        # transition to t[2] must therefore use row 1, never future row 2.
+        drive_ξ = [0.0, 0.0, -0.01]
+        varying = SolarWindData(
+            [0.0, 1.0], [100.0, 200.0], [-1.0, -1.0], zeros(2),
+            fill(5.0, 2), fill(2.0, 2), fill(NaN, 2), fill(NaN, 2),
+        )
+        causal = ForecastState(times[1], 0.0, lib, drive_ξ,
+                               repeat(drive_ξ', 5), 1.0, ForecastResult[])
+        causal_result = SolarSINDy._replay_monitor_from_anchor!(
+            causal, varying, times[1:2], nothing, 2,
+        )
+        oracle = simulate_sindy(drive_ξ, lib, varying, 1.0; Dst0=0.0)
+        @test causal_result.dst_predicted == oracle[2] == -1.0
+
+        unavailable_predecessor = ForecastState(
+            times[1] - Hour(1), 0.0, lib, drive_ξ,
+            repeat(drive_ξ', 5), 1.0, ForecastResult[],
+        )
+        @test_throws ArgumentError SolarSINDy._replay_monitor_from_anchor!(
+            unavailable_predecessor, varying, times[1:2], nothing, 2,
+        )
     end
 
     @testset "NEW-4: print_status flags a stale feed and not a fresh one" begin
@@ -546,6 +712,15 @@ using HTTP
         @test recover_shadow_state(() -> nothing, () -> boot) === boot
         # load throws (torn/corrupt state) -> bootstrap
         @test recover_shadow_state(() -> error("torn file"), () -> boot) === boot
+        @test_throws InterruptException recover_shadow_state(
+            () -> throw(InterruptException()), () -> boot,
+        )
+        @test_throws InterruptException SolarSINDy._fetch_swpc_json(
+            "https://example.invalid";
+            max_retries=2,
+            retry_delay_sec=0.0,
+            http_get=(args...; kwargs...) -> throw(InterruptException()),
+        )
 
         # dead-man predicate
         @test feed_deadman_tripped(0) == false

@@ -328,10 +328,13 @@ function renderCalib(status) {
 function renderUpstream(status) {
   const up = status.upstream, us = status.upstream_status;
   const badge = $("upstream-badge"), stats = $("upstream-stats"), alertsEl = $("swpc-alerts"), cap = $("upstream-caption");
-  if (!up || up.available === false) {
-    badge.textContent = "unavailable"; badge.style.color = "var(--ink-mute)";
+  if (!up || up.available === false || !us || us.available === false) {
+    const stale = up && up.available && us && us.available === false;
+    badge.textContent = stale ? "stale" : "unavailable"; badge.style.color = "var(--ink-mute)";
     stats.innerHTML = ""; alertsEl.innerHTML = "";
-    cap.textContent = "NOAA SWPC feeds are currently unreachable; the Dst forecast above is unaffected.";
+    cap.textContent = stale
+      ? "NOAA SWPC readings are too old or future-dated to assess current upstream conditions."
+      : "NOAA SWPC feeds are currently unreachable; the Dst forecast above is unaffected.";
     return;
   }
   const sw = up.solar_wind || {};
@@ -370,9 +373,12 @@ function renderUpstream(status) {
 async function renderDbdt(dbdt) {
   const badge = $("dbdt-badge"), stats = $("dbdt-stats"), cap = $("dbdt-caption"), stn = $("dbdt-station");
   if (!dbdt || dbdt.available === false) {
-    badge.textContent = "unavailable"; badge.style.color = "var(--ink-mute)";
+    const stale = dbdt && dbdt.stale;
+    badge.textContent = stale ? "stale" : "unavailable"; badge.style.color = "var(--ink-mute)";
     stats.innerHTML = ""; if (window.Plotly) Plotly.purge("dbdt-plot");
-    cap.textContent = "USGS ground-magnetometer feed currently unreachable — it throttles intermittently; this panel fills in automatically on the next refresh once the feed responds. The Dst forecast above is unaffected.";
+    cap.textContent = stale
+      ? "The latest USGS ground-magnetometer sample is too old or future-dated for a live dB/dt assessment."
+      : "USGS ground-magnetometer feed currently unreachable — it throttles intermittently; this panel fills in automatically on the next refresh once the feed responds. The Dst forecast above is unaffected.";
     return;
   }
   stn.textContent = "· USGS " + dbdt.station;

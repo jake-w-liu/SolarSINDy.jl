@@ -2,6 +2,82 @@
 
 using Dates
 
+const OMNI_OBSERVATION_COLUMNS = (:V, :Bz, :By, :n, :Pdyn, :T, :Dst, :AE, :AL, :AU)
+
+"""
+    add_original_observation_flags!(df; columns=OMNI_OBSERVATION_COLUMNS)
+
+Snapshot which parsed OMNI values were finite before any interpolation or
+nearest-neighbour filling. For each requested column `x`, add a Boolean
+`x_observed` column. Call this immediately after [`parse_omni2`](@ref) and before
+[`clean_omni_data!`](@ref). Existing flag columns are rejected so a later call
+cannot silently relabel interpolated values as original observations.
+"""
+function add_original_observation_flags!(df::DataFrame;
+        columns=OMNI_OBSERVATION_COLUMNS)
+    requested = collect(columns)
+    length(unique(requested)) == length(requested) ||
+        throw(ArgumentError("original-observation columns must be unique"))
+    for col in requested
+        col in propertynames(df) || throw(ArgumentError("missing OMNI column: $col"))
+        flag = Symbol(col, "_observed")
+        flag in propertynames(df) &&
+            throw(ArgumentError("original-observation flag already exists: $flag"))
+    end
+    for col in requested
+        flag = Symbol(col, "_observed")
+        df[!, flag] = Bool[!ismissing(x) && x isa Real && isfinite(x)
+                           for x in df[!, col]]
+    end
+    return df
+end
+
+"""
+    original_sindy_mask(df, rows; smooth_window=5, require_ae=false)
+
+Return the strict original-observation mask for SINDy rows in one storm window.
+The instantaneous library drivers (`V`, `Bz`, `By`, `n`) must be original at the
+candidate row. In addition, every original `Dst`, `V`, and `n` observation used
+by the centered smoothing-plus-finite-difference target stencil must be present;
+`AE` is included in that stencil when `require_ae=true`. Consequently no target,
+pressure correction, or current-row driver depends on an interpolated value.
+
+The required `*_observed` columns are produced by
+[`add_original_observation_flags!`](@ref). The returned vector is local to
+`rows` and aligns with [`extract_storm_data`](@ref) and
+[`prepare_sindy_data`](@ref) for the same window.
+"""
+function original_sindy_mask(df::DataFrame, rows;
+                             smooth_window::Int=5, require_ae::Bool=false)
+    smooth_window > 0 && isodd(smooth_window) ||
+        throw(ArgumentError("smooth_window must be a positive odd integer"))
+    row_idx = collect(Int, rows)
+    isempty(row_idx) && return Bool[]
+    all(i -> 1 <= i <= nrow(df), row_idx) || throw(BoundsError(df, row_idx))
+    all(==(1), diff(row_idx)) ||
+        throw(ArgumentError("rows must be a chronological contiguous window"))
+
+    current_flags = [:V_observed, :Bz_observed, :By_observed, :n_observed]
+    stencil_flags = [:Dst_observed, :V_observed, :n_observed]
+    require_ae && push!(stencil_flags, :AE_observed)
+    for flag in union(current_flags, stencil_flags)
+        flag in propertynames(df) ||
+            throw(ArgumentError("missing original-observation flag: $flag"))
+    end
+
+    n = length(row_idx)
+    radius = div(smooth_window, 2) + 1
+    mask = falses(n)
+    for i in 1:n
+        all(flag -> Bool(df[row_idx[i], flag]), current_flags) || continue
+        lo = max(1, i - radius)
+        hi = min(n, i + radius)
+        mask[i] = all(flag -> all(Bool, @view(df[row_idx[lo:hi], flag])),
+                      stencil_flags)
+    end
+    return mask
+end
+
 """
     clean_omni_data!(df::DataFrame; causal::Bool=false)
 
@@ -38,6 +114,7 @@ function clean_omni_data!(df::DataFrame; causal::Bool=false)
     fill_cols = causal ? [:V, :Bz, :By, :n, :T, :AE, :AL, :AU] :
                          [:V, :Bz, :By, :n, :T, :Dst, :AE, :AL, :AU]
     for col in fill_cols
+        map!(x -> isfinite(x) ? x : NaN, df[!, col], df[!, col])
         causal ? _ffill_short_gaps!(df[!, col], 3) : _interp_short_gaps!(df[!, col], 3)
     end
 
@@ -51,7 +128,8 @@ function clean_omni_data!(df::DataFrame; causal::Bool=false)
     # --- Quality flag: 1 = all critical vars present, 0 = any critical missing ---
     df[!, :quality] = ones(Int, nrow(df))
     for i in 1:nrow(df)
-        if isnan(df.V[i]) || isnan(df.Bz[i]) || isnan(df.Dst[i])
+        if !isfinite(df.V[i]) || !isfinite(df.Bz[i]) || !isfinite(df.Dst[i]) ||
+           !isfinite(df.n[i]) || !isfinite(df.Pdyn[i])
             df.quality[i] = 0
         end
     end
@@ -59,7 +137,13 @@ function clean_omni_data!(df::DataFrame; causal::Bool=false)
     # --- Derived quantities ---
     df[!, :Bs] = [isnan(bz) ? NaN : max(-bz, 0.0) for bz in df.Bz]
     df[!, :theta_c] = [isnan(by) || isnan(bz) ? NaN : atan(abs(by), bz) for (by, bz) in zip(df.By, df.Bz)]
-    df[!, :BT] = [isnan(by) || isnan(bz) ? NaN : sqrt(by^2 + bz^2) for (by, bz) in zip(df.By, df.Bz)]
+    df[!, :BT] = [isnan(by) || isnan(bz) ? NaN : hypot(by, bz) for (by, bz) in zip(df.By, df.Bz)]
+    for i in eachindex(df.BT)
+        if isfinite(df.By[i]) && isfinite(df.Bz[i]) && !isfinite(df.BT[i])
+            df.BT[i] = NaN
+            df.quality[i] = 0
+        end
+    end
 
     # Dst*: pressure-correct where Pdyn is available; when it is missing use a
     # physically-defensible fallback (carry the last known Pdyn forward over a
@@ -70,13 +154,13 @@ function clean_omni_data!(df::DataFrame; causal::Bool=false)
     last_pdyn = NaN
     last_pdyn_age = PDYN_CARRY_MAX_AGE_H + 1
     for i in 1:nrow(df)
-        if isfinite(df.Pdyn[i])
+        if isfinite(df.Pdyn[i]) && df.Pdyn[i] >= 0
             last_pdyn = df.Pdyn[i]
             last_pdyn_age = 0
         else
             last_pdyn_age = min(last_pdyn_age + 1, PDYN_CARRY_MAX_AGE_H + 1)
         end
-        if isnan(df.Dst[i])
+        if !isfinite(df.Dst[i])
             df.Dst_star[i] = NaN
         else
             pdyn_eff = resolve_pdyn(df.Pdyn[i], last_pdyn, last_pdyn_age)
@@ -170,29 +254,44 @@ Metadata for a single geomagnetic storm event.
 struct StormCatalogEntry
     storm_id::Int
     onset_time::DateTime
-    min_dst::Float64
-    min_dst_time::DateTime
+    min_dst_star::Float64
+    min_dst_star_time::DateTime
     recovery_end_time::DateTime
     duration_hr::Float64
     solar_cycle::Int
     split::String              # "train", "val", "test"
-    onset_idx::Int             # index into cleaned DataFrame
+    onset_idx::Int             # extraction-window start index in cleaned DataFrame
     end_idx::Int
 end
 
-"""
-    _solar_cycle(year)
+# Source compatibility for callers that consumed the pre-migration field names.
+# Canonical artifacts and new code use the explicit Dst* names above.
+function Base.getproperty(entry::StormCatalogEntry, name::Symbol)
+    name === :min_dst && return getfield(entry, :min_dst_star)
+    name === :min_dst_time && return getfield(entry, :min_dst_star_time)
+    return getfield(entry, name)
+end
 
-Approximate solar cycle number from year.
-Cycles: 20 (1964–1976), 21 (1976–1986), 22 (1986–1996),
-        23 (1996–2008), 24 (2008–2019), 25 (2019–present)
+function Base.propertynames(::StormCatalogEntry, private::Bool=false)
+    canonical = fieldnames(StormCatalogEntry)
+    return (canonical..., :min_dst, :min_dst_time)
+end
+
 """
-function _solar_cycle(year::Int)
-    year < 1976 && return 20
-    year < 1986 && return 21
-    year < 1996 && return 22
-    year < 2008 && return 23
-    year < 2019 && return 24
+    _solar_cycle(time)
+
+Assign the official SILSO cycle number from its month-level minimum boundary.
+The boundaries are based on the World Data Center SILSO Version 2 table of
+13-month-smoothed sunspot-number minima.
+"""
+function _solar_cycle(time::Union{Date,DateTime})
+    day = Date(time)
+    day < Date(1964, 10, 1) && return 19
+    day < Date(1976, 3, 1) && return 20
+    day < Date(1986, 9, 1) && return 21
+    day < Date(1996, 8, 1) && return 22
+    day < Date(2008, 12, 1) && return 23
+    day < Date(2019, 12, 1) && return 24
     return 25
 end
 
@@ -200,14 +299,16 @@ end
     _assign_split(cycle)
 
 Assign train/val/test split by solar cycle:
-  Train: cycles 20–23 (~1964–2008)
+  Train: cycles 20–23 (1964-10 through 2008-11)
   Val:   cycle 24 (2008–2019)
   Test:  cycle 25 (2019–present, includes May 2024 superstorm)
+  Exclude: pre-cycle-20 records
 """
 function _assign_split(cycle::Int)
-    cycle <= 23 && return "train"
+    cycle in 20:23 && return "train"
     cycle == 24 && return "val"
-    return "test"
+    cycle >= 25 && return "test"
+    return "exclude"
 end
 
 """
@@ -227,12 +328,30 @@ function build_storm_catalog(df::DataFrame;
                               window_pre::Int=24,
                               window_post::Int=144,
                               min_separation::Int=48)
+    isfinite(dst_thresh) || throw(ArgumentError("dst_thresh must be finite"))
+    window_pre >= 0 || throw(ArgumentError("window_pre must be nonnegative"))
+    window_post >= 0 || throw(ArgumentError("window_post must be nonnegative"))
+    min_separation >= 0 || throw(ArgumentError("min_separation must be nonnegative"))
+    required = (:datetime, :Dst_star, :quality)
+    missing_columns = filter(name -> !(name in propertynames(df)), required)
+    isempty(missing_columns) || throw(ArgumentError(
+        "storm catalog is missing required columns: $(join(string.(missing_columns), ", "))"
+    ))
     catalog = StormCatalogEntry[]
     n = nrow(df)
+    n >= 1 || throw(ArgumentError("storm catalog requires at least one hourly row"))
+    all(value -> value isa DateTime, df.datetime) ||
+        throw(ArgumentError("storm catalog datetimes must be DateTime values"))
+    all(i -> df.datetime[i] - df.datetime[i - 1] == Hour(1), 2:n) ||
+        throw(ArgumentError("storm catalog rows must be strictly contiguous and hourly"))
+    all(value -> value isa Real && (isfinite(value) || isnan(value)), df.Dst_star) ||
+        throw(ArgumentError("Dst_star must contain only finite values or NaN gaps"))
+    all(value -> value isa Real && (value == 0 || value == 1), df.quality) ||
+        throw(ArgumentError("quality must contain only 0/1 flags"))
 
     # For storm detection, only need Dst_star (Dst + Pdyn).
     # Full quality (V, Bz) checked separately for SINDy usability.
-    valid_mask = .!isnan.(df.Dst_star)
+    valid_mask = isfinite.(df.Dst_star)
     # Precompute SINDy-usable mask (V, Bz, Dst_star all valid)
     sindy_mask = (df.quality .== 1) .& valid_mask
 
@@ -268,11 +387,11 @@ function build_storm_catalog(df::DataFrame;
 
         # Find minimum Dst* in the storm window (search from original detection point)
         search_end = min(n, i + window_post)
-        min_dst = df.Dst_star[onset_idx]
+        min_dst_star = df.Dst_star[onset_idx]
         min_idx = onset_idx
         for k in onset_idx:search_end
-            if valid_mask[k] && df.Dst_star[k] < min_dst
-                min_dst = df.Dst_star[k]
+            if valid_mask[k] && df.Dst_star[k] < min_dst_star
+                min_dst_star = df.Dst_star[k]
                 min_idx = k
             end
         end
@@ -301,14 +420,13 @@ function build_storm_catalog(df::DataFrame;
         end
 
         storm_id += 1
-        year = Dates.year(df.datetime[onset_idx])
-        cycle = _solar_cycle(year)
+        cycle = _solar_cycle(df.datetime[onset_idx])
         duration = (win_end - win_start)  # hours (hourly data)
 
         entry = StormCatalogEntry(
             storm_id,
             df.datetime[onset_idx],
-            min_dst,
+            min_dst_star,
             df.datetime[min_idx],
             df.datetime[recovery_idx],
             Float64(duration),
@@ -327,9 +445,11 @@ function build_storm_catalog(df::DataFrame;
     n_train = count(e -> e.split == "train", catalog)
     n_val   = count(e -> e.split == "val", catalog)
     n_test  = count(e -> e.split == "test", catalog)
-    println("  Storm catalog: $(length(catalog)) storms (train=$(n_train), val=$(n_val), test=$(n_test))")
+    n_excluded = count(e -> e.split == "exclude", catalog)
+    println("  Storm catalog: $(length(catalog)) storms (train=$(n_train), " *
+            "val=$(n_val), test=$(n_test), exclude=$(n_excluded))")
     if !isempty(catalog)
-        println("  Dst range: $(round(minimum(e.min_dst for e in catalog), digits=1)) to $(round(maximum(e.min_dst for e in catalog), digits=1)) nT")
+        println("  Dst* range: $(round(minimum(e.min_dst_star for e in catalog), digits=1)) to $(round(maximum(e.min_dst_star for e in catalog), digits=1)) nT")
     end
 
     return catalog
@@ -405,11 +525,12 @@ end
 Save storm catalog to CSV.
 """
 function save_storm_catalog(catalog::Vector{StormCatalogEntry}, filepath::String)
+    _require_regular_output_target(filepath)
     df = DataFrame(
         storm_id = [e.storm_id for e in catalog],
         onset_time = [e.onset_time for e in catalog],
-        min_dst = [e.min_dst for e in catalog],
-        min_dst_time = [e.min_dst_time for e in catalog],
+        min_dst_star = [e.min_dst_star for e in catalog],
+        min_dst_star_time = [e.min_dst_star_time for e in catalog],
         recovery_end_time = [e.recovery_end_time for e in catalog],
         duration_hr = [e.duration_hr for e in catalog],
         solar_cycle = [e.solar_cycle for e in catalog],
@@ -417,7 +538,16 @@ function save_storm_catalog(catalog::Vector{StormCatalogEntry}, filepath::String
         onset_idx = [e.onset_idx for e in catalog],
         end_idx = [e.end_idx for e in catalog]
     )
-    CSV.write(filepath, df)
+    parent = dirname(filepath)
+    !isempty(parent) && mkpath(parent)
+    temporary, io = mktemp(parent; cleanup=false)
+    close(io)
+    try
+        CSV.write(temporary, df)
+        _atomic_replace_regular(temporary, filepath)
+    finally
+        isfile(temporary) && rm(temporary; force=true)
+    end
     println("  Saved storm catalog: $filepath ($(nrow(df)) storms)")
 end
 
@@ -428,20 +558,61 @@ Load storm catalog from CSV.
 """
 function load_storm_catalog(filepath::String)
     df = CSV.read(filepath, DataFrame)
+    min_col = :min_dst_star in propertynames(df) ? :min_dst_star :
+              :min_dst in propertynames(df) ? :min_dst : nothing
+    min_time_col = :min_dst_star_time in propertynames(df) ? :min_dst_star_time :
+                   :min_dst_time in propertynames(df) ? :min_dst_time : nothing
+    min_col === nothing && throw(ArgumentError(
+        "storm catalog must contain min_dst_star (or legacy min_dst)"
+    ))
+    min_time_col === nothing && throw(ArgumentError(
+        "storm catalog must contain min_dst_star_time (or legacy min_dst_time)"
+    ))
+    required = (:storm_id, :onset_time, :recovery_end_time, :duration_hr,
+                :solar_cycle, :split, :onset_idx, :end_idx)
+    missing_columns = filter(name -> !(name in propertynames(df)), required)
+    isempty(missing_columns) || throw(ArgumentError(
+        "storm catalog is missing required columns: $(join(string.(missing_columns), ", "))"
+    ))
     catalog = StormCatalogEntry[]
     for row in eachrow(df)
+        storm_id = Int(row.storm_id)
+        min_dst_star = Float64(row[min_col])
+        duration_hr = Float64(row.duration_hr)
+        solar_cycle = Int(row.solar_cycle)
+        split = String(row.split)
+        onset_idx = Int(row.onset_idx)
+        end_idx = Int(row.end_idx)
+        storm_id >= 1 || throw(ArgumentError("storm_id must be positive"))
+        isfinite(min_dst_star) || throw(ArgumentError("min_dst_star must be finite"))
+        isfinite(duration_hr) && duration_hr >= 0 ||
+            throw(ArgumentError("duration_hr must be finite and nonnegative"))
+        split in ("train", "val", "test", "exclude") ||
+            throw(ArgumentError("invalid storm split: $split"))
+        1 <= onset_idx <= end_idx ||
+            throw(ArgumentError("storm indices must satisfy 1 <= onset_idx <= end_idx"))
+        onset_time = DateTime(row.onset_time)
+        min_dst_star_time = DateTime(row[min_time_col])
+        recovery_end_time = DateTime(row.recovery_end_time)
+        onset_time <= min_dst_star_time <= recovery_end_time ||
+            throw(ArgumentError("storm times must satisfy onset <= minimum Dst* <= recovery"))
+        isapprox(duration_hr, end_idx - onset_idx; rtol=0.0, atol=eps(Float64)) ||
+            throw(ArgumentError("duration_hr must equal end_idx - onset_idx for hourly rows"))
         push!(catalog, StormCatalogEntry(
-            row.storm_id,
-            DateTime(row.onset_time),
-            row.min_dst,
-            DateTime(row.min_dst_time),
-            DateTime(row.recovery_end_time),
-            row.duration_hr,
-            row.solar_cycle,
-            row.split,
-            row.onset_idx,
-            row.end_idx
+            storm_id,
+            onset_time,
+            min_dst_star,
+            min_dst_star_time,
+            recovery_end_time,
+            duration_hr,
+            solar_cycle,
+            split,
+            onset_idx,
+            end_idx,
         ))
     end
+    ids = getfield.(catalog, :storm_id)
+    length(unique(ids)) == length(ids) ||
+        throw(ArgumentError("storm catalog contains duplicate storm ids"))
     return catalog
 end

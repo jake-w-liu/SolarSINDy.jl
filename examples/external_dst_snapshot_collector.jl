@@ -12,6 +12,10 @@
 # Env:
 #   SOLARSINDY_EXTERNAL_DST_DIR  output directory for the external Dst log/report/raw snapshots
 #                                (default SOLARSINDY_MONITOR_DIR, else "live_forecasts")
+#   SOLARSINDY_EXTERNAL_DST_MAX_ROWS
+#                                maximum retained forecast rows (default 50000)
+#   SOLARSINDY_EXTERNAL_DST_MAX_RAW
+#                                maximum retained raw response snapshots (default 10000)
 
 using CSV
 using DataFrames
@@ -21,6 +25,7 @@ using JSON3
 using Printf
 using SHA
 using Statistics
+using FileWatching: Pidfile
 
 const EXTERNAL_DST_DIR = get(ENV, "SOLARSINDY_EXTERNAL_DST_DIR",
                              get(ENV, "SOLARSINDY_MONITOR_DIR", "live_forecasts"))
@@ -29,6 +34,8 @@ const EXTERNAL_DST_REPORT = joinpath(EXTERNAL_DST_DIR, "external_dst_forecast_re
 const EXTERNAL_DST_RAW_DIR = joinpath(EXTERNAL_DST_DIR, "source_cache", "external_dst_snapshots")
 const EXTERNAL_DST_REPO_ROOT = normpath(joinpath(EXTERNAL_DST_DIR, ".."))
 const EXTERNAL_DST_MAX_OBS_GAP_MIN = 30.0
+const EXTERNAL_DST_MAX_LOG_ROWS = 50_000
+const EXTERNAL_DST_MAX_RAW_SNAPSHOTS = 10_000
 const EXTERNAL_DST_SOURCES = [
     (; name = "swpc_geospace_dst_1_hour",
        url = "https://services.swpc.noaa.gov/json/geospace/geospace_dst_1_hour.json",
@@ -54,6 +61,10 @@ Base.@kwdef struct ExternalDstCollectorConfig
     sources::Vector = EXTERNAL_DST_SOURCES
     obs_url::String = EXTERNAL_DST_OBS_URL
     max_obs_gap_min::Float64 = EXTERNAL_DST_MAX_OBS_GAP_MIN
+    max_log_rows::Int = parse(Int, get(ENV, "SOLARSINDY_EXTERNAL_DST_MAX_ROWS",
+                                       string(EXTERNAL_DST_MAX_LOG_ROWS)))
+    max_raw_snapshots::Int = parse(Int, get(ENV, "SOLARSINDY_EXTERNAL_DST_MAX_RAW",
+                                            string(EXTERNAL_DST_MAX_RAW_SNAPSHOTS)))
 end
 
 function _external_empty_log()
@@ -117,6 +128,155 @@ end
 
 _sha256_hex(text::AbstractString) = bytes2hex(sha256(codeunits(String(text))))
 
+function _external_durable_flush(io::IO)
+    flush(io)
+    rc = Sys.iswindows() ?
+         ccall(:_commit, Cint, (Cint,), fd(io)) :
+         ccall(:fsync, Cint, (Cint,), fd(io))
+    systemerror("durable external-Dst flush", rc != 0)
+    return nothing
+end
+
+function _external_sync_parent(path::AbstractString)
+    Sys.iswindows() && return nothing
+    parent = dirname(path)
+    isempty(parent) && (parent = ".")
+    open(parent, "r") do io
+        rc = ccall(:fsync, Cint, (Cint,), fd(io))
+        systemerror("durable external-Dst directory flush", rc != 0)
+    end
+    return nothing
+end
+
+function _external_require_regular_target(path::AbstractString)
+    islink(path) && throw(ArgumentError(
+        "external Dst output target must not be a symbolic link: $path",
+    ))
+    ispath(path) && !isfile(path) && throw(ArgumentError(
+        "external Dst output target exists but is not a regular file: $path",
+    ))
+    return path
+end
+
+# Prepare a complete, durable same-directory replacement without changing the
+# target.  File-set transactions can stage every member before the first rename.
+function _external_stage_file(writer::Function, path::AbstractString)
+    parent = dirname(path)
+    isempty(parent) && (parent = ".")
+    mkpath(parent)
+    _external_require_regular_target(path)
+    tmp, io = mktemp(parent; cleanup=false)
+    try
+        writer(io)
+        _external_durable_flush(io)
+        close(io)
+    catch
+        isopen(io) && close(io)
+        isfile(tmp) && rm(tmp; force=true)
+        rethrow()
+    end
+    return tmp
+end
+
+# Same-directory temporary + fsync + rename: a failed writer leaves the old
+# complete target in place, and readers never observe a partially-written file.
+function _external_atomic_file(writer::Function, path::AbstractString)
+    tmp = _external_stage_file(writer, path)
+    try
+        Base.Filesystem.rename(tmp, path)
+        _external_sync_parent(path)
+    catch
+        isfile(tmp) && rm(tmp; force=true)
+        rethrow()
+    end
+    return path
+end
+
+function _external_target_snapshot(path::AbstractString)
+    _external_require_regular_target(path)
+    return isfile(path) ? (exists=true, bytes=read(path)) :
+                          (exists=false, bytes=UInt8[])
+end
+
+function _restore_external_target!(path::AbstractString, snapshot)
+    if snapshot.exists
+        _external_atomic_file(path) do io
+            write(io, snapshot.bytes)
+        end
+    elseif isfile(path)
+        _external_require_regular_target(path)
+        rm(path)
+        _external_sync_parent(path)
+    end
+    return nothing
+end
+
+function _external_canonical_destination(path::AbstractString)
+    absolute = abspath(path)
+    parent = dirname(absolute)
+    mkpath(parent)
+    return normpath(joinpath(realpath(parent), basename(absolute)))
+end
+
+function _external_targets_alias(first_path::AbstractString,
+                                 second_path::AbstractString)
+    first_destination = _external_canonical_destination(first_path)
+    second_destination = _external_canonical_destination(second_path)
+    first_destination == second_destination && return true
+    # Fail closed for case-only basename distinctions in the same resolved
+    # directory. They are aliases on common case-insensitive filesystems and
+    # are unsuitable as separate operational outputs even when a filesystem
+    # happens to permit both names.
+    dirname(first_destination) == dirname(second_destination) &&
+        lowercase(basename(first_destination)) ==
+            lowercase(basename(second_destination)) && return true
+    return ispath(first_path) && ispath(second_path) &&
+           Base.Filesystem.samefile(first_path, second_path)
+end
+
+_external_atomic_text(path::AbstractString, text::AbstractString) =
+    _external_atomic_file(path) do io
+        write(io, text)
+    end
+
+_external_atomic_csv(path::AbstractString, table) =
+    _external_atomic_file(path) do io
+        CSV.write(io, table)
+    end
+
+function _with_external_dst_lock(f::Function, log_path::AbstractString;
+                                 timeout_sec::Real=30.0,
+                                 stale_after_sec::Real=900.0,
+                                 poll_sec::Real=0.05)
+    isfinite(timeout_sec) && timeout_sec >= 0 ||
+        throw(ArgumentError("timeout_sec must be finite and nonnegative"))
+    isfinite(stale_after_sec) && stale_after_sec >= 0 ||
+        throw(ArgumentError("stale_after_sec must be finite and nonnegative"))
+    isfinite(poll_sec) && poll_sec > 0 ||
+        throw(ArgumentError("poll_sec must be finite and positive"))
+    lock_path = string(log_path, ".lock")
+    parent = dirname(lock_path)
+    isempty(parent) || mkpath(parent)
+    deadline = time() + Float64(timeout_sec)
+    owner = false
+    while owner === false
+        if !isdir(lock_path) && !islink(lock_path)
+            owner = Pidfile.trymkpidlock(
+                lock_path; stale_age=Float64(stale_after_sec),
+                refresh=stale_after_sec == 0 ? 0.0 : Float64(stale_after_sec) / 2,
+            )
+        end
+        owner === false || break
+        time() < deadline || error("timed out waiting for external Dst log lock: $lock_path")
+        sleep(min(Float64(poll_sec), max(deadline - time(), 0.0)))
+    end
+    try
+        return f()
+    finally
+        close(owner)
+    end
+end
+
 function _http_text(url::AbstractString; http_get::Function = HTTP.get)
     resp = http_get(String(url); connect_timeout = 15, readtimeout = 30,
                     retries = 1, status_exception = true)
@@ -131,8 +291,72 @@ function _write_raw_snapshot(raw_dir::AbstractString, source::AbstractString,
     mkpath(raw_dir)
     path = joinpath(raw_dir, string(Dates.format(fetched_utc, dateformat"yyyymmddTHHMMSS"),
                                    "Z_", _slug(source), "_", first(String(sha), 12), ".raw"))
-    isfile(path) || write(path, body)
+    expected = String(sha)
+    _sha256_hex(body) == expected || throw(ArgumentError(
+        "raw snapshot SHA-256 does not match its response body",
+    ))
+    if isfile(path) && !islink(path)
+        bytes2hex(sha256(read(path))) == expected && return relpath(path, repo_root)
+    end
+    _external_atomic_text(path, body)
+    bytes2hex(sha256(read(path))) == expected || error(
+        "raw snapshot failed post-write SHA-256 verification: $path",
+    )
     return relpath(path, repo_root)
+end
+
+function _external_raw_retention_plan(raw_dir::AbstractString,
+                                      repo_root::AbstractString,
+                                      max_files::Int)
+    max_files >= 1 || throw(ArgumentError("max_raw_snapshots must be at least 1"))
+    isdir(raw_dir) || return (Set{String}(), String[])
+    files = [joinpath(raw_dir, name) for name in readdir(raw_dir)
+             if endswith(name, ".raw") &&
+                isfile(joinpath(raw_dir, name)) && !islink(joinpath(raw_dir, name))]
+    sort!(files; by=path -> (mtime(path), basename(path)))
+    first_kept = max(1, length(files) - max_files + 1)
+    kept = isempty(files) ? String[] : files[first_kept:end]
+    removed = first_kept == 1 ? String[] : files[1:(first_kept - 1)]
+    relative_kept = Set(normpath(relpath(path, repo_root)) for path in kept)
+    return relative_kept, removed
+end
+
+function _verify_retained_external_raw_snapshots!(df::DataFrame,
+                                                   repo_root::AbstractString)
+    expected_by_path = Dict{String,String}()
+    for row in eachrow(df)
+        relative_path = normpath(String(row.raw_path))
+        expected = String(row.raw_sha256)
+        prior = get(expected_by_path, relative_path, expected)
+        prior == expected || error(
+            "retained raw snapshot has conflicting logged SHA-256 digests: $relative_path",
+        )
+        expected_by_path[relative_path] = expected
+    end
+    for (relative_path, expected) in expected_by_path
+        path = normpath(joinpath(repo_root, relative_path))
+        isfile(path) && !islink(path) || error(
+            "retained raw snapshot is missing or not a regular file: $path",
+        )
+        actual = bytes2hex(sha256(read(path)))
+        actual == expected || error(
+            "retained raw snapshot SHA-256 mismatch: $path",
+        )
+    end
+    return true
+end
+
+function _delete_external_raw_snapshots!(paths::AbstractVector{<:AbstractString})
+    for path in paths
+        rm(path)
+    end
+    return length(paths)
+end
+
+function _retain_external_rows(df::DataFrame, max_rows::Int)
+    max_rows >= 1 || throw(ArgumentError("max_log_rows must be at least 1"))
+    nrow(df) <= max_rows && return df
+    return df[(nrow(df) - max_rows + 1):nrow(df), :]
 end
 
 function _parse_temerin_model_run(html::AbstractString)
@@ -174,7 +398,8 @@ function _parse_swpc_geospace_json(text::AbstractString)
         t === missing && continue
         val = try
             Float64(dv)
-        catch
+        catch e
+            e isa InterruptException && rethrow()
             NaN
         end
         isfinite(val) && push!(rows, (t, val))
@@ -271,7 +496,8 @@ function _parse_observed_dst_json(text::AbstractString)
         t === missing && continue
         val = try
             Float64(dv)
-        catch
+        catch e
+            e isa InterruptException && rethrow()
             NaN
         end
         isfinite(val) && push!(rows, (t, val))
@@ -301,6 +527,9 @@ end
 function score_external_dst_rows!(df::DataFrame, obs::DataFrame;
                                   max_obs_gap_min::Real = EXTERNAL_DST_MAX_OBS_GAP_MIN,
                                   scored_utc::DateTime = now(UTC))
+    isfinite(max_obs_gap_min) && max_obs_gap_min >= 0 || throw(ArgumentError(
+        "max_obs_gap_min must be finite and nonnegative",
+    ))
     isempty(df) && return 0
     sort!(obs, :observed_time_utc)
     scored = 0
@@ -327,7 +556,13 @@ function _fetch_observations(url::AbstractString; http_get::Function = HTTP.get)
     return _parse_observed_dst_json(body)
 end
 
-function _validate_external_dst_log(df::DataFrame)
+function _validate_external_dst_log(
+    df::DataFrame;
+    max_obs_gap_min::Real=EXTERNAL_DST_MAX_OBS_GAP_MIN,
+)
+    isfinite(max_obs_gap_min) && max_obs_gap_min >= 0 || throw(ArgumentError(
+        "max_obs_gap_min must be finite and nonnegative",
+    ))
     for col in EXTERNAL_DST_SCHEMA
         col in propertynames(df) || error("external Dst log missing column $col")
     end
@@ -349,11 +584,24 @@ function _validate_external_dst_log(df::DataFrame)
             isfinite(Float64(df.abs_error_nt[i])) ||
                 error("external Dst row $i has invalid abs_error_nt")
             isfinite(Float64(df.observed_gap_min[i])) &&
-                Float64(df.observed_gap_min[i]) <= EXTERNAL_DST_MAX_OBS_GAP_MIN + 1e-9 ||
+                Float64(df.observed_gap_min[i]) <= max_obs_gap_min + 1e-9 ||
                 error("external Dst row $i has invalid observed_gap_min")
         end
     end
     return true
+end
+
+function _external_stable_rmse(values::AbstractVector{<:Real})
+    isempty(values) && return missing
+    scale = maximum(abs, values)
+    isfinite(scale) || throw(ArgumentError("external Dst residuals must be finite"))
+    scale == 0 && return 0.0
+    normalized = Float64.(values) ./ Float64(scale)
+    result = Float64(scale) * sqrt(mean(abs2, normalized))
+    isfinite(result) || throw(ArgumentError(
+        "external Dst RMSE exceeds the supported Float64 range",
+    ))
+    return result
 end
 
 function external_dst_summary(df::DataFrame)
@@ -364,9 +612,15 @@ function external_dst_summary(df::DataFrame)
         sub = df[String.(df.source) .== source, :]
         scored_mask = .!ismissing.(sub.observed_dst_nt)
         if any(scored_mask)
-            err = Float64.(sub.forecast_dst_nt[scored_mask]) .- Float64.(sub.observed_dst_nt[scored_mask])
-            rmse_val = sqrt(mean(err .^ 2))
-            mae_val = mean(abs.(err))
+            absolute_errors = abs.(
+                Float64.(sub.forecast_dst_nt[scored_mask]) .-
+                Float64.(sub.observed_dst_nt[scored_mask]),
+            )
+            all(isfinite, absolute_errors) || throw(ArgumentError(
+                "external Dst residual exceeds the supported Float64 range",
+            ))
+            rmse_val = _external_stable_rmse(absolute_errors)
+            mae_val = mean(absolute_errors)
         else
             rmse_val = missing
             mae_val = missing
@@ -377,28 +631,108 @@ function external_dst_summary(df::DataFrame)
     return out
 end
 
-function _write_external_dst_report(path::AbstractString, df::DataFrame)
+function _emit_external_dst_report(
+    io::IO,
+    df::DataFrame;
+    max_obs_gap_min::Real=EXTERNAL_DST_MAX_OBS_GAP_MIN,
+)
+    isfinite(max_obs_gap_min) && max_obs_gap_min >= 0 || throw(ArgumentError(
+        "max_obs_gap_min must be finite and nonnegative",
+    ))
     summary = external_dst_summary(df)
-    open(path, "w") do io
-        println(io, "# Prospective external Dst forecast snapshots\n")
-        println(io, "This log captures public same-unit Dst forecast/nowcast products as issue-time snapshots. Rows are written only when the product target time is after the inferred issue time. The collector stores raw-response SHA-256 hashes and scores rows later against the SWPC-served Kyoto Dst product within $(EXTERNAL_DST_MAX_OBS_GAP_MIN) min.\n")
-        println(io, "| Source | Rows | Scored | Issues | Max lead [h] | RMSE [nT] | MAE [nT] |")
-        println(io, "|---|---:|---:|---:|---:|---:|---:|")
-        for r in eachrow(summary)
-            rmse_s = ismissing(r.rmse_nt) ? "pending" : @sprintf("%.2f", r.rmse_nt)
-            mae_s = ismissing(r.mae_nt) ? "pending" : @sprintf("%.2f", r.mae_nt)
-            @printf(io, "| %s | %d | %d | %d | %.3f | %s | %s |\n",
-                    r.source, r.n_rows, r.n_scored, r.n_issues, r.max_lead_h,
-                    rmse_s, mae_s)
-        end
-        println(io, "\nBoundary: this starts a prospective issue-time-resolved external Dst archive. It does not backfill missing historical issue snapshots, and current public products may provide sub-hour future Dst rows rather than the full 1--6 h V2 lead set.")
+    println(io, "# Prospective external Dst forecast snapshots\n")
+    println(io, "This log captures public same-unit Dst forecast/nowcast products as issue-time snapshots. Rows are written only when the product target time is after the inferred issue time. The collector stores raw-response SHA-256 hashes and scores rows later against the SWPC-served Kyoto Dst product within $(Float64(max_obs_gap_min)) min.\n")
+    println(io, "| Source | Rows | Scored | Issues | Max lead [h] | RMSE [nT] | MAE [nT] |")
+    println(io, "|---|---:|---:|---:|---:|---:|---:|")
+    for r in eachrow(summary)
+        rmse_s = ismissing(r.rmse_nt) ? "pending" : @sprintf("%.2f", r.rmse_nt)
+        mae_s = ismissing(r.mae_nt) ? "pending" : @sprintf("%.2f", r.mae_nt)
+        @printf(io, "| %s | %d | %d | %d | %.3f | %s | %s |\n",
+                r.source, r.n_rows, r.n_scored, r.n_issues, r.max_lead_h,
+                rmse_s, mae_s)
     end
+    println(io, "\nBoundary: this starts a prospective issue-time-resolved external Dst archive. It does not backfill missing historical issue snapshots, and current public products may provide sub-hour future Dst rows rather than the full 1--6 h V2 lead set.")
+    return nothing
+end
+
+function _write_external_dst_report(
+    path::AbstractString,
+    df::DataFrame;
+    max_obs_gap_min::Real=EXTERNAL_DST_MAX_OBS_GAP_MIN,
+)
+    _external_atomic_file(path) do io
+        _emit_external_dst_report(io, df; max_obs_gap_min=max_obs_gap_min)
+    end
+    return path
+end
+
+# Stage the CSV and its derived report before committing either target. If any
+# rename, directory sync, or injected post-log step fails, restore both exact
+# pre-transaction byte sequences before propagating the failure.
+function _external_transactional_log_report!(
+    log_path::AbstractString,
+    report_path::AbstractString,
+    df::DataFrame;
+    max_obs_gap_min::Real=EXTERNAL_DST_MAX_OBS_GAP_MIN,
+    after_log_commit::Function=() -> nothing,
+)
+    !_external_targets_alias(log_path, report_path) ||
+        throw(ArgumentError("external Dst log and report paths must differ"))
+    log_snapshot = _external_target_snapshot(log_path)
+    report_snapshot = _external_target_snapshot(report_path)
+    log_stage = nothing
+    report_stage = nothing
+    commit_started = false
+    try
+        log_stage = _external_stage_file(log_path) do io
+            CSV.write(io, df)
+        end
+        report_stage = _external_stage_file(report_path) do io
+            _emit_external_dst_report(io, df; max_obs_gap_min=max_obs_gap_min)
+        end
+        commit_started = true
+        Base.Filesystem.rename(log_stage, log_path)
+        log_stage = nothing
+        _external_sync_parent(log_path)
+        after_log_commit()
+        Base.Filesystem.rename(report_stage, report_path)
+        report_stage = nothing
+        _external_sync_parent(report_path)
+    catch failure
+        log_stage isa AbstractString && isfile(log_stage) && rm(log_stage; force=true)
+        report_stage isa AbstractString && isfile(report_stage) && rm(report_stage; force=true)
+        if commit_started
+            rollback_errors = String[]
+            for (path, snapshot) in ((log_path, log_snapshot),
+                                     (report_path, report_snapshot))
+                try
+                    _restore_external_target!(path, snapshot)
+                catch rollback_failure
+                    push!(rollback_errors, string(path, ": ",
+                        sprint(showerror, rollback_failure)))
+                end
+            end
+            isempty(rollback_errors) || error(
+                "external Dst file-set transaction failed ($(sprint(showerror, failure))) " *
+                "and rollback was incomplete: $(join(rollback_errors, "; "))",
+            )
+        end
+        rethrow()
+    end
+    return nothing
 end
 
 function capture_and_score_external_dst_snapshot!(cfg::ExternalDstCollectorConfig = ExternalDstCollectorConfig();
                                                   fetched_utc::DateTime = now(UTC),
                                                   http_get::Function = HTTP.get)
-    current = _load_external_log(cfg.log_path)
+    isfinite(cfg.max_obs_gap_min) && cfg.max_obs_gap_min >= 0 ||
+        throw(ArgumentError("max_obs_gap_min must be finite and nonnegative"))
+    cfg.max_log_rows >= 1 || throw(ArgumentError("max_log_rows must be at least 1"))
+    cfg.max_raw_snapshots >= 1 ||
+        throw(ArgumentError("max_raw_snapshots must be at least 1"))
+
+    # Fetch outside the log lock. Only the read/merge/score/install transaction is
+    # serialized, so slow public endpoints cannot hold the cross-process lock.
     new_rows = _external_empty_log()
     for source in cfg.sources
         rows = _future_rows_for_source(source; fetched_utc = fetched_utc,
@@ -406,19 +740,45 @@ function capture_and_score_external_dst_snapshot!(cfg::ExternalDstCollectorConfi
                                        repo_root = cfg.repo_root)
         append!(new_rows, rows; cols = :union)
     end
-    combined = vcat(current, new_rows; cols = :union)
-    combined = _dedupe_external_log(combined)
     obs = _fetch_observations(cfg.obs_url; http_get = http_get)
-    n_scored = score_external_dst_rows!(combined, obs; max_obs_gap_min = cfg.max_obs_gap_min,
-                                        scored_utc = fetched_utc)
-    _validate_external_dst_log(combined)
-    mkpath(dirname(cfg.log_path))
-    CSV.write(cfg.log_path, combined)
-    _write_external_dst_report(cfg.report_path, combined)
-    return (; rows_added = nrow(combined) - nrow(current),
-            rows_total = nrow(combined),
-            rows_scored_now = n_scored,
-            summary = external_dst_summary(combined))
+
+    return _with_external_dst_lock(cfg.log_path) do
+        # Re-read only after acquiring the lock: another collector may have
+        # committed rows while this process was fetching.
+        current = _load_external_log(cfg.log_path)
+        combined = _dedupe_external_log(vcat(current, new_rows; cols = :union))
+        rows_added = max(0, nrow(combined) - nrow(current))
+        _validate_external_dst_log(
+            combined; max_obs_gap_min=cfg.max_obs_gap_min,
+        )
+        before_retention = nrow(combined)
+        retained_raw_paths, raw_to_remove = _external_raw_retention_plan(
+            cfg.raw_dir, cfg.repo_root, cfg.max_raw_snapshots,
+        )
+        # Raw response retention and row retention are one policy: never retain a
+        # metadata row whose claimed raw payload has been rotated away.
+        raw_mask = [normpath(String(path)) in retained_raw_paths
+                    for path in combined.raw_path]
+        combined = combined[raw_mask, :]
+        _verify_retained_external_raw_snapshots!(combined, cfg.repo_root)
+        combined = _retain_external_rows(combined, cfg.max_log_rows)
+        rows_dropped = before_retention - nrow(combined)
+        n_scored = score_external_dst_rows!(
+            combined, obs; max_obs_gap_min=cfg.max_obs_gap_min,
+            scored_utc=fetched_utc,
+        )
+        _validate_external_dst_log(
+            combined; max_obs_gap_min=cfg.max_obs_gap_min,
+        )
+        _external_transactional_log_report!(
+            cfg.log_path, cfg.report_path, combined;
+            max_obs_gap_min=cfg.max_obs_gap_min,
+        )
+        raw_pruned = _delete_external_raw_snapshots!(raw_to_remove)
+        return (; rows_added, rows_dropped, raw_pruned,
+                rows_total=nrow(combined), rows_scored_now=n_scored,
+                summary=external_dst_summary(combined))
+    end
 end
 
 function _mock_response(body::AbstractString; last_modified::Union{Nothing, String} = nothing)

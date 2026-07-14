@@ -29,6 +29,7 @@
 #   LIVE_MONITOR_MAX_CYCLES    stop after N cycles (default 0 = run forever; testing)
 #   LIVE_MONITOR_HORIZONS      comma list of horizons (default "1,2,3,6")
 #   LIVE_MONITOR_DEADMAN_CYCLES consecutive all-failed cycles before the issuance dead-man trips
+#   LIVE_MONITOR_MAX_LOG_ROWS   maximum rows retained in the hot forecast log (default 50000)
 
 include(joinpath(@__DIR__, "live_forecast_verify.jl"))
 include(joinpath(@__DIR__, "external_dst_snapshot_collector.jl"))
@@ -63,11 +64,19 @@ const V2_CALIB = _resolve_v2_calibration()
 const INTERVAL = parse(Int, get(ENV, "LIVE_MONITOR_INTERVAL_SEC", "3600"))
 const RUN_ONCE = get(ENV, "SOLARSINDY_MONITOR_ONCE", "0") == "1" || ("--once" in ARGS)
 const MAX_CYCLES = RUN_ONCE ? 1 : parse(Int, get(ENV, "LIVE_MONITOR_MAX_CYCLES", "0"))
-const HORIZONS = parse.(Int, split(get(ENV, "LIVE_MONITOR_HORIZONS", "1,2,3,6"), ","))
+const HORIZONS = unique(parse.(Int, split(get(ENV, "LIVE_MONITOR_HORIZONS", "1,2,3,6"), ",")))
 # Consecutive all-horizon-failed cycles before the issuance dead-man trips. Uses the
 # package-level feed_deadman_tripped predicate (realtime.jl) so the escalation threshold
 # is shared and unit-tested.
 const ISSUE_DEADMAN_THRESHOLD = parse(Int, get(ENV, "LIVE_MONITOR_DEADMAN_CYCLES", string(DEFAULT_FEED_DEADMAN_THRESHOLD)))
+const MAX_LOG_ROWS = parse(Int, get(ENV, "LIVE_MONITOR_MAX_LOG_ROWS", "50000"))
+
+INTERVAL >= 1 || error("LIVE_MONITOR_INTERVAL_SEC must be at least 1")
+MAX_CYCLES >= 0 || error("LIVE_MONITOR_MAX_CYCLES must be nonnegative")
+!isempty(HORIZONS) && all(>(0), HORIZONS) ||
+    error("LIVE_MONITOR_HORIZONS must contain positive integers")
+ISSUE_DEADMAN_THRESHOLD >= 1 || error("LIVE_MONITOR_DEADMAN_CYCLES must be at least 1")
+MAX_LOG_ROWS >= 1 || error("LIVE_MONITOR_MAX_LOG_ROWS must be at least 1")
 
 # External Dst snapshot collector config pinned to the monitor directory. repo_root keeps the
 # stored raw_path column relative to the directory's parent, matching the deployed layout.
@@ -88,6 +97,7 @@ function guarded(label, f)
         f()
         return true
     catch e
+        e isa InterruptException && rethrow()
         logln("WARN ", label, " failed: ", sprint(showerror, e))
         return false
     end
@@ -98,7 +108,12 @@ end
 # path (e.g. a retired upstream feed) can no longer look healthy in the logs.
 function newest_issuance_age_hours()
     isfile(LOG) || return nothing
-    df = try CSV.read(LOG, DataFrame) catch; return nothing end
+    df = try
+        CSV.read(LOG, DataFrame)
+    catch e
+        e isa InterruptException && rethrow()
+        return nothing
+    end
     ("issue_time_utc" in names(df)) || return nothing
     latest = nothing
     for s in df.issue_time_utc
@@ -131,12 +146,37 @@ function write_outage_sentinel(first_fail::AbstractString, consecutive::Int)
         mkpath(dirname(OUTAGE_SENTINEL))
         open(OUTAGE_SENTINEL, "w") do io; write(io, body); end
     catch e
+        e isa InterruptException && rethrow()
         logln("WARN could not write outage sentinel: ", sprint(showerror, e))
     end
     return nothing
 end
 
 clear_outage_sentinel() = (isfile(OUTAGE_SENTINEL) && rm(OUTAGE_SENTINEL; force=true); nothing)
+
+# Bound the operational hot log under the same cross-process lock used by
+# issuance and verification. Retention is FIFO by append order; rebuilding the
+# sidecar clears order-dependent ACI checkpoints so the next query replays only
+# the retained authoritative rows.
+function _retain_live_forecast_log!(log_path::AbstractString, max_rows::Int)
+    max_rows >= 1 || throw(ArgumentError("max_rows must be at least 1"))
+    isfile(log_path) || return 0
+    path = String(log_path)
+    return _with_forecast_log_lock(path) do
+        _recover_append_transaction!(path)
+        _live_require_regular_target(path)
+        df = CSV.read(path, DataFrame)
+        n = nrow(df)
+        n <= max_rows && return 0
+        previous_state = _valid_live_state(path)
+        retained = df[(n - max_rows + 1):n, :]
+        _atomic_csv(path, retained)
+        _persist_live_state_after_table_write!(
+            path, previous_state, retained, Int[]; revised=true,
+        )
+        return n - max_rows
+    end
+end
 
 # Run one cycle; returns the number of horizons that issued successfully.
 function cycle!()
@@ -150,6 +190,7 @@ function cycle!()
     cfg = LiveVerifyConfig(; log_path=LOG, report_path=REPORT)
     guarded("refresh_observations", () -> refresh_observations!(cfg))
     guarded("verify_pending", () -> verify_pending!(cfg))
+    guarded("forecast_log_retention", () -> _retain_live_forecast_log!(LOG, MAX_LOG_ROWS))
     guarded("external_dst_snapshot", () -> capture_and_score_external_dst_snapshot!(EXTERNAL_DST_CFG))
     guarded("comparison_report", () -> write_live_comparison_report(cfg.log_path, cfg.report_path))
     guarded("summary", () -> begin
@@ -163,7 +204,8 @@ end
 function main()
     logln("start: dir=", MONITOR_DIR, " calibration=", V2_CALIB,
           " interval=", INTERVAL, "s horizons=", HORIZONS,
-          " max_cycles=", MAX_CYCLES, " deadman_cycles=", ISSUE_DEADMAN_THRESHOLD)
+          " max_cycles=", MAX_CYCLES, " deadman_cycles=", ISSUE_DEADMAN_THRESHOLD,
+          " max_log_rows=", MAX_LOG_ROWS)
     cycles = 0
     consecutive_failures = 0
     first_failure = ""
@@ -194,8 +236,12 @@ function main()
         else
             if consecutive_failures > 0
                 logln("issuance recovered after ", consecutive_failures, " failed cycle(s)")
-                clear_outage_sentinel()
             end
+            # Recovery may occur after the supervisor restarted this process, in
+            # which case the in-memory failure counter is zero but a sentinel from
+            # the previous process still exists. Every successful issuance clears
+            # persistent outage state.
+            clear_outage_sentinel()
             consecutive_failures = 0
             first_failure = ""
         end
@@ -207,4 +253,4 @@ function main()
     logln("stop after ", cycles, " cycle(s)")
 end
 
-main()
+abspath(PROGRAM_FILE) == abspath(@__FILE__) && main()

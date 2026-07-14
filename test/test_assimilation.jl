@@ -86,9 +86,18 @@ using Statistics
         assimilation_predict!(f, drivers)
         assimilation_update!(f, NaN)                        # no-op update
         @test dst_variance(f) > v0
+        @test_throws ArgumentError assimilation_update!(f, Inf)
     end
 
     @testset "raw stored covariance stays symmetric over a multi-coefficient path" begin
+        extreme_covariance = fill(floatmax(Float64), 2, 2)
+        SolarSINDy._symmetrize!(extreme_covariance)
+        @test all(==(floatmax(Float64)), extreme_covariance)
+        @test_throws ArgumentError SolarSINDy._symmetrize!(
+            [1.0 Inf; 0.0 1.0],
+        )
+        @test_throws DimensionMismatch SolarSINDy._symmetrize!(zeros(2, 1))
+
         # Mutation-sensitivity guard for _symmetrize!: with two adapted
         # coefficients the F·P·F' and K·row updates accumulate off-diagonal
         # asymmetry that the symmetrizer must scrub on the RAW matrix every step.
@@ -163,6 +172,12 @@ using Statistics
         # validation: wrong-length bounds and lo>hi are rejected
         @test_throws ArgumentError init_assimilation(lib, ξ0, [2], -10.0; coeff_bounds=[(-1.0, 0.0), (0.0, 1.0)])
         @test_throws ArgumentError init_assimilation(lib, ξ0, [2], -10.0; coeff_bounds=[(0.0, -1.0)])
+        @test_throws ArgumentError init_assimilation(
+            lib, ξ0, [2], -10.0; coeff_bounds=[(Inf, Inf)],
+        )
+        @test_throws ArgumentError init_assimilation(
+            lib, ξ0, [2], -10.0; coeff_bounds=[(-Inf, -Inf)],
+        )
     end
 
     @testset "input validation" begin
@@ -172,8 +187,58 @@ using Statistics
         @test_throws ArgumentError init_assimilation(lib, ξ, [9], -10.0)      # idx out of range
         @test_throws ArgumentError init_assimilation(lib, ξ, [2, 2], -10.0)   # duplicate idx
         @test_throws ArgumentError init_assimilation(lib, ξ, [2], -10.0; R=0.0)
+        @test_throws ArgumentError init_assimilation(lib, [0.0, Inf, 0.0], [2], -10.0)
+        @test_throws ArgumentError init_assimilation(lib, ξ, [2], Inf)
+        @test_throws ArgumentError init_assimilation(
+            lib, ξ, [2], big"1e400",
+        )
+        @test_throws ArgumentError init_assimilation(lib, ξ, [2], -10.0; R=Inf)
+        @test_throws ArgumentError init_assimilation(lib, ξ, [2], -10.0; q_dst=Inf)
+        @test_throws ArgumentError init_assimilation(
+            lib, BigFloat[big"1e10000", -0.1, 0.0], [2], -10.0)
+        @test_throws ArgumentError init_assimilation(lib, ξ, [2], -10.0;
+                                                     coeff_bounds=[(NaN, 1.0)])
         f = init_assimilation(lib, ξ, [2], -10.0)
         @test_throws DimensionMismatch run_assimilation(f, [(V=1.0,Bz=1.0,By=1.0,n=1.0,Pdyn=1.0)], Float64[])
+
+        # The public contract accepts arbitrary finite `Real` values, including
+        # integer-valued drivers; they must dispatch through the Float64 kernel.
+        fint = init_assimilation(lib, ξ, [2], -10.0)
+        assimilation_predict!(fint, (V=400, Bz=-5, By=0, n=5, Pdyn=2))
+        @test isfinite(current_dst(fint))
+
+        for bad in ((V=-1.0, Bz=-5.0, By=0.0, n=5.0, Pdyn=2.0),
+                    (V=400.0, Bz=-5.0, By=0.0, n=-1.0, Pdyn=2.0),
+                    (V=400.0, Bz=-5.0, By=0.0, n=5.0, Pdyn=-1.0))
+            fbad = init_assimilation(lib, ξ, [2], -10.0)
+            @test_throws ArgumentError assimilation_predict!(fbad, bad)
+        end
+
+        foverflow = init_assimilation(lib, ξ, [2], -10.0)
+        @test_throws ArgumentError assimilation_predict!(foverflow,
+            (V=big"1e10000", Bz=-5, By=0, n=5, Pdyn=2))
+
+        # The filter is public and mutable.  Every public mutation boundary must
+        # reject a damaged checkpoint before an `@inbounds` EKF loop can observe
+        # inconsistent dimensions; even a NaN no-op update validates first.
+        fbad_bounds = init_assimilation(lib, ξ, [2], -10.0)
+        empty!(fbad_bounds.bounds)
+        @test_throws DimensionMismatch assimilation_update!(fbad_bounds, NaN)
+
+        fbad_cov = init_assimilation(lib, ξ, [2], -10.0)
+        fbad_cov.cov = zeros(1, 1)
+        @test_throws DimensionMismatch assimilation_predict!(fbad_cov,
+            (V=400.0, Bz=-5.0, By=0.0, n=5.0, Pdyn=2.0))
+
+        fbad_q = init_assimilation(lib, ξ, [2], -10.0)
+        fbad_q.Q = zeros(1, 1)
+        @test_throws DimensionMismatch assimilation_predict!(fbad_q,
+            (V=NaN, Bz=-5.0, By=0.0, n=5.0, Pdyn=2.0))
+
+        fbad_mean = init_assimilation(lib, ξ, [2], -10.0;
+                                      coeff_bounds=[(-Inf, -0.01)])
+        fbad_mean.mean[2] = 0.0
+        @test_throws ArgumentError assimilation_update!(fbad_mean, -11.0)
     end
 
 end

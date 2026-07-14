@@ -1,3 +1,5 @@
+module V2GScaleReplayTests
+
 using Test
 using DataFrames
 using Dates
@@ -75,3 +77,5 @@ const GSCALE_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "..", "live_forec
         end
     end
 end
+
+end # module V2GScaleReplayTests

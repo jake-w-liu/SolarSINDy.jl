@@ -8,8 +8,10 @@
 using SolarSINDy
 using CSV, DataFrames, Dates
 
-const DATA_DIR = joinpath(@__DIR__, "..", "data")
-mkpath(DATA_DIR)
+include(joinpath(@__DIR__, "output_paths.jl"))
+include(joinpath(@__DIR__, "canonical_provenance.jl"))
+const OUTPUT_PATHS = validation_output_paths()
+const DATA_DIR = OUTPUT_PATHS.data
 
 # ============================================================
 # A1: Download OMNI2 hourly data
@@ -19,7 +21,13 @@ println("Phase A1: Download OMNI2 hourly data")
 println("=" ^ 60)
 
 raw_path = joinpath(DATA_DIR, "omni_hourly_raw.dat")
-download_omni2(raw_path)
+if !OUTPUT_PATHS.explicit
+    download_omni2(raw_path)
+else
+    isfile(OUTPUT_PATHS.omni) ||
+        error("frozen OMNI input not found: $(OUTPUT_PATHS.omni)")
+    println("Using frozen OMNI extraction: $(OUTPUT_PATHS.omni)")
+end
 
 # ============================================================
 # A2: Parse and clean
@@ -28,9 +36,12 @@ println("\n" * "=" ^ 60)
 println("Phase A2: Parse and clean OMNI2 data")
 println("=" ^ 60)
 
-extracted_path = joinpath(DATA_DIR, "omni_extracted.csv")
-extract_omni2_columns(raw_path, extracted_path)
+extracted_path = OUTPUT_PATHS.explicit ? OUTPUT_PATHS.omni :
+                 joinpath(DATA_DIR, "omni_extracted.csv")
+!OUTPUT_PATHS.explicit && extract_omni2_columns(raw_path, extracted_path)
+verify_omni_input(extracted_path; mode=OUTPUT_PATHS.mode)
 @time df = parse_omni2(extracted_path; year_start=1963, year_end=2025)
+add_original_observation_flags!(df)
 println("  DataFrame: $(nrow(df)) rows, $(ncol(df)) columns")
 println("  Date range: $(df.datetime[1]) to $(df.datetime[end])")
 
@@ -41,6 +52,38 @@ end
 
 println("\nCleaning...")
 @time clean_omni_data!(df)
+
+observation_rows = NamedTuple[]
+for col in (:V, :Bz, :By, :n, :Pdyn, :T, :Dst, :AE, :AL, :AU)
+    flag = Symbol(col, "_observed")
+    push!(observation_rows, (
+        field=String(col),
+        n_rows=nrow(df),
+        n_original_observations=count(df[!, flag]),
+        n_finite_after_cleaning=count(isfinite, df[!, col]),
+        canonical_role=col == :Pdyn ? "source_only_recomputed_from_n_and_V" :
+                       "measured_field",
+    ))
+end
+observation_provenance_path = joinpath(DATA_DIR, "observation_provenance.csv")
+observation_selection_record = (
+    kind="deterministic_original_observation_and_cleaning_audit",
+    fields=Tuple(String(row.field) for row in observation_rows),
+    original_observation_flags="recorded_before_clean_omni_data",
+    cleaning_mode="offline_centered_linear_interpolation",
+    maximum_filled_gap_hours=3,
+    filled_measured_fields=("V", "Bz", "By", "n", "T", "Dst", "AE", "AL", "AU"),
+    dynamic_pressure_policy="recomputed_proton_only_from_cleaned_n_and_V",
+    dst_star_policy="pressure_corrected_with_bounded_last_valid_or_quiet_pressure_fallback",
+    counts="whole_frozen_OMNI_parse_window_1963_through_2025",
+)
+write_manifested_csv(observation_provenance_path, DataFrame(observation_rows);
+    producer_script=@__FILE__,
+    input_paths=(omni_extracted=extracted_path,),
+    selection_record=observation_selection_record,
+    deterministic=true,
+    mode=OUTPUT_PATHS.mode,
+)
 
 println("  Dst_star range: $(round(minimum(filter(!isnan, df.Dst_star)), digits=1)) to $(round(maximum(filter(!isnan, df.Dst_star)), digits=1)) nT")
 println("  Dst_star < -50: $(count(x -> !isnan(x) && x < -50, df.Dst_star)) hours")
@@ -88,7 +131,20 @@ end
 
 # Save catalog
 catalog_path = joinpath(DATA_DIR, "storm_catalog.csv")
-save_storm_catalog(catalog, catalog_path)
+catalog_parameters = storm_catalog_parameters(
+    year_start=1963, year_end=2025, dst_thresh=-50.0,
+    window_pre=24, window_post=144, min_separation=48,
+)
+if OUTPUT_PATHS.mode in (:canonical, :test)
+    write_verified_storm_catalog(catalog, catalog_path;
+        omni_path=extracted_path,
+        producer_script=@__FILE__,
+        parameters=catalog_parameters,
+        mode=OUTPUT_PATHS.mode,
+    )
+else
+    save_storm_catalog(catalog, catalog_path)
+end
 
 # ============================================================
 # A4: Validate storm extraction

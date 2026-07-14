@@ -54,6 +54,14 @@ top layer → its own half-space impedance; a thin top layer → the impedance b
 frequency → top-layer resistivity, low frequency → bottom-layer resistivity.
 """
 function surface_impedance(w::Real, rho::AbstractVector{<:Real}, thick::AbstractVector{<:Real})
+    isfinite(w) || throw(ArgumentError("surface_impedance: frequency must be finite"))
+    isempty(rho) && throw(ArgumentError("surface_impedance: at least one layer is required"))
+    length(thick) == length(rho) - 1 ||
+        throw(ArgumentError("surface_impedance: thickness count must equal resistivity count minus one"))
+    all(r -> isfinite(r) && r > 0, rho) ||
+        throw(ArgumentError("surface_impedance: resistivities must be finite and positive"))
+    all(d -> isfinite(d) && d >= 0, thick) ||
+        throw(ArgumentError("surface_impedance: thicknesses must be finite and nonnegative"))
     w == 0 && return 0.0 + 0.0im
     N = length(rho)
     Z = sqrt(im * w * MU0 * rho[N])                  # bottom half-space impedance
@@ -79,6 +87,8 @@ ignored — it is the terminating half-space) to use a 1-D LAYERED earth instead
 """
 function geoelectric_field(Bx_nt::AbstractVector{<:Real}, By_nt::AbstractVector{<:Real},
                            dt_s::Real; rho_ohm_m::Real = 1000.0, layers = nothing)
+    isfinite(dt_s) && dt_s > 0 ||
+        throw(ArgumentError("geoelectric_field: dt_s must be finite and positive"))
     rho, thick = layers === nothing ?
         (Float64[float(rho_ohm_m)], Float64[]) :
         (Float64[float(l[1]) for l in layers],
@@ -89,8 +99,17 @@ function geoelectric_field(Bx_nt::AbstractVector{<:Real}, By_nt::AbstractVector{
     length(Bx_nt) == length(By_nt) ||
         throw(ArgumentError("geoelectric_field: Bx and By must have equal length"))
     N = length(Bx_nt)
-    bx = (Bx_nt .- mean(Bx_nt)) .* 1e-9          # nT -> T, detrended
-    by = (By_nt .- mean(By_nt)) .* 1e-9
+    N >= 1 || throw(ArgumentError("geoelectric_field: input series must not be empty"))
+    bx_values = Float64.(Bx_nt)
+    by_values = Float64.(By_nt)
+    all(isfinite, bx_values) && all(isfinite, by_values) ||
+        throw(ArgumentError("geoelectric_field: magnetic inputs must be finite"))
+    bx_mean = mean(bx_values)
+    by_mean = mean(by_values)
+    isfinite(bx_mean) && isfinite(by_mean) ||
+        throw(ArgumentError("geoelectric_field: magnetic-input mean overflowed"))
+    bx = (bx_values .- bx_mean) .* 1e-9          # nT -> T, detrended
+    by = (by_values .- by_mean) .* 1e-9
     BX = _dft(bx); BY = _dft(by)
     EX = zeros(ComplexF64, N); EY = zeros(ComplexF64, N)
     @inbounds for k in 0:N-1

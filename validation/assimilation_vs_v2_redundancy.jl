@@ -42,7 +42,7 @@ function main()
     cand = filter(e -> e.split == "test" && year(e.min_dst_time) >= 2023, catalog)
     sort!(cand, by = e -> e.min_dst); deepest = cand[1:min(6, length(cand))]
 
-    lib = build_solar_wind_library(); term_names = get_term_names(lib)
+    lib = build_solar_wind_library(include_redundant_n_v2=true); term_names = get_term_names(lib)
     coef_df = CSV.read(COEFCSV, DataFrame); ξ0 = zeros(length(lib))
     for row in eachrow(coef_df)
         idx = findfirst(==(row.term), term_names); idx !== nothing && (ξ0[idx] = row.coefficient)

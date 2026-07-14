@@ -10,9 +10,13 @@ using CSV, DataFrames
 using PlotlySupply
 using Statistics, Random, LinearAlgebra
 
-const DATA_DIR = joinpath(@__DIR__, "..", "data")
-const FIGS_DIR = joinpath(@__DIR__, "..", "figs")
-mkpath(DATA_DIR); mkpath(FIGS_DIR)
+include(joinpath(@__DIR__, "output_paths.jl"))
+const OUTPUT_PATHS = validation_output_paths()
+OUTPUT_PATHS.mode == :canonical && error(
+    "legacy synthetic repair is prohibited in canonical runs; use synthetic_equation_recovery.jl",
+)
+const DATA_DIR = OUTPUT_PATHS.data
+const FIGS_DIR = OUTPUT_PATHS.figs
 
 
 const COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7"]

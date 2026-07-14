@@ -38,13 +38,22 @@ refreshed and the display redrawn, while model time stays synchronized with wall
 clock. Between new bins the last forecast is reused for display and alarms.
 
 `history_cap` bounds the retained per-step forecast history (the monitor never
-reads it back, so it is a rolling window sized for daemon memory safety, ≈ a week
-of hourly steps by default). `max_log_bytes` triggers single-generation rotation
+reads it back, so it is a rolling window sized for daemon memory safety, about
+83 days of hourly steps by default). `max_log_bytes` triggers single-generation rotation
 of `log_file` so the append-only log cannot grow without bound; set it to `0` to
 disable rotation.
 
 Press Ctrl-C to stop.
 """
+function _refresh_dst_feed(previous, fetch::Function=fetch_swpc_dst)
+    return try
+        fetch()
+    catch error_value
+        error_value isa InterruptException && rethrow()
+        previous
+    end
+end
+
 function run_monitor(; poll_interval_min::Int=5,
                        forecast_horizon_hr::Int=6,
                        alarm_config::AlarmConfig=default_alarm_config(),
@@ -56,10 +65,18 @@ function run_monitor(; poll_interval_min::Int=5,
                        staleness_threshold_hr::Real=3.0,
                        history_cap::Int=2000,
                        max_log_bytes::Int=5_000_000)
+    poll_interval_min >= 1 || throw(ArgumentError("poll_interval_min must be at least 1"))
+    forecast_horizon_hr >= 0 ||
+        throw(ArgumentError("forecast_horizon_hr must be nonnegative"))
+    isfinite(staleness_threshold_hr) && staleness_threshold_hr > 0 ||
+        throw(ArgumentError("staleness_threshold_hr must be finite and positive"))
+    history_cap >= 0 || throw(ArgumentError("history_cap must be nonnegative"))
+    max_log_bytes >= 0 || throw(ArgumentError("max_log_bytes must be nonnegative"))
     # Observed Dst for anchoring (best-effort; monitor still runs if the feed fails)
     dst_feed = try
         fetch_swpc_dst()
     catch e
+        e isa InterruptException && rethrow()
         println("  [WARN] Dst feed unavailable; forecaster will run unanchored: $(sprint(showerror, e))")
         nothing
     end
@@ -67,42 +84,53 @@ function run_monitor(; poll_interval_min::Int=5,
     # Initial data fetch with retry
     swd, t_tags = _fetch_with_retry(; hours=48, max_retries=3, dst=dst_feed)
 
-    # Anchor the initial state on the most recent observed Dst*. If none is
-    # available the forecaster free-runs from 0.0, and we say so loudly rather
-    # than silently presenting a quiet-time state during an active storm.
-    dst0 = 0.0
-    anchored = false
-    for i in length(t_tags):-1:1
-        if !isnan(swd.Dst_star[i])
-            dst0 = swd.Dst_star[i]
-            anchored = true
-            break
-        end
+    # Warm only the newest contiguous block of measured primary drivers. Starting
+    # at the newest timestamp and then iterating old rows used to move model time
+    # backwards and let a future Dst anchor initialise earlier dynamics. A gap in
+    # V/Bz likewise cannot be compressed into one later Euler step.
+    warm_start, warm_end, anchor_idx = _monitor_warmup_window(swd, t_tags)
+    anchored = anchor_idx !== nothing
+    if anchored
+        state = init_forecast(;
+            coefficients_csv=coefficients_csv,
+            ensemble_csv=ensemble_csv,
+            t0=t_tags[anchor_idx],
+            dst0=swd.Dst_star[anchor_idx],
+        )
+        observed = swd.Dst_star[anchor_idx]
+        last_result::Union{Nothing,ForecastResult} = ForecastResult(
+            t_tags[anchor_idx], observed, observed, observed, observed, observed)
+        last_obs_time::Union{Nothing,DateTime} = t_tags[anchor_idx]
+        first_step = anchor_idx + 1
+    else
+        println("  [WARN] No observed Dst* in the contiguous driver window; initial Dst*=0 (unanchored free-run).")
+        state = init_forecast(;
+            coefficients_csv=coefficients_csv,
+            ensemble_csv=ensemble_csv,
+            t0=t_tags[warm_start],
+            dst0=0.0,
+        )
+        last_result = nothing
+        last_obs_time = nothing
+        first_step = warm_start + 1
     end
-    anchored ||
-        println("  [WARN] No observed Dst* available to anchor; initial Dst*=0 (unanchored free-run).")
 
-    state = init_forecast(;
-        coefficients_csv=coefficients_csv,
-        ensemble_csv=ensemble_csv,
-        t0=t_tags[end],
-        dst0=dst0,
-    )
-
-    # Warm up: run through recent history to initialise state
-    println("Initialising from $(length(t_tags)) hours of history...")
-    last_result::Union{Nothing,ForecastResult} = nothing
-    last_obs_time::Union{Nothing,DateTime} = nothing
-    for i in eachindex(t_tags)
-        (isnan(swd.V[i]) || isnan(swd.Bz[i])) && continue
-        V_safe = _safe_val(swd.V[i], 400.0)
-        n_safe = _safe_val(swd.n[i], 5.0)
-        Pdyn_safe = _safe_val(swd.Pdyn[i], 1.6726e-6 * n_safe * V_safe^2)
+    println("Initialising from contiguous rows $(first_step):$(warm_end)...")
+    for i in first_step:warm_end
+        # Row k is the average over [t[k], t[k+1]); it advances the state
+        # from timestamp k to timestamp k+1. Never use the target row's driver
+        # average, which belongs to the following (future) interval.
+        driver_idx = i - 1
+        V_safe = _safe_val(swd.V[driver_idx], 400.0)
+        n_safe = _safe_val(swd.n[driver_idx], 5.0)
+        Pdyn_safe = _safe_val(swd.Pdyn[driver_idx],
+                              1.6726e-6 * n_safe * V_safe^2)
         last_result = step_forecast!(state, t_tags[i],
-                       V_safe, swd.Bz[i], _safe_val(swd.By[i], 0.0),
+                       V_safe, swd.Bz[driver_idx],
+                       _safe_val(swd.By[driver_idx], 0.0),
                        n_safe, Pdyn_safe;
                        dst_observed=swd.Dst_star[i])
-        isnan(swd.Dst_star[i]) || (last_obs_time = t_tags[i])
+        isfinite(swd.Dst_star[i]) && (last_obs_time = t_tags[i])
     end
     _cap_history!(state, history_cap)
 
@@ -121,18 +149,15 @@ function run_monitor(; poll_interval_min::Int=5,
         while true
             # Fetch latest data with error handling (refresh observed Dst too)
             swd_new, t_new, t_fresh = try
-                dst_now = try
-                    fetch_swpc_dst()
-                catch
-                    dst_feed
-                end
+                dst_feed = _refresh_dst_feed(dst_feed)
                 # 6 h trailing window: wide enough to contain at least one
                 # published Kyoto Dst hour (the feed lags ~1-3 h) so re-anchoring
                 # has an observation to lock onto.
-                data = fetch_realtime_solar_wind(; hours=6, dst=dst_now)
+                data = fetch_realtime_solar_wind(; hours=6, dst=dst_feed)
                 consecutive_failures = 0
                 data
             catch e
+                e isa InterruptException && rethrow()
                 consecutive_failures += 1
                 if display
                     println("  [WARN] Data fetch failed (attempt $consecutive_failures): $(sprint(showerror, e))")
@@ -145,7 +170,7 @@ function run_monitor(; poll_interval_min::Int=5,
             end
 
             # Guard: need at least 1 valid data point
-            if isempty(t_new) || all(isnan, swd_new.V)
+            if isempty(t_new) || all(x -> !isfinite(x), swd_new.V)
                 sleep(poll_interval_min * 60)
                 continue
             end
@@ -197,16 +222,18 @@ function run_monitor(; poll_interval_min::Int=5,
                 # Re-anchor the forecaster to the most recent observed Dst* before
                 # projecting forward, so the displayed state tracks observations
                 # rather than drifting on a free-run.
-                obs_idx = findlast(i -> !isnan(swd_new.Dst_star[i]),
-                                   eachindex(swd_new.Dst_star))
+                obs_idx = findlast(i -> isfinite(swd_new.Dst_star[i]),
+                                   1:latest_idx)
                 if obs_idx !== nothing
-                    state.dst_current = swd_new.Dst_star[obs_idx]
                     last_obs_time = t_new[obs_idx]
                 end
 
-                # Step forecast
-                result = step_forecast!(state, t_new[latest_idx],
-                                        V, Bz, By, n_val, Pdyn)
+                # A published Dst anchor commonly lags the newest driver bin by
+                # several hours. Replay each intervening bin; taking one step and
+                # labeling it at the newest timestamp would compress multi-hour
+                # dynamics into a single Euler update.
+                result = _replay_monitor_from_anchor!(state, swd_new, t_new,
+                                                      obs_idx, latest_idx)
                 _cap_history!(state, history_cap)
 
                 # Multi-hour forecast (persistence assumption)
@@ -247,8 +274,11 @@ function run_monitor(; poll_interval_min::Int=5,
                                 ",", round(result.dst_ci_05, digits=1),
                                 ",", round(result.dst_ci_95, digits=1))
                     end
-                catch
-                    # Non-critical — don't crash on log write failure
+                catch e
+                    e isa InterruptException && rethrow()
+                    # Forecasting continues, but persistence failure is an
+                    # operational health fault and must remain visible.
+                    @warn "Monitor log persistence failed" log_file exception=(e, catch_backtrace()) maxlog=1
                 end
             else
                 # No new hourly bin: reuse the last forecast rather than re-integrating.
@@ -287,6 +317,102 @@ Return x if finite, otherwise default.
 _safe_val(x::Float64, default::Float64) = (isnan(x) || isinf(x)) ? default : x
 
 """
+    _monitor_warmup_window(swd, times)
+
+Return `(start_idx, end_idx, anchor_idx)` for the newest strictly hourly,
+contiguous block whose speed and Bz are finite. `anchor_idx` is the first finite
+Dst* observation in that block, ensuring warm-up never starts from a future
+observation. Throws when no primary-driver row is usable.
+"""
+function _monitor_warmup_window(swd::SolarWindData,
+                                times::AbstractVector{DateTime})
+    n = length(times)
+    n >= 1 || throw(ArgumentError("monitor warm-up requires at least one timestamp"))
+    all(length(v) == n for v in
+        (swd.t, swd.V, swd.Bz, swd.By, swd.n, swd.Pdyn, swd.Dst, swd.Dst_star)) ||
+        throw(DimensionMismatch("driver times and SolarWindData fields must align"))
+    latest = _latest_finite_VBz_idx(swd.V, swd.Bz)
+    latest === nothing && throw(ArgumentError("monitor warm-up has no finite V/Bz row"))
+    start = latest
+    while start > 1 && isfinite(swd.V[start - 1]) && isfinite(swd.Bz[start - 1]) &&
+          times[start] - times[start - 1] == Hour(1)
+        start -= 1
+    end
+    anchor = findfirst(i -> isfinite(swd.Dst_star[i]), start:latest)
+    anchor_idx = anchor === nothing ? nothing : start + anchor - 1
+    return start, latest, anchor_idx
+end
+
+"""
+    _replay_monitor_from_anchor!(state, swd, times, obs_idx, latest_idx)
+
+Anchor `state` at `obs_idx` when available, then advance through every hourly
+target timestamp up to `latest_idx`. A row timestamp labels the start of its
+hourly driver-average interval, so the transition to target row `j` uses driver
+row `j-1`. This prevents both delayed-anchor compression and future-driver
+leakage.
+"""
+function _replay_monitor_from_anchor!(state::ForecastState, swd::SolarWindData,
+                                      times::AbstractVector{DateTime},
+                                      obs_idx::Union{Nothing,Int}, latest_idx::Int)
+    n = length(times)
+    1 <= latest_idx <= n || throw(BoundsError(times, latest_idx))
+    all(length(v) == n for v in
+        (swd.t, swd.V, swd.Bz, swd.By, swd.n, swd.Pdyn, swd.Dst, swd.Dst_star)) ||
+        throw(DimensionMismatch("driver times and SolarWindData fields must align"))
+    all(i -> times[i + 1] - times[i] == Hour(1), 1:(n - 1)) ||
+        throw(ArgumentError("monitor driver times must be strictly hourly and contiguous"))
+    if obs_idx !== nothing
+        1 <= obs_idx <= latest_idx ||
+            throw(ArgumentError("observation index must not follow the latest driver index"))
+        isfinite(swd.Dst_star[obs_idx]) ||
+            throw(ArgumentError("observation anchor must be finite"))
+        state.dst_current = swd.Dst_star[obs_idx]
+        state.t_current = times[obs_idx]
+    end
+
+    # Replay every driver bin strictly after the state/anchor time. In the
+    # unanchored case this also catches multiple bins missed during a polling or
+    # network outage; taking only the newest row would compress the whole gap to
+    # one Euler step.
+    replay_start = findfirst(j -> times[j] > state.t_current, 1:latest_idx)
+    if replay_start === nothing
+        # The newest Dst observation can coincide with the newest driver bin.
+        # There is then no elapsed model interval to integrate: expose the
+        # observed current state and forecast future horizons from that anchor,
+        # rather than applying a one-hour step at the same timestamp.
+        state.t_current == times[latest_idx] ||
+            throw(ArgumentError("no driver bin follows the current forecast state"))
+        current = state.dst_current
+        observed = obs_idx === latest_idx ? current : NaN
+        result = ForecastResult(times[latest_idx], current, current,
+                                current, current, observed)
+        push!(state.history, result)
+        return result
+    end
+    replay_start >= 2 && times[replay_start - 1] == state.t_current ||
+        throw(ArgumentError(
+            "cannot bridge forecast state to the first available target without its preceding driver bin"
+        ))
+    result = nothing
+    for j in replay_start:latest_idx
+        driver_idx = j - 1
+        isfinite(swd.V[driver_idx]) && isfinite(swd.Bz[driver_idx]) ||
+            throw(ArgumentError(
+                "cannot bridge Dst anchor across non-finite primary drivers at $(times[driver_idx])"
+            ))
+        Vj = _safe_val(swd.V[driver_idx], 400.0)
+        Bzj = swd.Bz[driver_idx]
+        Byj = _safe_val(swd.By[driver_idx], 0.0)
+        nj = _safe_val(swd.n[driver_idx], 5.0)
+        Pj = _safe_val(swd.Pdyn[driver_idx], dynamic_pressure(nj, Vj))
+        result = step_forecast!(state, times[j], Vj, Bzj, Byj, nj, Pj)
+    end
+    result === nothing && error("monitor failed to produce a forecast step")
+    return result
+end
+
+"""
     _cap_history!(state, cap)
 
 Bound `state.history` to at most `cap` entries by dropping the oldest, matching the
@@ -296,9 +422,8 @@ long-running daemon. A non-positive `cap` disables trimming.
 """
 function _cap_history!(state::ForecastState, cap::Int)
     cap > 0 || return state
-    while length(state.history) > cap
-        popfirst!(state.history)
-    end
+    excess = length(state.history) - cap
+    excess > 0 && deleteat!(state.history, 1:excess)
     return state
 end
 
@@ -312,7 +437,7 @@ non-positive `max_bytes` disables rotation.
 """
 function _rotate_log!(path::String, max_bytes::Int)
     (max_bytes > 0 && isfile(path) && filesize(path) > max_bytes) || return nothing
-    mv(path, path * ".1"; force=true)
+    _atomic_replace_regular(path, path * ".1")
     return nothing
 end
 
@@ -325,7 +450,9 @@ matches the warm-up policy (which skips NaN-Bz hours): a bin with finite V but
 NaN Bz would otherwise force Bz=0 and suppress a southward-driving storm alarm.
 """
 function _latest_finite_VBz_idx(V::AbstractVector, Bz::AbstractVector)
-    return findlast(i -> !isnan(V[i]) && !isnan(Bz[i]), eachindex(V))
+    length(V) == length(Bz) ||
+        throw(DimensionMismatch("V and Bz must have equal length"))
+    return findlast(i -> isfinite(V[i]) && isfinite(Bz[i]), eachindex(V))
 end
 
 """
@@ -339,6 +466,7 @@ function _fetch_with_retry(; hours::Int, max_retries::Int=3, delay_sec::Int=10,
         try
             return fetch_realtime_solar_wind(; hours=hours, dst=dst)
         catch e
+            e isa InterruptException && rethrow()
             if attempt == max_retries
                 error("Failed to fetch solar wind data after $max_retries attempts: $(sprint(showerror, e))")
             end

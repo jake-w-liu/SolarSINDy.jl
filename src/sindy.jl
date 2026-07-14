@@ -1,5 +1,39 @@
 # SINDy algorithm: Sequential Thresholded Least Squares (STLSQ)
 
+# Unit-normalize design columns without silently zeroing a finite column whose
+# Euclidean norm exceeds the floating-point range. Ordinary columns retain the
+# previous `column / norm(column)` evaluation exactly. Overflowing norms use a
+# max-abs scale followed by the norm of the scaled column; the two divisors stay
+# separate so their product never has to be representable.
+function _normalize_sindy_columns(Θ::AbstractMatrix)
+    p = size(Θ, 2)
+    divisors = [norm(@view Θ[:, j]) for j in 1:p]
+    secondary_divisors = similar(divisors)
+    fill!(secondary_divisors, one(eltype(secondary_divisors)))
+    divisors[divisors .== 0] .= one(eltype(divisors))
+    Θn = Θ ./ divisors'
+
+    for j in 1:p
+        isfinite(divisors[j]) && continue
+        scale = maximum(abs, @view Θ[:, j])
+        isfinite(scale) && scale > 0 || throw(ArgumentError(
+            "SINDy column $j cannot be normalized within the supported range",
+        ))
+        scaled = Θ[:, j] ./ scale
+        shape_norm = norm(scaled)
+        isfinite(shape_norm) && shape_norm > 0 || throw(ArgumentError(
+            "SINDy column $j scaled norm is invalid",
+        ))
+        Θn[:, j] = scaled ./ shape_norm
+        divisors[j] = scale
+        secondary_divisors[j] = shape_norm
+    end
+    all(isfinite, Θn) || throw(ArgumentError(
+        "normalized SINDy design contains a non-finite value",
+    ))
+    return Θn, divisors, secondary_divisors
+end
+
 """
     stlsq(Θ, dx; λ=0.1, max_iter=25, normalize=true)
 
@@ -27,20 +61,27 @@ Returns coefficient vector ξ (in physical units).
 function stlsq(Θ::AbstractMatrix, dx::AbstractVector;
                 λ::Real=0.1, max_iter::Int=25, normalize::Bool=true)
     n, p = size(Θ)
-    @assert length(dx) == n "Dimension mismatch: Θ has $n rows, dx has $(length(dx))"
+    length(dx) == n ||
+        throw(DimensionMismatch("Θ has $n rows, dx has $(length(dx)) entries"))
+    n > 0 && p > 0 || throw(ArgumentError("Θ must be nonempty, got size $(size(Θ))"))
+    isfinite(λ) && λ >= 0 ||
+        throw(ArgumentError("λ must be finite and nonnegative, got $λ"))
+    max_iter >= 1 || throw(ArgumentError("max_iter must be at least 1, got $max_iter"))
+    all(isfinite, Θ) || throw(ArgumentError("Θ must contain only finite values"))
+    all(isfinite, dx) || throw(ArgumentError("dx must contain only finite values"))
 
     # Optional column normalization for better conditioning
     if normalize
-        col_norms = [norm(Θ[:, j]) for j in 1:p]
-        col_norms[col_norms .== 0] .= 1.0
-        Θn = Θ ./ col_norms'
+        Θn, col_norms, col_norm_shapes = _normalize_sindy_columns(Θ)
     else
         Θn = Θ
         col_norms = ones(p)
+        col_norm_shapes = ones(p)
     end
 
     # Initial least squares
     ξ = Θn \ dx
+    all(isfinite, ξ) || throw(ArgumentError("initial least-squares solve was non-finite"))
 
     for iter in 1:max_iter
         # Threshold small coefficients. NOTE: each (normalized) coefficient is
@@ -59,8 +100,11 @@ function stlsq(Θ::AbstractMatrix, dx::AbstractVector;
         end
 
         # Re-solve on active terms only
-        ξ_new = zeros(p)
+        ξ_new = similar(ξ, p)
+        fill!(ξ_new, zero(eltype(ξ_new)))
         ξ_new[active] = Θn[:, active] \ dx
+        all(isfinite, ξ_new) ||
+            throw(ArgumentError("active-set least-squares solve was non-finite"))
 
         # Check convergence
         if norm(ξ_new - ξ) / max(norm(ξ), 1e-10) < 1e-8
@@ -88,14 +132,26 @@ function stlsq(Θ::AbstractMatrix, dx::AbstractVector;
         ξ[below] .= 0.0
         active_final = findall(!=(0.0), ξ)
         isempty(active_final) && break
-        ξ_new = zeros(p)
+        ξ_new = similar(ξ, p)
+        fill!(ξ_new, zero(eltype(ξ_new)))
         ξ_new[active_final] = Θn[:, active_final] \ dx
+        all(isfinite, ξ_new) ||
+            throw(ArgumentError("final active-set least-squares solve was non-finite"))
         ξ = ξ_new
     end
 
     # Undo normalization
     if normalize
-        ξ ./= col_norms
+        for j in eachindex(ξ)
+            normalized_coefficient = ξ[j]
+            ξ[j] = (normalized_coefficient / col_norms[j]) / col_norm_shapes[j]
+            iszero(ξ[j]) && !iszero(normalized_coefficient) && throw(ArgumentError(
+                "physical SINDy coefficient underflowed the supported range",
+            ))
+        end
+        all(isfinite, ξ) || throw(ArgumentError(
+            "physical SINDy coefficients exceed the supported range",
+        ))
     end
 
     return ξ
@@ -161,15 +217,34 @@ function collinearity_diagnostics(Θ::AbstractMatrix, ξ::AbstractVector;
                                   groups::Union{Nothing,AbstractVector}=nothing,
                                   cond_warn::Real=100.0)
     n, p = size(Θ)
+    n >= 1 && p >= 1 ||
+        throw(ArgumentError("collinearity diagnostics require a nonempty design matrix"))
     length(ξ) == p ||
         throw(DimensionMismatch("ξ length $(length(ξ)) != $(p) library columns"))
+    all(isfinite, Θ) || throw(ArgumentError("design matrix must be finite"))
+    all(isfinite, ξ) || throw(ArgumentError("coefficients must be finite"))
+    isfinite(cond_warn) && cond_warn > 0 ||
+        throw(ArgumentError("cond_warn must be finite and positive"))
+    if groups !== nothing
+        for group in groups
+            idx = collect(Int, group)
+            all(i -> 1 <= i <= p, idx) ||
+                throw(ArgumentError("collinearity group index out of range"))
+            length(unique(idx)) == length(idx) ||
+                throw(ArgumentError("collinearity groups must not repeat an index"))
+        end
+    end
 
     _block_cond(idx) = begin
         isempty(idx) && return 1.0
+        # `svdvals` returns only min(n, p) singular values. For a wide block it
+        # can therefore look perfectly conditioned even though its columns are
+        # necessarily linearly dependent and individual coefficients are not
+        # identifiable.
+        length(idx) > n && return Inf
         B = Θ[:, idx]
-        norms = [norm(@view B[:, j]) for j in 1:size(B, 2)]
-        norms[norms .== 0] .= 1.0
-        s = svdvals(B ./ norms')
+        normalized, _, _ = _normalize_sindy_columns(B)
+        s = svdvals(normalized)
         smin = minimum(s)
         smin == 0 ? Inf : maximum(s) / smin
     end
@@ -246,7 +321,20 @@ function ensemble_sindy(data::Dict{String,Vector{Float64}},
     rng = MersenneTwister(seed)
     Θ = evaluate_library(lib, data)
     n, p = size(Θ)
-    n_sub = round(Int, n * subsample_frac)
+    length(target) == n ||
+        throw(DimensionMismatch("target length $(length(target)) != $n data rows"))
+    all(isfinite, target) || throw(ArgumentError("target must contain only finite values"))
+    n_models >= 1 || throw(ArgumentError("n_models must be at least 1, got $n_models"))
+    isfinite(λ) && λ >= 0 || throw(ArgumentError("λ must be finite and nonnegative, got $λ"))
+    seed >= 0 || throw(ArgumentError("seed must be nonnegative, got $seed"))
+    if bootstrap
+        n_sub = n
+    else
+        isfinite(subsample_frac) && 0 < subsample_frac <= 1 ||
+            throw(ArgumentError("subsample_frac must lie in (0, 1], got $subsample_frac"))
+        n_sub = round(Int, n * subsample_frac)
+        n_sub >= 1 || throw(ArgumentError("subsample_frac selects zero rows"))
+    end
 
     all_ξ = zeros(p, n_models)
     for m in 1:n_models
@@ -279,8 +367,15 @@ Predict dDst/dt using discovered coefficients ξ and library.
 """
 function sindy_predict(ξ::AbstractVector, lib::CandidateLibrary,
                        data::Dict{String,Vector{Float64}})
+    length(ξ) == length(lib) ||
+        throw(DimensionMismatch("ξ length $(length(ξ)) != library length $(length(lib))"))
+    all(isfinite, ξ) || throw(ArgumentError("ξ must contain only finite values"))
     Θ = evaluate_library(lib, data)
-    return Θ * ξ
+    prediction = Θ * ξ
+    all(isfinite, prediction) || throw(ArgumentError(
+        "SINDy prediction exceeded the supported numeric range",
+    ))
+    return prediction
 end
 
 """
@@ -305,33 +400,56 @@ Returns Dst* time series (Vector{Float64}).
 function simulate_sindy(ξ::AbstractVector, lib::CandidateLibrary,
                         swd::SolarWindData, dt::Real;
                         Dst0::Real=swd.Dst_star[1])
+    _validate_candidate_library(lib)
     n_pts = length(swd.t)
+    n_pts >= 1 || throw(ArgumentError("simulate_sindy requires at least one sample"))
+    all(length(v) == n_pts for v in
+        (swd.V, swd.Bz, swd.By, swd.n, swd.Pdyn, swd.Dst, swd.Dst_star)) ||
+        throw(DimensionMismatch("SolarWindData fields must have equal length"))
+    length(ξ) == length(lib) ||
+        throw(DimensionMismatch("ξ length $(length(ξ)) != library length $(length(lib))"))
+    all(isfinite, ξ) || throw(ArgumentError("ξ must contain only finite values"))
+    isfinite(dt) && dt > 0 || throw(ArgumentError("dt must be finite and positive, got $dt"))
+    isfinite(Dst0) || throw(ArgumentError("Dst0 must be finite, got $Dst0"))
+    ξ_float = Float64.(ξ)
+    all(isfinite, ξ_float) || throw(ArgumentError(
+        "ξ values must be representable as finite Float64 values",
+    ))
+    dt_float = Float64(dt)
+    isfinite(dt_float) || throw(ArgumentError(
+        "dt must be representable as a finite Float64 value",
+    ))
+    Dst0_float = Float64(Dst0)
+    isfinite(Dst0_float) || throw(ArgumentError(
+        "Dst0 must be representable as a finite Float64 value",
+    ))
+    all(isfinite, swd.t) || throw(ArgumentError("SolarWindData times must be finite"))
+    all(v -> all(isfinite, v), (swd.V, swd.Bz, swd.By, swd.n, swd.Pdyn)) ||
+        throw(ArgumentError("SolarWindData drivers must contain only finite values"))
+    all(>=(0.0), swd.V) && all(>=(0.0), swd.n) && all(>=(0.0), swd.Pdyn) ||
+        throw(ArgumentError("speed, density, and dynamic pressure must be nonnegative"))
     Dst_pred = zeros(n_pts)
-    Dst_pred[1] = Dst0
+    Dst_pred[1] = Dst0_float
+    θ = Vector{Float64}(undef, length(lib))
 
     for k in 1:(n_pts - 1)
-        Bs_k = max(-swd.Bz[k], 0.0)
-        theta_c_k = atan(abs(swd.By[k]), swd.Bz[k])
-        BT_k = sqrt(swd.By[k]^2 + swd.Bz[k]^2)
-
-        point_data = Dict{String,Vector{Float64}}(
-            "V"        => [swd.V[k]],
-            "Bs"       => [Bs_k],
-            "n"        => [swd.n[k]],
-            "Pdyn"     => [swd.Pdyn[k]],
-            "Dst_star" => [Dst_pred[k]],
-            "theta_c"  => [theta_c_k],
-            "BT"       => [BT_k],
-            "By"       => [swd.By[k]],
-            "Bz"       => [swd.Bz[k]]
-        )
-
-        Θ_k = evaluate_library(lib, point_data)  # 1 × n_terms
-        dDst = (Θ_k * ξ)[1]
+        _evaluate_point_vector_unchecked!(θ, lib, Dst_pred[k], Float64(swd.V[k]),
+                                          Float64(swd.Bz[k]), Float64(swd.By[k]),
+                                          Float64(swd.n[k]), Float64(swd.Pdyn[k]))
+        dDst = dot(θ, ξ_float)
+        isfinite(dDst) || throw(ArgumentError("SINDy derivative became non-finite at sample $k"))
 
         # Clamp to prevent numerical blow-up (same bounds as baseline models)
         dDst = clamp(dDst, -200.0, 200.0)
-        Dst_pred[k+1] = clamp(Dst_pred[k] + dt * dDst, -2000.0, 50.0)
+        increment = dt_float * dDst
+        isfinite(increment) || throw(ArgumentError(
+            "SINDy integration increment became non-finite at sample $k",
+        ))
+        next_state = Dst_pred[k] + increment
+        isfinite(next_state) || throw(ArgumentError(
+            "SINDy state became non-finite at sample $(k + 1)",
+        ))
+        Dst_pred[k+1] = clamp(next_state, -2000.0, 50.0)
     end
 
     return Dst_pred
@@ -345,14 +463,21 @@ Useful for Pareto front of parsimony vs. accuracy.
 """
 function sweep_lambda(Θ::AbstractMatrix, dx::AbstractVector,
                       lambdas::AbstractVector; normalize::Bool=true)
-    results = Vector{NamedTuple{(:λ, :n_terms, :rmse, :ξ),
-                                 Tuple{Float64, Int, Float64, Vector{Float64}}}}()
-    for λ in lambdas
+    isempty(lambdas) && throw(ArgumentError("lambda sweep must not be empty"))
+    all(λ -> isfinite(λ) && λ >= 0, lambdas) ||
+        throw(ArgumentError("lambda sweep values must be finite and nonnegative"))
+    return map(lambdas) do λ
         ξ = stlsq(Θ, dx; λ=λ, normalize=normalize)
         n_terms = count(abs.(ξ) .> 0)
         pred = Θ * ξ
-        err = sqrt(mean((pred .- dx).^2))
-        push!(results, (λ=λ, n_terms=n_terms, rmse=err, ξ=ξ))
+        all(isfinite, pred) || throw(ArgumentError(
+            "lambda-sweep prediction exceeded the supported range",
+        ))
+        differences = pred .- dx
+        all(isfinite, differences) || throw(ArgumentError(
+            "lambda-sweep residual exceeded the supported range",
+        ))
+        err = _stable_root_mean_square(differences)
+        (λ=λ, n_terms=n_terms, rmse=err, ξ=ξ)
     end
-    return results
 end

@@ -14,6 +14,21 @@ struct ForecastResult
     dst_observed::Float64        # observed Dst* (NaN if unavailable) [nT]
 end
 
+function _forecast_step_period(dt::Real)
+    isfinite(dt) && dt > 0 ||
+        throw(ArgumentError("forecast state dt must be finite and positive"))
+    milliseconds_float = Float64(dt) * 3_600_000.0
+    isfinite(milliseconds_float) && milliseconds_float <= typemax(Int) ||
+        throw(ArgumentError("forecast state dt is outside the DateTime range"))
+    milliseconds = round(Int, milliseconds_float)
+    milliseconds >= 1 ||
+        throw(ArgumentError("forecast state dt must be at least one millisecond"))
+    tolerance = 8eps(max(1.0, abs(milliseconds_float)))
+    isapprox(milliseconds_float, milliseconds; rtol=0.0, atol=tolerance) ||
+        throw(ArgumentError("forecast state dt must be representable to millisecond precision"))
+    return Millisecond(milliseconds)
+end
+
 """
     ForecastState
 
@@ -27,7 +42,29 @@ mutable struct ForecastState
     ξ_ensemble::Matrix{Float64}  # n_ensemble × n_terms
     dt::Float64
     history::Vector{ForecastResult}
+    function ForecastState(t_current::DateTime, dst_current::Float64,
+                           lib::CandidateLibrary, ξ_primary::Vector{Float64},
+                           ξ_ensemble::Matrix{Float64}, dt::Float64,
+                           history::Vector{ForecastResult})
+        isfinite(dst_current) || throw(ArgumentError("forecast state Dst* must be finite"))
+        _forecast_step_period(dt)
+        length(ξ_primary) == length(lib) ||
+            throw(DimensionMismatch("primary coefficient count does not match library"))
+        size(ξ_ensemble, 2) == length(lib) ||
+            throw(DimensionMismatch("ensemble coefficient count does not match library"))
+        size(ξ_ensemble, 1) >= 1 ||
+            throw(ArgumentError("forecast state requires at least one ensemble member"))
+        all(isfinite, ξ_primary) || throw(ArgumentError("primary coefficients must be finite"))
+        all(isfinite, ξ_ensemble) || throw(ArgumentError("ensemble coefficients must be finite"))
+        return new(t_current, dst_current, lib, ξ_primary, ξ_ensemble, dt, history)
+    end
 end
+
+ForecastState(t_current::DateTime, dst_current::Real, lib::CandidateLibrary,
+              ξ_primary::AbstractVector{<:Real}, ξ_ensemble::AbstractMatrix{<:Real},
+              dt::Real, history::Vector{ForecastResult}=ForecastResult[]) =
+    ForecastState(t_current, Float64(dst_current), lib, collect(Float64, ξ_primary),
+                  Matrix{Float64}(ξ_ensemble), Float64(dt), history)
 
 """
     OperationalV2Calibration
@@ -81,6 +118,8 @@ struct OperationalV2Calibration
                                       selected_component::Symbol=:v2,
                                       guard_margin_nt::Real=0.0)
         n = length(feature_names)
+        length(Set(feature_names)) == length(feature_names) ||
+            throw(ArgumentError("feature_names must not contain duplicates"))
         length(feature_mean) == n ||
             throw(DimensionMismatch("feature_mean length $(length(feature_mean)) != $n"))
         length(feature_scale) == n ||
@@ -95,6 +134,8 @@ struct OperationalV2Calibration
             throw(ArgumentError("interval_scale must be positive and finite"))
         n_selector = length(selector_names)
         n_selector > 0 || throw(ArgumentError("at least one selector component is required"))
+        length(Set(selector_names)) == n_selector ||
+            throw(ArgumentError("selector_names must not contain duplicates"))
         length(selector_rmse) == n_selector ||
             throw(DimensionMismatch("selector_rmse length $(length(selector_rmse)) != $n_selector"))
         length(selector_mae) == n_selector ||
@@ -128,7 +169,23 @@ struct OperationalV2Calibration
         all(>=(0.0), weights) || throw(ArgumentError("selector weights must be nonnegative"))
         weight_sum = sum(weights)
         weight_sum > 0 || throw(ArgumentError("selector weights must have positive sum"))
-        weights ./= weight_sum
+        if isfinite(weight_sum)
+            weights ./= weight_sum
+        else
+            weight_scale = maximum(weights)
+            isfinite(weight_scale) && weight_scale > 0 || throw(ArgumentError(
+                "selector weights cannot be normalized within the supported range",
+            ))
+            weights ./= weight_scale
+            scaled_sum = sum(weights)
+            isfinite(scaled_sum) && scaled_sum > 0 || throw(ArgumentError(
+                "selector weights cannot be normalized within the supported range",
+            ))
+            weights ./= scaled_sum
+        end
+        all(isfinite, weights) && sum(weights) > 0 || throw(ArgumentError(
+            "normalized selector weights must be finite with positive sum",
+        ))
         isfinite(Float64(guard_margin_nt)) && Float64(guard_margin_nt) >= 0 ||
             throw(ArgumentError("guard_margin_nt must be finite and nonnegative"))
         return new(feature_names, feature_mean, feature_scale, coefficients,
@@ -573,8 +630,11 @@ function _candidate_selector_stats(clean::DataFrame, corrected::Vector{Float64},
     half_widths = Float64[]
     for p in preds
         residuals = obs .- p
-        push!(rmse_vals, sqrt(mean(residuals .^ 2)))
-        push!(mae_vals, mean(abs.(residuals)))
+        all(isfinite, residuals) || throw(ArgumentError(
+            "selector residuals exceed the supported range",
+        ))
+        push!(rmse_vals, rmse(p, obs))
+        push!(mae_vals, mae(p, obs))
         push!(half_widths, _quantile_sorted(abs.(collect(residuals)), interval_coverage))
     end
 
@@ -598,33 +658,19 @@ function _component_value(baselines, component::Symbol)
     baselines === nothing && throw(ArgumentError(
         "v2 selector component $component requires baseline predictions"
     ))
-    if baselines isa NamedTuple
+    value = if baselines isa NamedTuple
         haskey(baselines, component) || throw(ArgumentError(
             "missing v2 selector baseline: $component"
         ))
-        return Float64(getfield(baselines, component))
+        getfield(baselines, component)
+    else
+        haskey(baselines, component) || throw(ArgumentError(
+            "missing v2 selector baseline: $component"
+        ))
+        baselines[component]
     end
-    haskey(baselines, component) || throw(ArgumentError(
-        "missing v2 selector baseline: $component"
-    ))
-    return Float64(baselines[component])
-end
-
-function _component_predictions(cal::OperationalV2Calibration,
-                                corrected_center::Float64,
-                                original_center::Float64,
-                                baselines)
-    values = Float64[]
-    for component in cal.selector_names
-        if component == :v2
-            push!(values, corrected_center)
-        elseif component == :sindy_v1
-            push!(values, original_center)
-        else
-            push!(values, _component_value(baselines, component))
-        end
-    end
-    return values
+    ismissing(value) && throw(ArgumentError("v2 selector baseline $component is missing"))
+    return Float64(value)
 end
 
 function _selected_component_prediction(component::Symbol, corrected_center::Float64,
@@ -634,8 +680,21 @@ function _selected_component_prediction(component::Symbol, corrected_center::Flo
     component == :v2 && return corrected_center
     component == :sindy_v1 && return original_center
     if component == :ensemble
-        values = _component_predictions(cal, corrected_center, original_center, baselines)
-        return sum(cal.selector_weights .* values)
+        prediction = 0.0
+        for (name, weight) in zip(cal.selector_names, cal.selector_weights)
+            iszero(weight) && continue
+            value = if name == :v2
+                corrected_center
+            elseif name == :sindy_v1
+                original_center
+            else
+                _component_value(baselines, name)
+            end
+            isfinite(value) ||
+                throw(ArgumentError("positive-weight v2 selector component $name is not finite"))
+            prediction += weight * value
+        end
+        return prediction
     end
     value = _component_value(baselines, component)
     isfinite(value) || throw(ArgumentError("v2 selector baseline $component is not finite"))
@@ -683,6 +742,8 @@ function fit_operational_v2_calibration(df::DataFrame;
         throw(ArgumentError("interval_coverage must lie in (0, 1)"))
     isfinite(Float64(guard_margin_nt)) && Float64(guard_margin_nt) >= 0 ||
         throw(ArgumentError("guard_margin_nt must be finite and nonnegative"))
+    length(Set(feature_names)) == length(feature_names) ||
+        throw(ArgumentError("feature_names must not contain duplicates"))
     required = vcat(
         [:pred_dst_nt, :observation_dst_nt, :pred_dst_ci05_nt, :pred_dst_ci95_nt],
         feature_names,
@@ -693,9 +754,9 @@ function fit_operational_v2_calibration(df::DataFrame;
     nrow(clean) > length(feature_names) + 1 ||
         throw(ArgumentError("not enough finite rows to fit V2 calibration"))
 
-    μ = [mean(Float64.(clean[!, c])) for c in feature_names]
-    σ = [std(Float64.(clean[!, c])) for c in feature_names]
-    σ = [s == 0.0 ? 1.0 : s for s in σ]
+    μ = Float64[mean(Float64.(clean[!, c])) for c in feature_names]
+    σ = Float64[std(Float64.(clean[!, c])) for c in feature_names]
+    σ = Float64[s == 0.0 ? 1.0 : s for s in σ]
     x = _standardized_design(clean, feature_names, μ, σ)
     y = Float64.(clean.observation_dst_nt) .- Float64.(clean.pred_dst_nt)
     λ = Float64(ridge)
@@ -743,8 +804,22 @@ function operational_v2_correction(cal::OperationalV2Calibration,
         haskey(features, name) ||
             throw(ArgumentError("missing v2 feature: $(String(name))"))
         value = Float64(getfield(features, name))
-        correction += cal.coefficients[j + 1] *
-                      ((value - cal.feature_mean[j]) / cal.feature_scale[j])
+        isfinite(value) || throw(ArgumentError(
+            "v2 feature $(String(name)) must be finite and representable as Float64",
+        ))
+        centered = value - cal.feature_mean[j]
+        isfinite(centered) || throw(ArgumentError(
+            "v2 feature $(String(name)) centered value exceeds Float64 range",
+        ))
+        contribution = cal.coefficients[j + 1] *
+                       (centered / cal.feature_scale[j])
+        isfinite(contribution) || throw(ArgumentError(
+            "v2 feature $(String(name)) contribution became non-finite",
+        ))
+        correction += contribution
+        isfinite(correction) || throw(ArgumentError(
+            "v2 correction became non-finite",
+        ))
     end
     return correction
 end
@@ -763,34 +838,60 @@ function operational_v2_predict(cal::OperationalV2Calibration,
                                 ci95::Real,
                                 features::NamedTuple;
                                 baselines=nothing)
+    pred64 = Float64(pred_dst)
+    lower64 = Float64(ci05)
+    upper64 = Float64(ci95)
+    all(isfinite, (pred64, lower64, upper64)) || throw(ArgumentError(
+        "v2 point and interval inputs must be finite and representable as Float64",
+    ))
     correction = operational_v2_correction(cal, features)
     # Clamp the corrected center to the physical Dst range used by every other
     # forecast path (v1 single/multi-step, baselines, storm guard). On valid
     # operational data the corrected center stays well inside [-2000, 50] (max
     # observed prediction ~46 nT), so this is a no-op there; it only guards the
     # selector :v2 path against a pathological positive correction.
-    corrected_center = clamp(Float64(pred_dst) + correction, -2000.0, 50.0)
-    original_center = Float64(pred_dst)
+    unbounded_center = pred64 + correction
+    isfinite(unbounded_center) || throw(ArgumentError(
+        "v2 corrected center exceeds the supported Float64 range",
+    ))
+    corrected_center = clamp(unbounded_center, -2000.0, 50.0)
+    original_center = pred64
     # Re-clamp the selected center: the :ensemble path is a weighted sum of
     # components and could otherwise land outside the physical range.
-    center = clamp(_selected_component_prediction(
+    selected_center = _selected_component_prediction(
         cal.selected_component,
         corrected_center,
         original_center,
         cal,
         baselines,
-    ), -2000.0, 50.0)
-    half_width = abs(Float64(ci95) - Float64(ci05)) / 2
+    )
+    isfinite(selected_center) || throw(ArgumentError(
+        "v2 selected center became non-finite",
+    ))
+    center = clamp(selected_center, -2000.0, 50.0)
+    span = upper64 - lower64
+    half_width = isfinite(span) ? abs(span) / 2 : abs(upper64 / 2 - lower64 / 2)
+    isfinite(half_width) || throw(ArgumentError(
+        "v2 interval half-width exceeds the supported Float64 range",
+    ))
     selector_half_width = if cal.selected_component == :ensemble
         sum(cal.selector_weights .* cal.selector_half_width)
     else
         cal.selector_half_width[_component_index(cal, cal.selected_component)]
     end
     inflated = max(cal.interval_scale * half_width, selector_half_width)
+    isfinite(inflated) || throw(ArgumentError(
+        "v2 inflated interval half-width exceeds the supported Float64 range",
+    ))
+    ci05_out = center - inflated
+    ci95_out = center + inflated
+    all(isfinite, (ci05_out, ci95_out)) || throw(ArgumentError(
+        "v2 interval endpoints exceed the supported Float64 range",
+    ))
     return (
         pred_dst=center,
-        ci05_dst=center - inflated,
-        ci95_dst=center + inflated,
+        ci05_dst=ci05_out,
+        ci95_dst=ci95_out,
         correction=correction,
         interval_scale=cal.interval_scale,
         label=cal.label,
@@ -828,6 +929,12 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
     v2_in_ci = Vector{Bool}(undef, nrow(out))
     v2_component = Vector{String}(undef, nrow(out))
     v2_component_pred = Vector{Float64}(undef, nrow(out))
+    needs_baselines = if cal.selected_component == :ensemble
+        any(name != :v2 && name != :sindy_v1 && !iszero(weight)
+            for (name, weight) in zip(cal.selector_names, cal.selector_weights))
+    else
+        cal.selected_component != :v2 && cal.selected_component != :sindy_v1
+    end
 
     for i in 1:nrow(out)
         features = NamedTuple{Tuple(cal.feature_names)}(
@@ -839,7 +946,7 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
             _cell_float_or_nan(out[i, :pred_dst_ci05_nt]),
             _cell_float_or_nan(out[i, :pred_dst_ci95_nt]),
             features,
-            baselines=_row_baselines(out, i),
+            baselines=needs_baselines ? _row_baselines(out, i) : nothing,
         )
         obs = _cell_float_or_nan(out[i, :observation_dst_nt])
         v2_pred[i] = pred.pred_dst
@@ -909,7 +1016,7 @@ function write_operational_v2_calibration(path::String,
             selector_weights=selector_weights,
         ))
     end
-    CSV.write(path, DataFrame(rows))
+    _write_selection_csv(path, rows)
     return path
 end
 
@@ -921,6 +1028,8 @@ function read_operational_v2_calibration(path::String)
     String(df.feature[1]) == "intercept" ||
         throw(ArgumentError("first calibration row must be feature=intercept"))
     feature_names = Symbol.(String.(df.feature[2:end]))
+    length(Set(feature_names)) == length(feature_names) ||
+        throw(ArgumentError("V2 calibration contains duplicate feature names: $path"))
     feature_mean = Float64.(df.feature_mean[2:end])
     feature_scale = Float64.(df.feature_scale[2:end])
     coefficients = Float64.(df.coefficient)
@@ -963,7 +1072,9 @@ end
 Initialise a ForecastState from saved discovery results.
 
 - `coefficients_csv`: path to real_sindy_discovery_coefficients.csv
-- `ensemble_csv`: path to real_ensemble_inclusion.csv (marginal per-term CIs)
+- `ensemble_csv`: path to real_ensemble_inclusion.csv (marginal per-term
+  conditional nonzero empirical intervals; legacy `ci_025`/`ci_975` columns
+  are also accepted)
 - `draws_csv`: path to the joint posterior-draws artifact
   (real_sindy_ensemble_draws.csv; columns = library term names, one draw per row).
   When present it is resampled and recentered on the deployed coefficients;
@@ -989,13 +1100,23 @@ function _ensemble_from_joint_draws(path::String, term_names::Vector{String},
         push!(colmap, (idx, Symbol(term)))
     end
     isempty(colmap) && return nothing
+    missing_active = [term_names[idx] for idx in eachindex(term_names)
+                      if ξ_primary[idx] != 0.0 &&
+                         all(first(pair) != idx for pair in colmap)]
+    isempty(missing_active) ||
+        @warn "Joint-draws artifact omits active terms; omitted terms remain fixed at their point coefficients" missing_active maxlog=1
+    valid_rows = [r for r in 1:D if all(begin
+        value = draws[r, c]
+        !ismissing(value) && isfinite(Float64(value))
+    end for (_, c) in colmap)]
+    isempty(valid_rows) && return nothing
     μ = Dict{Symbol,Float64}()             # per-term draw mean, for recentering on ξ_primary
     for (_, c) in colmap
-        μ[c] = mean(Float64.(collect(skipmissing(draws[!, c]))))
+        μ[c] = mean(Float64(draws[r, c]) for r in valid_rows)
     end
-    ξ_ensemble = zeros(n_ensemble, length(ξ_primary))
+    ξ_ensemble = repeat(reshape(ξ_primary, 1, :), n_ensemble, 1)
     for i in 1:n_ensemble
-        r = rand(rng, 1:D)                 # resample a joint draw (preserves cross-term covariance)
+        r = rand(rng, valid_rows)          # resample a complete joint draw
         for (idx, c) in colmap
             ξ_ensemble[i, idx] = ξ_primary[idx] + (Float64(draws[r, c]) - μ[c])
         end
@@ -1012,23 +1133,40 @@ function init_forecast(; coefficients_csv::String,
                          dt::Float64=1.0)
     # Load primary coefficients
     coef_df = CSV.read(coefficients_csv, DataFrame)
-    lib = build_solar_wind_library()
+    all(c -> String(c) in names(coef_df), (:term, :coefficient)) ||
+        throw(ArgumentError("coefficient CSV must contain term and coefficient columns"))
+    # Legacy deployed artifacts contain the now-removed exact pressure proxy
+    # `n*V^2`. Opt into that 21-term representation only when the artifact
+    # explicitly requires it; new/canonical artifacts use the identifiable
+    # default library.
+    # CSV.jl may infer a one-row intercept-only `term` column as `Int64` for the
+    # textual term `"1"`.  Normalize through `string`, which is defined for both
+    # numeric and textual cells, instead of requiring an existing String value.
+    coefficient_terms = string.(coef_df.term)
+    lib = build_solar_wind_library(
+        include_redundant_n_v2=("n*V^2" in coefficient_terms),
+    )
     term_names = get_term_names(lib)
 
     # Map CSV terms to library indices
     ξ_primary = zeros(length(lib))
+    seen_terms = Set{String}()
     for row in eachrow(coef_df)
-        idx = findfirst(==(row.term), term_names)
-        if idx !== nothing
-            ξ_primary[idx] = row.coefficient
-        end
+        term = string(row.term)
+        term in seen_terms && throw(ArgumentError("duplicate coefficient term: $term"))
+        push!(seen_terms, term)
+        idx = findfirst(==(term), term_names)
+        idx === nothing && throw(ArgumentError("unknown coefficient term: $term"))
+        coefficient = Float64(row.coefficient)
+        isfinite(coefficient) || throw(ArgumentError("non-finite coefficient for term $term"))
+        ξ_primary[idx] = coefficient
     end
 
     # Build the uncertainty ensemble AROUND the deployed point coefficients
     # (ξ_primary), so the ensemble describes the model that is actually issued.
-    # Per-term spread comes from the bootstrap CI half-width in the ensemble CSV,
-    # read as an approximately 95% interval (±z·σ, z=1.96 → σ = width/(2z)).
-    # Every active primary term is perturbed (terms with no CI / zero width keep
+    # Per-term spread comes from the empirical interval width in the ensemble CSV,
+    # mapped to an approximate Gaussian 95% interval (±z·σ, z=1.96).
+    # Every active primary term is perturbed (terms with no interval / zero width keep
     # ξ_primary exactly); terms absent from ξ_primary stay zero. This fixes the
     # prior defects where the ensemble was centered on a different fit (the
     # ensemble CSV medians) and silently dropped active terms with π<0.9.
@@ -1047,14 +1185,47 @@ function init_forecast(; coefficients_csv::String,
             @warn "Joint-draws artifact present but unusable; using marginal per-term ensemble" draws_csv maxlog=1
         isfile(draws_csv) ||
             @warn "Joint-draws artifact not found; using marginal per-term ensemble" draws_csv maxlog=1
-        # Fallback: marginal per-term Gaussian spread from the bootstrap CI width
+        # Fallback: marginal per-term Gaussian spread from the empirical interval width
         # (±z·σ, z=1.96 → σ = width/(2z)). Only active terms are perturbed.
+        isfile(ensemble_csv) ||
+            throw(ArgumentError("ensemble coefficient artifact not found: $ensemble_csv"))
         ens_df = CSV.read(ensemble_csv, DataFrame)
+        available = Set(names(ens_df))
+        "term" in available || throw(ArgumentError(
+            "ensemble CSV must contain a term column",
+        ))
+        interval_columns = if all(in(available),
+                                  ("conditional_nonzero_empirical_q025",
+                                   "conditional_nonzero_empirical_q975"))
+            (:conditional_nonzero_empirical_q025,
+             :conditional_nonzero_empirical_q975)
+        elseif all(in(available), ("ci_025", "ci_975"))
+            (:ci_025, :ci_975)
+        else
+            throw(ArgumentError(
+                "ensemble CSV must contain canonical conditional-nonzero " *
+                "q025/q975 columns or legacy ci_025/ci_975 columns",
+            ))
+        end
+        nrow(ens_df) >= 1 || throw(ArgumentError("ensemble CSV contains no coefficient rows"))
         σ_term = zeros(n_terms)
+        seen_ensemble_terms = Set{String}()
         for row in eachrow(ens_df)
-            idx = findfirst(==(row.term), term_names)
-            idx === nothing && continue
-            width = Float64(row.ci_975) - Float64(row.ci_025)
+            term = string(row.term)
+            term in seen_ensemble_terms &&
+                throw(ArgumentError("duplicate ensemble coefficient term: $term"))
+            push!(seen_ensemble_terms, term)
+            idx = findfirst(==(term), term_names)
+            idx === nothing && throw(ArgumentError("unknown ensemble coefficient term: $term"))
+            lo = Float64(row[interval_columns[1]])
+            hi = Float64(row[interval_columns[2]])
+            if isnan(lo) && isnan(hi)
+                σ_term[idx] = 0.0
+                continue
+            end
+            isfinite(lo) && isfinite(hi) && lo <= hi ||
+                throw(ArgumentError("invalid ensemble interval for term $term"))
+            width = hi - lo
             σ_term[idx] = width > 0 ? width / (2 * z95) : 0.0
         end
         ξ_ensemble = zeros(n_ensemble, n_terms)
@@ -1106,15 +1277,33 @@ function _evaluate_point_vector!(θ::Vector{Float64},
                                  dst_star::Float64, V::Float64,
                                  Bz::Float64, By::Float64,
                                  n_density::Float64, Pdyn::Float64)
-    length(θ) == length(lib) || throw(DimensionMismatch("θ length $(length(θ)) != library length $(length(lib))"))
+    _validate_candidate_library(lib)
+    return _evaluate_point_vector_unchecked!(
+        θ, lib, dst_star, V, Bz, By, n_density, Pdyn,
+    )
+end
+
+# Internal hot-loop kernel. Public callers validate the immutable semantic
+# contract once before entering their loop; immutable tuples are used here so a
+# concurrent mutation of the legacy public vectors cannot change equations
+# between iterations.
+function _evaluate_point_vector_unchecked!(θ::Vector{Float64},
+                                           lib::CandidateLibrary,
+                                           dst_star::Float64, V::Float64,
+                                           Bz::Float64, By::Float64,
+                                           n_density::Float64, Pdyn::Float64)
+    n_terms = _validate_candidate_library_structure(lib)
+    length(θ) == n_terms || throw(DimensionMismatch(
+        "θ length $(length(θ)) != library length $n_terms",
+    ))
     Bs = max(-Bz, 0.0)
     theta_c = atan(abs(By), Bz)
-    BT = sqrt(By^2 + Bz^2)
+    BT = hypot(By, Bz)
     sin_half = sin(theta_c / 2)
     fallback_data = nothing
 
-    @inbounds for j in eachindex(lib.term_codes)
-        code = lib.term_codes[j]
+    for j in eachindex(lib._contract_term_codes)
+        code = lib._contract_term_codes[j]
         if code == TERM_ONE
             θ[j] = 1.0
         elseif code == TERM_V
@@ -1156,14 +1345,33 @@ function _evaluate_point_vector!(θ::Vector{Float64},
         elseif code == TERM_V_SIN_HALF2
             θ[j] = V * sin_half^2
         elseif code == TERM_NEWELL
-            θ[j] = V^(4/3) * max(BT, 1e-10)^(2/3) * sin_half^(8/3)
+            θ[j] = _newell_coupling_value(V, BT, sin_half)
         else
             if fallback_data === nothing
                 fallback_data = _point_data(dst_star, V, Bz, By, n_density, Pdyn, Bs, theta_c, BT)
             end
-            θ[j] = lib.funcs[j](fallback_data)[1]
+            value = lib._contract_funcs[j](fallback_data)
+            value isa AbstractVector || throw(ArgumentError(
+                "custom point-evaluation term $(lib._contract_names[j]) must return a vector",
+            ))
+            length(value) == 1 || throw(DimensionMismatch(
+                "custom point-evaluation term $(lib._contract_names[j]) returned $(length(value)) values; expected 1"
+            ))
+            raw_value = value[1]
+            raw_value isa Real && !(raw_value isa Bool) && isfinite(raw_value) ||
+                throw(ArgumentError(
+                    "custom point-evaluation term $(lib._contract_names[j]) returned a non-finite or non-real value",
+                ))
+            converted = Float64(raw_value)
+            isfinite(converted) || throw(ArgumentError(
+                "custom point-evaluation term $(lib._contract_names[j]) exceeds the supported Float64 range",
+            ))
+            θ[j] = converted
         end
     end
+
+    all(isfinite, θ) ||
+        throw(ArgumentError("candidate-library point evaluation produced a non-finite value"))
 
     return θ
 end
@@ -1174,6 +1382,45 @@ function _dot_ensemble_row(θ::Vector{Float64}, ξ_ensemble::Matrix{Float64}, i:
         s += θ[j] * ξ_ensemble[i, j]
     end
     return s
+end
+
+function _clamped_finite_derivative(value::Real, label::AbstractString)
+    isfinite(value) || throw(ArgumentError("$label derivative is non-finite"))
+    return clamp(Float64(value), -200.0, 200.0)
+end
+
+function _validate_forecast_step_time(state::ForecastState, t::DateTime)
+    elapsed = t - state.t_current
+    elapsed > Millisecond(0) ||
+        throw(ArgumentError("forecast step time must be later than the current state time"))
+    expected = _forecast_step_period(state.dt)
+    elapsed == expected ||
+        throw(ArgumentError(
+            "forecast step elapsed time ($(Dates.value(elapsed)) ms) does not match " *
+            "state.dt ($(state.dt) h)"
+        ))
+    return nothing
+end
+
+function _validate_forecast_state(state::ForecastState)
+    n_terms = _validate_candidate_library(state.lib)
+    length(state.ξ_primary) == n_terms || throw(DimensionMismatch(
+        "primary coefficient count does not match the mutable forecast library",
+    ))
+    size(state.ξ_ensemble, 2) == n_terms || throw(DimensionMismatch(
+        "ensemble coefficient count does not match the mutable forecast library",
+    ))
+    size(state.ξ_ensemble, 1) >= 1 || throw(ArgumentError(
+        "forecast state requires at least one ensemble member",
+    ))
+    all(isfinite, state.ξ_primary) ||
+        throw(ArgumentError("primary coefficients must remain finite"))
+    all(isfinite, state.ξ_ensemble) ||
+        throw(ArgumentError("ensemble coefficients must remain finite"))
+    isfinite(state.dst_current) ||
+        throw(ArgumentError("forecast state Dst* must remain finite"))
+    _forecast_step_period(state.dt)
+    return nothing
 end
 
 """
@@ -1189,19 +1436,28 @@ function step_forecast!(state::ForecastState,
                         V::Float64, Bz::Float64, By::Float64,
                         n_density::Float64, Pdyn::Float64;
                         dst_observed::Float64=NaN)
+    all(isfinite, (V, Bz, By, n_density, Pdyn)) ||
+        throw(ArgumentError("forecast drivers must be finite"))
+    V >= 0 && n_density >= 0 && Pdyn >= 0 ||
+        throw(ArgumentError("V, density, and dynamic pressure must be nonnegative"))
+    (isnan(dst_observed) || isfinite(dst_observed)) ||
+        throw(ArgumentError("dst_observed must be finite or NaN"))
+    _validate_forecast_state(state)
+    _validate_forecast_step_time(state, t)
     θ_k = Vector{Float64}(undef, length(state.lib))
-    _evaluate_point_vector!(θ_k, state.lib, state.dst_current,
-                            V, Bz, By, n_density, Pdyn)
+    _evaluate_point_vector_unchecked!(θ_k, state.lib, state.dst_current,
+                                      V, Bz, By, n_density, Pdyn)
 
     # Primary prediction
-    dDst = clamp(dot(θ_k, state.ξ_primary), -200.0, 200.0)
+    dDst = _clamped_finite_derivative(dot(θ_k, state.ξ_primary), "primary")
     dst_next = clamp(state.dst_current + state.dt * dDst, -2000.0, 50.0)
 
     # Ensemble predictions
     n_ens = size(state.ξ_ensemble, 1)
     dst_ens = Vector{Float64}(undef, n_ens)
     for i in 1:n_ens
-        dDst_i = clamp(_dot_ensemble_row(θ_k, state.ξ_ensemble, i), -200.0, 200.0)
+        dDst_i = _clamped_finite_derivative(
+            _dot_ensemble_row(θ_k, state.ξ_ensemble, i), "ensemble member $i")
         dst_ens[i] = clamp(state.dst_current + state.dt * dDst_i, -2000.0, 50.0)
     end
     sort!(dst_ens)
@@ -1219,7 +1475,7 @@ function step_forecast!(state::ForecastState,
     )
 
     # Update state
-    if !isnan(dst_observed)
+    if isfinite(dst_observed)
         state.dst_current = dst_observed   # anchor to observation when available
     else
         state.dst_current = dst_next
@@ -1231,15 +1487,22 @@ function step_forecast!(state::ForecastState,
 end
 
 """
-    forecast_ahead(state, V, Bz, By, n, Pdyn, n_hours)
+    forecast_ahead(state, V, Bz, By, n, Pdyn, n_steps)
 
-Multi-hour forecast assuming persistence of current solar wind conditions.
-Does NOT modify state. Returns Vector{ForecastResult}.
+Multi-step forecast assuming persistence of current solar wind conditions. Each
+step advances by `state.dt` hours. Does NOT modify state. Returns
+`Vector{ForecastResult}`.
 """
 function forecast_ahead(state::ForecastState,
                         V::Float64, Bz::Float64, By::Float64,
                         n_density::Float64, Pdyn::Float64,
-                        n_hours::Int)
+                        n_steps::Int)
+    n_steps >= 0 || throw(ArgumentError("n_steps must be nonnegative, got $n_steps"))
+    all(isfinite, (V, Bz, By, n_density, Pdyn)) ||
+        throw(ArgumentError("forecast drivers must be finite"))
+    V >= 0 && n_density >= 0 && Pdyn >= 0 ||
+        throw(ArgumentError("V, density, and dynamic pressure must be nonnegative"))
+    _validate_forecast_state(state)
     results = ForecastResult[]
     dst_curr = state.dst_current
     t_curr = state.t_current
@@ -1248,25 +1511,27 @@ function forecast_ahead(state::ForecastState,
     dst_ens_curr = fill(dst_curr, n_ens)
     θ_k = Vector{Float64}(undef, length(state.lib))
 
-    # The integration advances state.dt hours of dynamics per step (dst + state.dt*dDst),
-    # so the emitted timestamp must advance by the same amount; a hardcoded Hour(1) would
-    # desynchronize labels from physics whenever dt ≠ 1. dt is hourly-resolution by contract.
-    @assert state.dt > 0 && isinteger(state.dt) "forecast_ahead emits hourly labels; state.dt must be a positive whole number of hours"
-    step = Hour(round(Int, state.dt))
-    for h in 1:n_hours
+    # DateTime has millisecond resolution, so the timestamp step must use the
+    # same exactly representable period validated by ForecastState.
+    step = _forecast_step_period(state.dt)
+    for _ in 1:n_steps
         t_next = t_curr + step
 
-        _evaluate_point_vector!(θ_k, state.lib, dst_curr, V, Bz, By, n_density, Pdyn)
+        _evaluate_point_vector_unchecked!(
+            θ_k, state.lib, dst_curr, V, Bz, By, n_density, Pdyn,
+        )
 
         # Primary
-        dDst = clamp(dot(θ_k, state.ξ_primary), -200.0, 200.0)
+        dDst = _clamped_finite_derivative(dot(θ_k, state.ξ_primary), "primary")
         dst_next = clamp(dst_curr + state.dt * dDst, -2000.0, 50.0)
 
         # Ensemble (each starts from its own previous prediction)
         for i in 1:n_ens
-            _evaluate_point_vector!(θ_k, state.lib, dst_ens_curr[i],
-                                    V, Bz, By, n_density, Pdyn)
-            dDst_i = clamp(_dot_ensemble_row(θ_k, state.ξ_ensemble, i), -200.0, 200.0)
+            _evaluate_point_vector_unchecked!(
+                θ_k, state.lib, dst_ens_curr[i], V, Bz, By, n_density, Pdyn,
+            )
+            dDst_i = _clamped_finite_derivative(
+                _dot_ensemble_row(θ_k, state.ξ_ensemble, i), "ensemble member $i")
             dst_ens_curr[i] = clamp(dst_ens_curr[i] + state.dt * dDst_i, -2000.0, 50.0)
         end
         sorted_ens = sort(dst_ens_curr)

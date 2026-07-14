@@ -77,7 +77,7 @@ function main()
             length(storms), DEPTH, flagship, string(storms[1].min_dst_time), storms[1].min_dst)
     @printf("calibration hours (non-storm, of %d total): %d\n", N, count(==(0), sid))
 
-    lib = build_solar_wind_library(); tn = get_term_names(lib)
+    lib = build_solar_wind_library(include_redundant_n_v2=true); tn = get_term_names(lib)
     coef = CSV.read(COEFCSV, DataFrame); ξ0 = zeros(length(lib))
     for r in eachrow(coef); i = findfirst(==(r.term), tn); i !== nothing && (ξ0[i] = r.coefficient); end
     i_decay = findfirst(==("Dst_star"), tn)

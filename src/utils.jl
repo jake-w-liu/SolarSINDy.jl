@@ -5,19 +5,66 @@
 
 Central finite difference derivative with forward/backward at boundaries.
 """
-function numerical_derivative(x::AbstractVector, dt::Real)
+function numerical_derivative(x::AbstractVector{<:Real}, dt::Real)
     n = length(x)
     n >= 2 || throw(ArgumentError("numerical_derivative requires length ≥ 2, got $n"))
-    dx = similar(x)
+    isfinite(dt) && dt > 0 ||
+        throw(ArgumentError("numerical_derivative requires finite dt > 0, got $dt"))
+    all(value -> !isinf(value), x) ||
+        throw(ArgumentError("numerical_derivative does not accept infinite samples"))
+    dx = similar(x, float(eltype(x)))
+    dt_float = float(dt)
+    function difference(a, b, divisor_factor)
+        (isnan(a) || isnan(b)) && return convert(eltype(dx), NaN)
+        denominator = divisor_factor * dt_float
+        value = (float(a) - float(b)) / denominator
+        if !isfinite(denominator) || !isfinite(value) || (iszero(value) && a != b)
+            value = (BigFloat(a) - BigFloat(b)) /
+                    (BigFloat(divisor_factor) * BigFloat(dt_float))
+        end
+        converted = convert(eltype(dx), value)
+        isfinite(converted) || throw(ArgumentError(
+            "numerical_derivative result exceeded the output range",
+        ))
+        iszero(converted) && !iszero(value) && throw(ArgumentError(
+            "numerical_derivative result underflowed the output range",
+        ))
+        return converted
+    end
     # Forward difference at start
-    dx[1] = (x[2] - x[1]) / dt
+    dx[1] = difference(x[2], x[1], 1)
     # Central differences
     for k in 2:n-1
-        dx[k] = (x[k+1] - x[k-1]) / (2dt)
+        dx[k] = difference(x[k+1], x[k-1], 2)
     end
     # Backward difference at end
-    dx[n] = (x[n] - x[n-1]) / dt
+    dx[n] = difference(x[n], x[n-1], 1)
     return dx
+end
+
+function _newell_coupling_value(speed::Real, transverse::Real, sin_half::Real)
+    speed_float = Float64(speed)
+    transverse_float = Float64(transverse)
+    sin_float = Float64(sin_half)
+    all(isfinite, (speed_float, transverse_float, sin_float)) ||
+        throw(ArgumentError("Newell coupling inputs must be finite"))
+    speed_float >= 0 && transverse_float >= 0 && sin_float >= 0 ||
+        throw(ArgumentError("Newell coupling inputs must be nonnegative"))
+    (iszero(speed_float) || iszero(transverse_float) || iszero(sin_float)) &&
+        return 0.0
+
+    value = speed_float^(4 / 3) * transverse_float^(2 / 3) * sin_float^(8 / 3)
+    isfinite(value) && !iszero(value) && return value
+
+    wide = BigFloat(speed_float)^(BigFloat(4) / 3) *
+           BigFloat(transverse_float)^(BigFloat(2) / 3) *
+           BigFloat(sin_float)^(BigFloat(8) / 3)
+    converted = Float64(wide)
+    isfinite(converted) && !iszero(converted) || throw(ArgumentError(
+        iszero(converted) ? "Newell coupling underflowed the supported range" :
+                            "Newell coupling exceeded the supported range",
+    ))
+    return converted
 end
 
 """
@@ -25,19 +72,35 @@ end
 
 Simple moving average smoothing with centered window. Window must be odd.
 """
-function smooth_moving_average(x::AbstractVector, window::Int)
-    @assert isodd(window) "Window must be odd"
+function smooth_moving_average(x::AbstractVector{<:Real}, window::Int)
+    window > 0 && isodd(window) ||
+        throw(ArgumentError("smoothing window must be a positive odd integer, got $window"))
     # A window wider than the series collapses every output to the global mean,
     # silently destroying the signal; reject it rather than returning a constant.
     length(x) >= window ||
         throw(ArgumentError("smoothing window ($window) exceeds series length ($(length(x)))"))
     n = length(x)
     half = div(window, 2)
-    xs = similar(x)
+    xs = similar(x, float(eltype(x)))
     for k in 1:n
         lo = max(1, k - half)
         hi = min(n, k + half)
-        xs[k] = mean(@view x[lo:hi])
+        window_values = @view x[lo:hi]
+        direct = mean(window_values)
+        if isfinite(direct) || any(isnan, window_values)
+            xs[k] = direct
+            continue
+        end
+        all(isfinite, window_values) || throw(ArgumentError(
+            "smoothing window contains an infinite value",
+        ))
+        scale = maximum(abs, window_values)
+        scaled_mean = iszero(scale) ? zero(direct) :
+            scale * (sum(value -> value / scale, window_values) / length(window_values))
+        isfinite(scaled_mean) || throw(ArgumentError(
+            "smoothing mean exceeded the supported range",
+        ))
+        xs[k] = scaled_mean
     end
     return xs
 end
@@ -85,8 +148,41 @@ const PDYN_CARRY_MAX_AGE_H = 6
 Proton-only dynamic pressure [nPa] from density `n` [cm⁻³] and speed `V` [km/s].
 Returns `NaN` if either input is `NaN`.
 """
-dynamic_pressure(n::Real, V::Real) =
-    (isnan(n) || isnan(V)) ? NaN : PROTON_PDYN_COEFF * n * V^2
+function dynamic_pressure(n::Real, V::Real)
+    (!isfinite(n) || !isfinite(V) || n < 0 || V < 0) && return NaN
+    # Promote fixed-width integers before the square so `typemax(Int)^2` cannot
+    # wrap to a small positive pressure. Keep the ordinary-range evaluation order;
+    # only use the factored fallback when the square itself overflows.
+    density = float(n)
+    speed = float(V)
+    iszero(density) && return zero(PROTON_PDYN_COEFF * density * speed)
+    speed_squared = speed * speed
+    pressure = PROTON_PDYN_COEFF * density * speed_squared
+    if isfinite(speed_squared) && isfinite(pressure) &&
+       (!iszero(pressure) || iszero(speed))
+        return pressure
+    end
+
+    # An overflowing square can still have a finite product when density is
+    # tiny; conversely, multiplying the tiny density first can underflow before
+    # the two speed factors restore the scale. Evaluate only this exceptional
+    # path with enough exponent/mantissa range to decide whether the Float result
+    # is representable. The ordinary path above remains byte-for-byte unchanged.
+    work_precision = max(
+        256,
+        density isa BigFloat ? precision(density) : 0,
+        speed isa BigFloat ? precision(speed) : 0,
+    )
+    wide_pressure = setprecision(BigFloat, work_precision) do
+        BigFloat(PROTON_PDYN_COEFF) * BigFloat(density) * BigFloat(speed)^2
+    end
+    result_type = promote_type(Float64, typeof(density), typeof(speed))
+    converted = convert(result_type, wide_pressure)
+    if !isfinite(converted) || (!iszero(wide_pressure) && iszero(converted))
+        return NaN
+    end
+    return converted
+end
 
 """
     dst_to_dst_star(dst, pdyn; b=DST_STAR_B, c=DST_STAR_C)
@@ -114,9 +210,22 @@ older than `max_age` hours; otherwise returns the quiet-time default `quiet`.
 """
 function resolve_pdyn(pdyn::Real, last_pdyn::Real, age::Integer;
                       max_age::Integer=PDYN_CARRY_MAX_AGE_H, quiet::Real=QUIET_PDYN_NPA)
-    isfinite(pdyn) && return Float64(pdyn)
-    (isfinite(last_pdyn) && age <= max_age) && return Float64(last_pdyn)
-    return Float64(quiet)
+    age >= 0 || throw(ArgumentError("dynamic-pressure age must be nonnegative, got $age"))
+    max_age >= 0 || throw(ArgumentError("max_age must be nonnegative, got $max_age"))
+    pdyn_float = Float64(pdyn)
+    last_float = Float64(last_pdyn)
+    quiet_float = Float64(quiet)
+    isfinite(pdyn) && !isfinite(pdyn_float) && throw(ArgumentError(
+        "dynamic pressure exceeds the supported Float64 range",
+    ))
+    isfinite(last_pdyn) && !isfinite(last_float) && throw(ArgumentError(
+        "carried dynamic pressure exceeds the supported Float64 range",
+    ))
+    isfinite(quiet_float) && quiet_float >= 0 ||
+        throw(ArgumentError("quiet fallback pressure must be finite and nonnegative, got $quiet"))
+    (isfinite(pdyn_float) && pdyn_float >= 0) && return pdyn_float
+    (isfinite(last_float) && last_float >= 0 && age <= max_age) && return last_float
+    return quiet_float
 end
 
 """
@@ -137,7 +246,8 @@ end
 Southward IMF component: Bs = max(-Bz, 0) following Burton convention.
 """
 function halfwave_rectify(bz::AbstractVector)
-    return max.(-bz, 0.0)
+    # `-typemin(Int)` wraps in fixed-width integer arithmetic. Promote first.
+    return max.(-float.(bz), 0.0)
 end
 
 """
@@ -146,7 +256,8 @@ end
 IMF clock angle θ_c = atan(|By|, Bz) in radians.
 """
 function imf_clock_angle(by::AbstractVector, bz::AbstractVector)
-    return atan.(abs.(by), bz)
+    # `abs(typemin(Int))` wraps negative and would produce a negative clock angle.
+    return atan.(abs.(float.(by)), float.(bz))
 end
 
 """

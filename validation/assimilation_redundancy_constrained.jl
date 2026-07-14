@@ -64,7 +64,7 @@ function main()
     sid = zeros(Int,N)
     for s in storms; lo=s.min_dst_time-Hour(36); hi=s.min_dst_time+Hour(72)
         @inbounds for k in 1:N; (df.datetime[k]>=lo && df.datetime[k]<=hi)&&(sid[k]=s.storm_id); end; end
-    lib=build_solar_wind_library(); tn=get_term_names(lib); coef=CSV.read(COEFCSV,DataFrame); ξ0=zeros(length(lib))
+    lib=build_solar_wind_library(include_redundant_n_v2=true); tn=get_term_names(lib); coef=CSV.read(COEFCSV,DataFrame); ξ0=zeros(length(lib))
     for r in eachrow(coef); i=findfirst(==(r.term),tn); i!==nothing&&(ξ0[i]=r.coefficient); end
     i_decay=findfirst(==("Dst_star"),tn)
     drivers=[(V=df.V[k],Bz=df.Bz[k],By=df.By[k],n=df.n[k],Pdyn=df.Pdyn[k]) for k in 1:N]

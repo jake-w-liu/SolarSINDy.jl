@@ -15,15 +15,22 @@ const SWPC_BASE = "https://services.swpc.noaa.gov"
 const SWPC_TTL = 50.0                       # seconds; SWPC products update ~1/min
 const _SWPC_CACHE = Ref{Any}(nothing)       # (fetch_time::Float64, snapshot)
 const _SWPC_LOCK = ReentrantLock()
-const _SWPC_REFRESHING = Ref(false)
+const _SWPC_REFRESH_TASK = Ref{Union{Nothing,Task}}(nothing)
 # Solar-wind inputs older than this no longer represent current upstream conditions for the
 # 30-min GIC forecast (RTSW products update ~1/min, and the physical L1 lead is ~30-60 min, so
 # a >15-min gap means the driver forecast would run on frozen values).
 const SW_INPUT_MAX_AGE_MIN = 15.0
+const SWPC_FUTURE_TOL_MIN = 2.0
+const KP_MAX_AGE_MIN = 240.0                  # Kp is a 3-hour product
+const SCALES_MAX_AGE_MIN = 120.0
 
 # parse a possibly-string numeric to Float64 or nothing
-_pf(x) = x === nothing ? nothing : (x isa Number ? Float64(x) :
-         (try parse(Float64, strip(String(x))) catch; nothing end))
+_pf(x) = x === nothing ? nothing : (x isa Number ? Float64(x) : try
+    parse(Float64, strip(String(x)))
+catch e
+    e isa InterruptException && rethrow()
+    nothing
+end)
 
 function _swpc_row_field(idx, row, name)
     i = get(idx, name, nothing)
@@ -35,7 +42,23 @@ end
 function _swpc_dt(s)
     (s === nothing || s === missing) && return missing
     str = replace(strip(String(s)), " " => "T")
-    try; return DateTime(first(str, 19)); catch; return missing; end
+    try
+        return DateTime(first(str, 19))
+    catch e
+        e isa InterruptException && rethrow()
+        return missing
+    end
+end
+
+function _source_freshness(timestamp, max_age_min::Real;
+                           reference::DateTime=now(UTC),
+                           future_tolerance_min::Real=SWPC_FUTURE_TOL_MIN)
+    dt = timestamp isa DateTime ? timestamp : parse_dt(timestamp)
+    age = dt === missing ? nothing : (reference - dt) / Millisecond(60_000)
+    future = age !== nothing && age < -future_tolerance_min
+    stale = age === nothing || future || age > max_age_min
+    return (age_min = age === nothing ? nothing : round(age; digits=1),
+            stale = stale, invalid_future = future)
 end
 
 function _swpc_get(path; readtimeout=1, connect_timeout=1)
@@ -44,6 +67,7 @@ function _swpc_get(path; readtimeout=1, connect_timeout=1)
                      connect_timeout=connect_timeout, retries=0, status_exception=true)
         return JSON3.read(r.body)
     catch e
+        e isa InterruptException && rethrow()
         @warn "SWPC fetch failed" path exception=e
         return nothing
     end
@@ -62,28 +86,47 @@ end
 # Named-key numeric field from a JSON object (JSON3.Object or Dict), or nothing on
 # missing key / null / non-finite value.
 function _rtsw_field(obj, key::Symbol)
-    (obj === nothing || !haskey(obj, key)) && return nothing
-    return jnum(_pf(obj[key]))
+    obj === nothing && return nothing
+    try
+        haskey(obj, key) || return nothing
+        return jnum(_pf(obj[key]))
+    catch e
+        e isa InterruptException && rethrow()
+        return nothing
+    end
 end
 
-# `active` flag: true when the key is absent (single-source feeds) or explicitly boolean-true;
-# any other encoding is treated as active so a schema surprise never silently drops every row.
+# `active` flag: true when the key is absent (single-source feeds) or explicitly
+# Boolean true. Malformed encodings are not preferred as the designated source;
+# the second selection pass can still use their otherwise valid measurements.
 function _rtsw_active(obj)
-    haskey(obj, :active) || return true
-    a = obj[:active]
-    (a === nothing) && return true
-    return a isa Bool ? a : true
+    try
+        haskey(obj, :active) || return true
+        return obj[:active] === true
+    catch e
+        e isa InterruptException && rethrow()
+        return false
+    end
 end
 
 # Newest physically-valid RTSW record: schema-validated (all `reqkeys` present, finite, within
 # `bounds`), preferring the currently-active source and falling back to any valid source. Records
 # are documented newest-first but we select by parsed time_tag so ordering is not assumed.
 function _rtsw_latest(arr, reqkeys::Vector{Symbol};
-                      bounds::Dict{Symbol,Tuple{Float64,Float64}} = Dict{Symbol,Tuple{Float64,Float64}}())
+                      bounds::Dict{Symbol,Tuple{Float64,Float64}} = Dict{Symbol,Tuple{Float64,Float64}}(),
+                      reference::DateTime = now(UTC))
     (arr === nothing || length(arr) < 1) && return nothing
     _valid(obj) = begin
-        t = _swpc_dt(haskey(obj, :time_tag) ? obj[:time_tag] : nothing)
+        time_value = try
+            haskey(obj, :time_tag) ? obj[:time_tag] : nothing
+        catch e
+            e isa InterruptException && rethrow()
+            nothing
+        end
+        t = _swpc_dt(time_value)
         t === missing && return (false, missing)
+        t > reference + Millisecond(round(Int, SWPC_FUTURE_TOL_MIN * 60_000)) &&
+            return (false, missing)
         for k in reqkeys
             v = _rtsw_field(obj, k)
             v === nothing && return (false, missing)
@@ -143,25 +186,41 @@ end
 # Age [min] of the OLDER of the mag/plasma feeds (both must be current for a valid driver
 # forecast). Returns nothing when neither timestamp is parseable.
 function solar_wind_input_age_min(sw)
-    ts = DateTime[]
-    for k in (:mag_time_utc, :plasma_time_utc)
-        v = get(sw, k, nothing)
-        v === nothing && continue
-        dt = parse_dt(v)
-        dt === missing || push!(ts, dt)
-    end
-    isempty(ts) && return nothing
-    return (now(UTC) - minimum(ts)) / Millisecond(60_000)
+    f = solar_wind_input_freshness(sw)
+    return f.age_min
 end
 
 # array of objects {time_tag, Kp, a_running, station_count} — no header row
+function _parse_swpc_kp(kp; reference::DateTime=now(UTC))
+    (kp === nothing || length(kp) < 1) && return nothing
+    valid = NamedTuple[]
+    for row in kp
+        t_raw = try get(row, :time_tag, nothing) catch e
+            e isa InterruptException && rethrow()
+            nothing
+        end
+        v_raw = try get(row, :Kp, nothing) catch e
+            e isa InterruptException && rethrow()
+            nothing
+        end
+        t = _swpc_dt(t_raw)
+        value = jnum(_pf(v_raw))
+        (t === missing || value === nothing || !(0.0 <= value <= 9.0) ||
+         t > reference + Millisecond(round(Int, SWPC_FUTURE_TOL_MIN * 60_000))) && continue
+        push!(valid, (time=t, value=value))
+    end
+    isempty(valid) && return nothing
+    sort!(valid; by=row -> row.time)
+    newest = last(valid)
+    first_trend = max(1, length(valid) - 7)
+    trend = [(time_utc=jdt(row.time), kp=row.value)
+             for row in @view valid[first_trend:end]]
+    return (value=newest.value, time_utc=jdt(newest.time), trend=trend)
+end
+
 function swpc_kp()
     kp = _swpc_get("/products/noaa-planetary-k-index.json")
-    (kp === nothing || length(kp) < 1) && return nothing
-    last = kp[end]
-    n = length(kp); s = max(1, n - 7)        # last ~24 h of 3-hourly Kp
-    trend = [(time_utc = jdt(_swpc_dt(kp[i].time_tag)), kp = jnum(_pf(kp[i].Kp))) for i in s:n]
-    return (value = jnum(_pf(last.Kp)), time_utc = jdt(_swpc_dt(last.time_tag)), trend = trend)
+    return _parse_swpc_kp(kp)
 end
 
 # object keyed "0".."N"; "0" is current conditions, R/S/G each with Scale/Text
@@ -176,6 +235,7 @@ function swpc_scales()
              string(String(cur.DateStamp), "T", String(cur.TimeStamp), "Z") : nothing
         return (time_utc = ts, G = gv(:G), G_text = gt(:G), S = gv(:S), R = gv(:R))
     catch e
+        e isa InterruptException && rethrow()
         @warn "SWPC scales parse failed" exception=e
         return nothing
     end
@@ -215,52 +275,73 @@ function _build_swpc_snapshot()
             solar_wind = sw, kp = kp, scales = sc, alerts = al)
 end
 
+function _run_swpc_refresh(; build_fn=_build_swpc_snapshot)
+    cache_result = false
+    val = nothing
+    try
+        val = try
+            out = build_fn()
+            if get(out, :available, false)
+                cache_result = true
+                out
+            else
+                stale = lock(_SWPC_LOCK) do
+                    c = _SWPC_CACHE[]; c === nothing ? nothing : c[2]
+                end
+                stale === nothing ? out : stale
+            end
+        catch e
+            e isa InterruptException && rethrow()
+            stale = lock(_SWPC_LOCK) do
+                c = _SWPC_CACHE[]; c === nothing ? nothing : c[2]
+            end
+            if stale !== nothing
+                @warn "SWPC snapshot build failed; serving cached" exception=e
+                stale
+            else
+                (source="NOAA SWPC", available=false, error=string(e))
+            end
+        end
+        return val
+    finally
+        lock(_SWPC_LOCK) do
+            cache_result && (_SWPC_CACHE[] = (time(), val))
+            _SWPC_REFRESH_TASK[] = nothing
+        end
+    end
+end
+
+# Caller holds _SWPC_LOCK. Both blocking and stale-while-refresh entry points use this task.
+function _start_swpc_refresh_locked()
+    task = _SWPC_REFRESH_TASK[]
+    if task === nothing || istaskdone(task)
+        task = @async _run_swpc_refresh()
+        _SWPC_REFRESH_TASK[] = task
+    end
+    return task
+end
+
 function swpc_snapshot()
-    # Lock only to read the cache; build (blocking HTTP) outside it so one stalled SWPC
-    # product cannot serialize every dashboard poller behind the mutex.
-    fresh = lock(_SWPC_LOCK) do
+    fresh, task = lock(_SWPC_LOCK) do
         c = _SWPC_CACHE[]
-        (c !== nothing && (time() - c[1]) <= SWPC_TTL) ? c[2] : nothing
+        c !== nothing && (time() - c[1]) <= SWPC_TTL ? (c[2], nothing) :
+            (nothing, _start_swpc_refresh_locked())
     end
-    fresh !== nothing && return fresh
-    val = try
-        _build_swpc_snapshot()
-    catch e
-        stale = lock(_SWPC_LOCK) do
-            c = _SWPC_CACHE[]; c === nothing ? nothing : c[2]
-        end
-        if stale !== nothing
-            @warn "SWPC snapshot build failed; serving cached" exception = e
-            return stale
-        end
-        return (source = "NOAA SWPC", available = false, error = string(e))
-    end
-    lock(_SWPC_LOCK) do; _SWPC_CACHE[] = (time(), val); end
-    return val
+    return fresh === nothing ? fetch(task) : fresh
 end
 
 function swpc_snapshot_cached_or_refresh()
-    c = lock(_SWPC_LOCK) do
-        _SWPC_CACHE[]
-    end
-    if c !== nothing && (time() - c[1]) <= SWPC_TTL
-        return c[2]
-    end
-    if !_SWPC_REFRESHING[]
-        _SWPC_REFRESHING[] = true
-        @async begin
-            try
-                swpc_snapshot()
-            catch e
-                @warn "async SWPC refresh failed" exception=e
-            finally
-                _SWPC_REFRESHING[] = false
-            end
+    fresh, stale = lock(_SWPC_LOCK) do
+        c = _SWPC_CACHE[]
+        if c !== nothing && (time() - c[1]) <= SWPC_TTL
+            (c[2], nothing)
+        else
+            _start_swpc_refresh_locked()
+            (nothing, c === nothing ? nothing : c[2])
         end
     end
-    if c !== nothing
-        return c[2]
-    end
+    fresh !== nothing && return fresh
+    stale !== nothing && return stale
     return (source = "NOAA SWPC", fetched_utc = jdt(now(UTC)), available = false,
             solar_wind = Dict{Symbol,Any}(:available => false), kp = nothing,
             scales = nothing, alerts = NamedTuple[])
@@ -268,17 +349,52 @@ end
 
 # Honest threshold-based upstream indicator (NOT a fused scalar): flags "elevated" when any
 # standard active-condition marker trips. Thresholds are conventional space-weather markers.
-function upstream_assessment(snap)
-    (snap === nothing || getproperty(snap, :available) == false) && return (available = false,)
+function solar_wind_input_freshness(sw; reference::DateTime=now(UTC))
+    mag = _source_freshness(get(sw, :mag_time_utc, nothing), SW_INPUT_MAX_AGE_MIN;
+                            reference=reference)
+    plasma = _source_freshness(get(sw, :plasma_time_utc, nothing), SW_INPUT_MAX_AGE_MIN;
+                               reference=reference)
+    ages = filter(!isnothing, (mag.age_min, plasma.age_min))
+    return (age_min = length(ages) == 2 ? maximum(ages) : nothing,
+            stale = mag.stale || plasma.stale,
+            invalid_future = mag.invalid_future || plasma.invalid_future,
+            mag = mag, plasma = plasma)
+end
+
+function upstream_assessment(snap; reference::DateTime=now(UTC))
+    (snap === nothing || !get(snap, :available, false)) && return (available = false,)
     reasons = String[]; elevated = false
-    g = snap.scales !== nothing ? snap.scales.G : nothing
-    if g !== nothing && g != "0"; elevated = true; push!(reasons, "NOAA G$g geomagnetic storm"); end
-    kpv = snap.kp !== nothing ? snap.kp.value : nothing
-    if kpv !== nothing && kpv >= 5; elevated = true; push!(reasons, "Kp $(kpv) (storm level)"); end
-    sw = snap.solar_wind
+    sc = get(snap, :scales, nothing)
+    kp = get(snap, :kp, nothing)
+    sw = get(snap, :solar_wind, Dict{Symbol,Any}())
+    g = sc === nothing ? nothing : get(sc, :G, nothing)
+    kpv = kp === nothing ? nothing : get(kp, :value, nothing)
     bz = get(sw, :bz_gsm_nt, nothing); sp = get(sw, :speed_kms, nothing)
-    if bz !== nothing && bz < -10; elevated = true; push!(reasons, "L1 Bz $(round(bz; digits=1)) nT southward"); end
-    if sp !== nothing && sp > 600; elevated = true; push!(reasons, "L1 wind $(round(Int, sp)) km/s"); end
-    return (available = true, elevated = elevated, reasons = reasons,
-            g_scale = g, kp = kpv, bz_gsm_nt = bz, speed_kms = sp)
+    scf = _source_freshness(sc === nothing ? nothing : get(sc, :time_utc, nothing),
+                            SCALES_MAX_AGE_MIN; reference=reference)
+    kpf = _source_freshness(kp === nothing ? nothing : get(kp, :time_utc, nothing),
+                            KP_MAX_AGE_MIN; reference=reference)
+    swf = solar_wind_input_freshness(sw; reference=reference)
+    if g !== nothing && !scf.stale && g != "0"
+        elevated = true; push!(reasons, "NOAA G$g geomagnetic storm")
+    end
+    if kpv !== nothing && !kpf.stale && kpv >= 5
+        elevated = true; push!(reasons, "Kp $(kpv) (storm level)")
+    end
+    if bz !== nothing && !swf.mag.stale && bz < -10
+        elevated = true; push!(reasons, "L1 Bz $(round(bz; digits=1)) nT southward")
+    end
+    if sp !== nothing && !swf.plasma.stale && sp > 600
+        elevated = true; push!(reasons, "L1 wind $(round(Int, sp)) km/s")
+    end
+    current = (g !== nothing && !scf.stale) || (kpv !== nothing && !kpf.stale) ||
+              (bz !== nothing && !swf.mag.stale) || (sp !== nothing && !swf.plasma.stale)
+    return (available = current, elevated = elevated, reasons = reasons,
+            g_scale = g, kp = kpv, bz_gsm_nt = bz, speed_kms = sp,
+            scales_age_min = scf.age_min, scales_stale = scf.stale,
+            kp_age_min = kpf.age_min, kp_stale = kpf.stale,
+            mag_age_min = swf.mag.age_min, mag_stale = swf.mag.stale,
+            plasma_age_min = swf.plasma.age_min, plasma_stale = swf.plasma.stale,
+            solar_wind_age_min = swf.age_min, solar_wind_stale = swf.stale,
+            invalid_future = scf.invalid_future || kpf.invalid_future || swf.invalid_future)
 end

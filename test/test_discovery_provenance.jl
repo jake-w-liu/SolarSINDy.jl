@@ -20,7 +20,9 @@
     # Term column matches the standard library order exactly, so the file loads
     # index-aligned. (The library builder is the single source of the term strings,
     # so this also pins the exact unicode names without hardcoding them here.)
-    lib_terms = get_term_names(build_solar_wind_library())
+    lib_terms = get_term_names(build_solar_wind_library(
+        include_redundant_n_v2=true,
+    ))
     @test String.(df.term) == lib_terms
     @test length(df.coefficient) == length(lib_terms) == 21
 

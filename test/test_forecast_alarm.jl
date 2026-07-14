@@ -128,6 +128,47 @@ using Dates
         @test r.dst_predicted <= 50.0    # within state bounds
     end
 
+    @testset "D: Forecast state and driver validation" begin
+        lib = build_minimal_library()
+        ξ = zeros(length(lib))
+        ens = zeros(2, length(lib))
+        t0 = DateTime(2026, 1, 1)
+        @test_throws ArgumentError ForecastState(t0, Inf, lib, ξ, ens, 1.0)
+        @test_throws ArgumentError ForecastState(t0, 0.0, lib, ξ, ens, 0.0)
+        @test_throws ArgumentError ForecastState(t0, 0.0, lib, ξ, ens, 1e-10)
+        @test_throws DimensionMismatch ForecastState(t0, 0.0, lib, ξ[1:2], ens, 1.0)
+        @test_throws DimensionMismatch ForecastState(t0, 0.0, lib, ξ, zeros(2, 2), 1.0)
+        @test_throws ArgumentError ForecastState(t0, 0.0, lib, ξ, zeros(0, length(lib)), 1.0)
+
+        state = ForecastState(t0, -20.0, lib, ξ, ens, 1.0)
+        @test_throws ArgumentError step_forecast!(state, t0 + Hour(1), Inf, 0.0, 0.0, 5.0, 2.0)
+        @test_throws ArgumentError step_forecast!(state, t0 + Hour(1), 400.0, 0.0, 0.0, -1.0, 2.0)
+        @test_throws ArgumentError step_forecast!(state, t0 + Hour(1), 400.0, 0.0, 0.0, 5.0, 2.0;
+                                                  dst_observed=Inf)
+        @test_throws ArgumentError step_forecast!(state, t0, 400.0, 0.0, 0.0, 5.0, 2.0)
+        @test_throws ArgumentError step_forecast!(state, t0 + Hour(2), 400.0, 0.0, 0.0, 5.0, 2.0)
+        corrupted = ForecastState(
+            t0, -20.0, lib, zeros(length(lib)), zeros(2, length(lib)), 1.0,
+        )
+        corrupted.ξ_ensemble = zeros(1, 0)
+        @test_throws DimensionMismatch step_forecast!(
+            corrupted, t0 + Hour(1), 400.0, 0.0, 0.0, 5.0, 2.0,
+        )
+        @test_throws DimensionMismatch forecast_ahead(
+            corrupted, 400.0, 0.0, 0.0, 5.0, 2.0, 1,
+        )
+        @test corrupted.t_current == t0
+        @test corrupted.dst_current == -20.0
+        @test_throws ArgumentError forecast_ahead(state, 400.0, 0.0, 0.0, 5.0, 2.0, -1)
+
+        half_hour = ForecastState(t0, -20.0, lib, ξ, ens, 0.5)
+        half_result = step_forecast!(half_hour, t0 + Minute(30),
+                                     400.0, 0.0, 0.0, 5.0, 2.0)
+        @test half_result.t == t0 + Minute(30)
+        half_ahead = forecast_ahead(half_hour, 400.0, 0.0, 0.0, 5.0, 2.0, 2)
+        @test getfield.(half_ahead, :t) == [t0 + Hour(1), t0 + Minute(90)]
+    end
+
     @testset "A/D: V2 calibration" begin
         cal0 = default_operational_v2_calibration(;
             feature_names=[:latest_dst_nt],
@@ -305,6 +346,15 @@ end
         @test classify_severity(-200.0, th) == SUPERINTENSE # at -200
         @test classify_severity(-500.0, th) == SUPERINTENSE # well below
         @test classify_severity(10.0, th) == QUIET         # positive Dst
+        @test_throws ArgumentError classify_severity(NaN, th)
+        @test_throws ArgumentError classify_severity(Inf, th)
+        @test_throws ArgumentError classify_severity(-Inf, th)
+        @test_throws ArgumentError AlarmConfig(
+            Dict(MODERATE => NaN), false, identity, 1,
+        )
+        @test_throws ArgumentError AlarmConfig(
+            Dict(MODERATE => -50.0), false, identity, -1,
+        )
     end
 
     @testset "B: Properties — alarm cooldown" begin
@@ -428,6 +478,26 @@ end
         @test maybe_fire_horizon_alarm!(config, fr_quiet, seen) === nothing
         @test !haskey(seen, fr_quiet.t)
     end
+
+
+    @testset "D: failed horizon delivery remains retryable" begin
+        calls = Ref(0)
+        callback = a -> begin
+            calls[] += 1
+            calls[] == 1 && error("transient delivery failure")
+        end
+        config = AlarmConfig(
+            Dict(MODERATE => -50.0, INTENSE => -100.0, SUPERINTENSE => -200.0),
+            false, callback, 6,
+        )
+        seen = Dict{DateTime,StormSeverity}()
+        fr = ForecastResult(DateTime(2026, 1, 1, 6), -60.0, -60.0, -70.0, -50.0, NaN)
+        @test_throws ErrorException maybe_fire_horizon_alarm!(config, fr, seen)
+        @test !haskey(seen, fr.t)
+        @test maybe_fire_horizon_alarm!(config, fr, seen) isa Alarm
+        @test calls[] == 2
+        @test seen[fr.t] == MODERATE
+    end
 end
 
 @testset "Baselines — Full Models" begin
@@ -522,6 +592,14 @@ end
         Θ = evaluate_library(lib, data)
         pred = sindy_predict(ξ, lib, data)
         @test pred ≈ Θ * ξ  # must be identical (exact arithmetic, atol=0)
+        @test_throws DimensionMismatch sindy_predict(ξ[1:2], lib, data)
+        @test_throws ArgumentError sindy_predict([1.0, NaN, 0.0], lib, data)
+        overflowing = CandidateLibrary(
+            ["two"], Function[d -> fill(2.0, length(d["V"]))],
+        )
+        @test_throws ArgumentError sindy_predict(
+            [floatmax(Float64)], overflowing, Dict("V" => [1.0]),
+        )
     end
 
     @testset "B: sweep_lambda — monotonic sparsity" begin
@@ -542,16 +620,18 @@ end
 
         # At low λ, should recover all 3 true terms
         @test results[1].n_terms >= 3
+        @test_throws ArgumentError sweep_lambda(X, y, Float64[])
+        @test_throws ArgumentError sweep_lambda(X, y, [0.1, Inf])
     end
 
     @testset "E: Error handling — stlsq dimension mismatch" begin
         X = randn(10, 3)
         y = randn(5)  # wrong length
-        @test_throws AssertionError stlsq(X, y; λ=0.1)
+        @test_throws DimensionMismatch stlsq(X, y; λ=0.1)
     end
 
     @testset "E: Error handling — smooth_moving_average even window" begin
-        @test_throws AssertionError smooth_moving_average([1.0, 2.0, 3.0], 4)
+        @test_throws ArgumentError smooth_moving_average([1.0, 2.0, 3.0], 4)
     end
 
     @testset "Baseline threshold boundaries and degenerate IMF (mutation guards)" begin
@@ -578,5 +658,18 @@ end
         @test imf_clock_angle([0.0], [-5.0])[1] ≈ π atol = 1e-12        # due south
         @test imf_clock_angle([5.0], [5.0])[1] ≈ π / 4 atol = 1e-12     # north-east
         @test imf_clock_angle([5.0], [-5.0])[1] ≈ 3π / 4 atol = 1e-12   # south-east
+
+        # Mismatched or nonphysical baseline inputs must fail before broadcast
+        # truncation/shape errors or NaN/Inf propagation can masquerade as output.
+        @test_throws DimensionMismatch burton_model([400.0, 500.0], [2.0], [-10.0, -20.0])
+        @test_throws DimensionMismatch newell_coupling([400.0], [2.0, 3.0], [π])
+        @test_throws ArgumentError simulate_burton([400.0], [2.0], 0.0)
+        @test_throws ArgumentError simulate_burton([400.0], [2.0], 1.0; τ=Inf)
+        @test_throws ArgumentError simulate_obrien([400.0], [2.0], 1.0; Ec_crit=-1.0)
+        @test_throws ArgumentError burton_model([NaN], [2.0], [-10.0])
+        @test_throws ArgumentError burton_model([-400.0], [2.0], [-10.0])
+        @test_throws ArgumentError burton_model([400.0], [-2.0], [-10.0])
+        @test_throws ArgumentError newell_coupling([400.0], [-2.0], [π])
+        @test_throws ArgumentError simulate_obrien([400.0], [Inf], 1.0)
     end
 end

@@ -7,7 +7,7 @@
 # Endpoints:
 #   GET /                -> dashboard (public/index.html)
 #   GET /<static>        -> public/<static>   (whitelisted extensions, traversal-guarded)
-#   GET /api/health      -> liveness + log path/age
+#   GET /api/health      -> liveness + log age
 #   GET /api/status      -> current threat status, lead time, calibration
 #   GET /api/forecast    -> latest forecast cycle (point + 90% band per horizon)
 #   GET /api/history?hours=72 -> recent verified track record
@@ -61,10 +61,21 @@ function serve_static(path::AbstractString)
     isempty(rel) && (rel = "index.html")
     (occursin("..", rel) || occursin('\0', rel)) && return HTTP.Response(403, "forbidden")
     file = normpath(joinpath(PUBLIC_DIR, rel))
-    # Confine to PUBLIC_DIR.
-    (startswith(file, PUBLIC_DIR) && isfile(file)) || return HTTP.Response(404, "not found")
-    return HTTP.Response(200, ["Content-Type" => content_type(file),
-                              "Cache-Control" => "no-store"], read(file))
+    isfile(file) || return HTTP.Response(404, "not found")
+    resolved = try
+        realpath(file)
+    catch e
+        e isa InterruptException && rethrow()
+        return HTTP.Response(404, "not found")
+    end
+    public_root = realpath(PUBLIC_DIR)
+    relative = relpath(resolved, public_root)
+    separator = string(Base.Filesystem.path_separator)
+    confined = !isabspath(relative) && relative != ".." &&
+               !startswith(relative, ".." * separator)
+    (confined && isfile(resolved)) || return HTTP.Response(403, "forbidden")
+    return HTTP.Response(200, ["Content-Type" => content_type(resolved),
+                              "Cache-Control" => "no-store"], read(resolved))
 end
 
 function api_handler(path::AbstractString, query::AbstractString, log_path::AbstractString)
@@ -95,10 +106,12 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
                 if fc !== nothing
                     # A reachable-but-stalled L1 feed must not drive a "reliable" 30-min forecast
                     # from frozen inputs: flag stale inputs and demote reliability.
-                    age = solar_wind_input_age_min(sw)
-                    stale_inputs = age !== nothing && age > SW_INPUT_MAX_AGE_MIN
+                    freshness = solar_wind_input_freshness(sw)
+                    age = freshness.age_min
+                    stale_inputs = freshness.stale
                     fc = merge(fc, (stale_inputs = stale_inputs,
                                     input_age_min = (age === nothing ? nothing : round(age; digits=1)),
+                                    invalid_future_inputs = freshness.invalid_future,
                                     mag_time_utc = get(sw, :mag_time_utc, nothing),
                                     plasma_time_utc = get(sw, :plasma_time_utc, nothing)))
                     stale_inputs && (fc = merge(fc, (reliable = false,)))
@@ -119,7 +132,8 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
         hours = try
             h = parse(Float64, get(q, "hours", "72"))
             isfinite(h) ? clamp(h, 1.0, 24.0 * 30) : 72.0
-        catch
+        catch e
+            e isa InterruptException && rethrow()
             72.0
         end
         return json_response(build_history(get_log(log_path), hours))
@@ -148,7 +162,7 @@ function make_handler(log_path::AbstractString)
                 status = !ok ? "no_log" :
                          (age !== nothing && age > STALE_CYCLE_HOURS * 60 ? "stale" : "ok")
                 return json_response((status = status,
-                                      log_path=log_path, log_age_min=age,
+                                      log_age_min=age,
                                       server_time_utc=string(now(UTC)) * "Z"))
             elseif startswith(path, "/api/")
                 return api_handler(path, uri.query === nothing ? "" : uri.query, log_path)
@@ -156,6 +170,7 @@ function make_handler(log_path::AbstractString)
                 return serve_static(path)
             end
         catch e
+            e isa InterruptException && rethrow()
             # Log the full exception server-side, but never echo it (and its absolute log path)
             # to clients — return a generic detail.
             @error "request failed" path=path exception=(e, catch_backtrace())

@@ -1,3 +1,5 @@
+module V2BroadReplayTests
+
 using Test
 using DataFrames
 using Dates
@@ -116,3 +118,5 @@ end
     end
     end
 end
+
+end # module V2BroadReplayTests

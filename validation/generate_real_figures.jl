@@ -12,9 +12,13 @@
 using PlotlySupply
 using CSV, DataFrames, Statistics
 
-const DATA_DIR = joinpath(@__DIR__, "..", "data")
-const FIGS_DIR = joinpath(@__DIR__, "..", "figs")
-mkpath(FIGS_DIR)
+include(joinpath(@__DIR__, "output_paths.jl"))
+const OUTPUT_PATHS = validation_output_paths()
+OUTPUT_PATHS.mode == :canonical && error(
+    "legacy unmanifested real-figure generation is prohibited in canonical runs",
+)
+const DATA_DIR = OUTPUT_PATHS.data
+const FIGS_DIR = OUTPUT_PATHS.figs
 
 # Publication constants
 const COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9"]

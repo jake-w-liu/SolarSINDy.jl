@@ -13,7 +13,9 @@ using DataFrames
 using Dates
 using HTTP
 using JSON3
+using SHA
 using Statistics
+using FileWatching: Pidfile
 
 const KYOTO_DST_JSON_URL = "https://services.swpc.noaa.gov/products/kyoto-dst.json"
 const DEFAULT_LOG_PATH = joinpath("live_forecasts", "live_forecast_log.csv")
@@ -339,12 +341,13 @@ end
 # the sibling solar-wind fetchers retry. The catch-all retries connect/read timeouts and truncated
 # JSON alike; the finite/sentinel filter (|Dst| < 9000, drop null) is kept so a feed outage cannot
 # anchor the monitor at a nonphysical value.
-function _fetch_dst(; max_retries::Int=3, retry_delay_sec::Real=1.0)
+function _fetch_dst(; max_retries::Int=3, retry_delay_sec::Real=1.0,
+                    fetch_fn=HTTP.get)
     max_retries >= 1 || throw(ArgumentError("max_retries must be >= 1"))
     last_error = nothing
     for attempt in 1:max_retries
         try
-            resp = HTTP.get(KYOTO_DST_JSON_URL; connect_timeout=15, readtimeout=30)
+            resp = fetch_fn(KYOTO_DST_JSON_URL; connect_timeout=15, readtimeout=30)
             resp.status == 200 || error("Kyoto Dst HTTP status $(resp.status)")
             rows = JSON3.read(String(resp.body))
             times = DateTime[]; dst = Float64[]
@@ -359,6 +362,7 @@ function _fetch_dst(; max_retries::Int=3, retry_delay_sec::Real=1.0)
             isempty(dst) && error("Kyoto Dst feed returned no finite values")
             return times, dst
         catch e
+            e isa InterruptException && rethrow()
             last_error = e
             attempt == max_retries && rethrow(e)
             sleep(retry_delay_sec)
@@ -446,13 +450,100 @@ function _driver_gap_status(n_speed_finite::Int, n_bz_finite::Int,
     return :ok
 end
 
-# Atomic CSV write: write to a sibling .tmp then rename (same-filesystem mv is atomic), so a concurrent
-# reader (e.g. the dashboard API serving live_forecast_log.csv) never observes a half-written log.
-function _atomic_csv(path::AbstractString, df)
-    tmp = string(path, ".tmp")
-    CSV.write(tmp, df)
-    mv(tmp, path; force=true)
-    return df
+# Atomic CSV write: write and fsync a sibling .tmp before the same-filesystem
+# rename, so readers see either the old complete file or the new complete file.
+function _durable_flush(io::IO)
+    flush(io)
+    rc = Sys.iswindows() ?
+         ccall(:_commit, Cint, (Cint,), fd(io)) :
+         ccall(:fsync, Cint, (Cint,), fd(io))
+    systemerror("durable file flush", rc != 0)
+    return nothing
+end
+
+function _sync_file(path::AbstractString)
+    open(path, "a") do io
+        _durable_flush(io)
+    end
+    return path
+end
+
+function _sync_parent_directory(path::AbstractString)
+    Sys.iswindows() && return nothing
+    parent = dirname(path)
+    isempty(parent) && (parent = ".")
+    open(parent, "r") do io
+        rc = ccall(:fsync, Cint, (Cint,), fd(io))
+        systemerror("durable directory flush", rc != 0)
+    end
+    return nothing
+end
+
+function _live_require_regular_target(path::AbstractString)
+    islink(path) && throw(ArgumentError(
+        "operational output target must not be a symbolic link: $path",
+    ))
+    ispath(path) && !isfile(path) && throw(ArgumentError(
+        "operational output target exists but is not a regular file: $path",
+    ))
+    return path
+end
+
+function _live_atomic_replace(source::AbstractString, target::AbstractString)
+    isfile(source) && !islink(source) || throw(ArgumentError(
+        "operational replacement source must be a regular non-symlink file: $source",
+    ))
+    _live_require_regular_target(target)
+    Base.Filesystem.rename(source, target)
+    isfile(target) && !islink(target) || throw(ErrorException(
+        "operational replacement did not install a regular file: $target",
+    ))
+    return target
+end
+
+function _atomic_csv(path::AbstractString, table)
+    parent = dirname(path)
+    mkpath(parent)
+    _live_require_regular_target(path)
+    tmp, io = mktemp(parent; cleanup=false)
+    close(io)
+    try
+        CSV.write(tmp, table)
+        _sync_file(tmp)
+        _live_atomic_replace(tmp, path)
+        _sync_parent_directory(path)
+    catch
+        isfile(tmp) && rm(tmp; force=true)
+        rethrow()
+    end
+    return table
+end
+
+function _atomic_json(path::AbstractString, value)
+    parent = dirname(path)
+    mkpath(parent)
+    _live_require_regular_target(path)
+    tmp, initial_io = mktemp(parent; cleanup=false)
+    close(initial_io)
+    try
+        open(tmp, "w") do io
+            JSON3.write(io, value)
+            _durable_flush(io)
+        end
+        _live_atomic_replace(tmp, path)
+        _sync_parent_directory(path)
+    catch
+        isfile(tmp) && rm(tmp; force=true)
+        rethrow()
+    end
+    return value
+end
+
+function _write_subhour_trajectory!(payload::Function, path::AbstractString,
+                                    appended::Bool)
+    appended || return false
+    _atomic_json(path, payload())
+    return true
 end
 
 const L1_DIST_KM = 1.5e6   # L1 standoff [km]; solar-wind transit lag to Earth = L1_DIST_KM / V / 3600 h
@@ -576,98 +667,367 @@ end
 
 function _with_forecast_log_lock(f, log_path::String; timeout_sec::Float64=30.0,
                                  stale_after_sec::Float64=900.0, poll_sec::Float64=0.05)
-    lock_dir = log_path * ".lock"
-    reap_dir = lock_dir * ".reap"
-    parent = dirname(lock_dir)
+    timeout_sec >= 0 || throw(ArgumentError("timeout_sec must be nonnegative"))
+    stale_after_sec >= 0 || throw(ArgumentError("stale_after_sec must be nonnegative"))
+    poll_sec > 0 || throw(ArgumentError("poll_sec must be positive"))
+    lock_path = log_path * ".lock"
+    parent = dirname(lock_path)
     !isempty(parent) && mkpath(parent)
     deadline = time() + timeout_sec
-    acquired = false
-    while !acquired
-        if isdir(reap_dir)
-            stale_reaper = try
-                time() - stat(reap_dir).mtime > stale_after_sec
-            catch
-                false
-            end
-            stale_reaper && rm(reap_dir; recursive=true, force=true)
-            time() < deadline || error("timed out waiting for forecast log lock: $lock_dir")
-            sleep(poll_sec)
-            continue
+    owner = false
+    while owner === false
+        if !isdir(lock_path) && !islink(lock_path)
+            owner = Pidfile.trymkpidlock(
+                lock_path; stale_age=stale_after_sec,
+                refresh=stale_after_sec == 0 ? 0.0 : stale_after_sec / 2,
+            )
         end
-        try
-            mkdir(lock_dir)
-            acquired = true
-        catch e
-            isdir(lock_dir) || throw(e)
-            stale = try
-                time() - stat(lock_dir).mtime > stale_after_sec
-            catch
-                false
-            end
-            if stale
-                reaping = false
-                try
-                    mkdir(reap_dir)
-                    reaping = true
-                catch reap_err
-                    isdir(reap_dir) || throw(reap_err)
-                end
-                if reaping
-                    try
-                        if isdir(lock_dir)
-                            still_stale = try
-                                time() - stat(lock_dir).mtime > stale_after_sec
-                            catch
-                                false
-                            end
-                            if still_stale
-                                rm(lock_dir; recursive=true, force=true)
-                                try
-                                    mkdir(lock_dir)
-                                    acquired = true
-                                catch lock_err
-                                    isdir(lock_dir) || throw(lock_err)
-                                end
-                            end
-                        end
-                    finally
-                        rm(reap_dir; recursive=true, force=true)
-                    end
-                    acquired && break
-                end
-            end
-            time() < deadline || error("timed out waiting for forecast log lock: $lock_dir")
-            sleep(poll_sec)
-        end
+        owner === false || break
+        time() < deadline || error("timed out waiting for forecast log lock: $lock_path")
+        sleep(min(poll_sec, max(deadline - time(), 0.0)))
     end
     try
         return f()
     finally
-        acquired && rm(lock_dir; recursive=true, force=true)
+        close(owner)
     end
+end
+
+const _LIVE_STATE_VERSION = 1
+const _LIVE_STATE_TAIL_BYTES = 4096
+# Exact O(1) duplicate lookup for the most recently appended unresolved rows.
+# Older unresolved identities remain authoritative in the CSV and are streamed
+# only when a caller retries an identity outside this operational cache.
+const _LIVE_PENDING_CACHE_LIMIT = 512
+const _LIVE_ACI_STREAM_LIMIT = 32
+
+_live_state_path(log_path::AbstractString) = string(log_path, ".state.json")
+_append_transaction_path(log_path::AbstractString) = string(log_path, ".append.json")
+
+function _tail_digest(path::AbstractString; upto::Integer=filesize(path))
+    stop = Int(upto)
+    0 <= stop <= filesize(path) || throw(ArgumentError("invalid digest boundary $stop for $path"))
+    count = min(stop, _LIVE_STATE_TAIL_BYTES)
+    bytes = open(path, "r") do io
+        seek(io, stop - count)
+        read(io, count)
+    end
+    return bytes2hex(sha256(bytes))
+end
+
+function _log_fingerprint(path::AbstractString)
+    st = stat(path)
+    return Dict{String,Any}(
+        "size" => Int(st.size),
+        "mtime" => Float64(st.mtime),
+        "device" => string(st.device),
+        "inode" => string(st.inode),
+        "tail_sha256" => _tail_digest(path),
+    )
+end
+
+function _pending_key(latest, target, model)
+    return string(_parse_dt(latest), '\x1f', _parse_dt(target), '\x1f', String(model))
+end
+
+function _incoming_pending_key(row::DataFrame)
+    nrow(row) == 1 || throw(ArgumentError("forecast append requires exactly one row"))
+    required = (:latest_dst_time_utc, :target_time_utc, :model_version)
+    all(String(c) in names(row) for c in required) || return nothing
+    any(ismissing(row[1, c]) for c in required) && return nothing
+    return _pending_key(row[1, :latest_dst_time_utc], row[1, :target_time_utc],
+                        row[1, :model_version])
+end
+
+function _csv_pending_key(csv_row, columns::Set{Symbol})
+    required = (:latest_dst_time_utc, :target_time_utc, :model_version,
+                :observation_dst_nt)
+    all(in(columns), required) || return nothing
+    ismissing(getproperty(csv_row, :observation_dst_nt)) || return nothing
+    vals = (getproperty(csv_row, :latest_dst_time_utc),
+            getproperty(csv_row, :target_time_utc),
+            getproperty(csv_row, :model_version))
+    any(ismissing, vals) && return nothing
+    return _pending_key(vals...)
+end
+
+function _new_live_state(path::AbstractString, columns, row_count::Integer, pending;
+                         pending_cache_complete::Bool=true,
+                         streams=Dict{String,Any}())
+    return Dict{String,Any}(
+        "version" => _LIVE_STATE_VERSION,
+        "fingerprint" => _log_fingerprint(path),
+        "columns" => String.(columns),
+        "row_count" => Int(row_count),
+        "pending" => Dict{String,Any}(String(k) => Int(v) for (k, v) in pairs(pending)),
+        "pending_cache_complete" => pending_cache_complete,
+        "aci_streams" => streams,
+    )
+end
+
+function _state_matches_log(state, path::AbstractString)
+    state isa AbstractDict || return false
+    get(state, "version", nothing) == _LIVE_STATE_VERSION || return false
+    get(state, "fingerprint", nothing) == _log_fingerprint(path) || return false
+    columns = get(state, "columns", nothing)
+    pending = get(state, "pending", nothing)
+    streams = get(state, "aci_streams", nothing)
+    pending_cache_complete = get(state, "pending_cache_complete", nothing)
+    row_count = get(state, "row_count", nothing)
+    columns isa AbstractVector || return false
+    all(c -> c isa AbstractString, columns) || return false
+    pending isa AbstractDict || return false
+    pending_cache_complete isa Bool || return false
+    streams isa AbstractDict || return false
+    row_count isa Integer && row_count >= 0 || return false
+    all(v -> v isa Integer && 1 <= v <= row_count, values(pending)) || return false
+    length(pending) <= _LIVE_PENDING_CACHE_LIMIT || return false
+    length(streams) <= _LIVE_ACI_STREAM_LIMIT || return false
+    return true
+end
+
+function _read_live_state(path::AbstractString)
+    state_path = _live_state_path(path)
+    isfile(state_path) || return nothing
+    try
+        envelope = JSON3.read(read(state_path, String), Dict{String,Any})
+        payload = get(envelope, "payload", nothing)
+        checksum = get(envelope, "sha256", nothing)
+        payload isa AbstractString || return nothing
+        checksum isa AbstractString || return nothing
+        bytes2hex(sha256(codeunits(payload))) == checksum || return nothing
+        return JSON3.read(String(payload), Dict{String,Any})
+    catch e
+        e isa InterruptException && rethrow()
+        return nothing
+    end
+end
+
+function _write_live_state!(path::AbstractString, state)
+    state["fingerprint"] = _log_fingerprint(path)
+    payload = JSON3.write(state)
+    envelope = Dict{String,Any}(
+        "sha256" => bytes2hex(sha256(codeunits(payload))),
+        "payload" => payload,
+    )
+    _atomic_json(_live_state_path(path), envelope)
+    return state
+end
+
+function _cache_pending!(pending::AbstractDict, key::String, row_idx::Integer,
+                         complete::Bool)
+    if !haskey(pending, key) && length(pending) >= _LIVE_PENDING_CACHE_LIMIT
+        oldest_key = first(keys(pending))
+        oldest_row = Int(pending[oldest_key])
+        for (candidate, candidate_row) in pairs(pending)
+            if Int(candidate_row) < oldest_row
+                oldest_key = candidate
+                oldest_row = Int(candidate_row)
+            end
+        end
+        delete!(pending, oldest_key)
+        complete = false
+    end
+    pending[key] = Int(row_idx)
+    return complete
+end
+
+function _rebuild_live_state(path::AbstractString)
+    rows = CSV.Rows(path; strict=true, reusebuffer=true)
+    columns = Symbol.(rows.names)
+    column_set = Set(columns)
+    pending = Dict{String,Int}()
+    pending_cache_complete = true
+    row_count = 0
+    for csv_row in rows
+        row_count += 1
+        key = _csv_pending_key(csv_row, column_set)
+        if key !== nothing && !haskey(pending, key)
+            pending_cache_complete = _cache_pending!(pending, key, row_count,
+                                                      pending_cache_complete)
+        end
+    end
+    return _new_live_state(path, columns, row_count, pending;
+                           pending_cache_complete=pending_cache_complete)
+end
+
+function _find_pending_row(path::AbstractString, wanted_key::String)
+    rows = CSV.Rows(path; strict=true, reusebuffer=true)
+    columns = Set(Symbol.(rows.names))
+    for (row_idx, row) in enumerate(rows)
+        _csv_pending_key(row, columns) == wanted_key && return row_idx
+    end
+    return nothing
+end
+
+function _load_or_rebuild_live_state!(path::AbstractString)
+    state = _read_live_state(path)
+    if state === nothing || !_state_matches_log(state, path)
+        state = _rebuild_live_state(path)
+        _write_live_state!(path, state)
+    end
+    return state
+end
+
+function _project_row(source, schema::Tuple, available::Set{Symbol})
+    T = NamedTuple{schema}
+    return T(ntuple(i -> begin
+        col = schema[i]
+        col in available ? getproperty(source, col) : missing
+    end, length(schema)))
+end
+
+function _project_row(row::DataFrame, schema::Tuple)
+    available = Set(Symbol.(names(row)))
+    T = NamedTuple{schema}
+    return T(ntuple(i -> begin
+        col = schema[i]
+        col in available ? row[1, col] : missing
+    end, length(schema)))
+end
+
+function _append_row_bytes(path::AbstractString, bytes::Vector{UInt8})
+    open(path, "a") do io
+        write(io, bytes)
+        _durable_flush(io)
+    end
+    return nothing
+end
+
+function _recover_append_transaction!(path::AbstractString)
+    transaction_path = _append_transaction_path(path)
+    isfile(transaction_path) || return false
+    transaction = try
+        JSON3.read(read(transaction_path, String), Dict{String,Any})
+    catch e
+        e isa InterruptException && rethrow()
+        error("corrupt forecast append transaction $transaction_path: $(sprint(showerror, e))")
+    end
+    get(transaction, "version", nothing) == 1 ||
+        error("unsupported forecast append transaction in $transaction_path")
+    pre_size = get(transaction, "pre_size", nothing)
+    row_hex = get(transaction, "row_hex", nothing)
+    row_digest = get(transaction, "row_sha256", nothing)
+    pre_digest = get(transaction, "pre_tail_sha256", nothing)
+    pre_size isa Integer && pre_size >= 0 || error("invalid append transaction size")
+    row_hex isa AbstractString || error("invalid append transaction row")
+    row_digest isa AbstractString || error("invalid append transaction row digest")
+    pre_digest isa AbstractString || error("invalid append transaction digest")
+    isfile(path) || error("forecast log disappeared while append transaction was pending")
+    filesize(path) >= pre_size || error("forecast log shrank during append transaction")
+    _tail_digest(path; upto=pre_size) == pre_digest ||
+        error("forecast log prefix changed during append transaction")
+    bytes = try
+        hex2bytes(row_hex)
+    catch e
+        e isa InterruptException && rethrow()
+        error("invalid append transaction bytes: $(sprint(showerror, e))")
+    end
+    bytes2hex(sha256(bytes)) == row_digest || error("append transaction row checksum mismatch")
+    final_size = pre_size + length(bytes)
+    filesize(path) <= final_size || error("forecast log advanced past a pending append transaction")
+    complete = if filesize(path) == final_size
+        open(path, "r") do io
+            seek(io, pre_size)
+            read(io, length(bytes)) == bytes
+        end
+    else
+        false
+    end
+    if !complete
+        open(path, "r+") do io
+            truncate(io, pre_size)
+            _durable_flush(io)
+        end
+        _append_row_bytes(path, bytes)
+    end
+    rm(transaction_path; force=true)
+    return true
+end
+
+function _transactional_append!(path::AbstractString, row_bytes::Vector{UInt8})
+    pre_size = filesize(path)
+    transaction = Dict{String,Any}(
+        "version" => 1,
+        "pre_size" => pre_size,
+        "pre_tail_sha256" => _tail_digest(path),
+        "row_hex" => bytes2hex(row_bytes),
+        "row_sha256" => bytes2hex(sha256(row_bytes)),
+    )
+    _atomic_json(_append_transaction_path(path), transaction)
+    _append_row_bytes(path, row_bytes)
+    rm(_append_transaction_path(path); force=true)
+    return nothing
+end
+
+function _stream_schema_upgrade!(path::AbstractString, old_columns::Vector{Symbol},
+                                 schema::Tuple, row::DataFrame)
+    available = Set(old_columns)
+    rows = CSV.Rows(path; strict=true, reusebuffer=true)
+    old_rows = (_project_row(csv_row, schema, available) for csv_row in rows)
+    new_row = _project_row(row, schema)
+    _atomic_csv(path, Iterators.flatten((old_rows, (new_row,))))
+    return nothing
 end
 
 function _append_forecast!(log_path::String, row::DataFrame; return_status::Bool=false)
     dir = dirname(log_path)
     !isempty(dir) && mkpath(dir)
     return _with_forecast_log_lock(log_path) do
-        if isfile(log_path)
-            df = CSV.read(log_path, DataFrame)
-            dup_idx = _pending_duplicate_forecast_row(df, row)
-            if dup_idx !== nothing
-                println(
-                    "Skipped duplicate pending forecast row $dup_idx: " *
-                    "latest_dst=$(row[1, :latest_dst_time_utc]) target=$(row[1, :target_time_utc]) " *
-                    "model=$(row[1, :model_version])"
-                )
-                return return_status ? (; row_idx=dup_idx, appended=false) : dup_idx
-            end
-            df = vcat(df, row; cols=:union)
-        else
-            df = row
+        if !isfile(log_path)
+            _atomic_csv(log_path, row)
+            key = _incoming_pending_key(row)
+            pending = key === nothing ? Dict{String,Int}() : Dict(key => 1)
+            state = _new_live_state(log_path, names(row), 1, pending)
+            _write_live_state!(log_path, state)
+            return return_status ? (; row_idx=1, appended=true) : 1
         end
-        _atomic_csv(log_path, df)
-        return return_status ? (; row_idx=nrow(df), appended=true) : nrow(df)
+
+        _recover_append_transaction!(log_path)
+        state = _load_or_rebuild_live_state!(log_path)
+        key = _incoming_pending_key(row)
+        dup_idx = key === nothing ? nothing : get(state["pending"], key, nothing)
+        if key !== nothing && !state["pending_cache_complete"]
+            dup_idx = _find_pending_row(log_path, key)
+        end
+        if dup_idx !== nothing
+            println(
+                "Skipped duplicate pending forecast row $dup_idx: " *
+                "latest_dst=$(row[1, :latest_dst_time_utc]) target=$(row[1, :target_time_utc]) " *
+                "model=$(row[1, :model_version])"
+            )
+            return return_status ? (; row_idx=Int(dup_idx), appended=false) : Int(dup_idx)
+        end
+
+        old_columns = Symbol.(state["columns"])
+        old_column_set = Set(old_columns)
+        extras = [Symbol(c) for c in names(row) if Symbol(c) ∉ old_column_set]
+        schema = Tuple(vcat(old_columns, extras))
+        if isempty(extras)
+            buffer = IOBuffer()
+            CSV.write(buffer, [_project_row(row, schema)]; header=false)
+            row_bytes = take!(buffer)
+            if filesize(log_path) > 0
+                final_byte = open(log_path, "r") do io
+                    seekend(io)
+                    skip(io, -1)
+                    read(io, UInt8)
+                end
+                final_byte == UInt8('\n') || (row_bytes = vcat(UInt8('\n'), row_bytes))
+            end
+            _transactional_append!(log_path, row_bytes)
+        else
+            _stream_schema_upgrade!(log_path, old_columns, schema, row)
+            state["columns"] = String.(schema)
+        end
+
+        row_idx = Int(state["row_count"]) + 1
+        state["row_count"] = row_idx
+        key === nothing || (state["pending_cache_complete"] = _cache_pending!(
+            state["pending"], key, row_idx, state["pending_cache_complete"]
+        ))
+        _write_live_state!(log_path, state)
+        return return_status ? (; row_idx=row_idx, appended=true) : row_idx
     end
 end
 
@@ -970,19 +1330,257 @@ function _load_conformal_for_model(cfg::LiveVerifyConfig)
 end
 
 # N2: online adaptive-conformal (ACI) interval derived from the verified forecast
-# log. The log IS the ACI state (no separate state file): for the requested horizon
-# we replay the chronological verified (v2 point, observed) stream to bring the ACI
-# miscoverage level to its current value, then read the locked interval for the new
-# forecast via a predict-only (gap) step that does not mutate the state. Returns
+# log. A checksummed log fingerprint and bounded ACI checkpoint live beside the CSV;
+# the log is streamed once when that checkpoint is absent or stale, then new verified
+# rows advance it causally. The new forecast uses a predict-only (gap) step that does
+# not mutate the checkpoint. Returns
 # (lo, hi), or `nothing` when there is too little verified history for this horizon
 # (the caller then keeps the static interval). Fail-safe: any error returns
 # `nothing`, so a malformed log can never break issuance.
+# The α recursion still replays every eligible observation, while the empirical
+# residual distribution retains only the configured trailing window.
 # Activity regime for the residual pool — same rule and threshold as the stratified
 # conformal calibration (SolarSINDy._activity_regime / CONFORMAL_ACTIVITY_THRESHOLD_NT):
 # :disturbed when latest_dst ≤ threshold, else :quiet; non-finite Dst → :disturbed.
 const _ACI_ACTIVITY_THRESHOLD_NT = -30.0
+const _ACI_HISTORY_WINDOW = 500
 _aci_regime(latest_dst::Real, thr::Real=_ACI_ACTIVITY_THRESHOLD_NT) =
     (isfinite(latest_dst) && latest_dst > thr) ? :quiet : :disturbed
+
+function _aci_stream_key(pred_col::Symbol, horizon_steps::Integer,
+                         activity_threshold::Real, target_coverage::Real,
+                         gamma::Real, warmup::Integer, history_window::Integer)
+    config = join((String(pred_col), string(Int(horizon_steps)),
+                   repr(Float64(activity_threshold)), repr(Float64(target_coverage)),
+                   repr(Float64(gamma)), string(Int(warmup)),
+                   string(Int(history_window))), '|')
+    return bytes2hex(sha256(codeunits(config)))
+end
+
+_csv_float(value) = value isa Real ? Float64(value) : parse(Float64, String(value))
+
+function _aci_snapshot(ac::AdaptiveConformal, count::Integer)
+    return Dict{String,Any}(
+        "alpha_t" => ac.alpha_t,
+        "history" => copy(ac.history),
+        "count" => Int(count),
+    )
+end
+
+function _restore_aci(snapshot, target_coverage::Real, gamma::Real,
+                      warmup::Integer, history_window::Integer)
+    snapshot isa AbstractDict || return nothing
+    alpha = get(snapshot, "alpha_t", nothing)
+    history = get(snapshot, "history", nothing)
+    count = get(snapshot, "count", nothing)
+    alpha isa Real && isfinite(alpha) && 0 <= alpha <= 1 || return nothing
+    history isa AbstractVector || return nothing
+    count isa Integer && count >= length(history) || return nothing
+    length(history) <= history_window || return nothing
+    all(v -> v isa Real && isfinite(v) && v >= 0, history) || return nothing
+    ac = init_adaptive_conformal(; target_coverage=target_coverage, gamma=gamma,
+                                 warmup=warmup, window=history_window)
+    ac.alpha_t = Float64(alpha)
+    append!(ac.history, Float64.(history))
+    return ac
+end
+
+function _valid_aci_entry(entry, pred_col::Symbol, horizon_steps::Integer,
+                          activity_threshold::Real, target_coverage::Real,
+                          gamma::Real, warmup::Integer, history_window::Integer)
+    entry isa AbstractDict || return false
+    get(entry, "pred_col", nothing) == String(pred_col) || return false
+    get(entry, "horizon_steps", nothing) == Int(horizon_steps) || return false
+    get(entry, "activity_threshold", nothing) == Float64(activity_threshold) || return false
+    get(entry, "target_coverage", nothing) == Float64(target_coverage) || return false
+    get(entry, "gamma", nothing) == Float64(gamma) || return false
+    get(entry, "warmup", nothing) == Int(warmup) || return false
+    get(entry, "history_window", nothing) == Int(history_window) || return false
+    last_issue = get(entry, "last_issue_time_utc", nothing)
+    (last_issue === nothing || last_issue isa AbstractString) || return false
+    for pool in ("all", "quiet", "disturbed")
+        _restore_aci(get(entry, pool, nothing), target_coverage, gamma,
+                     warmup, history_window) === nothing && return false
+    end
+    return true
+end
+
+function _build_aci_entry(path::AbstractString, pred_col::Symbol,
+                          horizon_steps::Integer, activity_threshold::Real,
+                          target_coverage::Real, gamma::Real,
+                          warmup::Integer, history_window::Integer)
+    rows = CSV.Rows(path; strict=true, reusebuffer=true)
+    columns = Set(Symbol.(rows.names))
+    required = (:model_step_hours, pred_col, :observation_dst_nt,
+                :issue_time_utc, :latest_dst_nt)
+    all(in(columns), required) || return nothing
+    states = Dict(
+        :all => init_adaptive_conformal(; target_coverage=target_coverage,
+                                        gamma=gamma, warmup=warmup,
+                                        window=history_window),
+        :quiet => init_adaptive_conformal(; target_coverage=target_coverage,
+                                          gamma=gamma, warmup=warmup,
+                                          window=history_window),
+        :disturbed => init_adaptive_conformal(; target_coverage=target_coverage,
+                                              gamma=gamma, warmup=warmup,
+                                              window=history_window),
+    )
+    counts = Dict(:all => 0, :quiet => 0, :disturbed => 0)
+    last_issue = nothing
+    h = Int(horizon_steps)
+    for row in rows
+        hv = getproperty(row, :model_step_hours)
+        pv = getproperty(row, pred_col)
+        ov = getproperty(row, :observation_dst_nt)
+        (ismissing(hv) || ismissing(pv) || ismissing(ov)) && continue
+        round(Int, _csv_float(hv)) == h || continue
+        point = _csv_float(pv)
+        observed = _csv_float(ov)
+        (isfinite(point) && isfinite(observed)) || continue
+        issue = _parse_dt(getproperty(row, :issue_time_utc))
+        last_issue !== nothing && issue < last_issue && error(
+            "ACI log is not chronological at $issue; refusing an order-dependent checkpoint"
+        )
+        last_issue = issue
+        adaptive_conformal_step!(states[:all], point, observed)
+        counts[:all] += 1
+        latest = getproperty(row, :latest_dst_nt)
+        if !ismissing(latest)
+            latest_value = _csv_float(latest)
+            if isfinite(latest_value)
+                regime = _aci_regime(latest_value, activity_threshold)
+                adaptive_conformal_step!(states[regime], point, observed)
+                counts[regime] += 1
+            end
+        end
+    end
+    return Dict{String,Any}(
+        "pred_col" => String(pred_col),
+        "horizon_steps" => h,
+        "activity_threshold" => Float64(activity_threshold),
+        "target_coverage" => Float64(target_coverage),
+        "gamma" => Float64(gamma),
+        "warmup" => Int(warmup),
+        "history_window" => Int(history_window),
+        "last_issue_time_utc" => last_issue === nothing ? nothing : string(last_issue),
+        "all" => _aci_snapshot(states[:all], counts[:all]),
+        "quiet" => _aci_snapshot(states[:quiet], counts[:quiet]),
+        "disturbed" => _aci_snapshot(states[:disturbed], counts[:disturbed]),
+    )
+end
+
+function _select_aci_state(entry, latest_dst::Real, activity_threshold::Real,
+                           target_coverage::Real, gamma::Real,
+                           warmup::Integer, history_window::Integer)
+    pool = "all"
+    if isfinite(Float64(latest_dst))
+        candidate = String(_aci_regime(Float64(latest_dst), activity_threshold))
+        snapshot = entry[candidate]
+        Int(snapshot["count"]) >= warmup + 5 && (pool = candidate)
+    end
+    snapshot = entry[pool]
+    Int(snapshot["count"]) >= warmup + 5 || return nothing
+    return _restore_aci(snapshot, target_coverage, gamma, warmup, history_window)
+end
+
+function _advance_aci_entry!(entry, df::DataFrame, changed_rows::Vector{Int})
+    pred_col = Symbol(entry["pred_col"])
+    required = (:model_step_hours, pred_col, :observation_dst_nt,
+                :issue_time_utc, :latest_dst_nt)
+    all(c -> String(c) in names(df), required) || return true
+    target_coverage = Float64(entry["target_coverage"])
+    gamma = Float64(entry["gamma"])
+    warmup = Int(entry["warmup"])
+    history_window = Int(entry["history_window"])
+    activity_threshold = Float64(entry["activity_threshold"])
+    states = Dict{Symbol,AdaptiveConformal}()
+    counts = Dict{Symbol,Int}()
+    for pool in (:all, :quiet, :disturbed)
+        snapshot = entry[String(pool)]
+        ac = _restore_aci(snapshot, target_coverage, gamma, warmup, history_window)
+        ac === nothing && return false
+        states[pool] = ac
+        counts[pool] = Int(snapshot["count"])
+    end
+    last_issue_raw = entry["last_issue_time_utc"]
+    last_issue = last_issue_raw === nothing ? nothing : _parse_dt(last_issue_raw)
+    ordered_rows = sort(changed_rows; by=i -> _parse_dt(df[i, :issue_time_utc]))
+    h = Int(entry["horizon_steps"])
+    for row_idx in ordered_rows
+        hv = df[row_idx, :model_step_hours]
+        pv = df[row_idx, pred_col]
+        ov = df[row_idx, :observation_dst_nt]
+        (ismissing(hv) || ismissing(pv) || ismissing(ov)) && continue
+        round(Int, Float64(hv)) == h || continue
+        point = Float64(pv)
+        observed = Float64(ov)
+        (isfinite(point) && isfinite(observed)) || continue
+        issue = _parse_dt(df[row_idx, :issue_time_utc])
+        last_issue !== nothing && issue <= last_issue && return false
+        last_issue = issue
+        adaptive_conformal_step!(states[:all], point, observed)
+        counts[:all] += 1
+        latest = df[row_idx, :latest_dst_nt]
+        if !ismissing(latest) && isfinite(Float64(latest))
+            regime = _aci_regime(Float64(latest), activity_threshold)
+            adaptive_conformal_step!(states[regime], point, observed)
+            counts[regime] += 1
+        end
+    end
+    entry["last_issue_time_utc"] = last_issue === nothing ? nothing : string(last_issue)
+    for pool in (:all, :quiet, :disturbed)
+        entry[String(pool)] = _aci_snapshot(states[pool], counts[pool])
+    end
+    return true
+end
+
+function _pending_from_dataframe(df::DataFrame)
+    columns = Set(Symbol.(names(df)))
+    required = (:latest_dst_time_utc, :target_time_utc, :model_version,
+                :observation_dst_nt)
+    all(in(columns), required) || return (Dict{String,Int}(), true)
+    pending = Dict{String,Int}()
+    complete = true
+    for row_idx in 1:nrow(df)
+        ismissing(df[row_idx, :observation_dst_nt]) || continue
+        vals = (df[row_idx, :latest_dst_time_utc], df[row_idx, :target_time_utc],
+                df[row_idx, :model_version])
+        any(ismissing, vals) && continue
+        key = _pending_key(vals...)
+        haskey(pending, key) && continue
+        complete = _cache_pending!(pending, key, row_idx, complete)
+    end
+    return (pending, complete)
+end
+
+function _valid_live_state(path::AbstractString)
+    state = _read_live_state(path)
+    return state !== nothing && _state_matches_log(state, path) ? state : nothing
+end
+
+function _persist_live_state_after_table_write!(path::AbstractString, previous_state,
+                                                df::DataFrame,
+                                                changed_rows::Vector{Int};
+                                                revised::Bool=false)
+    streams = previous_state === nothing ? Dict{String,Any}() :
+              previous_state["aci_streams"]
+    if revised
+        empty!(streams)
+    else
+        for key in collect(keys(streams))
+            entry = streams[key]
+            if !(entry isa AbstractDict) || !_advance_aci_entry!(entry, df, changed_rows)
+                delete!(streams, key)
+            end
+        end
+    end
+    pending, pending_cache_complete = _pending_from_dataframe(df)
+    state = _new_live_state(path, names(df), nrow(df), pending;
+                            pending_cache_complete=pending_cache_complete,
+                            streams=streams)
+    _write_live_state!(path, state)
+    return state
+end
 
 function _aci_interval_from_log(log_path::AbstractString, center::Real,
                                 horizon_steps::Integer;
@@ -990,56 +1588,38 @@ function _aci_interval_from_log(log_path::AbstractString, center::Real,
                                 pred_col::Symbol=:v2_pred_dst_nt,
                                 activity_threshold::Real=_ACI_ACTIVITY_THRESHOLD_NT,
                                 target_coverage::Float64=0.90, gamma::Float64=0.03,
-                                warmup::Int=30)
+                                warmup::Int=30,
+                                history_window::Int=_ACI_HISTORY_WINDOW)
     try
         isfile(log_path) || return nothing
-        df = CSV.read(log_path, DataFrame)
-        cols = names(df)
-        # Key on model_step_hours — the lead (target − anchor) the QUERY is keyed on —
-        # not horizon_hours (wall-clock target − issue). The two differ whenever the
-        # anchor Dst lags the issue time, which silently routed long leads to a
-        # different / empty residual pool and through to the over-wide fallback.
-        # The residual pool is keyed on `pred_col`, the SAME model whose center is being
-        # queried, so a v1 issuance is not banded from a v2-calibrated residual distribution.
-        all(c -> c in cols, ("model_step_hours", String(pred_col),
-                             "observation_dst_nt", "issue_time_utc", "latest_dst_nt")) || return nothing
-        h = Int(horizon_steps)
-        cur_regime = _aci_regime(Float64(latest_dst), activity_threshold)
-        # Residual indices at this lead; regime_match restricts to the current activity
-        # regime so a quiet-period band is not inflated by past storm-time residuals.
-        collect_idx(regime_match::Bool) = begin
-            out = Int[]
-            for i in 1:nrow(df)
-                hv = df[i, :model_step_hours]; pv = df[i, pred_col]
-                ov = df[i, :observation_dst_nt]; ld = df[i, :latest_dst_nt]
-                (ismissing(hv) || ismissing(pv) || ismissing(ov)) && continue
-                (round(Int, Float64(hv)) == h) || continue
-                (isfinite(Float64(pv)) && isfinite(Float64(ov))) || continue
-                if regime_match
-                    (ismissing(ld) || !isfinite(Float64(ld))) && continue
-                    (_aci_regime(Float64(ld), activity_threshold) == cur_regime) || continue
+        path = String(log_path)
+        return _with_forecast_log_lock(path) do
+            _recover_append_transaction!(path)
+            state = _load_or_rebuild_live_state!(path)
+            key = _aci_stream_key(pred_col, horizon_steps, activity_threshold,
+                                  target_coverage, gamma, warmup, history_window)
+            streams = state["aci_streams"]
+            entry = get(streams, key, nothing)
+            if !_valid_aci_entry(entry, pred_col, horizon_steps, activity_threshold,
+                                 target_coverage, gamma, warmup, history_window)
+                entry = _build_aci_entry(path, pred_col, horizon_steps, activity_threshold,
+                                         target_coverage, gamma, warmup, history_window)
+                entry === nothing && return nothing
+                while !haskey(streams, key) && length(streams) >= _LIVE_ACI_STREAM_LIMIT
+                    delete!(streams, first(keys(streams)))
                 end
-                push!(out, i)
+                streams[key] = entry
+                _write_live_state!(path, state)
             end
-            out
+            ac = _select_aci_state(entry, latest_dst, activity_threshold,
+                                   target_coverage, gamma, warmup, history_window)
+            ac === nothing && return nothing
+            s = adaptive_conformal_step!(ac, Float64(center), NaN)
+            (isfinite(s.lo) && isfinite(s.hi)) || return nothing
+            return (s.lo, s.hi)
         end
-        # Prefer the regime-conditional pool; fall back to the all-regime pool at this
-        # lead if regime data is too sparse (graceful — still correctly lead-keyed ACI,
-        # never the over-wide static fallback).
-        idx = isfinite(Float64(latest_dst)) ? collect_idx(true) : collect_idx(false)
-        length(idx) < warmup + 5 && (idx = collect_idx(false))
-        length(idx) < warmup + 5 && return nothing
-        idx = idx[sortperm([string(df[i, :issue_time_utc]) for i in idx])]
-        ac = init_adaptive_conformal(; target_coverage=target_coverage,
-                                     gamma=gamma, warmup=warmup)
-        for i in idx
-            adaptive_conformal_step!(ac, Float64(df[i, pred_col]),
-                                     Float64(df[i, :observation_dst_nt]))
-        end
-        s = adaptive_conformal_step!(ac, Float64(center), NaN)  # predict-only (gap path)
-        (isfinite(s.lo) && isfinite(s.hi)) || return nothing
-        return (s.lo, s.hi)
-    catch
+    catch e
+        e isa InterruptException && rethrow()
         return nothing
     end
 end
@@ -1774,6 +2354,7 @@ function _select_validated_v2_calibration(train::DataFrame,
                     _calibration_with_forced_component(cal0, :v2; label=label * "_minsample_v2") :
                     cal0
             catch err
+                err isa InterruptException && rethrow()
                 push!(candidates, (
                     feature_set=feature_set,
                     ridge=ridge,
@@ -2349,6 +2930,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
             sub_hourly_pred_dst = ismissing(selected.v2_correction) ? sv1 : sv1 + selected.v2_correction
         end
     catch e
+        e isa InterruptException && rethrow()
         @warn "V2 L1/regime-aware tail failed; serving pre-upgrade baseline" exception=(e, catch_backtrace())
     end
     if selected.model_version == "v2" &&
@@ -2467,17 +3049,23 @@ function issue_forecast(cfg::LiveVerifyConfig)
     append_result = _append_forecast!(cfg.log_path, row; return_status=true)
     row_idx = append_result.row_idx
 
-    # Sub-hour model trajectory (display only) for the latest cycle; overwritten each issue (idempotent).
+    # Sub-hour model trajectory (display only) for the latest newly logged cycle.
     try
-        traj = _subhour_trajectory(coef_csv, ens_csv, latest_dst_time, anchor_dst_star, plasma, mag, recent,
-                                   latest_complete_hour, latest_common_sw, selected.v2_correction;
-                                   dst_rate_nt_per_h=dst_rate_nt_per_h)
-        open(joinpath(dirname(cfg.log_path), "subhour_trajectory.json"), "w") do io
-            JSON3.write(io, Dict("issue_time_utc" => string(issue_time),
-                                 "anchor_time_utc" => string(latest_dst_time),
-                                 "anchor_dst_nt" => latest_dst, "points" => traj))
+        _write_subhour_trajectory!(
+            joinpath(dirname(cfg.log_path), "subhour_trajectory.json"),
+            append_result.appended,
+        ) do
+            traj = _subhour_trajectory(
+                coef_csv, ens_csv, latest_dst_time, anchor_dst_star, plasma, mag,
+                recent, latest_complete_hour, latest_common_sw,
+                selected.v2_correction; dst_rate_nt_per_h=dst_rate_nt_per_h,
+            )
+            Dict("issue_time_utc" => string(issue_time),
+                 "anchor_time_utc" => string(latest_dst_time),
+                 "anchor_dst_nt" => latest_dst, "points" => traj)
         end
     catch e
+        e isa InterruptException && rethrow()
         @warn "sub-hour trajectory write failed" exception=(e, catch_backtrace())
     end
 
@@ -2543,8 +3131,11 @@ function verify_pending!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=noth
         dst_times, dst_vals = _fetch_dst()
     end
     verified = _with_forecast_log_lock(cfg.log_path) do
+        _recover_append_transaction!(cfg.log_path)
+        previous_state = _valid_live_state(cfg.log_path)
         df = CSV.read(cfg.log_path, DataFrame)
         n = 0
+        changed_rows = Int[]
         for row_idx in 1:nrow(df)
             if String(:observation_dst_nt) in names(df) && !ismissing(df[row_idx, :observation_dst_nt])
                 continue
@@ -2554,8 +3145,13 @@ function verify_pending!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=noth
             idx === nothing && continue
             _score_row!(df, row_idx, Float64(dst_vals[idx]))
             n += 1
+            push!(changed_rows, row_idx)
         end
-        n > 0 && _atomic_csv(cfg.log_path, df)
+        if n > 0
+            _atomic_csv(cfg.log_path, df)
+            _persist_live_state_after_table_write!(cfg.log_path, previous_state, df,
+                                                   changed_rows)
+        end
         n
     end
     println("Verified $verified pending forecast row(s).")
@@ -2570,8 +3166,11 @@ function refresh_observations!(cfg::LiveVerifyConfig; dst_times=nothing, dst_val
     end
     dst_map = _dst_lookup(dst_times, dst_vals)
     updated, changed = _with_forecast_log_lock(cfg.log_path) do
+        _recover_append_transaction!(cfg.log_path)
+        previous_state = _valid_live_state(cfg.log_path)
         df = CSV.read(cfg.log_path, DataFrame)
         u = 0; c = 0
+        changed_rows = Int[]
         for row_idx in 1:nrow(df)
             String(:target_time_utc) in names(df) || continue
             target = _parse_dt(df[row_idx, :target_time_utc])
@@ -2582,9 +3181,14 @@ function refresh_observations!(cfg::LiveVerifyConfig; dst_times=nothing, dst_val
                 !ismissing(old_observed) && (c += 1)
                 _score_row!(df, row_idx, observed)
                 u += 1
+                push!(changed_rows, row_idx)
             end
         end
-        u > 0 && _atomic_csv(cfg.log_path, df)
+        if u > 0
+            _atomic_csv(cfg.log_path, df)
+            _persist_live_state_after_table_write!(cfg.log_path, previous_state, df,
+                                                   changed_rows; revised=c > 0)
+        end
         (u, c)
     end
     println(
@@ -2617,6 +3221,7 @@ function backfill_baselines!(log_path::String)
     isfile(log_path) || error("No forecast log exists at $log_path")
     # Read-modify-write under the shared log lock so a concurrent locked append is not clobbered.
     updated = _with_forecast_log_lock(log_path) do
+        _recover_append_transaction!(log_path)
         df = CSV.read(log_path, DataFrame)
         u = 0
         for row_idx in 1:nrow(df)
@@ -2638,7 +3243,11 @@ function backfill_baselines!(log_path::String)
             end
             filled && (u += 1)
         end
-        u > 0 && _atomic_csv(log_path, df)
+        if u > 0
+            _atomic_csv(log_path, df)
+            _persist_live_state_after_table_write!(log_path, nothing, df, Int[];
+                                                   revised=true)
+        end
         u
     end
     println("Backfilled baseline forecasts for $updated row(s) (fill-if-missing).")
@@ -2660,6 +3269,8 @@ function wait_for_observation(cfg::LiveVerifyConfig, forecast)
             # rather than the stored positional index (a concurrent writer may have rewritten the
             # log, so the index can be stale — mis-scoring the wrong row).
             scored = _with_forecast_log_lock(cfg.log_path) do
+                _recover_append_transaction!(cfg.log_path)
+                previous_state = _valid_live_state(cfg.log_path)
                 df = CSV.read(cfg.log_path, DataFrame)
                 ridx = _locate_forecast_row(df, forecast.latest_dst_time, target, forecast.model_version)
                 ridx === nothing && error(
@@ -2670,6 +3281,8 @@ function wait_for_observation(cfg::LiveVerifyConfig, forecast)
                 r = _score_row!(df, ridx, observed)
                 in_ci = df[ridx, :observed_in_90ci]
                 _atomic_csv(cfg.log_path, df)
+                _persist_live_state_after_table_write!(cfg.log_path, previous_state,
+                                                       df, [ridx])
                 (; observed_dst=r.observed_dst, residual=r.residual, in_ci)
             end
             println("Observed target Dst arrived: $target = $(scored.observed_dst) nT")
@@ -2882,7 +3495,8 @@ function _row_is_strictly_future(df::DataFrame, row_idx::Int)
             target > _parse_dt(df[row_idx, :latest_dst_time_utc]) || return false
         end
         return true
-    catch
+    catch e
+        e isa InterruptException && rethrow()
         return false
     end
 end
@@ -3039,7 +3653,12 @@ function _newest_issue_time(df::DataFrame)
     latest = nothing
     for s in df.issue_time_utc
         ismissing(s) && continue
-        t = try _parse_dt(s) catch; nothing end
+        t = try
+            _parse_dt(s)
+        catch e
+            e isa InterruptException && rethrow()
+            nothing
+        end
         t === nothing && continue
         (latest === nothing || t > latest) && (latest = t)
     end

@@ -1,8 +1,14 @@
+module LiveForecastVerificationTests
+
+using Test
 using CSV
 using DataFrames
 using Dates
 
 include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
+
+struct _InterruptingForecastText end
+Base.String(::_InterruptingForecastText) = throw(InterruptException())
 
 @testset "Live Forecast Verification Workflow" begin
     @testset "A/D: target time is strictly future relative to issue time" begin
@@ -17,6 +23,24 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         exact_hour_issue = DateTime(2026, 6, 6, 4)
         @test _next_hourly_target(exact_hour_issue, 1, latest_dst_time) ==
               DateTime(2026, 6, 6, 5)
+
+        interrupted = DataFrame(
+            issue_time_utc=Any[_InterruptingForecastText()],
+            target_time_utc=Any["2026-06-06T05:00:00Z"],
+        )
+        @test_throws InterruptException _row_is_strictly_future(interrupted, 1)
+    end
+
+    @testset "A/D: feed retries never swallow process interruption" begin
+        attempts = Ref(0)
+        interrupting_fetch = function (_url; kwargs...)
+            attempts[] += 1
+            throw(InterruptException())
+        end
+        @test_throws InterruptException _fetch_dst(
+            max_retries=3, retry_delay_sec=0, fetch_fn=interrupting_fetch,
+        )
+        @test attempts[] == 1
     end
 
     @testset "D: argument parser accepts v2 workflow options" begin
@@ -187,37 +211,289 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
         end
     end
 
-    @testset "C0-5: forecast log lock creates and releases lock directory" begin
+    @testset "LOG-01: durable append state recovers and remains idempotent" begin
         mktempdir() do tmp
             log_path = joinpath(tmp, "live_forecast_log.csv")
-            lock_dir = log_path * ".lock"
+            forecast_row(issue, target) = DataFrame(
+                issue_time_utc=[string(issue)],
+                latest_dst_time_utc=["2026-06-06T04:00:00"],
+                target_time_utc=[string(target)],
+                model_version=["v2"],
+                pred_dst_nt=[-20.0],
+                pred_dst_ci05_nt=[-30.0],
+                pred_dst_ci95_nt=[-10.0],
+                observation_dst_nt=[missing],
+            )
+            first = forecast_row(DateTime(2026, 6, 6, 4, 10),
+                                 DateTime(2026, 6, 6, 6))
+            @test _append_forecast!(log_path, first) == 1
+
+            # A truncated checkpoint is disposable: rebuild its row count and
+            # pending-key index from the authoritative CSV, then keep idempotency.
+            open(_live_state_path(log_path), "w") do io
+                write(io, "{\"version\":")
+            end
+            duplicate = copy(first)
+            duplicate.issue_time_utc .= "2026-06-06T04:11:00"
+            result = _append_forecast!(log_path, duplicate; return_status=true)
+            @test result == (row_idx=1, appended=false)
+            @test nrow(CSV.read(log_path, DataFrame)) == 1
+            @test _state_matches_log(_read_live_state(log_path), log_path)
+
+            # Simulate a process death halfway through the one-row append. The
+            # durable transaction restores the exact row before duplicate lookup.
+            second = forecast_row(DateTime(2026, 6, 6, 5, 10),
+                                  DateTime(2026, 6, 6, 7))
+            state = _load_or_rebuild_live_state!(log_path)
+            schema = Tuple(Symbol.(state["columns"]))
+            buffer = IOBuffer()
+            CSV.write(buffer, [_project_row(second, schema)]; header=false)
+            row_bytes = take!(buffer)
+            pre_size = filesize(log_path)
+            _atomic_json(_append_transaction_path(log_path), Dict(
+                "version" => 1,
+                "pre_size" => pre_size,
+                "pre_tail_sha256" => _tail_digest(log_path),
+                "row_hex" => bytes2hex(row_bytes),
+                "row_sha256" => bytes2hex(sha256(row_bytes)),
+            ))
+            open(log_path, "a") do io
+                write(io, row_bytes[1:max(1, length(row_bytes) ÷ 2)])
+            end
+            recovered = _append_forecast!(log_path, second; return_status=true)
+            @test recovered == (row_idx=2, appended=false)
+            @test !isfile(_append_transaction_path(log_path))
+            @test nrow(CSV.read(log_path, DataFrame)) == 2
+
+            # An unreadable transaction is ambiguous and therefore fails closed;
+            # the authoritative log is left byte-for-byte unchanged.
+            before = read(log_path)
+            open(_append_transaction_path(log_path), "w") do io
+                write(io, "{")
+            end
+            @test_throws ErrorException _append_forecast!(
+                log_path,
+                forecast_row(DateTime(2026, 6, 6, 6, 10),
+                             DateTime(2026, 6, 6, 8)),
+            )
+            @test read(log_path) == before
+        end
+    end
+
+    @testset "LOG-01: steady-state append allocation is independent of log length" begin
+        mktempdir() do tmp
+            function verified_log(path, n)
+                base = DateTime(2026, 1, 1)
+                issues = base .+ Hour.(0:n-1)
+                CSV.write(path, DataFrame(
+                    issue_time_utc=string.(issues),
+                    latest_dst_time_utc=string.(issues),
+                    target_time_utc=string.(issues .+ Hour(1)),
+                    model_version=fill("v2", n),
+                    pred_dst_nt=fill(-20.0, n),
+                    pred_dst_ci05_nt=fill(-30.0, n),
+                    pred_dst_ci95_nt=fill(-10.0, n),
+                    observation_dst_nt=fill(-19.0, n),
+                ))
+                _load_or_rebuild_live_state!(path)
+            end
+            function next_row(n)
+                issue = DateTime(2026, 1, 1) + Hour(n + 1)
+                return DataFrame(
+                    issue_time_utc=[string(issue)],
+                    latest_dst_time_utc=[string(issue)],
+                    target_time_utc=[string(issue + Hour(1))],
+                    model_version=["v2"],
+                    pred_dst_nt=[-20.0], pred_dst_ci05_nt=[-30.0],
+                    pred_dst_ci95_nt=[-10.0], observation_dst_nt=[missing],
+                )
+            end
+
+            warm = joinpath(tmp, "warm.csv")
+            verified_log(warm, 2)
+            _append_forecast!(warm, next_row(2))
+
+            small = joinpath(tmp, "small.csv")
+            large = joinpath(tmp, "large.csv")
+            verified_log(small, 100)
+            verified_log(large, 20_000)
+            inode_small = stat(small).inode
+            inode_large = stat(large).inode
+            GC.gc()
+            alloc_small = @allocated _append_forecast!(small, next_row(100))
+            GC.gc()
+            alloc_large = @allocated _append_forecast!(large, next_row(20_000))
+            @test stat(small).inode == inode_small
+            @test stat(large).inode == inode_large
+            @test alloc_large <= 2 * alloc_small + 1_000_000
+        end
+    end
+
+    @testset "LOG-01: unresolved identity cache is bounded and resolves cleanly" begin
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "pending.csv")
+            n = _LIVE_PENDING_CACHE_LIMIT + 200
+            base = DateTime(2026, 1, 1)
+            anchors = base .+ Hour.(0:n-1)
+            targets = anchors .+ Hour(1)
+            log = DataFrame(
+                issue_time_utc=string.(anchors),
+                latest_dst_time_utc=string.(anchors),
+                target_time_utc=string.(targets),
+                model_version=fill("v2", n),
+                pred_dst_nt=fill(-20.0, n),
+                pred_dst_ci05_nt=fill(-30.0, n),
+                pred_dst_ci95_nt=fill(-10.0, n),
+                observation_dst_nt=fill(missing, n),
+            )
+            # Repeat the oldest identity at the end. Once the bounded cache is
+            # incomplete, duplicate lookup must still return the earliest row.
+            log[n, :latest_dst_time_utc] = log[1, :latest_dst_time_utc]
+            log[n, :target_time_utc] = log[1, :target_time_utc]
+            CSV.write(log_path, log)
+            state = _load_or_rebuild_live_state!(log_path)
+            @test length(state["pending"]) == _LIVE_PENDING_CACHE_LIMIT
+            @test !state["pending_cache_complete"]
+            @test minimum(Int.(values(state["pending"]))) == n - _LIVE_PENDING_CACHE_LIMIT + 1
+            @test filesize(_live_state_path(log_path)) < 100_000
+
+            # The oldest identity is outside the cache, but the bounded-memory
+            # CSV fallback still preserves exact idempotency.
+            old_retry = log[1:1, :]
+            old_retry.issue_time_utc .= string(base + Minute(1))
+            retry = _append_forecast!(log_path, old_retry; return_status=true)
+            @test retry == (row_idx=1, appended=false)
+
+            # Scoring a cached pending row removes it from both the checkpoint
+            # and the authoritative pending scan.
+            resolved_idx = n - 1
+            resolved_key = _pending_key(log[resolved_idx, :latest_dst_time_utc],
+                                        log[resolved_idx, :target_time_utc], "v2")
+            @test verify_pending!(LiveVerifyConfig(; log_path=log_path);
+                                  dst_times=[targets[resolved_idx]],
+                                  dst_vals=[-19.0]) == 1
+            resolved_state = _read_live_state(log_path)
+            @test length(resolved_state["pending"]) == _LIVE_PENDING_CACHE_LIMIT
+            @test !haskey(resolved_state["pending"], resolved_key)
+            @test _find_pending_row(log_path, resolved_key) === nothing
+        end
+    end
+
+    @testset "C0-5: forecast log lock creates and releases an owned pidfile" begin
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "live_forecast_log.csv")
+            lock_path = log_path * ".lock"
 
             result = _with_forecast_log_lock(log_path) do
-                @test isdir(lock_dir)
+                @test isfile(lock_path)
                 :locked
             end
 
             @test result == :locked
-            @test !isdir(lock_dir)
+            @test !ispath(lock_path)
         end
     end
 
-    @testset "C0-6: forecast log lock recovers stale lock directory" begin
+    @testset "C0-6: forecast log lock recovers a dead stale pidfile" begin
         mktempdir() do tmp
             log_path = joinpath(tmp, "live_forecast_log.csv")
-            lock_dir = log_path * ".lock"
-            reap_dir = lock_dir * ".reap"
-            mkdir(lock_dir)
+            lock_path = log_path * ".lock"
+            write(lock_path, "999999999 dead-test-host")
+            sleep(0.03)
 
-            result = _with_forecast_log_lock(log_path; stale_after_sec=0.0) do
-                @test isdir(lock_dir)
-                @test !isdir(reap_dir)
+            result = _with_forecast_log_lock(
+                log_path; stale_after_sec=0.01, poll_sec=0.005,
+            ) do
+                @test isfile(lock_path)
                 :recovered
             end
 
             @test result == :recovered
-            @test !isdir(lock_dir)
-            @test !isdir(reap_dir)
+            @test !ispath(lock_path)
+        end
+    end
+
+    @testset "C0-6b: a live owner is refreshed and never reaped" begin
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "live_forecast_log.csv")
+            entered = Channel{Symbol}(2)
+            release = Channel{Nothing}(1)
+            first_owner = @async _with_forecast_log_lock(
+                log_path; timeout_sec=1.0, stale_after_sec=0.04, poll_sec=0.005,
+            ) do
+                put!(entered, :first)
+                take!(release)
+            end
+            @test take!(entered) == :first
+            sleep(0.08)
+            second_owner = @async _with_forecast_log_lock(
+                log_path; timeout_sec=1.0, stale_after_sec=0.04, poll_sec=0.005,
+            ) do
+                put!(entered, :second)
+            end
+            sleep(0.08)
+            @test !isready(entered)
+            put!(release, nothing)
+            wait(first_owner)
+            wait(second_owner)
+            @test take!(entered) == :second
+        end
+    end
+
+    @testset "C0-6c: atomic writers preserve directories and symlinks" begin
+        mktempdir() do tmp
+            directory_target = joinpath(tmp, "output.csv")
+            mkdir(directory_target)
+            keep = joinpath(directory_target, "keep")
+            write(keep, "preserve")
+            @test_throws ArgumentError _atomic_csv(
+                directory_target, DataFrame(value=[1]),
+            )
+            @test isdir(directory_target)
+            @test read(keep, String) == "preserve"
+
+            json_directory = joinpath(tmp, "state.json")
+            mkdir(json_directory)
+            json_keep = joinpath(json_directory, "keep")
+            write(json_keep, "preserve")
+            @test_throws ArgumentError _atomic_json(json_directory, Dict("value" => 1))
+            @test isdir(json_directory)
+            @test read(json_keep, String) == "preserve"
+
+            if !Sys.iswindows()
+                referent = joinpath(tmp, "referent.csv")
+                write(referent, "old")
+                link = joinpath(tmp, "link.csv")
+                symlink(referent, link)
+                @test_throws ArgumentError _atomic_csv(link, DataFrame(value=[1]))
+                @test islink(link)
+                @test read(referent, String) == "old"
+            end
+        end
+    end
+
+    @testset "C0-6d: duplicate cycles preserve the atomic sub-hour trajectory" begin
+        mktempdir() do tmp
+            path = joinpath(tmp, "subhour_trajectory.json")
+            _atomic_json(path, Dict("generation" => "old"))
+            old_bytes = read(path)
+            payload_calls = Ref(0)
+
+            skipped = _write_subhour_trajectory!(path, false) do
+                payload_calls[] += 1
+                Dict("generation" => "duplicate")
+            end
+            @test !skipped
+            @test payload_calls[] == 0
+            @test read(path) == old_bytes
+
+            written = _write_subhour_trajectory!(path, true) do
+                payload_calls[] += 1
+                Dict("generation" => "new")
+            end
+            @test written
+            @test payload_calls[] == 1
+            @test String(JSON3.read(read(path, String))["generation"]) == "new"
         end
     end
 
@@ -1337,7 +1613,10 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
                                      latest_dst_nt=ld, issue_time_utc=iss))
             # Quiet query: pools only the ±5 rows -> narrow band (NOT the old ~nothing/fallback).
             q = _aci_interval_from_log(log, 0.0, 7; latest_dst=5.0)
+            q_unlimited = _aci_interval_from_log(log, 0.0, 7; latest_dst=5.0,
+                                                  history_window=typemax(Int))
             @test q !== nothing                            # would be `nothing` under the horizon-key bug
+            @test q == q_unlimited                         # exact while support is below 500 rows
             hw_q = (q[2] - q[1]) / 2
             @test 3.0 <= hw_q <= 12.0                       # tracks the ±5 quiet residuals
             # Disturbed query: pools the ±60 rows -> much wider band (regime conditioning).
@@ -1376,4 +1655,64 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
             @test _aci_interval_from_log(log, 0.0, 1; latest_dst=-10.0, pred_col=:v1_pred_dst_nt) === nothing
         end
     end
+
+    @testset "LOG-01: ACI checkpoint is bounded and restart-equivalent" begin
+        mktempdir() do dir
+            log = joinpath(dir, "log.csv")
+            n = 520
+            base = DateTime(2026, 1, 1)
+            issues = base .+ Hour.(0:n-1)
+            pred = fill(-20.0, n)
+            obs = pred .+ [isodd(i) ? Float64(i % 17) : -Float64(i % 17)
+                           for i in 1:n]
+            CSV.write(log, DataFrame(
+                issue_time_utc=string.(issues),
+                latest_dst_time_utc=string.(issues),
+                target_time_utc=string.(issues .+ Hour(1)),
+                model_version=fill("v2", n),
+                model_step_hours=fill(1.0, n),
+                latest_dst_nt=fill(-10.0, n),
+                pred_dst_nt=pred,
+                pred_dst_ci05_nt=fill(-40.0, n),
+                pred_dst_ci95_nt=fill(0.0, n),
+                v2_pred_dst_nt=pred,
+                observation_dst_nt=obs,
+            ))
+
+            initial = _aci_interval_from_log(log, -20.0, 1; latest_dst=-10.0)
+            @test initial !== nothing
+            state = _read_live_state(log)
+            entry = first(values(state["aci_streams"]))
+            @test length(entry["all"]["history"]) == _ACI_HISTORY_WINDOW
+            @test length(entry["quiet"]["history"]) == _ACI_HISTORY_WINDOW
+            @test isempty(entry["disturbed"]["history"])
+
+            issue = base + Hour(n)
+            target = issue + Hour(1)
+            pending = DataFrame(
+                issue_time_utc=[string(issue)],
+                latest_dst_time_utc=[string(issue)],
+                target_time_utc=[string(target)],
+                model_version=["v2"], model_step_hours=[1.0],
+                latest_dst_nt=[-10.0], pred_dst_nt=[-20.0],
+                pred_dst_ci05_nt=[-40.0], pred_dst_ci95_nt=[0.0],
+                v2_pred_dst_nt=[-20.0], observation_dst_nt=[missing],
+            )
+            @test _append_forecast!(log, pending) == n + 1
+            @test verify_pending!(LiveVerifyConfig(; log_path=log);
+                                  dst_times=[target], dst_vals=[-27.0]) == 1
+            incremental = _aci_interval_from_log(log, -20.0, 1; latest_dst=-10.0)
+
+            # Deleting the checkpoint emulates a fresh process with no cached
+            # state. Full chronological replay is the independent oracle.
+            rm(_live_state_path(log); force=true)
+            rebuilt = _aci_interval_from_log(log, -20.0, 1; latest_dst=-10.0)
+            @test incremental == rebuilt
+            rebuilt_state = _read_live_state(log)
+            rebuilt_entry = first(values(rebuilt_state["aci_streams"]))
+            @test length(rebuilt_entry["all"]["history"]) == _ACI_HISTORY_WINDOW
+        end
+    end
 end
+
+end # module LiveForecastVerificationTests

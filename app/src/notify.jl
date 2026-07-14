@@ -38,6 +38,14 @@ end
 const _LAST_ALERT_LEVEL = Ref{Int}(-1)        # -1 = uninitialized (baseline, do not fire)
 reset_notify!() = (_LAST_ALERT_LEVEL[] = -1; nothing)
 
+_webhook_host(url) = try
+    host = HTTP.URI(url).host
+    isempty(host) ? "?" : String(host)
+catch e
+    e isa InterruptException && rethrow()
+    "?"
+end
+
 """
     maybe_notify!(state; url, now_utc) -> NamedTuple
 
@@ -74,9 +82,11 @@ function maybe_notify!(state; url::AbstractString = get(ENV, "SWM_WEBHOOK_URL", 
         _LAST_ALERT_LEVEL[] = state.level           # commit only on successful delivery
         return (fired = true, level = state.level, previous_level = prev, message = msg)
     catch e
+        e isa InterruptException && rethrow()
         # Leave _LAST_ALERT_LEVEL at prev so the next poll re-attempts this transition.
-        @warn "alert webhook POST failed" exception = e
-        return (fired = false, changed = true, level = state.level, error = string(e))
+        @warn "alert webhook POST failed" error_type=string(nameof(typeof(e))) webhook_host=_webhook_host(url)
+        return (fired = false, changed = true, level = state.level,
+                error = "webhook delivery failed")
     end
 end
 
@@ -85,7 +95,13 @@ end
 function start_notify_loop(log_path::AbstractString; interval::Int = 300)
     url = get(ENV, "SWM_WEBHOOK_URL", "")
     isempty(url) && return nothing
-    @info "alert webhook enabled" url_host=try HTTP.URI(url).host catch; "?" end interval_s=interval
+    host = try
+        HTTP.URI(url).host
+    catch e
+        e isa InterruptException && rethrow()
+        "?"
+    end
+    @info "alert webhook enabled" url_host=host interval_s=interval
     return @async begin
         while true
             try
@@ -96,6 +112,7 @@ function start_notify_loop(log_path::AbstractString; interval::Int = 300)
                 r = maybe_notify!(st; url = url, now_utc = string(now(UTC)) * "Z")
                 getproperty(r, :fired) == true && @info "alert webhook fired" level=st.level
             catch e
+                e isa InterruptException && rethrow()
                 @warn "notify loop iteration failed" exception = (e, catch_backtrace())
             end
             sleep(interval)

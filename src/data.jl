@@ -27,26 +27,52 @@ struct StormEvent
     onset_idx::Int           # Storm onset index
     main_end_idx::Int        # End of main phase
     recovery_end_idx::Int    # End of recovery phase
-    min_dst::Float64         # Minimum Dst reached
+    min_dst_star::Float64    # Minimum pressure-corrected Dst* reached
+end
+
+# Compatibility for exploratory callers written before the minimum was named
+# explicitly. Synthetic events have always stored the minimum of the generated
+# Dst* trajectory, not the pressure-uncorrected Dst series.
+function Base.getproperty(event::StormEvent, name::Symbol)
+    name === :min_dst && return getfield(event, :min_dst_star)
+    return getfield(event, name)
+end
+
+function Base.propertynames(::StormEvent, private::Bool=false)
+    return (fieldnames(StormEvent)..., :min_dst)
 end
 
 """
     generate_synthetic_storm(; seed=42, dt=1.0, duration=120.0,
-                              noise_level=0.05, α=4.559e-3, τ=7.7)
+                              noise_level=0.05, α=5.4e-3, τ=7.7)
 
 Generate a synthetic geomagnetic storm event using the Burton model.
-The solar wind drivers are prescribed analytically, and Dst is computed
-by forward integration.
+The solar wind drivers are prescribed analytically, Dst* is computed by
+forward integration, and Dst is reconstructed with the declared pressure
+correction.
 
 Returns (SolarWindData, StormEvent).
 """
 function generate_synthetic_storm(; seed::Int=42, dt::Real=1.0,
                                     duration::Real=120.0,
                                     noise_level::Real=0.05,
-                                    α::Real=4.559e-3, τ::Real=7.7)
+                                    α::Real=5.4e-3, τ::Real=7.7)
+    seed >= 0 || throw(ArgumentError("seed must be nonnegative"))
+    isfinite(dt) && dt > 0 || throw(ArgumentError("dt must be finite and positive"))
+    isfinite(duration) && duration >= dt ||
+        throw(ArgumentError("duration must be finite and at least one dt"))
+    isfinite(noise_level) && noise_level >= 0 ||
+        throw(ArgumentError("noise_level must be finite and nonnegative"))
+    isfinite(α) && α >= 0 || throw(ArgumentError("α must be finite and nonnegative"))
+    isfinite(τ) && τ > 0 || throw(ArgumentError("τ must be finite and positive"))
+    step_ratio = Float64(duration) / Float64(dt)
+    n_steps = round(Int, step_ratio)
+    isapprox(step_ratio, n_steps; rtol=0.0,
+             atol=sqrt(eps(Float64)) * max(1.0, abs(step_ratio))) ||
+        throw(ArgumentError("duration must be an integer multiple of dt"))
     rng = MersenneTwister(seed)
-    n_pts = round(Int, duration / dt) + 1
-    t = collect(range(0, duration, length=n_pts))
+    n_pts = n_steps + 1
+    t = Float64(dt) .* collect(0:n_steps)
 
     # --- Prescribe solar wind drivers ---
     # Quiet → sudden onset → main phase → recovery
@@ -94,8 +120,6 @@ function generate_synthetic_storm(; seed::Int=42, dt::Real=1.0,
     onset_idx = onset_idx === nothing ? 1 : onset_idx
     recovery_end_idx = min(n_pts, min_idx + round(Int, 48.0 / dt))
 
-    theta_c = imf_clock_angle(By, Bz)
-
     swd = SolarWindData(t, V, Bz, By, n_density, Pdyn, Dst_obs, Dst_star_noisy)
     event = StormEvent(swd, onset_idx, min_idx, recovery_end_idx, min_dst_val)
     return swd, event
@@ -107,11 +131,15 @@ end
 Generate multiple synthetic storms with varying intensities.
 
 **Note:** This function varies the ground-truth Burton parameters (α, τ) across storms for
-synthetic diversity. All paper results use fixed Burton parameters (α=4.559e-3, τ=7.7 hr)
-via `generate_synthetic_storm()`. This function is provided for exploratory use only and was
+synthetic diversity. The canonical single-storm generator uses the published Burton
+injection slope (α=5.4e-3) and decay time (τ=7.7 hr).
+This function is provided for exploratory use only and was
 NOT used to generate any published figures or tables.
 """
 function generate_multistorm_dataset(; n_storms::Int=5, seed::Int=42)
+    n_storms >= 1 || throw(ArgumentError("n_storms must be at least 1"))
+    seed >= 0 || throw(ArgumentError("seed must be nonnegative"))
+    seed <= typemax(Int) - n_storms || throw(ArgumentError("seed range overflows Int"))
     storms = StormEvent[]
     datasets = SolarWindData[]
 
@@ -138,13 +166,17 @@ Prepare data dictionary for SINDy from SolarWindData.
 Computes numerical derivative of Dst* and all library inputs.
 """
 function prepare_sindy_data(swd::SolarWindData, dt::Real; smooth_window::Int=5)
+    n = length(swd.t)
+    all(length(v) == n for v in
+        (swd.V, swd.Bz, swd.By, swd.n, swd.Pdyn, swd.Dst, swd.Dst_star)) ||
+        throw(DimensionMismatch("SolarWindData fields must have equal length"))
     # Smooth Dst* before differentiation
     Dst_smooth = smooth_moving_average(swd.Dst_star, smooth_window)
     dDst_dt = numerical_derivative(Dst_smooth, dt)
 
     Bs = halfwave_rectify(swd.Bz)
     theta_c = imf_clock_angle(swd.By, swd.Bz)
-    BT = sqrt.(swd.By.^2 .+ swd.Bz.^2)
+    BT = hypot.(swd.By, swd.Bz)
 
     data = Dict{String,Vector{Float64}}(
         "V" => swd.V,
@@ -172,6 +204,12 @@ function identify_storm_phases(Dst_star::AbstractVector,
                                dDst_dt::AbstractVector;
                                quiet_thresh::Real=-20.0,
                                deriv_thresh::Real=-2.0)
+    length(Dst_star) == length(dDst_dt) ||
+        throw(DimensionMismatch("Dst_star and dDst_dt must have equal length"))
+    all(isfinite, Dst_star) && all(isfinite, dDst_dt) ||
+        throw(ArgumentError("phase inputs must contain only finite values"))
+    isfinite(quiet_thresh) && isfinite(deriv_thresh) ||
+        throw(ArgumentError("phase thresholds must be finite"))
     n = length(Dst_star)
     phases = ones(Int, n)  # default: quiet
     for k in 1:n

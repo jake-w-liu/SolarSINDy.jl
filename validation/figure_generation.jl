@@ -18,9 +18,13 @@ using CSV, DataFrames
 using PlotlySupply
 using Statistics, Random, LinearAlgebra
 
-const DATA_DIR = joinpath(@__DIR__, "..", "data")
-const FIGS_DIR = joinpath(@__DIR__, "..", "figs")
-mkpath(DATA_DIR); mkpath(FIGS_DIR)
+include(joinpath(@__DIR__, "output_paths.jl"))
+const OUTPUT_PATHS = validation_output_paths()
+OUTPUT_PATHS.mode == :canonical && error(
+    "legacy unmanifested figure generation is prohibited in canonical runs",
+)
+const DATA_DIR = OUTPUT_PATHS.data
+const FIGS_DIR = OUTPUT_PATHS.figs
 
 
 const COLORS = ["#0072B2", "#D55E00", "#009E73", "#CC79A7"]
@@ -54,7 +58,8 @@ end
 # ============================================================
 # Generate multi-storm dataset
 # ============================================================
-# Use FIXED Burton parameters (α=4.559e-3, τ=7.7) so SINDy can recover them.
+# Use the canonical simplified Burton parameters (α=5.4e-3, τ=7.7) so
+# SINDy can recover the same equation used by the synthetic generator.
 # NOTE: generate_synthetic_storm prescribes deterministic V and Bz, so these
 # storms differ only by the noise seed (By/density/measurement noise). The
 # noise-free min Dst is therefore identical across storms; the range printed
@@ -62,7 +67,7 @@ end
 println("=== Generating multi-storm dataset ===")
 
 n_storms = 10
-α_true = 4.559e-3
+α_true = 5.4e-3
 τ_true = 7.7
 
 all_datasets = SolarWindData[]
@@ -76,7 +81,7 @@ for k in 1:n_storms
     push!(all_events, event)
 end
 println("  Generated $n_storms storms, α=$α_true, τ=$τ_true")
-println("  Min Dst range: $(round(minimum(e.min_dst for e in all_events), digits=1)) to $(round(maximum(e.min_dst for e in all_events), digits=1)) nT")
+println("  Min Dst* range: $(round(minimum(e.min_dst_star for e in all_events), digits=1)) to $(round(maximum(e.min_dst_star for e in all_events), digits=1)) nT")
 
 # Concatenate all for training
 all_data, all_dDst = concatenate_data(all_datasets)
@@ -174,7 +179,7 @@ ms_s_ho = metrics_summary(Dst_sindy_ho, test_swd.Dst_star; name="SINDy")
 ms_b_ho = metrics_summary(Dst_burton_ho, test_swd.Dst_star; name="Burton")
 ms_o_ho = metrics_summary(Dst_obrien_ho, test_swd.Dst_star; name="O'Brien")
 
-println("  Held-out storm $holdout_idx (min Dst=$(round(all_events[holdout_idx].min_dst, digits=1)) nT):")
+println("  Held-out storm $holdout_idx (min Dst*=$(round(all_events[holdout_idx].min_dst_star, digits=1)) nT):")
 println("  SINDy  RMSE=$(round(ms_s_ho.rmse, digits=2)), PE=$(round(ms_s_ho.pe, digits=4))")
 println("  Burton RMSE=$(round(ms_b_ho.rmse, digits=2)), PE=$(round(ms_b_ho.pe, digits=4))")
 println("  O'Brien RMSE=$(round(ms_o_ho.rmse, digits=2)), PE=$(round(ms_o_ho.pe, digits=4))")
@@ -208,7 +213,7 @@ for ho in holdout_storms
     Dst_o = simulate_obrien(ts.V, bs, 1.0)
 
     push!(holdout_labels_out, "Storm $ho")
-    push!(holdout_min_dst, all_events[ho].min_dst)
+    push!(holdout_min_dst, all_events[ho].min_dst_star)
     push!(holdout_rmse_sindy, rmse(Dst_s, ts.Dst_star))
     push!(holdout_rmse_burton, rmse(Dst_b, ts.Dst_star))
     push!(holdout_rmse_obrien, rmse(Dst_o, ts.Dst_star))
@@ -219,7 +224,7 @@ end
 
 df_holdout = DataFrame(
     storm = holdout_labels_out,
-    min_dst_nT = holdout_min_dst,
+    min_dst_star_nT = holdout_min_dst,
     sindy_rmse = holdout_rmse_sindy,
     burton_rmse = holdout_rmse_burton,
     obrien_rmse = holdout_rmse_obrien,

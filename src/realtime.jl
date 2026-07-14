@@ -48,6 +48,7 @@ function _fetch_swpc_json(url::String;
                 length(raw) >= 2 || error("response has no data rows")
                 return raw
             catch e
+                e isa InterruptException && rethrow()
                 last_error = e
                 if ui == length(urls) && attempt == max_retries
                     error(
@@ -243,6 +244,9 @@ value. Non-finite entries are dropped, and out-of-range fill sentinels
 data-quality event cannot inject a nonphysical anchor into the forecast bins.
 """
 function _hourly_dst_lookup(dst_times, dst_vals)
+    length(dst_times) == length(dst_vals) || throw(DimensionMismatch(
+        "Dst timestamp count $(length(dst_times)) does not match value count $(length(dst_vals))"
+    ))
     lookup = Dict{DateTime,Float64}()
     n_rejected = 0
     for (t, v) in zip(dst_times, dst_vals)
@@ -259,6 +263,99 @@ function _hourly_dst_lookup(dst_times, dst_vals)
     n_rejected > 0 &&
         @warn "dropped $n_rejected out-of-range Dst sentinel value(s) (|Dst| > $DST_SENTINEL_ABS)" maxlog=1
     return lookup
+end
+
+# Aggregate two driver columns in one pass through a feed. `out_x` and `out_y`
+# arrive filled with NaN; the first finite sample seeds each bin so IEEE values
+# such as signed zero retain the same behavior as `mean` on a sliced vector.
+function _hourly_means!(out_x::Vector{Float64}, out_y::Vector{Float64},
+                        times, x, y, t_start::DateTime, min_samples::Int)
+    n_bins = length(out_x)
+    length(out_y) == n_bins || throw(DimensionMismatch("hourly output lengths differ"))
+    min_samples >= 1 || throw(ArgumentError("min_samples must be at least 1"))
+    count_x = zeros(Int, n_bins)
+    count_y = zeros(Int, n_bins)
+
+    for j in eachindex(times, x, y)
+        t = times[j]
+        t < t_start && continue
+        i = div(t - t_start, Hour(1)) + 1
+        1 <= i <= n_bins || continue
+
+        xj = x[j]
+        if isfinite(xj)
+            count_x[i] += 1
+            out_x[i] = count_x[i] == 1 ? xj : out_x[i] + xj
+        end
+        yj = y[j]
+        if isfinite(yj)
+            count_y[i] += 1
+            out_y[i] = count_y[i] == 1 ? yj : out_y[i] + yj
+        end
+    end
+
+    for i in 1:n_bins
+        out_x[i] = count_x[i] >= min_samples ? out_x[i] / count_x[i] : NaN
+        out_y[i] = count_y[i] >= min_samples ? out_y[i] / count_y[i] : NaN
+    end
+    return nothing
+end
+
+function _latest_covered_common_time(plasma::DataFrame, mag::DataFrame,
+                                     t_start::DateTime, t_end::DateTime,
+                                     min_samples::Int)
+    # A DataFrame does not encode column element types in its own type.  Cross a
+    # function barrier once so the minute-cadence loops below specialize on the
+    # concrete column vectors instead of dynamically dispatching and boxing on
+    # every row.
+    return _latest_covered_common_time(
+        plasma.time_tag, plasma.speed, mag.time_tag, mag.bz_gsm,
+        t_start, t_end, min_samples,
+    )
+end
+
+function _latest_covered_common_time(plasma_times::AbstractVector{<:DateTime},
+                                     plasma_speed::AbstractVector{<:Real},
+                                     mag_times::AbstractVector{<:DateTime},
+                                     mag_bz::AbstractVector{<:Real},
+                                     t_start::DateTime, t_end::DateTime,
+                                     min_samples::Int)
+    eachindex(plasma_times) == eachindex(plasma_speed) || throw(DimensionMismatch(
+        "plasma timestamps and speeds must have equal lengths",
+    ))
+    eachindex(mag_times) == eachindex(mag_bz) || throw(DimensionMismatch(
+        "magnetic-field timestamps and Bz values must have equal lengths",
+    ))
+    n_hours = div(t_end - t_start, Hour(1)) + 1
+    speed_counts = zeros(Int, n_hours)
+    bz_counts = zeros(Int, n_hours)
+    latest_speed = fill(t_start, n_hours)
+    latest_bz = fill(t_start, n_hours)
+    for index in eachindex(plasma_times, plasma_speed)
+        time = plasma_times[index]
+        t_start <= time <= t_end && isfinite(plasma_speed[index]) || continue
+        hour_index = div(time - t_start, Hour(1)) + 1
+        speed_counts[hour_index] += 1
+        latest_speed[hour_index] = max(latest_speed[hour_index], time)
+    end
+    for index in eachindex(mag_times, mag_bz)
+        time = mag_times[index]
+        t_start <= time <= t_end && isfinite(mag_bz[index]) || continue
+        hour_index = div(time - t_start, Hour(1)) + 1
+        bz_counts[hour_index] += 1
+        latest_bz[hour_index] = max(latest_bz[hour_index], time)
+    end
+    newest = nothing
+    for hour_index in 1:n_hours
+        speed_counts[hour_index] >= min_samples &&
+            bz_counts[hour_index] >= min_samples || continue
+        candidate = min(latest_speed[hour_index], latest_bz[hour_index])
+        newest = newest === nothing ? candidate : max(newest, candidate)
+    end
+    newest === nothing && throw(ArgumentError(
+        "no common solar-wind hour meets the minimum sample coverage",
+    ))
+    return newest::DateTime
 end
 
 """
@@ -282,6 +379,12 @@ function fetch_realtime_solar_wind(; hours::Int=168,
                                     max_retries::Int=DEFAULT_SWPC_MAX_RETRIES,
                                     retry_delay_sec::Real=DEFAULT_SWPC_RETRY_DELAY_SEC,
                                     http_get::Function=HTTP.get)
+    hours >= 1 || throw(ArgumentError("hours must be at least 1"))
+    min_hourly_samples >= 1 ||
+        throw(ArgumentError("min_hourly_samples must be at least 1"))
+    max_retries >= 1 || throw(ArgumentError("max_retries must be at least 1"))
+    isfinite(retry_delay_sec) && retry_delay_sec >= 0 ||
+        throw(ArgumentError("retry_delay_sec must be finite and nonnegative"))
     plasma_data = plasma === nothing ? fetch_swpc_plasma(;
         max_retries=max_retries,
         retry_delay_sec=retry_delay_sec,
@@ -292,6 +395,14 @@ function fetch_realtime_solar_wind(; hours::Int=168,
         retry_delay_sec=retry_delay_sec,
         http_get=http_get,
     ) : mag
+    required_plasma = (:time_tag, :speed, :density)
+    required_mag = (:time_tag, :bz_gsm, :by_gsm)
+    all(col -> col in propertynames(plasma_data), required_plasma) ||
+        throw(ArgumentError("plasma data is missing required columns"))
+    all(col -> col in propertynames(mag_data), required_mag) ||
+        throw(ArgumentError("magnetic-field data is missing required columns"))
+    nrow(plasma_data) >= 1 || throw(ArgumentError("plasma data is empty"))
+    nrow(mag_data) >= 1 || throw(ArgumentError("magnetic-field data is empty"))
     # Observed Dst lookup for anchoring (hour-keyed). When absent, the
     # forecaster runs unanchored (Dst* stays NaN) — but the monitor supplies it.
     dst_lookup = dst === nothing ? Dict{DateTime,Float64}() :
@@ -324,29 +435,20 @@ function fetch_realtime_solar_wind(; hours::Int=168,
     Dst_hr = fill(NaN, n_bins)
     t_hr = Vector{DateTime}(undef, n_bins)
 
+    # Aggregate each feed once. The former per-bin Boolean masks scanned and
+    # copied the complete minute-cadence feed for every hour (quadratic work and
+    # allocation as the requested window grew).
+    _hourly_means!(V_hr, n_hr, plasma_data.time_tag, plasma_data.speed,
+                   plasma_data.density, t_start, min_hourly_samples)
+    _hourly_means!(Bz_hr, By_hr, mag_data.time_tag, mag_data.bz_gsm,
+                   mag_data.by_gsm, t_start, min_hourly_samples)
+    t_fresh = _latest_covered_common_time(
+        plasma_data, mag_data, t_start, t_end, min_hourly_samples,
+    )
+
     for i in 1:n_bins
-        t0, t1 = t_edges[i], t_edges[i+1]
+        t0 = t_edges[i]
         t_hr[i] = t0
-
-        # Plasma averages. A bin is only measured when it holds at least
-        # min_hourly_samples finite 1-min samples; below that it stays NaN (a
-        # gap), so a feed brownout is not served as a one-minute "hourly average".
-        mask_p = (plasma_data.time_tag .>= t0) .& (plasma_data.time_tag .< t1)
-        if any(mask_p)
-            vals_v = filter(!isnan, plasma_data.speed[mask_p])
-            vals_n = filter(!isnan, plasma_data.density[mask_p])
-            length(vals_v) >= min_hourly_samples && (V_hr[i] = mean(vals_v))
-            length(vals_n) >= min_hourly_samples && (n_hr[i] = mean(vals_n))
-        end
-
-        # Mag averages (same minimum-coverage gate).
-        mask_m = (mag_data.time_tag .>= t0) .& (mag_data.time_tag .< t1)
-        if any(mask_m)
-            vals_bz = filter(!isnan, mag_data.bz_gsm[mask_m])
-            vals_by = filter(!isnan, mag_data.by_gsm[mask_m])
-            length(vals_bz) >= min_hourly_samples && (Bz_hr[i] = mean(vals_bz))
-            length(vals_by) >= min_hourly_samples && (By_hr[i] = mean(vals_by))
-        end
 
         # Observed Dst for this hour bin (anchoring)
         haskey(dst_lookup, t0) && (Dst_hr[i] = dst_lookup[t0])
@@ -383,12 +485,11 @@ function fetch_realtime_solar_wind(; hours::Int=168,
     # Convert to hours from first timestamp
     t_hours = Float64[(t_hr[i] - t_hr[1]) / Hour(1) for i in 1:n_bins]
 
-    # Third return is the newest actual common sample time (NOT the last hour-floored bin
-    # start): the bins drop the trailing partial hour and are floored, so t_hr[end] lags real
-    # time by up to ~2 h. Freshness/staleness must be measured from t_end; the floored t_hr
-    # stays the Dst-anchor key and step time. (2-value callers ignore the extra by destructuring.)
+    # Third return is the newest actual common sample time in an hour meeting the
+    # configured coverage floor. A lone recent brownout sample cannot make an old
+    # usable driver bin look fresh. The floored t_hr remains the Dst-anchor key.
     return SolarWindData(t_hours, V_hr, Bz_hr, By_hr, n_hr, Pdyn_hr,
-                         Dst_hr, Dst_star_hr), t_hr, t_end
+                         Dst_hr, Dst_star_hr), t_hr, t_fresh
 end
 
 """
@@ -436,6 +537,7 @@ function recover_shadow_state(load_fn, bootstrap_fn)
     st = try
         load_fn()
     catch e
+        e isa InterruptException && rethrow()
         @warn "state load failed; re-bootstrapping from history (live drift discarded)" exception=e
         nothing
     end

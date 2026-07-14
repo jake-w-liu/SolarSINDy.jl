@@ -1,164 +1,310 @@
 #!/usr/bin/env julia
-# phase_sensitivity.jl — Phase threshold sensitivity analysis
-#
-# Sweeps D_thresh and R_thresh to assess stability of phase-dependent coefficients.
-# Output: data/phase_threshold_sensitivity.csv
+# Canonical phase-threshold sensitivity with independent storm-level selection.
 
 using SolarSINDy
 using CSV, DataFrames, Dates, Statistics, Random
 
-const DATA_DIR = joinpath(@__DIR__, "..", "data")
+isdefined(@__MODULE__, :_select_phase_lambda) ||
+    include(joinpath(@__DIR__, "phase_dependent_discovery.jl"))
 
-println("=" ^ 60)
-println("Phase Threshold Sensitivity Analysis")
-println("=" ^ 60)
+const PHASE_QUIET_THRESHOLDS = (-30.0, -25.0, -20.0, -15.0, -10.0)
+const PHASE_DERIV_THRESHOLDS = (-4.0, -3.0, -2.0, -1.0, 0.0)
 
-# Load data
-extracted_path = joinpath(DATA_DIR, "omni_extracted.csv")
-println("\nLoading OMNI data...")
-@time df = parse_omni2(extracted_path; year_start=1963, year_end=2025)
-@time clean_omni_data!(df)
-
-catalog = load_storm_catalog(joinpath(DATA_DIR, "storm_catalog.csv"))
-train_entries = filter(e -> e.split == "train", catalog)
-println("Training storms: $(length(train_entries))")
-
-# Build library
-lib = build_solar_wind_library(; max_poly_order=2, include_trig=true,
-                                 include_cross=true, include_known=true)
-term_names = get_term_names(lib)
-
-# Prepare all storm data once
-all_swd = SolarWindData[]
-all_data_dicts = Dict{String,Vector{Float64}}[]
-all_dDst = Float64[]
-all_phases_cache = Dict{Tuple{Float64,Float64}, Vector{Int}}()
-
-storm_data_pairs = []
-for entry in train_entries
-    swd = extract_storm_data(df, entry)
-    try
-        data_dict, dDst_dt = prepare_sindy_data(swd, 1.0; smooth_window=5)
-        if count(!isnan, dDst_dt) < 20
-            continue
-        end
-        push!(storm_data_pairs, (swd, data_dict, dDst_dt))
-    catch
-        continue
+function _phase_threshold_selections(storms::AbstractVector,
+                                     lib::CandidateLibrary;
+                                     quiet_thresholds=PHASE_QUIET_THRESHOLDS,
+                                     deriv_thresholds=PHASE_DERIV_THRESHOLDS,
+                                     min_phase_rows::Int=max(length(lib), PHASE_MIN_REGRESSION_ROWS),
+                                     min_phase_storms::Int=2)
+    isempty(quiet_thresholds) &&
+        throw(ArgumentError("quiet_thresholds must not be empty"))
+    isempty(deriv_thresholds) &&
+        throw(ArgumentError("deriv_thresholds must not be empty"))
+    results = NamedTuple[]
+    for quiet_thresh in quiet_thresholds, deriv_thresh in deriv_thresholds
+        isfinite(quiet_thresh) && isfinite(deriv_thresh) ||
+            throw(ArgumentError("phase thresholds must be finite"))
+        labeled = _with_phase_labels(
+            storms; quiet_thresh, deriv_thresh,
+        )
+        # A fresh selector call is mandatory for every threshold pair. No
+        # coefficient vector or lambda is carried between configurations.
+        selection = _select_phase_lambda(
+            labeled, lib; quiet_thresh, deriv_thresh,
+            min_phase_rows, min_phase_storms,
+        )
+        push!(results, (
+            quiet_thresh=Float64(quiet_thresh),
+            deriv_thresh=Float64(deriv_thresh),
+            storms=labeled,
+            selection,
+        ))
     end
+    return results
 end
-println("Storms with valid data: $(length(storm_data_pairs))")
 
-# Sweep parameters
-D_thresh_values = [-30.0, -25.0, -20.0, -15.0, -10.0]
-R_thresh_values = [-4.0, -3.0, -2.0, -1.0, 0.0]
-
-sensitivity_rows = []
-phase_lambda = 148.0
-
-for D_thresh in D_thresh_values
-    for R_thresh in R_thresh_values
-        println("\n--- D_thresh=$D_thresh, R_thresh=$R_thresh ---")
-
-        # Segment data by phase
-        phase_data = Dict{String,Vector{Dict{String,Vector{Float64}}}}(
-            "quiet" => [], "main" => [], "recovery" => []
-        )
-        phase_dDst = Dict{String,Vector{Float64}}(
-            "quiet" => Float64[], "main" => Float64[], "recovery" => Float64[]
-        )
-
-        for (swd, data_dict, dDst_dt) in storm_data_pairs
-            # Custom phase classification with these thresholds
-            n_pts = length(swd.Dst_star)
-            phases = ones(Int, n_pts)
-            for k in 1:n_pts
-                dst_k = swd.Dst_star[k]
-                dDst_k = k <= length(dDst_dt) ? dDst_dt[k] : 0.0
-                if dst_k >= D_thresh
-                    phases[k] = 1  # quiet
-                elseif !isnan(dDst_k) && dDst_k < R_thresh
-                    phases[k] = 2  # main
-                else
-                    phases[k] = 3  # recovery
-                end
-            end
-
-            for (phase_id, phase_name) in [(1, "quiet"), (2, "main"), (3, "recovery")]
-                mask = (phases[1:length(dDst_dt)] .== phase_id) .& .!isnan.(dDst_dt)
-                for key in keys(data_dict)
-                    mask .&= .!isnan.(data_dict[key])
-                end
-                n_phase = count(mask)
-                if n_phase >= 5
-                    pd = Dict{String,Vector{Float64}}()
-                    for key in keys(data_dict)
-                        pd[key] = data_dict[key][mask]
-                    end
-                    push!(phase_data[phase_name], pd)
-                    append!(phase_dDst[phase_name], dDst_dt[mask])
-                end
-            end
-        end
-
-        # Run SINDy for each phase
-        for phase_name in ["quiet", "main", "recovery"]
-            dDst_vec = phase_dDst[phase_name]
-            if length(dDst_vec) < 100
-                println("  $phase_name: insufficient data ($(length(dDst_vec)))")
-                continue
-            end
-
-            # Concatenate phase data
-            concat = Dict{String,Vector{Float64}}()
-            if !isempty(phase_data[phase_name])
-                for key in keys(phase_data[phase_name][1])
-                    concat[key] = vcat([d[key] for d in phase_data[phase_name]]...)
-                end
-            end
-
-            xi, active, _ = sindy_discover(concat, lib, dDst_vec;
-                                            λ=phase_lambda, normalize=true)
-
-            n_active = count(xi .!= 0)
-            println("  $phase_name: $(length(dDst_vec)) pts, $n_active terms")
-
-            for (i, name) in enumerate(term_names)
-                push!(sensitivity_rows, (
-                    D_thresh = D_thresh,
-                    R_thresh = R_thresh,
-                    phase = phase_name,
-                    term = name,
-                    coefficient = xi[i],
-                    n_data_points = length(dDst_vec),
-                    n_active_terms = n_active
+function _threshold_result_rows(results, lib::CandidateLibrary)
+    terms = get_term_names(lib)
+    coefficients = NamedTuple[]
+    decisions = NamedTuple[]
+    candidates = NamedTuple[]
+    errors = NamedTuple[]
+    support = NamedTuple[]
+    inner_split = NamedTuple[]
+    counts = NamedTuple[]
+    for result in results
+        quiet_thresh = result.quiet_thresh
+        deriv_thresh = result.deriv_thresh
+        selection = result.selection
+        model = selection.model
+        thresholds = (; quiet_thresh, deriv_thresh)
+        push!(decisions, merge(thresholds, selection.decision_record))
+        append!(candidates, [merge(thresholds, row)
+                             for row in selection.candidate_records])
+        append!(errors, [merge(thresholds, row)
+                         for row in selection.error_records])
+        append!(support, [merge(thresholds, row)
+                          for row in selection.support_records])
+        append!(inner_split, [merge(thresholds, row)
+                              for row in selection.split_records])
+        for phase in 1:3
+            push!(counts, (
+                quiet_thresh, deriv_thresh,
+                phase=PHASE_NAMES[phase],
+                selected_lambda=selection.selected_lambda,
+                n_regression_rows=model.row_counts[phase],
+                n_storms_with_phase=model.storm_counts[phase],
+                n_training_storms=length(result.storms),
+            ))
+            for index in eachindex(terms)
+                push!(coefficients, (
+                    quiet_thresh, deriv_thresh,
+                    phase=PHASE_NAMES[phase],
+                    term=terms[index],
+                    coefficient=model.coefficients[phase][index],
+                    selected_lambda=selection.selected_lambda,
+                    n_regression_rows=model.row_counts[phase],
+                    n_storms_with_phase=model.storm_counts[phase],
+                    n_active_terms=count(!=(0.0), model.coefficients[phase]),
+                    selection_rule=selection.decision_record.selection_rule,
                 ))
             end
         end
     end
+    return (; coefficients, decisions, candidates, errors, support,
+            inner_split, counts)
 end
 
-sensitivity_df = DataFrame(sensitivity_rows)
-CSV.write(joinpath(DATA_DIR, "phase_threshold_sensitivity.csv"), sensitivity_df)
-println("\nSaved: phase_threshold_sensitivity.csv ($(nrow(sensitivity_df)) rows)")
-
-# Print summary of key coefficient stability
-println("\n--- Key Coefficient Stability ---")
-for phase_name in ["quiet", "main", "recovery"]
-    println("\n$(uppercase(phase_name)):")
-    for key_term in ["Dst_star", "Bs", "sin^(8/3)(θ_c/2)", "n*V", "n*V^2"]
-        sub = filter(row -> row.phase == phase_name && row.term == key_term &&
-                     row.coefficient != 0.0, sensitivity_df)
-        if nrow(sub) > 0
-            coefs = sub.coefficient
-            println("  $(rpad(key_term, 20)) mean=$(round(mean(coefs), sigdigits=3))  " *
-                    "std=$(round(std(coefs), sigdigits=2))  " *
-                    "range=[$(round(minimum(coefs), sigdigits=3)), $(round(maximum(coefs), sigdigits=3))]  " *
-                    "present in $(nrow(sub))/$(length(D_thresh_values)*length(R_thresh_values)) configs")
+function _phase_threshold_outer_rows(results, outer_storms,
+                                     single_coefficients,
+                                     lib::CandidateLibrary)
+    isempty(results) && throw(ArgumentError("threshold results must not be empty"))
+    isempty(outer_storms) && throw(ArgumentError("outer storms must not be empty"))
+    metrics = NamedTuple[]
+    trajectories = NamedTuple[]
+    for result in results
+        quiet_thresh = result.quiet_thresh
+        deriv_thresh = result.deriv_thresh
+        selected_lambda = result.selection.selected_lambda
+        for storm in sort(collect(outer_storms); by=s -> (s.onset_time, s.storm_id))
+            score = _score_phase_storm(
+                storm, result.selection.model, single_coefficients, lib;
+                quiet_thresh, deriv_thresh,
+            )
+            _paired_phase_metrics(score.rows)
+            prediction = score.predictions.SwitchingSINDy
+            all(isfinite, prediction) || error(
+                "threshold trajectory is non-finite for storm $(storm.storm_id)",
+            )
+            append!(metrics, [merge((selected_lambda=selected_lambda,), row)
+                              for row in score.rows])
+            score_mask = falses(length(score.observations))
+            score_mask[score.scored_indices] .= true
+            for index in eachindex(prediction)
+                push!(trajectories, (
+                    quiet_thresh,
+                    deriv_thresh,
+                    selected_lambda,
+                    split=String(storm.entry.split),
+                    storm_id=storm.storm_id,
+                    onset_time=string(storm.onset_time),
+                    catalog_index=score.anchor_index + index - 1,
+                    time_hr=score.swd.t[index],
+                    dst_star_observed_nt=score.observations[index],
+                    dst_star_switching_nt=prediction[index],
+                    original_target=isfinite(score.observations[index]),
+                    scored_target=score_mask[index],
+                    shared_observed_anchor=index == 1,
+                ))
+            end
         end
     end
+    return (; metrics, trajectories)
 end
 
-println("\n" * "=" ^ 60)
-println("Sensitivity Analysis Complete")
-println("=" ^ 60)
+
+function _phase_threshold_design_rows(results, lib::CandidateLibrary)
+    rows = NamedTuple[]
+    for result in results
+        thresholds = (
+            quiet_thresh=result.quiet_thresh,
+            deriv_thresh=result.deriv_thresh,
+        )
+        append!(rows, [merge(thresholds, row) for row in
+                       _phase_design_diagnostic_records(
+                           result.storms, result.selection, lib,
+                       )])
+    end
+    return rows
+end
+
+function run_phase_sensitivity()
+    isempty(strip(get(ENV, "SOLARSINDY_OUTPUT_ROOT", ""))) && error(
+        "SOLARSINDY_OUTPUT_ROOT must be set for canonical phase sensitivity",
+    )
+    output_paths = validation_output_paths()
+    omni = output_paths.omni
+    data_dir = output_paths.data
+    producer = @__FILE__
+    isfile(omni) || error("frozen OMNI extraction not found: $omni")
+    verify_omni_input(omni; mode=output_paths.mode)
+
+    df = parse_omni2(omni; year_start=1963, year_end=2025)
+    add_original_observation_flags!(df)
+    clean_omni_data!(df)
+    catalog_path = joinpath(data_dir, "storm_catalog.csv")
+    catalog = load_verified_storm_catalog(
+        catalog_path; omni_path=omni,
+        parameters=storm_catalog_parameters(), mode=output_paths.mode,
+    )
+    inputs = (omni_extracted=omni, storm_catalog=catalog_path)
+    policy = DiscoveryObservationPolicy()
+    audit = _audit_discovery_observations(df, catalog; policy)
+    base_inputs = Dict(
+        "omni_extracted" => omni,
+        "storm_catalog" => catalog_path,
+    )
+    observation_path = _phase_write(
+        joinpath(data_dir, "phase_threshold_observation_audit.csv"),
+        audit.storm_records;
+        output_paths, producer_script=producer, inputs=base_inputs,
+        selection_record=(
+            kind="phase_threshold_observation_policy",
+            smooth_window=policy.smooth_window,
+            min_regression_rows=policy.min_regression_rows,
+            min_scoring_rows=policy.min_scoring_rows,
+            min_scoring_fraction=policy.min_scoring_fraction,
+        ), deterministic=true,
+    )
+    selection_inputs = merge(base_inputs, Dict(
+        "phase_threshold_observation_audit" => observation_path,
+    ))
+    lib = build_solar_wind_library()
+    length(lib) == 20 || error("phase sensitivity requires the 20-term library")
+    "n*V^2" in get_term_names(lib) &&
+        error("phase sensitivity library contains redundant n*V^2")
+    eligible_training = filter(
+        entry -> entry.split == "train", audit.eligible_entries,
+    )
+    length(eligible_training) >= 2 ||
+        error("phase sensitivity needs at least two eligible training storms")
+    storms = _prepare_discovery_storms(df, eligible_training, lib; policy)
+    eligible_outer = filter(
+        entry -> entry.split in ("val", "test"), audit.eligible_entries,
+    )
+    Set(entry.split for entry in eligible_outer) == Set(("val", "test")) ||
+        error("phase sensitivity needs eligible validation and test storms")
+    outer_storms = _prepare_discovery_storms(df, eligible_outer, lib; policy)
+
+    results = _phase_threshold_selections(storms, lib)
+    expected = length(PHASE_QUIET_THRESHOLDS) * length(PHASE_DERIV_THRESHOLDS)
+    length(results) == expected ||
+        error("phase sensitivity did not select every threshold configuration")
+    rows = _threshold_result_rows(results, lib)
+    single_selection = _select_discovery_lambda(storms, lib, Dict{Any,Any}())
+    single_paths = _phase_manifest_selection(
+        single_selection, "phase_threshold_single_lambda";
+        output_paths, producer_script=producer, inputs=selection_inputs,
+        kind="threshold_independent_same_cohort_single_equation_control",
+    )
+    outer_rows = _phase_threshold_outer_rows(
+        results, outer_storms, single_selection.model, lib,
+    )
+    design_rows = _phase_threshold_design_rows(results, lib)
+    selection_record = (
+        kind="per_threshold_independent_storm_lambda_selection",
+        quiet_thresholds=PHASE_QUIET_THRESHOLDS,
+        deriv_thresholds=PHASE_DERIV_THRESHOLDS,
+        configurations=expected,
+        lambda_grid=storm_lambda_grid(),
+        selected_decisions=[(
+            quiet_thresh=result.quiet_thresh,
+            deriv_thresh=result.deriv_thresh,
+            selected_lambda=result.selection.selected_lambda,
+            selection_rule=result.selection.decision_record.selection_rule,
+        ) for result in results],
+        comparator_models=("Switching-SINDy", "Single-SINDy", "Burton",
+                           "BurtonFull", "OBrien-McPherron"),
+        single_control_decision=single_selection.decision_record,
+    )
+
+    selection_outputs = (
+        "phase_threshold_selection_decisions.csv" => rows.decisions,
+        "phase_threshold_selection_candidates.csv" => rows.candidates,
+        "phase_threshold_selection_errors.csv" => rows.errors,
+        "phase_threshold_selection_support.csv" => rows.support,
+        "phase_threshold_selection_inner_split.csv" => rows.inner_split,
+    )
+    analysis_inputs = copy(selection_inputs)
+    for (filename, data) in selection_outputs
+        path = _phase_write(
+            joinpath(data_dir, filename), data;
+            output_paths, producer_script=producer, inputs=selection_inputs,
+            selection_record, deterministic=true,
+        )
+        analysis_inputs["threshold_selection_" *
+            replace(splitext(filename)[1], "phase_threshold_selection_" => "")] = path
+    end
+    for field in propertynames(single_paths)
+        analysis_inputs["threshold_single_selection_$(field)"] =
+            getproperty(single_paths, field)
+    end
+
+    derived_outputs = (
+        "phase_threshold_sensitivity.csv" => rows.coefficients,
+        "phase_threshold_cohort_counts.csv" => rows.counts,
+        "phase_threshold_outer_metrics.csv" => outer_rows.metrics,
+        "phase_threshold_outer_trajectories.csv" => outer_rows.trajectories,
+        "phase_threshold_design_diagnostics.csv" => design_rows,
+    )
+    for (filename, data) in derived_outputs
+        _phase_write(
+            joinpath(data_dir, filename), data;
+            output_paths, producer_script=producer, inputs=analysis_inputs,
+            selection_record, deterministic=true,
+        )
+    end
+    println("Phase-threshold sensitivity outputs written under: $data_dir")
+    println("Independently selected configurations: $(length(results))")
+    names = get_term_names(lib)
+    _phase_write(
+        joinpath(data_dir, "phase_threshold_single_control_coefficients.csv"),
+        [(term=names[index], coefficient=single_selection.model[index],
+          selected_lambda=single_selection.selected_lambda)
+         for index in eachindex(names)];
+        output_paths, producer_script=producer,
+        inputs=merge(selection_inputs, Dict(
+            "threshold_single_selection_$(field)" => getproperty(single_paths, field)
+            for field in propertynames(single_paths)
+        )),
+        selection_record=(
+            kind="threshold_independent_same_cohort_single_equation_control",
+            decision=single_selection.decision_record,
+        ), deterministic=true,
+    )
+    return (; results, rows, outer_rows, design_rows, single_selection)
+end
+
+if abspath(PROGRAM_FILE) == abspath(@__FILE__)
+    run_phase_sensitivity()
+end

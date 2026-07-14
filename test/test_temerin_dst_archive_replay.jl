@@ -1,3 +1,5 @@
+module TemerinDstArchiveReplayTests
+
 using Test
 using DataFrames
 using Dates
@@ -55,3 +57,5 @@ const TEMERIN_DST_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "..", "live_
         @test_throws ErrorException _validate_temerin_rows(broken_gap; max_match_gap_min = 5.0)
     end
 end
+
+end # module TemerinDstArchiveReplayTests

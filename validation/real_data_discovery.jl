@@ -1,533 +1,946 @@
 #!/usr/bin/env julia
-# real_data_discovery.jl — Phase B: Real-Data SINDy Discovery
-#
-# Following PLAN.md strictly:
-#   B1: Single-equation discovery on training storms (cycles 20–23)
-#   B2: Compare to all baselines on validation set (cycle 24)
-#   B3: Extreme event test (May 2024 superstorm)
-#   B4: Cross-solar-cycle generalization
-#
-# Outputs:
-#   data/real_sindy_coefficients.csv
-#   data/real_ensemble_inclusion.csv
-#   data/real_lambda_sweep.csv
-#   data/real_holdout_metrics.csv
-#   data/may2024_reconstruction.csv
-#   data/cross_cycle_metrics.csv
+# Canonical real-data SINDy discovery and untouched outer evaluation.
 
 using SolarSINDy
-using CSV, DataFrames, Dates, Statistics, Random
+using CSV, DataFrames, Dates, Statistics, Random, LinearAlgebra
 
-const DATA_DIR = joinpath(@__DIR__, "..", "data")
-const FIGS_DIR = joinpath(@__DIR__, "..", "figs")
-mkpath(DATA_DIR)
-mkpath(FIGS_DIR)
+isdefined(@__MODULE__, :validation_output_paths) ||
+    include(joinpath(@__DIR__, "output_paths.jl"))
+isdefined(@__MODULE__, :write_output_manifest) ||
+    include(joinpath(@__DIR__, "canonical_provenance.jl"))
+isdefined(@__MODULE__, :DiscoveryObservationPolicy) ||
+    include(joinpath(@__DIR__, "real_discovery_helpers.jl"))
 
-# ============================================================
-# Helper functions (must be defined before use)
-# ============================================================
+const _REAL_PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
+const _REAL_ENSEMBLE_SEED = 42
+const _REAL_ENSEMBLE_DRAWS = 500
+const _REAL_CLOCK_PROXY_TERMS = (
+    "sin(θ_c/2)", "sin²(θ_c/2)", "sin⁴(θ_c/2)",
+    "sin^(8/3)(θ_c/2)", "V*sin²(θ_c/2)",
+)
+const _REAL_CLOCK_RESPONSE_TERMS = (_REAL_CLOCK_PROXY_TERMS..., "Newell_d_Φ")
+const _REAL_CONDITION_WARNING = 100.0
 
-# simulate_sindy is now exported from SolarSINDy — use it directly
+function _real_output_context()
+    paths = validation_output_paths()
+    paths.explicit || error(
+        "SOLARSINDY_OUTPUT_ROOT must be set; canonical revision outputs may not use package data/",
+    )
+    paths.mode in (:canonical, :test) || error(
+        "real_data_discovery.jl requires canonical mode (or explicit test mode)",
+    )
+    catalog = joinpath(paths.data, "storm_catalog.csv")
+    isfile(paths.omni) || error("frozen OMNI extraction not found: $(paths.omni)")
+    isfile(catalog) || error("verified storm catalog not found: $catalog")
+    return merge(paths, (; catalog))
+end
 
-"""
-    _concat_storm_data(df, entries)
+_real_base_inputs(context) = Dict(
+    "omni_extracted" => context.omni,
+    "storm_catalog" => context.catalog,
+)
 
-Extract storms, prepare for SINDy, concatenate, and remove NaN AND fill-fabricated
-rows. Returns (concat_data::Dict, dDst_clean::Vector, n_storms_used::Int).
+function _real_merge_inputs(context, extra_inputs)
+    inputs = _real_base_inputs(context)
+    for pair in pairs(extra_inputs)
+        name = String(pair.first)
+        haskey(inputs, name) && throw(ArgumentError("duplicate manifest input name: $name"))
+        inputs[name] = String(pair.second)
+    end
+    return inputs
+end
 
-Fabricated-row exclusion (finding real_data_discovery.jl:69): `extract_storm_data`
-forward/backward-fills every driver, so by the time the concatenated arrays are
-built there is no NaN left for a post-fill `isnan` filter to catch — the old filter
-was dead code and up to ~40% fill-fabricated (and, at window heads, future-copied)
-driver hours entered the SINDy regression. The fix carries a PRE-FILL validity mask
-straight from the cleaned DataFrame (which still holds the original NaNs) for each
-storm window and drops those rows. Density and Pdyn are checked explicitly because
-`clean_omni_data!`'s `:quality` flag covers only V/Bz/Dst, yet n and Pdyn drive
-active discovered terms (n·V, n·Bs, n·V·Bs, n·V², Pdyn·Bs).
-"""
-function _concat_storm_data(df::DataFrame, entries::Vector{StormCatalogEntry})
-    all_data_dicts = Dict{String,Vector{Float64}}[]
-    all_dDst = Float64[]
-    all_rawvalid = Bool[]   # per-row PRE-FILL driver validity, aligned to all_dDst
-    n_used = 0
+function _real_manifested_csv(context, filename::AbstractString, data;
+                              selection_record,
+                              seed::Union{Nothing,Int}=nothing,
+                              extra_inputs=(;), metadata=(;),
+                              producer_script::AbstractString=@__FILE__)
+    basename(filename) == filename ||
+        throw(ArgumentError("filename must not contain a path"))
+    path = joinpath(context.data, filename)
+    frame = data isa DataFrame ? data : DataFrame(data)
+    return write_manifested_csv(path, frame;
+        producer_script,
+        input_paths=_real_merge_inputs(context, extra_inputs),
+        selection_record,
+        seed,
+        deterministic=seed === nothing,
+        metadata,
+        package_root=_REAL_PACKAGE_ROOT,
+        mode=context.mode,
+        verify_source=true,
+    )
+end
 
-    for entry in entries
-        swd = extract_storm_data(df, entry)
-        try
-            data_dict, dDst_dt = prepare_sindy_data(swd, 1.0; smooth_window=5)
-            if count(!isnan, dDst_dt) < 20
-                continue
+function _real_policy_record(policy::DiscoveryObservationPolicy)
+    return (
+        smooth_window=policy.smooth_window,
+        min_regression_rows=policy.min_regression_rows,
+        min_scoring_rows=policy.min_scoring_rows,
+        min_scoring_fraction=policy.min_scoring_fraction,
+        require_ae=policy.require_ae,
+        maximum_admissible_cleaned_gap_hours=3,
+        regression_target_policy="original_Dst_V_n_full_smoothing_derivative_stencil",
+        scoring_target_policy="original_Dst_V_n_derived_Dst_star_post_anchor_only",
+    )
+end
+
+function _real_explicit_exclusion_records(records)
+    return [merge(record, (
+        exclusion_reason=isempty(strip(String(record.exclusion_reason))) ?
+            "none" : String(record.exclusion_reason),
+    )) for record in records]
+end
+
+function _real_selection_record(selection; basis, scope)
+    return (
+        kind="fixed_grid_whole_storm_forward_selection",
+        basis=String(basis),
+        scope=String(scope),
+        grid="10.^range(-2,4,length=60)",
+        normalize=true,
+        decision=selection.decision_record,
+    )
+end
+
+function _real_persist_selection(context, selection, prefix;
+                                 basis, scope, extra_inputs=(;))
+    paths = (
+        split=joinpath(context.data, "$(prefix)_inner_split.csv"),
+        candidates=joinpath(context.data, "$(prefix)_candidates.csv"),
+        errors=joinpath(context.data, "$(prefix)_validation_errors.csv"),
+        support=joinpath(context.data, "$(prefix)_support.csv"),
+        decision=joinpath(context.data, "$(prefix)_decision.csv"),
+    )
+    transaction_paths = vcat(
+        String[getproperty(paths, field) for field in propertynames(paths)],
+        String[getproperty(paths, field) * ".manifest.json"
+               for field in propertynames(paths)],
+    )
+    snapshot = SolarSINDy._snapshot_regular_file_set(transaction_paths)
+    record = _real_selection_record(selection; basis, scope)
+    try
+        write_storm_lambda_selection(selection, context.data; prefix)
+        SolarSINDy._with_selection_csv_set_lock(paths) do
+            for field in propertynames(paths)
+                path = getproperty(paths, field)
+                frame = CSV.read(path, DataFrame)
+                write_output_manifest(path;
+                    producer_script=@__FILE__,
+                    input_paths=_real_merge_inputs(context, extra_inputs),
+                    selection_record=merge(record, (artifact=String(field),)),
+                    deterministic=true,
+                    metadata=(rows=nrow(frame), columns=names(frame)),
+                    package_root=_REAL_PACKAGE_ROOT,
+                    mode=context.mode,
+                )
+                verify_output_manifest(path;
+                    package_root=_REAL_PACKAGE_ROOT,
+                    require_canonical=context.mode == :canonical,
+                )
             end
-            # Pre-fill validity: rows whose model drivers were originally present.
-            # extract_storm_data set swd.t = 0:(n_pts-1) over exactly these rows, and
-            # prepare_sindy_data preserves length, so the mask aligns 1:1 with
-            # dDst_dt / data_dict. A row filled by _fillnan (forward OR backward, the
-            # latter copying future values into leading gaps) has raw_valid = false.
-            rows = entry.onset_idx:entry.end_idx
-            raw_valid = .!(isnan.(df.V[rows]) .| isnan.(df.Bz[rows]) .|
-                           isnan.(df.By[rows]) .| isnan.(df.n[rows]) .|
-                           isnan.(df.Pdyn[rows]) .| isnan.(df.Dst_star[rows]))
-            push!(all_data_dicts, data_dict)
-            append!(all_dDst, dDst_dt)
-            append!(all_rawvalid, raw_valid)
-            n_used += 1
-        catch
-            continue
+        end
+    catch
+        SolarSINDy._restore_regular_file_set!(snapshot)
+        rethrow()
+    end
+    SolarSINDy._discard_regular_file_snapshot!(snapshot)
+    return paths
+end
+
+function _real_selection_inputs(context, paths, prefix::AbstractString)
+    return SolarSINDy._with_selection_csv_set_lock(paths) do
+        inputs = Dict{String,String}()
+        for field in propertynames(paths)
+            path = getproperty(paths, field)
+            verify_output_manifest(path;
+                package_root=_REAL_PACKAGE_ROOT,
+                require_canonical=context.mode == :canonical,
+            )
+            inputs["$(prefix)_$(field)"] = path
+        end
+        inputs
+    end
+end
+
+function _real_require_subset(storms, predicate, label; minimum=1)
+    subset = filter(predicate, storms)
+    length(subset) >= minimum ||
+        error("$label has $(length(subset)) eligible storms; need at least $minimum")
+    return subset
+end
+
+function _real_assert_matching_cohort(full_storms, collapsed_storms, label)
+    full_ordered = sort(collect(full_storms); by=s -> (s.onset_time, s.storm_id))
+    collapsed_ordered = sort(collect(collapsed_storms); by=s -> (s.onset_time, s.storm_id))
+    getproperty.(full_ordered, :storm_id) == getproperty.(collapsed_ordered, :storm_id) ||
+        error("$label full and collapsed storm cohorts differ")
+    for (full, collapsed) in zip(full_ordered, collapsed_ordered)
+        full.entry.split == collapsed.entry.split ||
+            error("$label catalog splits differ for storm $(full.storm_id)")
+        full.regression_mask == collapsed.regression_mask ||
+            error("$label regression masks differ for storm $(full.storm_id)")
+        isequal(full.target, collapsed.target) ||
+            error("$label regression targets differ for storm $(full.storm_id)")
+        Set(keys(full.data)) == Set(keys(collapsed.data)) &&
+            all(key -> isequal(full.data[key], collapsed.data[key]), keys(full.data)) ||
+            error("$label regression inputs differ for storm $(full.storm_id)")
+        isequal(full.scoring_observations, collapsed.scoring_observations) ||
+            error("$label scoring targets differ for storm $(full.storm_id)")
+        (full.observation_record.scoring_start_idx,
+         full.observation_record.scoring_end_idx) ==
+            (collapsed.observation_record.scoring_start_idx,
+             collapsed.observation_record.scoring_end_idx) ||
+            error("$label scoring bounds differ for storm $(full.storm_id)")
+        all(field -> isequal(getproperty(full.window_swd, field),
+                             getproperty(collapsed.window_swd, field)),
+            (:t, :V, :Bz, :By, :n, :Pdyn, :Dst, :Dst_star)) ||
+            error("$label source windows differ for storm $(full.storm_id)")
+        all(field -> isequal(getproperty(full.swd, field),
+                             getproperty(collapsed.swd, field)),
+            (:t, :V, :Bz, :By, :n, :Pdyn, :Dst, :Dst_star)) ||
+            error("$label scoring inputs differ for storm $(full.storm_id)")
+        size(full.theta, 1) == size(collapsed.theta, 1) == length(full.target) ||
+            error("$label regression design sizes differ for storm $(full.storm_id)")
+    end
+    return nothing
+end
+
+function _real_assert_matching_inner_split(full_selection, collapsed_selection, label)
+    full_rows = sort(full_selection.split_records; by=row -> row.chronological_index)
+    collapsed_rows = sort(collapsed_selection.split_records;
+                          by=row -> row.chronological_index)
+    [(row.storm_id, row.inner_split) for row in full_rows] ==
+        [(row.storm_id, row.inner_split) for row in collapsed_rows] ||
+        error("$label full and collapsed inner storm splits differ")
+    length(full_selection.candidate_records) == 60 ||
+        error("$label full selector did not evaluate the fixed 60-point grid")
+    length(collapsed_selection.candidate_records) == 60 ||
+        error("$label collapsed selector did not evaluate the fixed 60-point grid")
+    return nothing
+end
+
+function _real_select_basis_pair(full_storms, collapsed_storms,
+                                 full_library, collapsed_library,
+                                 full_cache, collapsed_cache; label)
+    _real_assert_matching_cohort(full_storms, collapsed_storms, label)
+    full_selection = _select_discovery_lambda(full_storms, full_library, full_cache)
+    collapsed_selection = _select_discovery_lambda(
+        collapsed_storms, collapsed_library, collapsed_cache,
+    )
+    _real_assert_matching_inner_split(full_selection, collapsed_selection, label)
+    return (; full=full_selection, collapsed=collapsed_selection)
+end
+
+function _real_normalized_block(theta::AbstractMatrix, indices::AbstractVector{Int})
+    isempty(indices) && return (
+        n_rows=size(theta, 1), n_columns=0, rank=0, rank_tolerance=NaN,
+        condition_number=NaN, largest_singular_value=NaN,
+        smallest_singular_value=NaN, zero_norm_columns=0,
+    )
+    block = Matrix{Float64}(@view theta[:, indices])
+    norms = [norm(@view block[:, column]) for column in axes(block, 2)]
+    zero_norm_columns = count(iszero, norms)
+    scaling = copy(norms)
+    scaling[iszero.(scaling)] .= 1.0
+    normalized = block ./ scaling'
+    singular_values = svdvals(normalized)
+    largest = isempty(singular_values) ? 0.0 : first(singular_values)
+    tolerance = max(size(normalized)...) * eps(Float64) * largest
+    numerical_rank = count(value -> value > tolerance, singular_values)
+    column_rank_deficient = numerical_rank < size(normalized, 2)
+    condition_number = if largest == 0.0 || column_rank_deficient
+        Inf
+    else
+        largest / last(singular_values)
+    end
+    return (
+        n_rows=size(normalized, 1),
+        n_columns=size(normalized, 2),
+        rank=numerical_rank,
+        rank_tolerance=tolerance,
+        condition_number=condition_number,
+        largest_singular_value=largest,
+        smallest_singular_value=last(singular_values),
+        zero_norm_columns=zero_norm_columns,
+    )
+end
+
+function _real_block_record(theta, coefficients, term_names, indices, block, basis)
+    diagnostics = _real_normalized_block(theta, indices)
+    selected = count(index -> coefficients[index] != 0.0, indices)
+    return merge((
+        basis=String(basis),
+        block=String(block),
+        terms=isempty(indices) ? "none" : join(term_names[indices], ";"),
+        active_terms=selected,
+        normalization="training_column_l2_norm",
+        rank_rule="singular_value > max(n_rows,n_columns)*eps(Float64)*largest_singular_value",
+        condition_warning_threshold=_REAL_CONDITION_WARNING,
+        ill_conditioned=!isnan(diagnostics.condition_number) &&
+            diagnostics.condition_number > _REAL_CONDITION_WARNING,
+    ), diagnostics)
+end
+
+function _real_conditioning_records(theta, coefficients, term_names; basis)
+    size(theta, 2) == length(coefficients) == length(term_names) ||
+        throw(DimensionMismatch("design, coefficients, and term names must align"))
+    active = findall(!iszero, coefficients)
+    proxy = findall(in(_REAL_CLOCK_PROXY_TERMS), term_names)
+    response = findall(in(_REAL_CLOCK_RESPONSE_TERMS), term_names)
+    active_proxy = intersect(active, proxy)
+    active_response = intersect(active, response)
+    return [
+        _real_block_record(theta, coefficients, term_names,
+                           collect(axes(theta, 2)), "full_design", basis),
+        _real_block_record(theta, coefficients, term_names,
+                           active, "selected_active_block", basis),
+        _real_block_record(theta, coefficients, term_names,
+                           proxy, "clock_proxy_candidate_block", basis),
+        _real_block_record(theta, coefficients, term_names,
+                           response, "clock_response_candidate_block", basis),
+        _real_block_record(theta, coefficients, term_names,
+                           active_proxy, "selected_clock_proxy_block", basis),
+        _real_block_record(theta, coefficients, term_names,
+                           active_response, "selected_clock_response_block", basis),
+    ]
+end
+
+function _real_column_norm_records(theta, coefficients, term_names; basis)
+    return [(
+        basis=String(basis),
+        term=term_names[index],
+        training_column_l2_norm=norm(@view theta[:, index]),
+        selected=coefficients[index] != 0.0,
+        coefficient=coefficients[index],
+        clock_proxy=term_names[index] in _REAL_CLOCK_PROXY_TERMS,
+        clock_response=term_names[index] in _REAL_CLOCK_RESPONSE_TERMS,
+    ) for index in axes(theta, 2)]
+end
+
+function _real_contribution_record(theta, coefficients, term_names, indices;
+                                   basis, record_kind, name)
+    n = size(theta, 1)
+    net = zeros(n)
+    gross = zeros(n)
+    for column in indices
+        coefficient = coefficients[column]
+        coefficient == 0.0 && continue
+        @inbounds for row in axes(theta, 1)
+            contribution = theta[row, column] * coefficient
+            net[row] += contribution
+            gross[row] += abs(contribution)
         end
     end
-
-    if isempty(all_data_dicts)
-        return Dict{String,Vector{Float64}}(), Float64[], 0
+    block = _real_normalized_block(theta, collect(indices))
+    net_absmax = isempty(net) ? 0.0 : maximum(abs, net)
+    gross_absmax = isempty(gross) ? 0.0 : maximum(gross)
+    cancellation = gross_absmax == 0.0 ? 0.0 :
+        gross_absmax / max(net_absmax, eps(Float64))
+    status = if isempty(indices)
+        "not_present"
+    elseif length(indices) == 1
+        coefficients[only(indices)] == 0.0 ? "inactive_basis_term" : "single_basis_term"
+    elseif block.rank < block.n_columns
+        "rank_deficient_grouped_net_only"
+    elseif block.condition_number > _REAL_CONDITION_WARNING
+        "ill_conditioned_grouped_net_preferred"
+    else
+        "full_rank_basis_dependent_group"
     end
-
-    # Concatenate
-    concat = Dict{String,Vector{Float64}}()
-    for key in keys(all_data_dicts[1])
-        concat[key] = vcat([d[key] for d in all_data_dicts]...)
-    end
-
-    # Drop rows that are NaN in the target/drivers (derivative/smoothing edges) OR
-    # that were fabricated by gap-filling (all_rawvalid). The pre-fill mask is the
-    # load-bearing part: without it the isnan checks alone never fire on filled rows.
-    valid = .!isnan.(all_dDst) .& all_rawvalid
-    for key in keys(concat)
-        valid .&= .!isnan.(concat[key])
-    end
-    for key in keys(concat)
-        concat[key] = concat[key][valid]
-    end
-
-    return concat, all_dDst[valid], n_used
+    return (
+        basis=String(basis),
+        record_kind=String(record_kind),
+        name=String(name),
+        terms=isempty(indices) ? "none" : join(term_names[indices], ";"),
+        row_scope="primary_training_regression_rows",
+        contribution_units="nT_per_hour",
+        n_terms=length(indices),
+        n_active_terms=count(index -> coefficients[index] != 0.0, indices),
+        normalized_design_rank=block.rank,
+        normalized_design_rank_tolerance=block.rank_tolerance,
+        normalized_design_condition_number=block.condition_number,
+        net_contribution_min=isempty(net) ? 0.0 : minimum(net),
+        net_contribution_max=isempty(net) ? 0.0 : maximum(net),
+        net_contribution_absmax=net_absmax,
+        gross_contribution_absmax=gross_absmax,
+        cancellation_ratio=cancellation,
+        interpretation_status=status,
+    )
 end
 
-"""
-    _cross_cycle_experiment(df, train_entries, test_entries, lib)
-
-Run SINDy discovery on train_entries, evaluate on test_entries with baselines.
-Returns (ξ, metrics_rows).
-"""
-function _cross_cycle_experiment(df::DataFrame,
-                                  train_entries::Vector{StormCatalogEntry},
-                                  test_entries::Vector{StormCatalogEntry},
-                                  lib::CandidateLibrary;
-                                  λ::Real=148.0)
-    concat, dDst, n_used = _concat_storm_data(df, train_entries)
-
-    if isempty(dDst)
-        println("  No valid training data!")
-        return zeros(length(lib)), []
+function _real_contribution_records(theta, coefficients, term_names; basis)
+    records = NamedTuple[]
+    for index in eachindex(term_names)
+        push!(records, _real_contribution_record(
+            theta, coefficients, term_names, [index];
+            basis, record_kind="term", name=term_names[index],
+        ))
     end
-
-    println("  Training: $(length(train_entries)) storms ($(n_used) used), $(length(dDst)) valid points")
-
-    # Discover
-    ξ, _, _ = sindy_discover(concat, lib, dDst; λ=λ, normalize=true)
-    n_active = count(ξ .!= 0)
-    println("  Discovered: $(n_active) active terms")
-
-    # Evaluate on test storms
-    metrics_rows = []
-    for entry in test_entries
-        swd = extract_storm_data(df, entry)
-        if length(swd.t) < 20
-            continue
-        end
-
-        Dst_obs = swd.Dst_star
-        Bs = max.(-swd.Bz, 0.0)
-        dt = 1.0
-
-        Dst_burton = simulate_burton(swd.V, Bs, dt; Dst0=Dst_obs[1])
-        Dst_burton_full = simulate_burton_full(swd.V, Bs, dt; Dst0=Dst_obs[1])
-        Dst_obrien = simulate_obrien(swd.V, Bs, dt; Dst0=Dst_obs[1])
-        Dst_sindy = simulate_sindy(ξ, lib, swd, dt)
-
-        for (name, pred) in [("SINDy", Dst_sindy), ("Burton", Dst_burton), ("BurtonFull", Dst_burton_full), ("OBrienMcP", Dst_obrien)]
-            if length(pred) == length(Dst_obs)
-                m = metrics_summary(pred, Dst_obs; name=name)
-                push!(metrics_rows, (
-                    storm_id = entry.storm_id,
-                    model = name,
-                    rmse = m.rmse,
-                    correlation = m.corr,
-                    pe = m.pe,
-                    min_dst_obs = minimum(Dst_obs)
-                ))
-            end
-        end
+    active = findall(!iszero, coefficients)
+    proxy = findall(in(_REAL_CLOCK_PROXY_TERMS), term_names)
+    response = findall(in(_REAL_CLOCK_RESPONSE_TERMS), term_names)
+    active_proxy = intersect(active, proxy)
+    active_response = intersect(active, response)
+    nonclock = filter(index -> !(term_names[index] in _REAL_CLOCK_RESPONSE_TERMS), active)
+    for (name, indices) in (
+        "selected_active_net" => active,
+        "clock_proxy_net" => proxy,
+        "clock_response_net" => response,
+        "selected_clock_proxy_net" => active_proxy,
+        "selected_clock_response_net" => active_response,
+        "selected_nonclock_net" => nonclock,
+    )
+        push!(records, _real_contribution_record(
+            theta, coefficients, term_names, indices;
+            basis, record_kind="group", name,
+        ))
     end
-
-    println("  Test: $(length(test_entries)) storms evaluated")
-    return ξ, metrics_rows
+    return records
 end
 
-# ============================================================
-# Load cleaned data and storm catalog
-# ============================================================
-println("=" ^ 60)
-println("Phase B: Real-Data SINDy Discovery")
-println("=" ^ 60)
-
-extracted_path = joinpath(DATA_DIR, "omni_extracted.csv")
-println("\nLoading OMNI data...")
-@time df = parse_omni2(extracted_path; year_start=1963, year_end=2025)
-@time clean_omni_data!(df)
-
-catalog_path = joinpath(DATA_DIR, "storm_catalog.csv")
-catalog = load_storm_catalog(catalog_path)
-println("Loaded catalog: $(length(catalog)) storms")
-
-# ============================================================
-# B1: Single-Equation Discovery (Training Set)
-# ============================================================
-println("\n" * "=" ^ 60)
-println("B1: Single-Equation Discovery on Training Storms")
-println("=" ^ 60)
-
-train_entries = filter(e -> e.split == "train", catalog)
-println("Training storms: $(length(train_entries))")
-
-concat_data, dDst_clean, n_storms_used = _concat_storm_data(df, train_entries)
-println("Storms used for SINDy: $(n_storms_used) / $(length(train_entries))")
-println("Valid data points: $(length(dDst_clean))")
-
-# Build candidate library (full 21-term)
-lib = build_solar_wind_library(; max_poly_order=2, include_trig=true,
-                                 include_cross=true, include_known=true)
-println("Library: $(length(lib)) terms")
-println("Terms: ", join(get_term_names(lib), ", "))
-
-# Evaluate library on concatenated training data
-Θ = evaluate_library(lib, concat_data)
-println("Library matrix: $(size(Θ))")
-
-# --- B1a: Lambda sweep (Pareto front) ---
-println("\n--- Lambda Sweep ---")
-lambdas = 10.0 .^ range(-2, 4, length=60)
-sweep_results = sweep_lambda(Θ, dDst_clean, lambdas; normalize=true)
-
-sweep_df = DataFrame(
-    lambda = [r.λ for r in sweep_results],
-    n_terms = [r.n_terms for r in sweep_results],
-    rmse = [r.rmse for r in sweep_results]
-)
-CSV.write(joinpath(DATA_DIR, "real_lambda_sweep.csv"), sweep_df)
-println("Lambda sweep saved ($(nrow(sweep_df)) points)")
-
-println("\nPareto front:")
-for nt in sort(unique([r.n_terms for r in sweep_results]))
-    subset = filter(r -> r.n_terms == nt, sweep_results)
-    best = argmin(r -> r.rmse, subset)
-    println("  $(nt) terms: RMSE=$(round(best.rmse, digits=4)), λ=$(round(best.λ, sigdigits=3))")
-end
-
-# --- B1b: Ensemble SINDy (500 subsample ensembles) ---
-# λ selection procedure (documented in paper §2.4):
-#   Sweep over logarithmic λ grid, then select the minimum-RMSE λ within
-#   the Pareto-optimal range of 4–8 active terms. On the 1963–2025 OMNI
-#   dataset (61,494 points), this yields λ ≈ 236. The value is data-dependent;
-#   re-downloading OMNI data may produce a slightly different λ.
-# Target: 4–8 active terms (physically motivated: Dst* decay + injection + trig)
-#
-# DELIBERATE λ MISMATCH (finding real_data_discovery.jl:261). The uncertainty
-# ensemble here is fit in the SPARSER 4–8-term regime, whereas the DEPLOYED point
-# fit (ξ_best below) is selected in the 8–10-term regime. The two therefore live in
-# different sparsity regimes by construction, with two consequences the operational
-# uncertainty path inherits: (1) deployed-active terms selected only in the denser
-# fit (e.g. n·Bs, n·V·Bs) appear in ≤1 subsample here, so their persisted CI is
-# degenerate (ci_025 == ci_975 ⇒ width 0 ⇒ σ = 0 in init_forecast); (2) the
-# surviving terms' spreads are estimated around ensemble point values that differ
-# ~30% from the deployed ones. A degenerate-CI audit runs after ξ_best is fit
-# (below) to make this mismatch visible. The served V2 interval is ACI/conformal and
-# does not consume these ensemble widths, so the shipped CI semantics are left
-# unchanged; the mismatch is documented rather than silently rebalanced.
-#
-# NOTE (finding sindy.jl:132): ensemble_sindy draws are 80% subsamples WITHOUT
-# replacement (subagging), not n-out-of-n bootstraps — hence "subsample ensembles".
-ensemble_λ = 100.0  # default
-for target_range in [4:8, 3:10, 2:12]
-    kr = filter(r -> r.n_terms in target_range, sweep_results)
-    if !isempty(kr)
-        global ensemble_λ = argmin(r -> r.rmse, kr).λ
-        break
+function _real_empirical_subsample_records(term_names, draws, inclusion_probability;
+                                           lambda, seed, subsample_fraction)
+    size(draws, 1) == length(term_names) == length(inclusion_probability) ||
+        throw(DimensionMismatch("ensemble draws, terms, and inclusion must align"))
+    records = NamedTuple[]
+    for index in eachindex(term_names)
+        values = @view draws[index, :]
+        nonzero = values[values .!= 0.0]
+        conditional_median = isempty(nonzero) ? NaN : median(nonzero)
+        conditional_q025 = isempty(nonzero) ? NaN : quantile(nonzero, 0.025)
+        conditional_q975 = isempty(nonzero) ? NaN : quantile(nonzero, 0.975)
+        push!(records, (
+            term=term_names[index],
+            inclusion_probability=inclusion_probability[index],
+            nonzero_draws=length(nonzero),
+            structural_zero_draws=count(iszero, values),
+            conditional_nonzero_median=conditional_median,
+            conditional_nonzero_empirical_q025=conditional_q025,
+            conditional_nonzero_empirical_q975=conditional_q975,
+            interval_kind="conditional_nonzero_empirical_row_subsample_interval",
+            confidence_interval=false,
+            subsample_without_replacement=true,
+            subsample_fraction=Float64(subsample_fraction),
+            lambda=Float64(lambda),
+            draws=size(draws, 2),
+            seed=Int(seed),
+        ))
     end
-end
-println("\n--- Ensemble SINDy (500 subsample ensembles, λ=$(round(ensemble_λ, sigdigits=3))) ---")
-@time median_ξ, inclusion_prob, all_ξ = ensemble_sindy(
-    concat_data, lib, dDst_clean;
-    λ=ensemble_λ, n_models=500, subsample_frac=0.8, seed=42
-)
-
-term_names = get_term_names(lib)
-println("\nEnsemble results:")
-for (i, name) in enumerate(term_names)
-    if inclusion_prob[i] > 0.05
-        coef_vals = all_ξ[i, :]
-        active_vals = coef_vals[coef_vals .!= 0.0]
-        ci_lo = isempty(active_vals) ? 0.0 : quantile(active_vals, 0.025)
-        ci_hi = isempty(active_vals) ? 0.0 : quantile(active_vals, 0.975)
-        println("  $(rpad(name, 25)) π=$(round(inclusion_prob[i], digits=3))  " *
-                "ξ=$(round(median_ξ[i], sigdigits=4))  " *
-                "95%CI=[$(round(ci_lo, sigdigits=3)), $(round(ci_hi, sigdigits=3))]")
-    end
+    return records
 end
 
-# Save ensemble results
-ensemble_df = DataFrame(
-    term = term_names,
-    inclusion_prob = inclusion_prob,
-    median_coef = median_ξ,
-    ci_025 = [begin
-        vals = all_ξ[i, :]; active = vals[vals .!= 0.0]
-        isempty(active) ? 0.0 : quantile(active, 0.025)
-    end for i in 1:length(term_names)],
-    ci_975 = [begin
-        vals = all_ξ[i, :]; active = vals[vals .!= 0.0]
-        isempty(active) ? 0.0 : quantile(active, 0.975)
-    end for i in 1:length(term_names)]
-)
-CSV.write(joinpath(DATA_DIR, "real_ensemble_inclusion.csv"), ensemble_df)
-
-coef_df = DataFrame(term=term_names, coefficient=median_ξ, inclusion=inclusion_prob)
-CSV.write(joinpath(DATA_DIR, "real_sindy_coefficients.csv"), coef_df)
-
-# --- Single best-λ discovery ---
-println("\n--- Single Discovery (best λ) ---")
-# Need 8+ terms for physical model (Dst_star decay + injection + trig)
-# Pareto front shows jump from 4 (trig-only) to 8 terms — knee is at 8
-best_λ = ensemble_λ
-best_n_terms = 0
-for target_range in [8:10, 6:12, 4:15, 2:21]
-    kr = filter(r -> r.n_terms in target_range, sweep_results)
-    if !isempty(kr)
-        global best_λ = argmin(r -> r.rmse, kr).λ
-        global best_n_terms = argmin(r -> r.rmse, kr).n_terms
-        break
-    end
-end
-println("Best λ: $(round(best_λ, sigdigits=3)) → $(best_n_terms) terms")
-
-ξ_best, active_terms, _ = sindy_discover(concat_data, lib, dDst_clean;
-                                           λ=best_λ, normalize=true)
-println("Discovered equation (dDst*/dt):")
-for (name, coef) in sort(collect(active_terms), by=x->abs(x[2]), rev=true)
-    println("  $(round(coef, sigdigits=4)) × $(name)")
-end
-
-# --- Persist the served point fit + provenance (finding real_data_discovery.jl:271)
-# The operationally served ODE reads data/real_sindy_discovery_coefficients.csv, but
-# that file previously had no generator: ξ_best was printed and thrown away, so the
-# deployed equation was not reproducible or traceable to code. Write it here with the
-# same (term, coefficient) schema the readers (init_forecast, generate_real_figures)
-# expect, index-aligned to get_term_names(lib). A companion provenance row records
-# best_λ, the active-term count, the training span/size, and the run date so a later
-# audit can tell whether a regenerated fit still matches the shipped, version-pinned
-# artifact (which is frozen by a package regression test).
-discovery_coef_df = DataFrame(term=term_names, coefficient=ξ_best)
-CSV.write(joinpath(DATA_DIR, "real_sindy_discovery_coefficients.csv"), discovery_coef_df)
-provenance_df = DataFrame(
-    field = ["best_lambda", "n_active_terms", "n_train_storms_used",
-             "n_train_points", "omni_year_start", "omni_year_end",
-             "library_terms", "generated_date"],
-    value = [string(best_λ), string(count(ξ_best .!= 0)), string(n_storms_used),
-             string(length(dDst_clean)), "1963", "2025",
-             string(length(lib)), string(Dates.today())]
-)
-CSV.write(joinpath(DATA_DIR, "real_sindy_discovery_provenance.csv"), provenance_df)
-println("Saved: real_sindy_discovery_coefficients.csv + provenance sidecar")
-
-# --- Degenerate-CI audit for the deliberate ensemble/deployed λ mismatch
-# (finding real_data_discovery.jl:261). Flag every deployed-active term whose
-# ensemble CI is degenerate (single-draw ci_025 == ci_975) or absent, i.e. terms
-# that would receive exactly zero coefficient spread in the operational ensemble.
-println("\nEnsemble-CI coverage of deployed-active terms (λ mismatch audit):")
-for (i, name) in enumerate(term_names)
-    ξ_best[i] == 0.0 && continue
-    width = ensemble_df.ci_975[i] - ensemble_df.ci_025[i]
-    incl = inclusion_prob[i]
-    flag = width <= 0 ? "  ⚠ DEGENERATE CI (σ→0 in ensemble)" : ""
-    println("  $(rpad(name, 20)) π=$(round(incl, digits=3))  " *
-            "CI width=$(round(width, sigdigits=3))$(flag)")
-end
-
-# ============================================================
-# B2: Validation on Cycle 24
-# ============================================================
-println("\n" * "=" ^ 60)
-n_val_storms = count(e -> e.split == "val", catalog)
-println("B2: Validation on Cycle 24 ($n_val_storms storms)")
-println("=" ^ 60)
-
-val_data, val_entries = extract_all_storms(df, catalog; split="val")
-
-metrics_rows = []
-for (i, swd) in enumerate(val_data)
-    dt = 1.0
-    n_pts = length(swd.t)
-    if n_pts < 20
-        continue
-    end
-
-    Dst_obs = swd.Dst_star
-    Bs = max.(-swd.Bz, 0.0)
-
-    Dst_burton = simulate_burton(swd.V, Bs, dt; Dst0=Dst_obs[1])
-    Dst_burton_full = simulate_burton_full(swd.V, Bs, dt; Dst0=Dst_obs[1])
-    Dst_obrien = simulate_obrien(swd.V, Bs, dt; Dst0=Dst_obs[1])
-    Dst_sindy = simulate_sindy(ξ_best, lib, swd, dt)
-
-    for (name, pred) in [("SINDy", Dst_sindy), ("Burton", Dst_burton), ("BurtonFull", Dst_burton_full), ("OBrienMcP", Dst_obrien)]
-        if length(pred) == length(Dst_obs)
-            m = metrics_summary(pred, Dst_obs; name=name)
-            push!(metrics_rows, (
-                storm_id = val_entries[i].storm_id,
-                model = name,
-                rmse = m.rmse,
-                correlation = m.corr,
-                pe = m.pe,
-                min_dst_obs = minimum(Dst_obs),
-                n_points = n_pts
+function _real_score_storms(storms, coefficients, library;
+                            basis, selected_lambda, experiment=nothing)
+    rows = NamedTuple[]
+    for storm in storms
+        scored = _score_discovery_storm(storm, coefficients, library)
+        for row in scored.metrics
+            prefix = experiment === nothing ? (;) : (experiment=String(experiment),)
+            push!(rows, (
+                prefix...,
+                basis=String(basis),
+                selected_lambda=Float64(selected_lambda),
+                row...,
             ))
         end
     end
+    return rows
 end
 
-metrics_df = DataFrame(metrics_rows)
+function _real_assert_exact_metric_cohorts(rows)
+    frame = DataFrame(rows)
+    isempty(frame) && throw(ArgumentError("real metric rows must not be empty"))
+    required = (:storm_id, :model, :anchor_catalog_index,
+                :driver_start_catalog_index, :driver_end_catalog_index,
+                :scored_catalog_indices, :cohort_signature_sha256)
+    all(in(propertynames(frame)), required) || error(
+        "real metric rows are missing exact cohort-identity columns",
+    )
+    keys = :experiment in propertynames(frame) ? [:experiment, :storm_id] : [:storm_id]
+    expected_models = Set(("SINDy", "Burton", "BurtonFull", "OBrienMcP"))
+    for group in groupby(frame, keys)
+        Set(String.(group.model)) == expected_models && nrow(group) == 4 || error(
+            "real outer storm $(first(group.storm_id)) lacks the exact comparator set",
+        )
+        for field in required[3:end]
+            length(unique(group[!, field])) == 1 || error(
+                "real outer storm $(first(group.storm_id)) used unequal $field values",
+            )
+        end
+    end
+    return true
+end
 
-println("\nValidation metrics (mean ± std across storms):")
-for model in ["SINDy", "Burton", "BurtonFull", "OBrienMcP"]
-    subset = filter(row -> row.model == model, metrics_df)
-    if nrow(subset) > 0
-        println("  $(rpad(model, 12)) RMSE=$(round(mean(subset.rmse), digits=2)) ± $(round(std(subset.rmse), digits=2))  " *
-                "PE=$(round(mean(subset.pe), digits=3)) ± $(round(std(subset.pe), digits=3))  " *
+function _real_print_metric_summary(rows)
+    frame = DataFrame(rows)
+    for model in ("SINDy", "Burton", "BurtonFull", "OBrienMcP")
+        subset = frame[frame.model .== model, :]
+        isempty(subset) && continue
+        println("  $(rpad(model, 12)) RMSE=$(round(mean(subset.rmse_nt), digits=2)), " *
+                "PE=$(round(mean(subset.pe), digits=3)), " *
                 "r=$(round(mean(subset.correlation), digits=3))")
     end
 end
 
-CSV.write(joinpath(DATA_DIR, "real_holdout_metrics.csv"), metrics_df)
-println("Saved: real_holdout_metrics.csv ($(nrow(metrics_df)) rows)")
-
-# ============================================================
-# B3: May 2024 Superstorm (Extreme Event Test)
-# ============================================================
-println("\n" * "=" ^ 60)
-println("B3: May 2024 Superstorm — Extreme Event Test")
-println("=" ^ 60)
-
-may2024_entries = filter(e -> Dates.year(e.onset_time) == 2024 &&
-                              Dates.month(e.onset_time) == 5, catalog)
-if !isempty(may2024_entries)
-    may_entry = may2024_entries[1]
-    may_swd = extract_storm_data(df, may_entry)
-    println("May 2024 storm: $(length(may_swd.t)) hours, " *
-            "Dst_star min=$(round(minimum(may_swd.Dst_star), digits=1)) nT")
-
-    dt = 1.0
-    Dst_obs = may_swd.Dst_star
-    Bs = max.(-may_swd.Bz, 0.0)
-
-    Dst_burton = simulate_burton(may_swd.V, Bs, dt; Dst0=Dst_obs[1])
-    Dst_burton_full = simulate_burton_full(may_swd.V, Bs, dt; Dst0=Dst_obs[1])
-    Dst_obrien = simulate_obrien(may_swd.V, Bs, dt; Dst0=Dst_obs[1])
-    Dst_sindy = simulate_sindy(ξ_best, lib, may_swd, dt)
-
-    println("\nMay 2024 superstorm metrics:")
-    for (name, pred) in [("SINDy", Dst_sindy), ("Burton", Dst_burton), ("BurtonFull", Dst_burton_full), ("OBrienMcP", Dst_obrien)]
-        m = metrics_summary(pred, Dst_obs; name=name)
-        println("  $(rpad(name, 12)) RMSE=$(round(m.rmse, digits=1)) nT, " *
-                "PE=$(round(m.pe, digits=3)), r=$(round(m.corr, digits=3))")
-    end
-
-    may_df = DataFrame(
-        t_hr = may_swd.t,
-        Dst_obs = Dst_obs,
-        Dst_sindy = Dst_sindy,
-        Dst_burton = Dst_burton,
-        Dst_burton_full = Dst_burton_full,
-        Dst_obrien = Dst_obrien,
-        V = may_swd.V,
-        Bz = may_swd.Bz,
-        Pdyn = may_swd.Pdyn
+function _real_may2024_frame(df, storm, score)
+    start = storm.observation_record.scoring_start_idx + score.anchor_index - 1
+    stop = start + length(score.swd.t) - 1
+    rows = start:stop
+    length(rows) == length(score.observations) ||
+        error("May-2024 source-row alignment failed")
+    dst_observed = [Bool(df.Dst_observed[row]) ? Float64(df.Dst[row]) : NaN
+                    for row in rows]
+    dst_star_observed = Float64.(score.observations)
+    return DataFrame(
+        storm_id=fill(storm.storm_id, length(rows)),
+        catalog_row=collect(rows),
+        datetime=df.datetime[rows],
+        time_hr=score.swd.t,
+        dst_observed_nt=dst_observed,
+        dst_star_observed_nt=dst_star_observed,
+        dst_cleaned_nt=score.swd.Dst,
+        dst_star_cleaned_nt=score.swd.Dst_star,
+        dst_original_flag=Bool.(df.Dst_observed[rows]),
+        dst_star_original_target_flag=isfinite.(dst_star_observed),
+        dst_star_sindy_nt=score.predictions.SINDy,
+        dst_star_burton_simplified_nt=score.predictions.Burton,
+        dst_star_burton_published_nt=score.predictions.BurtonFull,
+        dst_star_obrien_nt=score.predictions.OBrienMcP,
+        v_kms=score.swd.V,
+        bz_nt=score.swd.Bz,
+        pdyn_npa=score.swd.Pdyn,
     )
-    CSV.write(joinpath(DATA_DIR, "may2024_reconstruction.csv"), may_df)
-    println("Saved: may2024_reconstruction.csv")
-else
-    println("WARNING: May 2024 superstorm not found in catalog!")
 end
 
-# ============================================================
-# B4: Cross-Solar-Cycle Generalization
-# ============================================================
-println("\n" * "=" ^ 60)
-println("B4: Cross-Solar-Cycle Generalization")
-println("=" ^ 60)
+function run_real_data_discovery(context)
+    println("=" ^ 68)
+    println("Canonical real-data SINDy discovery")
+    println("=" ^ 68)
+    verify_omni_input(context.omni; mode=context.mode)
 
-cross_cycle_rows = []
+    df = parse_omni2(context.omni; year_start=1963, year_end=2025)
+    add_original_observation_flags!(df)
+    clean_omni_data!(df)
+    catalog = load_verified_storm_catalog(context.catalog;
+        omni_path=context.omni,
+        parameters=storm_catalog_parameters(),
+        mode=context.mode,
+    )
 
-# Experiment 1: Train on cycles 20-22, test on cycle 23
-println("\n--- Train: cycles 20-22, Test: cycle 23 ---")
-train_2022 = filter(e -> e.solar_cycle <= 22, catalog)
-test_23 = filter(e -> e.solar_cycle == 23, catalog)
-if !isempty(train_2022) && !isempty(test_23)
-    _, metrics_2022 = _cross_cycle_experiment(df, train_2022, test_23, lib; λ=best_λ)
-    for m in metrics_2022
-        push!(cross_cycle_rows, (experiment="C20-22->C23", m...))
+    policy = DiscoveryObservationPolicy()
+    audit = _audit_discovery_observations(df, catalog; policy)
+    isempty(audit.eligible_entries) && error("no storms satisfy the observation policy")
+    policy_record = _real_policy_record(policy)
+    storm_audit_records = _real_explicit_exclusion_records(audit.storm_records)
+    cycle_audit_records = _real_explicit_exclusion_records(audit.cycle_records)
+    storm_audit_path = _real_manifested_csv(
+        context, "real_storm_eligibility.csv", storm_audit_records;
+        selection_record=(kind="predeclared_observation_policy", policy=policy_record),
+        metadata=(level="storm", policy=policy_record),
+    )
+    cycle_audit_path = _real_manifested_csv(
+        context, "real_cycle_observation_audit.csv", cycle_audit_records;
+        selection_record=(kind="predeclared_observation_policy", policy=policy_record),
+        metadata=(level="solar_cycle", policy=policy_record),
+    )
+    audit_inputs = Dict(
+        "storm_observation_audit" => storm_audit_path,
+        "cycle_observation_audit" => cycle_audit_path,
+    )
+    println("Eligible storm windows: $(length(audit.eligible_entries)) / $(length(catalog))")
+
+    full_library = build_solar_wind_library(clock_basis=:full)
+    collapsed_library = build_solar_wind_library(clock_basis=:collapsed)
+    length(full_library) == 20 || error("full canonical library must contain 20 terms")
+    length(collapsed_library) == 15 ||
+        error("collapsed canonical library must contain 15 terms")
+    "n*V^2" in get_term_names(full_library) &&
+        error("canonical library contains redundant n*V^2")
+
+    full_storms = _prepare_discovery_storms(
+        df, audit.eligible_entries, full_library; policy,
+    )
+    collapsed_storms = _prepare_discovery_storms(
+        df, audit.eligible_entries, collapsed_library; policy,
+    )
+    _real_assert_matching_cohort(full_storms, collapsed_storms, "all eligible storms")
+    full_cache = Dict{Any,Any}()
+    collapsed_cache = Dict{Any,Any}()
+
+    full_primary = _real_require_subset(
+        full_storms, storm -> storm.entry.split == "train", "primary full training";
+        minimum=2,
+    )
+    collapsed_primary = _real_require_subset(
+        collapsed_storms, storm -> storm.entry.split == "train",
+        "primary collapsed training"; minimum=2,
+    )
+    primary = _real_select_basis_pair(
+        full_primary, collapsed_primary, full_library, collapsed_library,
+        full_cache, collapsed_cache; label="primary",
+    )
+    full_primary_paths = _real_persist_selection(
+        context, primary.full, "primary_lambda";
+        basis="full", scope="primary", extra_inputs=audit_inputs,
+    )
+    collapsed_primary_paths = _real_persist_selection(
+        context, primary.collapsed, "primary_collapsed_lambda";
+        basis="collapsed", scope="primary", extra_inputs=audit_inputs,
+    )
+    full_primary_inputs = _real_selection_inputs(
+        context, full_primary_paths, "full_primary",
+    )
+    collapsed_primary_inputs = _real_selection_inputs(
+        context, collapsed_primary_paths, "collapsed_primary",
+    )
+    primary_inputs = merge(full_primary_inputs, collapsed_primary_inputs)
+    full_coefficients = primary.full.model
+    collapsed_coefficients = primary.collapsed.model
+    full_names = get_term_names(full_library)
+    collapsed_names = get_term_names(collapsed_library)
+    full_design = _cached_subset_design!(full_cache, full_primary)
+    collapsed_design = _cached_subset_design!(collapsed_cache, collapsed_primary)
+    size(full_design.theta, 1) == size(collapsed_design.theta, 1) ||
+        error("full and collapsed primary designs do not use the same regression rows")
+
+    full_record = _real_selection_record(primary.full; basis="full", scope="primary")
+    collapsed_record = _real_selection_record(
+        primary.collapsed; basis="collapsed", scope="primary",
+    )
+    sweep_records = [(
+        lambda=row.lambda,
+        n_terms=row.n_active_terms,
+        mean_validation_rmse_nt=row.mean_storm_rmse,
+        standard_error_nt=row.standard_error,
+        eligible=row.eligible,
+        selected=row.selected,
+    ) for row in primary.full.candidate_records]
+    _real_manifested_csv(context, "real_lambda_sweep.csv", sweep_records;
+        selection_record=full_record,
+        extra_inputs=full_primary_inputs,
+    )
+
+    conditioning = vcat(
+        _real_conditioning_records(
+            full_design.theta, full_coefficients, full_names; basis="full",
+        ),
+        _real_conditioning_records(
+            collapsed_design.theta, collapsed_coefficients, collapsed_names;
+            basis="collapsed",
+        ),
+    )
+    _real_manifested_csv(context, "real_design_conditioning.csv", conditioning;
+        selection_record=(kind="actual_normalized_training_design",
+                          full=full_record, collapsed=collapsed_record),
+        extra_inputs=primary_inputs,
+    )
+    column_norms = vcat(
+        _real_column_norm_records(
+            full_design.theta, full_coefficients, full_names; basis="full",
+        ),
+        _real_column_norm_records(
+            collapsed_design.theta, collapsed_coefficients, collapsed_names;
+            basis="collapsed",
+        ),
+    )
+    _real_manifested_csv(context, "real_design_column_norms.csv", column_norms;
+        selection_record=(kind="actual_training_design_column_norms",
+                          full=full_record, collapsed=collapsed_record),
+        extra_inputs=primary_inputs,
+    )
+    contribution_records = vcat(
+        _real_contribution_records(
+            full_design.theta, full_coefficients, full_names; basis="full",
+        ),
+        _real_contribution_records(
+            collapsed_design.theta, collapsed_coefficients, collapsed_names;
+            basis="collapsed",
+        ),
+    )
+    _real_manifested_csv(
+        context, "real_contribution_diagnostics.csv", contribution_records;
+        selection_record=(kind="physical_unit_term_and_group_contributions",
+                          full=full_record, collapsed=collapsed_record),
+        extra_inputs=primary_inputs,
+        metadata=(condition_warning_threshold=_REAL_CONDITION_WARNING,
+                  individual_terms_are_basis_dependent=true),
+    )
+
+    full_coefficient_path = _real_manifested_csv(
+        context, "real_sindy_discovery_coefficients.csv",
+        [(term=full_names[index], coefficient=full_coefficients[index])
+         for index in eachindex(full_names)];
+        selection_record=full_record,
+        extra_inputs=full_primary_inputs,
+        metadata=(coefficient_kind="selected_full_refit_point_coefficient",),
+    )
+    collapsed_coefficient_path = _real_manifested_csv(
+        context, "real_sindy_collapsed_coefficients.csv",
+        [(term=collapsed_names[index], coefficient=collapsed_coefficients[index])
+         for index in eachindex(collapsed_names)];
+        selection_record=collapsed_record,
+        extra_inputs=collapsed_primary_inputs,
+        metadata=(coefficient_kind="selected_full_refit_point_coefficient",),
+    )
+
+    println("Primary full lambda: $(primary.full.selected_lambda); " *
+            "active terms: $(count(!iszero, full_coefficients))")
+    println("Primary collapsed lambda: $(primary.collapsed.selected_lambda); " *
+            "active terms: $(count(!iszero, collapsed_coefficients))")
+
+    primary_data = _concat_discovery_data(full_primary)
+    _, inclusion_probability, joint_draws = ensemble_sindy(
+        primary_data, full_library, full_design.target;
+        λ=primary.full.selected_lambda,
+        n_models=_REAL_ENSEMBLE_DRAWS,
+        subsample_frac=0.8,
+        seed=_REAL_ENSEMBLE_SEED,
+        bootstrap=false,
+    )
+    size(joint_draws) == (length(full_names), _REAL_ENSEMBLE_DRAWS) ||
+        error("ensemble draw matrix has an unexpected shape")
+    draw_inputs = merge(full_primary_inputs, Dict(
+        "point_coefficients" => full_coefficient_path,
+        "storm_observation_audit" => storm_audit_path,
+        "cycle_observation_audit" => cycle_audit_path,
+    ))
+    draw_path = _real_manifested_csv(
+        context, "real_sindy_ensemble_draws.csv",
+        DataFrame(permutedims(joint_draws), Symbol.(full_names));
+        selection_record=merge(full_record, (
+            ensemble="500_raw_complete_80pct_row_subsamples_without_replacement",
+            structural_zeros="retained",
+        )),
+        seed=_REAL_ENSEMBLE_SEED,
+        extra_inputs=draw_inputs,
+    )
+    ensemble_records = _real_empirical_subsample_records(
+        full_names, joint_draws, inclusion_probability;
+        lambda=primary.full.selected_lambda,
+        seed=_REAL_ENSEMBLE_SEED,
+        subsample_fraction=0.8,
+    )
+    ensemble_inputs = merge(draw_inputs, Dict("raw_joint_draws" => draw_path))
+    _real_manifested_csv(
+        context, "real_ensemble_inclusion.csv", ensemble_records;
+        selection_record=merge(full_record, (
+            interval_kind="conditional_nonzero_empirical_row_subsample_interval",
+            confidence_interval=false,
+        )),
+        seed=_REAL_ENSEMBLE_SEED,
+        extra_inputs=ensemble_inputs,
+    )
+    _real_manifested_csv(
+        context, "real_sindy_coefficients.csv",
+        [(
+            term=full_names[index],
+            coefficient=full_coefficients[index],
+            coefficient_kind="selected_full_refit_point_coefficient",
+            inclusion=inclusion_probability[index],
+        ) for index in eachindex(full_names)];
+        selection_record=full_record,
+        seed=_REAL_ENSEMBLE_SEED,
+        extra_inputs=ensemble_inputs,
+    )
+    _real_manifested_csv(
+        context, "real_sindy_discovery_provenance.csv", [
+            (field="selected_lambda", value=string(primary.full.selected_lambda)),
+            (field="selection_rule", value=primary.full.decision_record.selection_rule),
+            (field="n_active_terms", value=string(count(!iszero, full_coefficients))),
+            (field="n_training_storms", value=string(length(full_primary))),
+            (field="n_training_points", value=string(size(full_design.theta, 1))),
+            (field="library_terms", value=string(length(full_library))),
+            (field="clock_basis", value="full"),
+            (field="ensemble_draws", value=string(_REAL_ENSEMBLE_DRAWS)),
+            (field="ensemble_seed", value=string(_REAL_ENSEMBLE_SEED)),
+            (field="ensemble_convention", value="raw_complete_rows_structural_zeros_retained"),
+        ];
+        selection_record=full_record,
+        seed=_REAL_ENSEMBLE_SEED,
+        extra_inputs=merge(full_primary_inputs, Dict(
+            "raw_joint_draws" => draw_path,
+        )),
+    )
+
+    full_holdout = _real_require_subset(
+        full_storms, storm -> storm.entry.split == "val", "cycle-24 full holdout",
+    )
+    collapsed_holdout = _real_require_subset(
+        collapsed_storms, storm -> storm.entry.split == "val",
+        "cycle-24 collapsed holdout",
+    )
+    _real_assert_matching_cohort(full_holdout, collapsed_holdout, "cycle-24 holdout")
+    full_holdout_rows = _real_score_storms(
+        full_holdout, full_coefficients, full_library;
+        basis="full", selected_lambda=primary.full.selected_lambda,
+    )
+    collapsed_holdout_rows = _real_score_storms(
+        collapsed_holdout, collapsed_coefficients, collapsed_library;
+        basis="collapsed", selected_lambda=primary.collapsed.selected_lambda,
+    )
+    _real_assert_exact_metric_cohorts(full_holdout_rows)
+    _real_assert_exact_metric_cohorts(collapsed_holdout_rows)
+    _real_print_metric_summary(full_holdout_rows)
+    _real_manifested_csv(context, "real_holdout_metrics.csv", full_holdout_rows;
+        selection_record=merge(full_record, (outer_split="cycle_24",)),
+        extra_inputs=merge(full_primary_inputs, Dict(
+            "point_coefficients" => full_coefficient_path,
+            "storm_observation_audit" => storm_audit_path,
+        )),
+    )
+    _real_manifested_csv(
+        context, "real_holdout_collapsed_metrics.csv", collapsed_holdout_rows;
+        selection_record=merge(collapsed_record, (outer_split="cycle_24",)),
+        extra_inputs=merge(collapsed_primary_inputs, Dict(
+            "point_coefficients" => collapsed_coefficient_path,
+            "storm_observation_audit" => storm_audit_path,
+        )),
+    )
+
+    may_storms = filter(
+        storm -> year(storm.onset_time) == 2024 && month(storm.onset_time) == 5,
+        full_storms,
+    )
+    isempty(may_storms) && error(
+        "May 2024 has no observation-policy-eligible catalog window",
+    )
+    may_storm = may_storms[argmin(
+        [minimum(storm.scoring_observations[isfinite.(storm.scoring_observations)])
+         for storm in may_storms],
+    )]
+    may_score = _score_discovery_storm(may_storm, full_coefficients, full_library)
+    may_frame = _real_may2024_frame(df, may_storm, may_score)
+    println("May 2024 original Dst minimum: $(minimum(may_frame.dst_observed_nt[isfinite.(may_frame.dst_observed_nt)])) nT")
+    println("May 2024 original-target Dst* minimum: $(minimum(may_frame.dst_star_observed_nt[isfinite.(may_frame.dst_star_observed_nt)])) nT")
+    _real_manifested_csv(context, "may2024_reconstruction.csv", may_frame;
+        selection_record=merge(full_record, (
+            event="May_2024",
+            selected_storm_id=may_storm.storm_id,
+            selected_storm_onset=string(may_storm.onset_time),
+            catalog_window_start=may_storm.entry.onset_idx,
+            catalog_window_end=may_storm.entry.end_idx,
+            scoring_start_catalog_row=first(may_frame.catalog_row),
+            scoring_end_catalog_row=last(may_frame.catalog_row),
+            event_selection="eligible_May_2024_window_with_lowest_original_target_Dst_star_minimum",
+        )),
+        extra_inputs=merge(full_primary_inputs, Dict(
+            "point_coefficients" => full_coefficient_path,
+            "storm_observation_audit" => storm_audit_path,
+        )),
+    )
+
+    experiments = [
+        (
+            label="C20-22->C23",
+            prefix="cross_c20_22_to_c23_lambda",
+            train=storm -> storm.entry.solar_cycle in 20:22,
+            test=storm -> storm.entry.solar_cycle == 23,
+        ),
+        (
+            label="even->odd",
+            prefix="cross_even_to_odd_lambda",
+            train=storm -> storm.entry.solar_cycle in (20, 22, 24),
+            test=storm -> storm.entry.solar_cycle in (21, 23),
+        ),
+        (
+            label="C20-23->C25",
+            prefix="cross_c20_23_to_c25_lambda",
+            train=storm -> storm.entry.solar_cycle in 20:23,
+            test=storm -> storm.entry.solar_cycle == 25,
+        ),
+    ]
+    full_cross_rows = NamedTuple[]
+    collapsed_cross_rows = NamedTuple[]
+    full_cross_inputs = Dict{String,String}()
+    collapsed_cross_inputs = Dict{String,String}()
+    full_cross_records = NamedTuple[]
+    collapsed_cross_records = NamedTuple[]
+    for (experiment_index, experiment) in enumerate(experiments)
+        full_training = _real_require_subset(
+            full_storms, experiment.train, "$(experiment.label) full training";
+            minimum=2,
+        )
+        collapsed_training = _real_require_subset(
+            collapsed_storms, experiment.train,
+            "$(experiment.label) collapsed training"; minimum=2,
+        )
+        full_outer = _real_require_subset(
+            full_storms, experiment.test, "$(experiment.label) full outer",
+        )
+        collapsed_outer = _real_require_subset(
+            collapsed_storms, experiment.test, "$(experiment.label) collapsed outer",
+        )
+        isempty(intersect(
+            Set(getproperty.(full_training, :storm_id)),
+            Set(getproperty.(full_outer, :storm_id)),
+        )) || error("$(experiment.label) training and outer storms overlap")
+        _real_assert_matching_cohort(
+            full_training, collapsed_training, "$(experiment.label) training",
+        )
+        _real_assert_matching_cohort(
+            full_outer, collapsed_outer, "$(experiment.label) outer",
+        )
+        selections = _real_select_basis_pair(
+            full_training, collapsed_training, full_library, collapsed_library,
+            full_cache, collapsed_cache; label=experiment.label,
+        )
+        full_paths = _real_persist_selection(
+            context, selections.full, experiment.prefix;
+            basis="full", scope=experiment.label, extra_inputs=audit_inputs,
+        )
+        collapsed_paths = _real_persist_selection(
+            context, selections.collapsed, "$(experiment.prefix)_collapsed";
+            basis="collapsed", scope=experiment.label, extra_inputs=audit_inputs,
+        )
+        merge!(full_cross_inputs, _real_selection_inputs(
+            context, full_paths, "cross_$(experiment_index)_full",
+        ))
+        merge!(collapsed_cross_inputs, _real_selection_inputs(
+            context, collapsed_paths, "cross_$(experiment_index)_collapsed",
+        ))
+        push!(full_cross_records, _real_selection_record(
+            selections.full; basis="full", scope=experiment.label,
+        ))
+        push!(collapsed_cross_records, _real_selection_record(
+            selections.collapsed; basis="collapsed", scope=experiment.label,
+        ))
+        append!(full_cross_rows, _real_score_storms(
+            full_outer, selections.full.model, full_library;
+            basis="full", selected_lambda=selections.full.selected_lambda,
+            experiment=experiment.label,
+        ))
+        append!(collapsed_cross_rows, _real_score_storms(
+            collapsed_outer, selections.collapsed.model, collapsed_library;
+            basis="collapsed", selected_lambda=selections.collapsed.selected_lambda,
+            experiment=experiment.label,
+        ))
     end
+    _real_assert_exact_metric_cohorts(full_cross_rows)
+    _real_assert_exact_metric_cohorts(collapsed_cross_rows)
+    _real_manifested_csv(context, "cross_cycle_metrics.csv", full_cross_rows;
+        selection_record=(kind="independently_selected_cross_cycle_outer_metrics",
+                          basis="full", experiments=full_cross_records),
+        extra_inputs=merge(full_cross_inputs, Dict(
+            "storm_observation_audit" => storm_audit_path,
+        )),
+    )
+    _real_manifested_csv(
+        context, "cross_cycle_collapsed_metrics.csv", collapsed_cross_rows;
+        selection_record=(kind="independently_selected_cross_cycle_outer_metrics",
+                          basis="collapsed", experiments=collapsed_cross_records),
+        extra_inputs=merge(collapsed_cross_inputs, Dict(
+            "storm_observation_audit" => storm_audit_path,
+        )),
+    )
+
+    println("Canonical discovery outputs written under: $(context.data)")
+    return nothing
 end
 
-# Experiment 2: Train on even cycles (20,22,24), test on odd (21,23)
-println("\n--- Train: even cycles (20,22,24), Test: odd cycles (21,23) ---")
-train_even = filter(e -> e.solar_cycle in [20, 22, 24], catalog)
-test_odd = filter(e -> e.solar_cycle in [21, 23], catalog)
-if !isempty(train_even) && !isempty(test_odd)
-    _, metrics_even = _cross_cycle_experiment(df, train_even, test_odd, lib; λ=best_λ)
-    for m in metrics_even
-        push!(cross_cycle_rows, (experiment="even->odd", m...))
-    end
-end
+run_real_data_discovery() = run_real_data_discovery(_real_output_context())
 
-# Experiment 3: Train on cycles 20-23, test on cycle 25 (full OOD)
-println("\n--- Train: cycles 20-23, Test: cycle 25 (incl. May 2024) ---")
-train_2023 = filter(e -> e.solar_cycle <= 23, catalog)
-test_25 = filter(e -> e.solar_cycle == 25, catalog)
-if !isempty(train_2023) && !isempty(test_25)
-    _, metrics_2023 = _cross_cycle_experiment(df, train_2023, test_25, lib; λ=best_λ)
-    for m in metrics_2023
-        push!(cross_cycle_rows, (experiment="C20-23->C25", m...))
-    end
-end
-
-if !isempty(cross_cycle_rows)
-    cross_df = DataFrame(cross_cycle_rows)
-    CSV.write(joinpath(DATA_DIR, "cross_cycle_metrics.csv"), cross_df)
-    println("\nCross-cycle results saved: cross_cycle_metrics.csv")
-
-    println("\nCross-cycle summary (mean RMSE across test storms):")
-    for exp in unique(cross_df.experiment)
-        subset = filter(row -> row.experiment == exp, cross_df)
-        for model in unique(subset.model)
-            ms = filter(row -> row.model == model, subset)
-            println("  $(rpad(exp, 15)) $(rpad(model, 12)) " *
-                    "RMSE=$(round(mean(ms.rmse), digits=2)), PE=$(round(mean(ms.pe), digits=3))")
-        end
-    end
-end
-
-# ============================================================
-# Summary
-# ============================================================
-println("\n" * "=" ^ 60)
-println("Phase B Complete")
-println("=" ^ 60)
-println("Outputs:")
-for f in ["real_sindy_coefficients.csv", "real_sindy_discovery_coefficients.csv",
-          "real_sindy_discovery_provenance.csv", "real_ensemble_inclusion.csv",
-          "real_lambda_sweep.csv", "real_holdout_metrics.csv",
-          "may2024_reconstruction.csv", "cross_cycle_metrics.csv"]
-    fp = joinpath(DATA_DIR, f)
-    if isfile(fp)
-        println("  ✓ $(f) ($(round(filesize(fp)/1e3, digits=1)) KB)")
-    else
-        println("  ✗ $(f) — MISSING")
-    end
+if abspath(PROGRAM_FILE) == abspath(@__FILE__)
+    context = _real_output_context()
+    run_real_data_discovery(context)
 end

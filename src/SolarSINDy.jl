@@ -12,15 +12,18 @@ using Random
 using CSV
 using DataFrames
 using Dates
+using FileWatching: Pidfile
 
 include("utils.jl")
 include("library.jl")
 include("baselines.jl")
 include("data.jl")
 include("sindy.jl")
+include("storm_selection.jl")
 include("data_pipeline.jl")
 include("data_cleaning.jl")
 include("metrics.jl")
+include("performance_statistics.jl")
 include("forecast.jl")
 include("conformal.jl")
 include("assimilation.jl")
@@ -39,6 +42,8 @@ export # Utils
        # SINDy
        stlsq, sindy_discover, ensemble_sindy, sindy_predict,
        simulate_sindy, sweep_lambda, collinearity_diagnostics,
+       storm_lambda_grid, select_storm_lambda, write_storm_lambda_selection,
+       read_storm_lambda_selection,
        # Baselines
        burton_model, burton_model_full, newell_coupling, obrien_mcpherron_model,
        simulate_burton, simulate_burton_full, simulate_obrien,
@@ -50,11 +55,14 @@ export # Utils
        download_omni2, prepare_omni_data, extract_omni2_columns, parse_omni2, load_omni2_csv,
        # Data cleaning & storm catalog
        clean_omni_data!, StormCatalogEntry,
+       add_original_observation_flags!, original_sindy_mask,
        build_storm_catalog, extract_storm_data, extract_all_storms,
        save_storm_catalog, load_storm_catalog,
        # Metrics
-       rmse, correlation, skill_score, prediction_efficiency,
+       rmse, mae, correlation, skill_score, prediction_efficiency,
        metrics_summary, wilcoxon_signed_rank_p,
+       paired_storm_statistics, holm_adjust,
+       write_paired_storm_statistics, write_holm_adjustment,
        # Forecast
        ForecastState, ForecastResult, init_forecast,
        step_forecast!, forecast_ahead,

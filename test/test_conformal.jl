@@ -1,6 +1,19 @@
 using Random
 using Statistics
 
+function _feed_aci!(ac::AdaptiveConformal, n::Int, offset::Int=0)
+    for i in 1:n
+        adaptive_conformal_step!(ac, 0.0, 10sin(i + offset))
+    end
+    return nothing
+end
+
+function _allocated_aci_run(n::Int)
+    points = zeros(n)
+    observations = [10sin(i) for i in 1:n]
+    return @allocated run_adaptive_conformal(points, observations; warmup=30)
+end
+
 @testset "Conformal UQ" begin
 
     @testset "finite-sample quantile index and coverage floor" begin
@@ -209,7 +222,74 @@ using Statistics
     @testset "ACI input validation" begin
         @test_throws ArgumentError init_adaptive_conformal(; target_coverage=1.0)
         @test_throws ArgumentError init_adaptive_conformal(; gamma=0.0)
+        @test_throws ArgumentError init_adaptive_conformal(; window=20, warmup=30)
         @test_throws DimensionMismatch run_adaptive_conformal([1.0, 2.0], [1.0])
+
+        # Every public mutation boundary validates the complete mutable state.
+        for mutate! in (
+            ac -> (ac.target_coverage = 1.0),
+            ac -> (ac.gamma = 0.0),
+            ac -> (ac.alpha_t = NaN),
+            ac -> (ac.window = 0),
+            ac -> (ac.warmup = ac.window + 1),
+            ac -> push!(ac.history, -1.0),
+        )
+            damaged = init_adaptive_conformal(; window=5, warmup=0)
+            mutate!(damaged)
+            @test_throws ArgumentError adaptive_conformal_step!(damaged, 0.0, 1.0)
+        end
+        oversized = init_adaptive_conformal(; window=2, warmup=0)
+        append!(oversized.history, [1.0, 2.0, 3.0])
+        @test_throws ArgumentError adaptive_conformal_step!(oversized, 0.0, 1.0)
+        aliased = init_adaptive_conformal(; window=5, warmup=0)
+        push!(aliased.history, 1.0)
+        aliased.scratch = aliased.history
+        @test_throws ArgumentError adaptive_conformal_step!(aliased, 0.0, 1.0)
+        @test aliased.history == [1.0]
+    end
+
+    @testset "ACI bounded history is exact through its operational window" begin
+        oracle = init_adaptive_conformal(; target_coverage=0.50, gamma=0.10,
+                                         window=5, warmup=0)
+        append!(oracle.history, [4.0, 1.0, 3.0, 2.0, 5.0])
+        oracle_step = adaptive_conformal_step!(oracle, 0.0, 3.0)
+        @test oracle_step.half_width == 3.0 # ceil((5+1)×0.5)-th order statistic
+        @test oracle.history == [1.0, 3.0, 2.0, 5.0, 3.0]
+
+        rng = MersenneTwister(20260713)
+        points = randn(rng, 500)
+        observations = points .+ 8randn(rng, 500)
+        bounded = run_adaptive_conformal(points, observations; warmup=30, window=500)
+        unlimited = run_adaptive_conformal(points, observations;
+                                           warmup=30, window=typemax(Int))
+        @test bounded.lo == unlimited.lo
+        @test bounded.hi == unlimited.hi
+        @test bounded.covered == unlimited.covered
+        @test bounded.alpha == unlimited.alpha
+        @test bounded.coverage == unlimited.coverage
+
+        ac = init_adaptive_conformal(; warmup=0)
+        @test ac.window == 500
+        _feed_aci!(ac, 5_000)
+        @test length(ac.history) == 500
+        @test all(isfinite, ac.history)
+    end
+
+    @testset "ACI steady-state allocation stays bounded" begin
+        ac = init_adaptive_conformal(; warmup=0)
+        _feed_aci!(ac, 1_000) # compile and fill both bounded buffers
+        _feed_aci!(ac, 10, 1_000)
+        alloc_500 = @allocated _feed_aci!(ac, 500, 2_000)
+        alloc_1_000 = @allocated _feed_aci!(ac, 1_000, 3_000)
+        @test alloc_1_000 <= 65_536
+        @test alloc_1_000 <= 2alloc_500 + 65_536
+        @test length(ac.history) == 500
+        @test Base.summarysize(ac.history) + Base.summarysize(ac.scratch) < 20_000
+
+        alloc_2_000 = _allocated_aci_run(2_000)
+        alloc_4_000 = _allocated_aci_run(4_000)
+        @test alloc_2_000 <= 500_000
+        @test alloc_4_000 <= 2alloc_2_000 + 131_072
     end
 
     @testset "CF-1: conformal quantile uses finite-sample (n+1) index exactly" begin
@@ -267,10 +347,35 @@ using Statistics
             df3.min_stratum_n .= 0
             CSV.write(bad_min, df3)
             @test_throws ArgumentError read_conformal_calibration(bad_min)
+
+            # Corrupt per-stratum support and interval geometry.
+            for (label, column, value) in (
+                ("negative_halfwidth", :half_width, -1.0),
+                ("invalid_floor", :coverage_floor, 1.5),
+                ("zero_support", :n, 0),
+            )
+                bad = joinpath(tmp, label * ".csv")
+                dfx = CSV.read(good, DataFrame)
+                dfx[2, column] = value
+                CSV.write(bad, dfx)
+                @test_throws ArgumentError read_conformal_calibration(bad)
+            end
+
+            duplicate = joinpath(tmp, "duplicate.csv")
+            dfd = CSV.read(good, DataFrame)
+            append!(dfd, dfd[2:2, :])
+            CSV.write(duplicate, dfd)
+            @test_throws ArgumentError read_conformal_calibration(duplicate)
+
+            bad_horizon = joinpath(tmp, "bad_horizon.csv")
+            dfh = CSV.read(good, DataFrame)
+            dfh.max_horizon .= NaN
+            CSV.write(bad_horizon, dfh)
+            @test_throws ArgumentError read_conformal_calibration(bad_horizon)
         end
     end
 
-    @testset "F4: out-of-support horizon falls back to global, not top-bin reuse" begin
+    @testset "F4: out-of-support horizon never narrows" begin
         rng = MersenneTwister(404)
         # Fit only on leads {1,2,3,6}; the top bin [4.5,Inf) is calibrated at 6 h
         # but with a much SMALLER residual scale than longer leads would have.
@@ -284,24 +389,34 @@ using Statistics
             append!(hor, fill(h, ngrp))
             append!(dst, zeros(ngrp))
         end
-        # Inflate the global pool's tail so the global band is strictly wider than
-        # the 6 h top-bin half-width (operationally: longer leads are worse).
-        append!(pts, zeros(40)); append!(obs, fill(200.0, 40))
-        append!(hor, fill(6.0, 40)); append!(dst, zeros(40))
         cc = fit_conformal(pts, obs, hor, dst; coverage=0.90, min_stratum_n=50)
 
         @test cc.max_horizon == 6.0
         hw_topbin = conformal_halfwidth(cc, 6.0, 0.0)          # in-support, top bin
         hw_24h    = conformal_halfwidth(cc, 24.0, 0.0)         # out-of-support
-        # The guard must NOT silently reuse the 6 h half-width for 24 h.
-        @test hw_24h != hw_topbin
-        @test conformal_stratum(cc, 24.0, 0.0).key == :global
-        @test hw_24h == cc.global_stratum.half_width
+        # The global mixture is deliberately narrower than the 6 h stratum.
+        # Crossing max_horizon must still never shrink the served interval.
+        @test cc.global_stratum.half_width < hw_topbin
+        @test hw_24h >= hw_topbin
         # In-support queries are unchanged (no number drift): horizon 6.0 with the
         # default edges [0,1.5,2.5,4.5,Inf] lands in bin 4 → :h4_quiet, which has
         # ≥ min_stratum_n points and is therefore the resolved stratum.
         @test conformal_stratum(cc, 6.0, 0.0).key == :h4_quiet
         @test conformal_halfwidth(cc, 6.0, 0.0) == cc.strata[:h4_quiet].half_width
+    end
+
+    @testset "sparse long-lead quiet fallback includes shorter quiet cells" begin
+        # Global is narrow, the short quiet cell is wide and populated, and the
+        # long quiet cell is sparse. A global-only fallback would shrink 10 → 1.
+        pts = zeros(223)
+        obs = vcat(fill(10.0, 20), fill(1.0, 200), fill(1.0, 3))
+        hor = vcat(fill(1.0, 20), fill(1.0, 200), fill(6.0, 3))
+        dst = vcat(fill(0.0, 20), fill(-80.0, 200), fill(0.0, 3))
+        cc = fit_conformal(pts, obs, hor, dst; coverage=0.8,
+                           min_stratum_n=10, horizon_edges=[0.0, 3.0, Inf])
+        @test cc.global_stratum.half_width == 1.0
+        @test conformal_halfwidth(cc, 1.0, 0.0) == 10.0
+        @test conformal_halfwidth(cc, 6.0, 0.0) == 10.0
     end
 
     @testset "NEW-ACI-NAN-1: mid-stream NaN does not poison the ACI stream" begin
@@ -339,19 +454,23 @@ using Statistics
         @test length(ac.history) == hlen0     # residual NOT pushed
         @test ac.alpha_t == a0                # alpha NOT updated
 
-        # Warm-up path guard: with a non-finite entry already in history, the
-        # warm-up band is max(finite history), not a NaN from maximum() over a
-        # poisoned vector. (Force the poison directly to also cover the case where
-        # the guard is partially reverted.)
+        # Direct mutation with a non-finite history entry fails before changing
+        # alpha or either buffer.
         ac2 = init_adaptive_conformal(; target_coverage=0.90, gamma=0.1, warmup=50)
-        append!(ac2.history, [3.0, NaN, 7.0])     # mid-warmup, one poisoned entry
-        s2 = adaptive_conformal_step!(ac2, 0.0, 1.0)
-        @test isfinite(s2.half_width)
-        @test s2.half_width == 7.0                # widest FINITE residual
+        append!(ac2.history, [3.0, NaN, 7.0])
+        alpha_before = ac2.alpha_t
+        @test_throws ArgumentError adaptive_conformal_step!(ac2, 0.0, 1.0)
+        @test isequal(ac2.history, [3.0, NaN, 7.0])
+        @test ac2.alpha_t == alpha_before
     end
 
     @testset "input validation and degenerate cases" begin
         @test_throws ArgumentError fit_conformal([1.0], [1.0], [1.0], [0.0]; coverage=0.0)
+        @test_throws ArgumentError fit_conformal([1.0], [1.0], [1.0], [0.0];
+                                                 horizon_edges=[0.0, 0.0, Inf])
+        @test_throws ArgumentError fit_conformal([1.0], [1.0], [1.0], [0.0];
+                                                 activity_threshold_nt=Inf)
+        @test_throws ArgumentError fit_conformal([1.0], [1.0], [-1.0], [0.0])
         @test_throws DimensionMismatch fit_conformal([1.0, 2.0], [1.0], [1.0], [0.0])
         @test_throws ArgumentError SolarSINDy._conformal_quantile(Float64[], 0.9)
         # Single calibration point: half-width = that residual, floor = 1/2.
@@ -361,6 +480,34 @@ using Statistics
         # Interval is centered on the point.
         lo, hi = conformal_interval(cc, -50.0, 1.0, 0.0)
         @test lo == -53.0 && hi == -47.0
+        @test_throws ArgumentError conformal_interval(
+            cc, big"1e400", 1.0, 0.0,
+        )
+        ac = init_adaptive_conformal(; warmup=0)
+        @test_throws ArgumentError adaptive_conformal_step!(
+            ac, big"1e400", 0.0,
+        )
+        @test_throws ArgumentError run_adaptive_conformal(
+            BigFloat[big"1e400"], BigFloat[0.0]; warmup=0,
+        )
+        @test_throws ArgumentError conformal_halfwidth(cc, -1.0, 0.0)
+        @test_throws ArgumentError conformal_halfwidth(cc, Inf, 0.0)
+        @test_throws ArgumentError conformal_halfwidth(cc, big"1e400", 0.0)
+    end
+
+    @testset "fixed-width endpoint residuals do not wrap" begin
+        cc = fit_conformal(
+            [typemin(Int)], [typemax(Int)], [1], [0]; min_stratum_n=1,
+        )
+        residual_oracle = Float64(
+            BigInt(typemax(Int)) - BigInt(typemin(Int)),
+        )
+        @test cc.global_stratum.half_width == residual_oracle
+        @test conformal_halfwidth(cc, 1.0, 0.0) == residual_oracle
+        @test_throws ArgumentError fit_conformal(
+            [-floatmax(Float64)], [floatmax(Float64)], [1.0], [0.0];
+            min_stratum_n=1,
+        )
     end
 
 end

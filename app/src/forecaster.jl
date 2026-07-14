@@ -11,8 +11,45 @@ using JSON3, Statistics
 
 const _FORECASTER = Dict{String,Any}()
 const _FORECASTER_LOCK = ReentrantLock()
+const FORECASTER_STATIONS = ("FRD", "CMO")
+
+function _valid_forecaster_threshold(x::Real)
+    x isa Bool && return false
+    isfinite(x) && x > 0 && isinteger(x) || return false
+    try
+        Int(x)
+        return true
+    catch e
+        e isa InterruptException && rethrow()
+        return false
+    end
+end
+
+function _valid_forecaster_artifact(a, station::AbstractString)
+    required = (:station, :features, :mu, :sigma, :beta, :rn_calib, :thresholds)
+    all(key -> haskey(a, key), required) || return false
+    string(a.station) == station || return false
+    features = string.(a.features)
+    features == ["dbdt_now", "dbdt_mean30", "dbdt_max30", "dbdt_std30",
+                 "V", "Bz", "Bs", "VBs"] || return false
+    μ = try Float64.(a.mu) catch e; e isa InterruptException && rethrow(); return false end
+    σ = try Float64.(a.sigma) catch e; e isa InterruptException && rethrow(); return false end
+    β = try Float64.(a.beta) catch e; e isa InterruptException && rethrow(); return false end
+    rn = try Float64.(a.rn_calib) catch e; e isa InterruptException && rethrow(); return false end
+    raw_thresholds = try collect(a.thresholds) catch e; e isa InterruptException && rethrow(); return false end
+    all(x -> x isa Real && !(x isa Bool), raw_thresholds) || return false
+    thresholds = try Float64.(raw_thresholds) catch e; e isa InterruptException && rethrow(); return false end
+    length(μ) == 8 && length(σ) == 8 && length(β) == 9 || return false
+    !isempty(rn) && !isempty(thresholds) || return false
+    all(isfinite, μ) && all(x -> isfinite(x) && x > 0, σ) && all(isfinite, β) || return false
+    all(isfinite, rn) && issorted(rn) || return false
+    all(_valid_forecaster_threshold, thresholds) || return false
+    return true
+end
 
 function load_forecaster(; station::AbstractString = "FRD")
+    station = uppercase(strip(String(station)))
+    station in FORECASTER_STATIONS || return nothing
     # Guard the check-then-load-then-store like the sibling caches (_DBDT/_SWPC/_NET/_LOG):
     # the file read between the haskey miss and the store is a yield point, so two concurrent
     # first-time pollers could otherwise both load (and, multi-threaded, race the setindex!).
@@ -21,8 +58,14 @@ function load_forecaster(; station::AbstractString = "FRD")
         path = joinpath(@__DIR__, "..", "models", "forecaster_$(station).json")
         isfile(path) || return nothing
         try
-            _FORECASTER[station] = JSON3.read(read(path, String))
+            artifact = JSON3.read(read(path, String))
+            _valid_forecaster_artifact(artifact, station) || begin
+                @warn "forecaster artifact failed schema validation" station
+                return nothing
+            end
+            _FORECASTER[station] = artifact
         catch e
+            e isa InterruptException && rethrow()
             @warn "forecaster artifact load failed" station exception=e; return nothing
         end
         return get(_FORECASTER, station, nothing)
@@ -31,18 +74,29 @@ end
 
 # Features (must match export): dbdt_now, dbdt_mean30, dbdt_max30, dbdt_std30, V, Bz, Bs, VBs.
 function forecast_dbdt(dbdt_recent::AbstractVector, V, Bz; station::AbstractString = "FRD")
+    station = uppercase(strip(String(station)))
     a = load_forecaster(; station=station)
     (a === nothing || V === nothing || Bz === nothing) && return nothing
-    vals = Float64[x for x in dbdt_recent if x !== nothing && isfinite(x)]
+    vals = Float64[]
+    sizehint!(vals, length(dbdt_recent))
+    for x in dbdt_recent
+        value = jnum(x)
+        value === nothing || push!(vals, value)
+    end
     length(vals) < 5 && return nothing
+    all(>=(0.0), vals) || return nothing
     w = vals[max(1, end-29):end]                 # trailing 30 min
     dnow = w[end]; dmean = mean(w); dmax = maximum(w); dstd = length(w) > 1 ? std(w) : 0.0
-    Vf = Float64(V); Bzf = Float64(Bz); Bs = max(-Bzf, 0.0); VBs = Vf * Bs
+    Vf = jnum(V); Bzf = jnum(Bz)
+    (Vf === nothing || Bzf === nothing || Vf <= 0 || Vf > 5_000 || abs(Bzf) > 1_000) && return nothing
+    Bs = max(-Bzf, 0.0); VBs = Vf * Bs
     x = Float64[dnow, dmean, dmax, dstd, Vf, Bzf, Bs, VBs]
     μ = Float64.(a.mu); σ = Float64.(a.sigma); β = Float64.(a.beta)
     length(x) == length(μ) || return nothing
     zf = (x .- μ) ./ σ
+    all(isfinite, zf) || return nothing
     ẑ = β[1] + sum(β[2:end] .* zf)               # bias + standardized features (log1p target)
+    isfinite(ẑ) || return nothing
     s = log1p(dmax) + 1.0                         # conformal scale
     rn = Float64.(a.rn_calib); n = length(rn)
     # rn_calib[i] holds the (i-1)/(n-1) quantile of the conformal residuals; interpolate to the

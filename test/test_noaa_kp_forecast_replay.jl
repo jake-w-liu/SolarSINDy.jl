@@ -1,3 +1,5 @@
+module NOAAKpForecastReplayTests
+
 using Test
 using DataFrames
 using Dates
@@ -49,3 +51,5 @@ const NOAA_KP_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "..", "live_fore
         @test_throws ErrorException _validate_noaa_rows(broken)
     end
 end
+
+end # module NOAAKpForecastReplayTests

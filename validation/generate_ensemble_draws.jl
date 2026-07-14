@@ -1,135 +1,247 @@
 #!/usr/bin/env julia
-# generate_ensemble_draws.jl — persist the JOINT ensemble coefficient draws.
-#
-# Finding sindy.jl:47 (uncertainty-quantification defect): init_forecast currently
-# perturbs the four near-collinear clock-angle coefficients INDEPENDENTLY, discarding
-# their near-perfect negative correlations, which inflates the operational ensemble
-# spread. The fix is to sample coefficient VECTORS jointly from the ensemble draw
-# matrix (all_ξ), which ensemble_sindy already returns but the pipeline discarded.
-#
-# This generator reruns ensemble_sindy on the real training pool (cycles 20–23) at
-# the DEPLOYED best-λ sparsity regime and writes data/real_sindy_ensemble_draws.csv:
-#   * one row per subsample draw (n_models = 500 ≥ 300),
-#   * columns = the discovered-coefficient term names in the exact order of
-#     data/real_sindy_discovery_coefficients.csv (= get_term_names order),
-#   * a fixed RNG seed for reproducibility,
-#   * each column RECENTERED so its mean equals the deployed point coefficient
-#     (the served fit stays the center) while the within/between-term correlation
-#     structure — in particular the clock-angle cancellation manifold — is preserved.
-#
-# It does NOT touch the deployed coefficient file or any paper_v2_monitor/data artifact; it only
-# reads the cached OMNI archive + storm catalog and writes the new draws sidecar.
+# Strict deterministic regeneration of the canonical raw coefficient draws.
 
-using SolarSINDy
-using CSV, DataFrames, Statistics, Random
+isdefined(@__MODULE__, :run_real_data_discovery) ||
+    include(joinpath(@__DIR__, "real_data_discovery.jl"))
 
-const PKG_DIR  = normpath(joinpath(@__DIR__, ".."))
-const DATA_DIR = joinpath(PKG_DIR, "data")
-
-# Resolve the cached OMNI archive (never re-download): package data/ first, then the
-# project's paper_v2_monitor/data cache, then $OMNI_EXTRACTED.
-function _resolve_omni()
-    cands = String[
-        joinpath(DATA_DIR, "omni_extracted.csv"),
-        normpath(joinpath(PKG_DIR, "..", "paper_v2_monitor", "data", "omni_extracted.csv")),
-    ]
-    haskey(ENV, "OMNI_EXTRACTED") && pushfirst!(cands, ENV["OMNI_EXTRACTED"])
-    for c in cands
-        isfile(c) && return c
-    end
-    error("omni_extracted.csv not found in: $(cands)")
+function _ensemble_primary_selection_paths(data_dir)
+    prefix = joinpath(data_dir, "primary_lambda")
+    return (
+        split="$(prefix)_inner_split.csv",
+        candidates="$(prefix)_candidates.csv",
+        errors="$(prefix)_validation_errors.csv",
+        support="$(prefix)_support.csv",
+        decision="$(prefix)_decision.csv",
+    )
 end
 
-# Faithful copy of real_data_discovery.jl's ORIGINAL concatenation (fill-included),
-# so the draws share the exact training pool that produced the DEPLOYED fit whose
-# coefficients we recenter onto. (The regression-side fabricated-row mask fix in
-# real_data_discovery.jl is a separate, not-yet-redeployed change.)
-function _concat_train(df, entries)
-    dicts = Dict{String,Vector{Float64}}[]
-    dDst = Float64[]
-    for entry in entries
-        swd = extract_storm_data(df, entry)
-        try
-            dd, ddt = prepare_sindy_data(swd, 1.0; smooth_window=5)
-            count(!isnan, ddt) < 20 && continue
-            push!(dicts, dd); append!(dDst, ddt)
-        catch
-            continue
+function _ensemble_selected_lambda(paths)
+    selection = SolarSINDy._read_selection_csv_set(paths)
+    candidates = selection.candidates
+    decision = selection.decision
+    nrow(candidates) == 60 || error("primary selection must contain 60 candidates")
+    nrow(decision) == 1 || error("primary selection must contain one decision row")
+    Float64.(candidates.lambda) == storm_lambda_grid() ||
+        error("primary selection does not use the fixed 60-point lambda grid")
+    selected = candidates[Bool.(candidates.selected), :]
+    nrow(selected) == 1 || error("primary selection must mark exactly one candidate")
+    lambda = Float64(only(decision.selected_lambda))
+    Float64(only(selected.lambda)) == lambda ||
+        error("candidate and decision selected lambdas disagree")
+    return lambda, NamedTuple(decision[1, :])
+end
+
+function _ensemble_verify_observation_audit(context, audit)
+    path = joinpath(context.data, "real_storm_eligibility.csv")
+    verify_output_manifest(path;
+        package_root=_REAL_PACKAGE_ROOT,
+        require_canonical=context.mode == :canonical,
+    )
+    persisted = CSV.read(path, DataFrame)
+    expected = DataFrame(audit.storm_records)
+    names(persisted) == names(expected) ||
+        error("persisted and regenerated storm-audit schemas differ")
+    nrow(persisted) == nrow(expected) ||
+        error("persisted and regenerated storm-audit row counts differ")
+    for name in names(expected)
+        persisted_values = persisted[!, name]
+        expected_values = expected[!, name]
+        equal = if name == "onset_time"
+            string.(persisted_values) == string.(expected_values)
+        elseif name == "exclusion_reason"
+            normalize = values -> [
+                ismissing(value) || isempty(strip(String(value))) ? "none" : String(value)
+                for value in values
+            ]
+            normalize(persisted_values) == normalize(expected_values)
+        else
+            isequal(persisted_values, expected_values)
         end
+        equal ||
+            error("persisted storm audit differs in column $name")
     end
-    isempty(dicts) && error("no training storms concatenated")
-    concat = Dict{String,Vector{Float64}}()
-    for key in keys(dicts[1])
-        concat[key] = vcat([d[key] for d in dicts]...)
-    end
-    valid = .!isnan.(dDst)
-    for key in keys(concat)
-        valid .&= .!isnan.(concat[key])
-    end
-    for key in keys(concat)
-        concat[key] = concat[key][valid]
-    end
-    return concat, dDst[valid]
+    return path
 end
 
-const SEED = 42          # fixed for reproducibility (matches shipped ensemble seed)
-const N_MODELS = 500     # ≥ 300 required
+function _ensemble_read_point_coefficients(context, term_names, design, lambda)
+    path = joinpath(context.data, "real_sindy_discovery_coefficients.csv")
+    verify_output_manifest(path;
+        package_root=_REAL_PACKAGE_ROOT,
+        require_canonical=context.mode == :canonical,
+    )
+    frame = CSV.read(path, DataFrame)
+    names(frame) == ["term", "coefficient"] ||
+        error("point-coefficient schema is not canonical")
+    string.(frame.term) == term_names ||
+        error("point-coefficient term order differs from the full library")
+    persisted = Float64.(frame.coefficient)
+    refit = stlsq(design.theta, design.target; λ=lambda, normalize=true)
+    persisted == refit || error(
+        "point coefficients are not the selected-lambda full refit on the masked design",
+    )
+    return path, persisted, refit
+end
 
-println("Loading cached OMNI archive + catalog ...")
-omni_path = _resolve_omni()
-println("  OMNI: $(omni_path)")
-df = parse_omni2(omni_path; year_start=1963, year_end=2025)
-clean_omni_data!(df)
-catalog = load_storm_catalog(joinpath(DATA_DIR, "storm_catalog.csv"))
-train_entries = filter(e -> e.split == "train", catalog)
-println("  train storms: $(length(train_entries))")
-
-lib = build_solar_wind_library(; max_poly_order=2, include_trig=true,
-                                include_cross=true, include_known=true)
-term_names = get_term_names(lib)
-
-concat_data, dDst_clean = _concat_train(df, train_entries)
-Θ = evaluate_library(lib, concat_data)
-println("  training points: $(length(dDst_clean)), library terms: $(length(lib))")
-
-# Select the DEPLOYED best-λ (same procedure as real_data_discovery.jl).
-lambdas = 10.0 .^ range(-2, 4, length=60)
-sweep = sweep_lambda(Θ, dDst_clean, lambdas; normalize=true)
-best_λ = lambdas[1]
-for target_range in [8:10, 6:12, 4:15, 2:21]
-    kr = filter(r -> r.n_terms in target_range, sweep)
-    if !isempty(kr)
-        global best_λ = argmin(r -> r.rmse, kr).λ
-        break
+function _persist_regenerated_ensemble_outputs!(
+        context, refit_audit_rows, term_names, draws, inclusion_rows,
+        coefficient_rows; record, refit_record, refit_inputs,
+        seed::Int, _after_artifact_hook::Function=(name, path) -> nothing)
+    names = (
+        refit_audit="real_primary_refit_audit.csv",
+        draws="real_sindy_ensemble_draws.csv",
+        inclusion="real_ensemble_inclusion.csv",
+        coefficients="real_sindy_coefficients.csv",
+    )
+    outputs = [joinpath(context.data, name) for name in values(names)]
+    snapshot = SolarSINDy._snapshot_regular_file_set(vcat(
+        outputs, [path * ".manifest.json" for path in outputs],
+    ))
+    local refit_audit_path, draw_path, inclusion_path, coefficient_path
+    try
+        refit_audit_path = _real_manifested_csv(
+            context, names.refit_audit, refit_audit_rows;
+            selection_record=refit_record, extra_inputs=refit_inputs,
+            producer_script=@__FILE__,
+        )
+        _after_artifact_hook(:refit_audit, refit_audit_path)
+        base_inputs = merge(refit_inputs, Dict(
+            "primary_refit_audit" => refit_audit_path,
+        ))
+        draw_path = _real_manifested_csv(
+            context, names.draws,
+            DataFrame(permutedims(draws), Symbol.(term_names));
+            selection_record=record, seed,
+            extra_inputs=base_inputs, producer_script=@__FILE__,
+        )
+        Matrix{Float64}(CSV.read(draw_path, DataFrame)) == permutedims(draws) ||
+            error("raw coefficient draws changed during persistence")
+        _after_artifact_hook(:draws, draw_path)
+        draw_inputs = merge(base_inputs, Dict("raw_joint_draws" => draw_path))
+        inclusion_path = _real_manifested_csv(
+            context, names.inclusion, inclusion_rows;
+            selection_record=merge(record, (
+                interval_kind="conditional_nonzero_empirical_row_subsample_interval",
+                confidence_interval=false,
+            )),
+            seed, extra_inputs=draw_inputs, producer_script=@__FILE__,
+        )
+        _after_artifact_hook(:inclusion, inclusion_path)
+        coefficient_path = _real_manifested_csv(
+            context, names.coefficients, coefficient_rows;
+            selection_record=record, seed,
+            extra_inputs=draw_inputs, producer_script=@__FILE__,
+        )
+        _after_artifact_hook(:coefficients, coefficient_path)
+    catch
+        SolarSINDy._restore_regular_file_set!(snapshot)
+        rethrow()
     end
-end
-println("  best-λ (deployed regime) = $(round(best_λ, sigdigits=4))")
-
-println("Running ensemble_sindy ($(N_MODELS) subsample draws, seed=$(SEED)) ...")
-_, _, all_ξ = ensemble_sindy(concat_data, lib, dDst_clean;
-                             λ=best_λ, n_models=N_MODELS, subsample_frac=0.8, seed=SEED)
-# all_ξ is p × n_models; transpose to draws (rows) × terms (cols).
-draws = permutedims(all_ξ)               # N_MODELS × p
-
-# Load the DEPLOYED point coefficients and recenter each column onto them.
-deployed = CSV.read(joinpath(DATA_DIR, "real_sindy_discovery_coefficients.csv"), DataFrame)
-String.(deployed.term) == term_names ||
-    error("deployed term order does not match library order")
-ξ_dep = Float64.(deployed.coefficient)
-for j in 1:length(term_names)
-    draws[:, j] .+= (ξ_dep[j] - mean(view(draws, :, j)))
+    SolarSINDy._discard_regular_file_snapshot!(snapshot)
+    return (
+        refit_audit=refit_audit_path, draws=draw_path,
+        inclusion=inclusion_path, coefficients=coefficient_path,
+    )
 end
 
-out = DataFrame(draws, Symbol.(term_names))
-out_path = joinpath(DATA_DIR, "real_sindy_ensemble_draws.csv")
-CSV.write(out_path, out)
+function regenerate_ensemble_draws(
+        context; _after_artifact_hook::Function=(name, path) -> nothing)
+    verify_omni_input(context.omni; mode=context.mode)
+    catalog = load_verified_storm_catalog(context.catalog;
+        omni_path=context.omni,
+        parameters=storm_catalog_parameters(),
+        mode=context.mode,
+    )
+    df = parse_omni2(context.omni; year_start=1963, year_end=2025)
+    add_original_observation_flags!(df)
+    clean_omni_data!(df)
+    policy = DiscoveryObservationPolicy()
+    audit = _audit_discovery_observations(df, catalog; policy)
+    audit_path = _ensemble_verify_observation_audit(context, audit)
 
-# --- Verification: means match deployed to 1e-8, row count ≥ 300 ---
-col_means = [mean(out[!, Symbol(t)]) for t in term_names]
-max_dev = maximum(abs.(col_means .- ξ_dep))
-println("\nWrote $(out_path)")
-println("  rows = $(nrow(out)) (≥ 300 required: $(nrow(out) >= 300))")
-println("  max |col_mean - deployed| = $(max_dev) (≤ 1e-8 required: $(max_dev <= 1e-8))")
-@assert nrow(out) >= 300 "row count < 300"
-@assert max_dev <= 1e-8 "column means do not match deployed coefficients to 1e-8"
-println("VERIFY OK")
+    library = build_solar_wind_library(clock_basis=:full)
+    length(library) == 20 || error("canonical full library must contain 20 terms")
+    term_names = get_term_names(library)
+    storms = _prepare_discovery_storms(df, audit.eligible_entries, library; policy)
+    training = _real_require_subset(
+        storms, storm -> storm.entry.split == "train", "primary ensemble training";
+        minimum=2,
+    )
+    design = _cached_subset_design!(Dict{Any,Any}(), training)
+    data = _concat_discovery_data(training)
+
+    selection_paths = _ensemble_primary_selection_paths(context.data)
+    selection_inputs = _real_selection_inputs(
+        context, selection_paths, "full_primary",
+    )
+    lambda, decision_record = _ensemble_selected_lambda(selection_paths)
+    coefficient_path, point_coefficients, fresh_refit = _ensemble_read_point_coefficients(
+        context, term_names, design, lambda,
+    )
+
+    _, inclusion, draws = ensemble_sindy(
+        data, library, design.target;
+        λ=lambda,
+        n_models=_REAL_ENSEMBLE_DRAWS,
+        subsample_frac=0.8,
+        seed=_REAL_ENSEMBLE_SEED,
+        bootstrap=false,
+    )
+    size(draws) == (20, _REAL_ENSEMBLE_DRAWS) ||
+        error("regenerated ensemble draw matrix has an unexpected shape")
+    record = (
+        kind="fixed_grid_whole_storm_selected_full_refit_ensemble",
+        basis="full",
+        selected_lambda=lambda,
+        decision=decision_record,
+        ensemble="500_raw_complete_80pct_row_subsamples_without_replacement",
+        structural_zeros="retained_without_recentering_or_imputation",
+    )
+    refit_inputs = merge(selection_inputs, Dict(
+        "point_coefficients" => coefficient_path,
+        "storm_observation_audit" => audit_path,
+    ))
+    refit_audit_rows = [(
+            term=term_names[index],
+            persisted_coefficient=point_coefficients[index],
+            fresh_selected_lambda_refit_coefficient=fresh_refit[index],
+            exact_match=point_coefficients[index] == fresh_refit[index],
+            absolute_difference=abs(point_coefficients[index] - fresh_refit[index]),
+            selected_lambda=lambda,
+            training_storms=length(training),
+            training_rows=size(design.theta, 1),
+        ) for index in eachindex(term_names)]
+    point_coefficients == fresh_refit || error(
+        "persisted primary coefficients differ from the fresh selected-lambda refit",
+    )
+    summary = _real_empirical_subsample_records(
+        term_names, draws, inclusion;
+        lambda,
+        seed=_REAL_ENSEMBLE_SEED,
+        subsample_fraction=0.8,
+    )
+    coefficient_rows = [(
+            term=term_names[index],
+            coefficient=point_coefficients[index],
+            coefficient_kind="selected_full_refit_point_coefficient",
+            inclusion=inclusion[index],
+        ) for index in eachindex(term_names)]
+    _persist_regenerated_ensemble_outputs!(
+        context, refit_audit_rows, term_names, draws, summary, coefficient_rows;
+        record,
+        refit_record=merge(record, (
+            audit="persisted_point_coefficients_equal_fresh_selected_lambda_full_refit",
+            exact_match=true,
+        )),
+        refit_inputs, seed=_REAL_ENSEMBLE_SEED, _after_artifact_hook,
+    )
+    println("Regenerated and verified $(_REAL_ENSEMBLE_DRAWS) raw ensemble draws")
+    return nothing
+end
+
+regenerate_ensemble_draws(; kwargs...) =
+    regenerate_ensemble_draws(_real_output_context(); kwargs...)
+
+if abspath(PROGRAM_FILE) == abspath(@__FILE__)
+    context = _real_output_context()
+    regenerate_ensemble_draws(context)
+end

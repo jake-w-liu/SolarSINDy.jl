@@ -35,6 +35,15 @@ struct AlarmConfig
     use_worst_case::Bool
     callback::Function
     cooldown_hours::Int
+    function AlarmConfig(thresholds::Dict{StormSeverity,Float64},
+                         use_worst_case::Bool, callback::Function,
+                         cooldown_hours::Int)
+        all(isfinite, values(thresholds)) ||
+            throw(ArgumentError("alarm thresholds must be finite"))
+        cooldown_hours >= 0 ||
+            throw(ArgumentError("cooldown_hours must be nonnegative"))
+        return new(copy(thresholds), use_worst_case, callback, cooldown_hours)
+    end
 end
 
 """
@@ -58,11 +67,12 @@ Classify storm severity from Dst* value.
 """
 function classify_severity(dst::Float64,
                            thresholds::Dict{StormSeverity, Float64})
-    # A non-finite Dst is a data-quality condition, not a quiet state. The live monitor guards
-    # its drivers upstream so NaN should not reach here; treat it explicitly (rather than letting
-    # every `NaN <= t` silently fall through to QUIET) so the suppression is intentional and a
-    # caller can detect it via `isnan` on the classified input.
-    isnan(dst) && return QUIET
+    # A non-finite Dst is a data-quality failure, not a severity level. Reject it
+    # so an invalid worst-case forecast cannot be silently interpreted as quiet
+    # (NaN) or super-intense (-Inf).
+    isfinite(dst) || throw(ArgumentError("Dst* severity input must be finite"))
+    all(isfinite, values(thresholds)) ||
+        throw(ArgumentError("severity thresholds must be finite"))
     # Upgrade cascade from least to most severe so the result is the most severe tier the
     # value actually crosses. This is identical to an ordered if/elseif for the documented
     # monotone thresholds (SUPERINTENSE ≤ INTENSE ≤ MODERATE) but stays correct (most-severe
@@ -126,10 +136,13 @@ function maybe_fire_horizon_alarm!(config::AlarmConfig, result::ForecastResult,
     severity == QUIET && return nothing
     # Already announced this target hour at an equal-or-greater severity → suppress.
     severity > get(seen, result.t, QUIET) || return nothing
-    seen[result.t] = severity
     msg = _alarm_message(severity, result)
     alarm = Alarm(result.t, severity, result.dst_predicted, result.dst_ci_05, msg)
+    # Commit the dedup state only after delivery succeeds. If the callback throws
+    # (network outage, full disk, etc.), the target remains retryable on the next
+    # poll rather than being silently marked as announced.
     config.callback(alarm)
+    seen[result.t] = severity
     return alarm
 end
 
