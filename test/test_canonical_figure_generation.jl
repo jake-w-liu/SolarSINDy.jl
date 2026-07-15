@@ -371,10 +371,14 @@ end
         end
         synthetic_layout = figures.synthetic_recovery.fig.layout.fields
         synthetic_legend = synthetic_layout[:legend]
-        @test synthetic_legend[:orientation] == "h"
-        @test synthetic_legend[:xanchor] == "center"
+        @test synthetic_legend[:orientation] == "v"
+        @test synthetic_legend[:xanchor] == "left"
         @test synthetic_legend[:yanchor] == "bottom"
-        @test synthetic_legend[:y] > maximum(synthetic_layout[:yaxis][:domain])
+        @test first(synthetic_layout[:xaxis2][:domain]) <=
+              synthetic_legend[:x] <= last(synthetic_layout[:xaxis2][:domain])
+        @test first(synthetic_layout[:yaxis2][:domain]) <=
+              synthetic_legend[:y] <= last(synthetic_layout[:yaxis2][:domain])
+        @test synthetic_legend[:font][:size] == 18
         @test !haskey(synthetic_layout, :legend2)
         @test figures.synthetic_recovery.fig.data[4].fields[:showlegend] == false
         @test figures.synthetic_recovery.fig.data[5].fields[:showlegend] == false

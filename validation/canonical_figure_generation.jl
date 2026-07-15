@@ -611,11 +611,14 @@ end
 
 _attribute_fields(value) = value isa AbstractDict ? value : value.fields
 
-function _horizontal_outside_top_legend!(figure)
-    set_legend!(figure; position=:outside_top)
+function _inside_bottomleft_legend!(figure)
+    set_legend!(figure; position=:bottomleft)
     legend = _plot_object(figure).layout.fields[:legend]
     legend_fields = _attribute_fields(legend)
-    legend_fields[:orientation] = "h"
+    legend_fields[:orientation] = "v"
+    legend_fields[:font] = attr(
+        family=_FONT_FAMILY, size=18, color=_TEXT,
+    )
     return figure
 end
 
@@ -781,8 +784,12 @@ function _build_synthetic_figure(data)
         legend="Full library stress", showlegend=false)
     xlabel!(figure, "Time [h]"; row=2, col=1)
     ylabel!(figure, "Simulation error [nT]"; row=2, col=1)
-    _horizontal_outside_top_legend!(figure)
-    return _submitted_style!(figure; height=_SYNTHETIC_FIGURE_HEIGHT, top_margin=70)
+    styled = _submitted_style!(
+        figure; height=_SYNTHETIC_FIGURE_HEIGHT, top_margin=70,
+    )
+    # Eight-position PDF audit: bottom-left tied at zero trace overlap and wins
+    # the mandated inside-position tie order.
+    return _inside_bottomleft_legend!(styled)
 end
 
 function _paired_label(experiment, reference)
