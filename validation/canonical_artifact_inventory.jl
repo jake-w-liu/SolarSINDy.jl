@@ -121,6 +121,7 @@ const CANONICAL_FIGURE_ARTIFACT_INVENTORY = let
     producer = abspath(joinpath(@__DIR__, "canonical_figure_generation.jl"))
     Dict(name => producer for name in (
         "fig_discovery_validation.pdf",
+        "fig_may2024_reconstruction.pdf",
         "fig_lambda_selection.pdf",
         "fig_coefficient_stability.pdf",
         "fig_synthetic_recovery.pdf",

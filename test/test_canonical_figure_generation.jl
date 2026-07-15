@@ -142,7 +142,7 @@ function _canonical_figure_fixture(root)
 
     draw_matrix = zeros(500, 20)
     draw_matrix[:, 2] .= -0.13
-    draw_matrix[1:250, 11] .= -5.4e-3 .+ 1e-4 .* sin.(1:250)
+    draw_matrix[1:475, 11] .= -5.4e-3 .+ 1e-4 .* sin.(1:475)
     draws = DataFrame(draw_matrix, Symbol.(terms))
     _figure_fixture_write(paths, "real_sindy_ensemble_draws.csv", draws)
     summary_rows = NamedTuple[]
@@ -249,98 +249,121 @@ end
         @test length(prepared.stability.terms) == 20
         @test nrow(prepared.synthetic.groups["minimal_identifiable"]) == 241
         @test nrow(prepared.paired.frame) == 12
+        @test Set(keys(prepared.discovery.trajectory_inputs)) ==
+              Set(["outer_trajectory"])
 
         figures = CFG.build_canonical_figures(prepared)
-        @test length(figures.discovery_validation.fig.data) == 6
+        @test length(figures.inclusion_frequency.data) == 3
+        @test length(figures.may2024_reconstruction.fig.data) == 5
         @test length(figures.lambda_selection.fig.data) == 5
-        @test length(figures.coefficient_stability.fig.data) == 4
+        @test length(figures.coefficient_stability.data) == 3
         @test length(figures.synthetic_recovery.fig.data) == 5
         @test length(figures.paired_performance.data) == 4
         @test CFG._display_terms(["Dst_star", "n*V", "Newell_d_Φ"]) ==
               ["Dst*", "n V", "dΦN/dt"]
 
         stability_medians = Float64.(
-            figures.coefficient_stability.fig.data[3].fields[:x],
+            figures.coefficient_stability.data[2].fields[:y],
         )
         @test length(stability_medians) == 2
         @test all(abs.(stability_medians) .== 1.0)
-        discovery_layout = figures.discovery_validation.fig.layout.fields
-        discovery_legend = discovery_layout[:legend]
-        @test discovery_legend[:orientation] == "h"
-        @test discovery_legend[:x] == 0.5
-        @test discovery_legend[:xanchor] == "center"
-        @test discovery_legend[:yanchor] == "bottom"
-        @test discovery_legend[:y] > maximum(discovery_layout[:yaxis][:domain])
-        @test !haskey(discovery_layout, :legend2)
-        discovery_selected = findall(prepared.discovery.selected)
-        discovery_trace = figures.discovery_validation.fig.data[1].fields
-        @test length(discovery_trace[:x]) == length(discovery_selected)
-        @test all(==(1.0), discovery_trace[:x])
-        @test discovery_trace[:y] == collect(1:length(discovery_selected))
-        @test discovery_layout[:yaxis][:tickmode] == "array"
-        @test discovery_layout[:yaxis][:tickvals] == collect(1:length(discovery_selected))
-        @test discovery_layout[:yaxis][:ticktext] == reverse(
-            CFG._display_terms(prepared.discovery.terms[discovery_selected]),
-        )
+        inclusion_layout = figures.inclusion_frequency.layout.fields
+        @test !haskey(inclusion_layout, :xaxis2)
+        @test !haskey(inclusion_layout, :yaxis2)
+        inclusion_order = sortperm(prepared.stability.inclusion;
+                                   rev=true, alg=MergeSort)
+        ordered_inclusion = prepared.stability.inclusion[inclusion_order]
+        core = ordered_inclusion .>= 0.9
+        inclusion_positions = collect(1:20)
+        @test figures.inclusion_frequency.data[1].fields[:x] ==
+              inclusion_positions[core]
+        @test figures.inclusion_frequency.data[1].fields[:y] ==
+              ordered_inclusion[core]
+        @test figures.inclusion_frequency.data[2].fields[:x] ==
+              inclusion_positions[.!core]
+        @test figures.inclusion_frequency.data[2].fields[:y] ==
+              ordered_inclusion[.!core]
+        @test figures.inclusion_frequency.data[3].fields[:x] == [0.5, 20.5]
+        @test figures.inclusion_frequency.data[3].fields[:y] == [0.9, 0.9]
+        @test [trace.fields[:name] for trace in
+               figures.inclusion_frequency.data] == [
+            "Core (pi >= 0.9)", "Peripheral (pi < 0.9)",
+            "pi = 0.9 threshold",
+        ]
+        @test inclusion_layout[:xaxis][:tickmode] == "array"
+        @test inclusion_layout[:xaxis][:tickvals] == inclusion_positions
+        @test inclusion_layout[:xaxis][:ticktext] ==
+              prepared.stability.terms[inclusion_order]
+        @test inclusion_layout[:xaxis][:tickangle] == -45
+        @test inclusion_layout[:legend][:xanchor] == "right"
+        @test inclusion_layout[:legend][:yanchor] == "top"
+        may_layout = figures.may2024_reconstruction.fig.layout.fields
+        @test figures.may2024_reconstruction.fig.data[1].fields[:y] ==
+              prepared.discovery.velocity
+        @test figures.may2024_reconstruction.fig.data[1].fields[:xaxis] == "x"
+        @test figures.may2024_reconstruction.fig.data[1].fields[:yaxis] == "y"
+        @test figures.may2024_reconstruction.fig.data[2].fields[:xaxis] == "x2"
+        @test figures.may2024_reconstruction.fig.data[2].fields[:yaxis] == "y2"
+        @test may_layout[:xaxis2][:title][:text] ==
+              "Time [hours from shared anchor]"
+        @test [trace.fields[:name] for trace in
+               figures.may2024_reconstruction.fig.data] == [
+            "V [km/s]", "Observed", "SINDy (11-term)",
+            "Burton (1975)", "O'Brien-McP (2000)",
+        ]
+        @test figures.may2024_reconstruction.fig.data[4].fields[:line][:dash] ==
+              "dash"
+        @test figures.may2024_reconstruction.fig.data[5].fields[:line][:dash] ==
+              "dashdot"
         @test figures.lambda_selection.fig.layout.fields[:legend][:yanchor] == "middle"
         @test figures.lambda_selection.fig.layout.fields[:legend2][:yanchor] == "middle"
-        stability_layout = figures.coefficient_stability.fig.layout.fields
+        stability_layout = figures.coefficient_stability.layout.fields
         stability_legend = stability_layout[:legend]
-        @test stability_legend[:orientation] == "h"
-        @test stability_legend[:xanchor] == "center"
-        @test stability_legend[:yanchor] == "bottom"
-        @test stability_legend[:y] > maximum(stability_layout[:yaxis][:domain])
-        @test !haskey(stability_layout, :legend2)
-        expected_stability_terms = reverse(CFG._display_terms(prepared.stability.terms))
-        for key in (:yaxis, :yaxis2)
-            @test stability_layout[key][:tickmode] == "array"
-            @test stability_layout[key][:tickvals] == collect(1:20)
-            @test stability_layout[key][:ticktext] == expected_stability_terms
-            @test stability_layout[key][:range] == [0.5, 20.5]
-        end
-        @test stability_layout[:yaxis2][:showticklabels] == false
-        stability_bar = figures.coefficient_stability.fig.data[1].fields
-        @test stability_bar[:x] == reverse(prepared.stability.inclusion)
-        @test stability_bar[:y] == collect(1:20)
+        @test stability_legend[:xanchor] == "right"
+        @test stability_legend[:yanchor] == "top"
+        @test !haskey(stability_layout, :xaxis2)
+        @test !haskey(stability_layout, :yaxis2)
         stability_valid = findall(
             isfinite.(prepared.stability.medians) .& .!iszero.(prepared.stability.medians),
         )
-        stability_positions = Float64.(20 .- reverse(stability_valid) .+ 1)
+        stability_positions = Float64.(stability_valid)
         stability_scales = abs.(prepared.stability.medians[stability_valid])
-        expected_stability_medians = reverse(
-            prepared.stability.medians[stability_valid] ./ stability_scales,
-        )
-        expected_stability_point = reverse(
-            prepared.stability.point[stability_valid] ./ stability_scales,
-        )
-        @test figures.coefficient_stability.fig.data[3].fields[:x] ==
+        expected_stability_medians =
+            prepared.stability.medians[stability_valid] ./ stability_scales
+        expected_stability_point =
+            prepared.stability.point[stability_valid] ./ stability_scales
+        @test figures.coefficient_stability.data[2].fields[:x] == stability_positions
+        @test figures.coefficient_stability.data[3].fields[:x] == stability_positions
+        @test figures.coefficient_stability.data[2].fields[:y] ==
               expected_stability_medians
-        @test figures.coefficient_stability.fig.data[4].fields[:x] ==
+        @test figures.coefficient_stability.data[3].fields[:y] ==
               expected_stability_point
-        @test figures.coefficient_stability.fig.data[3].fields[:y] == stability_positions
-        @test figures.coefficient_stability.fig.data[4].fields[:y] == stability_positions
-        expected_interval_x, expected_interval_y = CFG._interval_segments(
+        expected_interval_y, expected_interval_x = CFG._interval_segments(
             stability_positions,
-            reverse(prepared.stability.lower[stability_valid] ./
-                    stability_scales),
-            reverse(prepared.stability.upper[stability_valid] ./
-                    stability_scales),
+            prepared.stability.lower[stability_valid] ./ stability_scales,
+            prepared.stability.upper[stability_valid] ./ stability_scales,
         )
         @test isequal(
-            figures.coefficient_stability.fig.data[2].fields[:x],
+            figures.coefficient_stability.data[1].fields[:x],
             expected_interval_x,
         )
         @test isequal(
-            figures.coefficient_stability.fig.data[2].fields[:y],
+            figures.coefficient_stability.data[1].fields[:y],
             expected_interval_y,
         )
-        @test discovery_layout[:yaxis][:domain] ==
-              discovery_layout[:yaxis2][:domain]
-        @test discovery_layout[:xaxis2][:domain][1] -
-              discovery_layout[:xaxis][:domain][2] ≈ 0.12
-        @test stability_layout[:yaxis][:domain] == stability_layout[:yaxis2][:domain]
-        @test stability_layout[:xaxis2][:domain][1] -
-              stability_layout[:xaxis][:domain][2] ≈ 0.12
+        @test may_layout[:xaxis][:domain] == may_layout[:xaxis2][:domain]
+        @test collect(may_layout[:xaxis][:domain]) == [0.0, 1.0]
+        @test maximum(may_layout[:yaxis2][:domain]) <
+              minimum(may_layout[:yaxis][:domain])
+        for (legend_key, xaxis_key, yaxis_key) in (
+            (:legend, :xaxis, :yaxis), (:legend2, :xaxis2, :yaxis2),
+        )
+            legend = may_layout[legend_key]
+            @test first(may_layout[xaxis_key][:domain]) <= legend[:x] <=
+                  last(may_layout[xaxis_key][:domain])
+            @test first(may_layout[yaxis_key][:domain]) <= legend[:y] <=
+                  last(may_layout[yaxis_key][:domain])
+        end
         for figure in (figures.lambda_selection, figures.synthetic_recovery)
             layout = figure.fig.layout.fields
             @test layout[:xaxis][:domain] == layout[:xaxis2][:domain]
@@ -362,18 +385,12 @@ end
                   figures.synthetic_recovery.fig.data[lower].fields[:line][:dash]
         end
         @test figures.paired_performance.layout.fields[:showlegend] == false
-        @test figures.discovery_validation.fig.data[2].fields[:xaxis] == "x2"
-        @test figures.discovery_validation.fig.data[2].fields[:yaxis] == "y2"
-        @test figures.discovery_validation.fig.layout.fields[:height] ==
-              CFG._DISCOVERY_FIGURE_HEIGHT
-        @test figures.coefficient_stability.fig.layout.fields[:height] ==
-              CFG._STABILITY_FIGURE_HEIGHT
-        @test CFG._STABILITY_FIGURE_HEIGHT == 800
+        @test CFG._INCLUSION_FREQUENCY_FIGURE_HEIGHT == 360
+        @test CFG._MAY2024_RECONSTRUCTION_FIGURE_HEIGHT == 540
+        @test CFG._COEFFICIENT_STABILITY_FIGURE_HEIGHT == 360
         @test CFG._SYNTHETIC_FIGURE_HEIGHT == 800
-        @test CFG._STABILITY_FIGURE_HEIGHT * 345 / CFG._FIGURE_WIDTH <= 598
-        @test stability_layout[:margin][:t] == 70
         @test synthetic_layout[:margin][:t] == 70
-        submitted_layout = figures.discovery_validation.fig.layout.fields
+        submitted_layout = figures.lambda_selection.fig.layout.fields
         @test CFG._BASE_FONT_SIZE == 24
         @test CFG._AXIS_TITLE_FONT_SIZE == 24
         @test CFG._BASE_FONT_SIZE * 345 / CFG._FIGURE_WIDTH >= 8
@@ -383,12 +400,11 @@ end
         @test submitted_layout[:font][:color] == CFG._TEXT
         @test submitted_layout[:margin][:l] == 53
         @test submitted_layout[:margin][:r] == 20
-        @test submitted_layout[:margin][:t] == 90
+        @test submitted_layout[:margin][:t] == 25
         @test submitted_layout[:margin][:b] == 25
         @test submitted_layout[:xaxis][:title][:font][:size] ==
               CFG._AXIS_TITLE_FONT_SIZE
-        @test submitted_layout[:yaxis2][:tickfont][:family] == CFG._FONT_FAMILY
-        @test submitted_layout[:legend][:font][:size] == CFG._BASE_FONT_SIZE
+        @test !haskey(may_layout, :legend3)
         lambda_layout = figures.lambda_selection.fig.layout.fields
         for key in (:xaxis, :xaxis2)
             @test lambda_layout[key][:tickmode] == "array"
@@ -427,20 +443,27 @@ end
         # even if a changed CSV subsequently receives a valid fresh manifest.
         point_path = joinpath(paths.data, "real_sindy_discovery_coefficients.csv")
         point_frame = CSV.read(point_path, DataFrame)
-        changed_point_frame = copy(point_frame)
-        changed_point_frame.coefficient[2] = -0.12
+        stability_point_path = joinpath(paths.data, "real_sindy_coefficients.csv")
+        stability_point_frame = CSV.read(stability_point_path, DataFrame)
+        changed_stability_point_frame = copy(stability_point_frame)
+        changed_stability_point_frame.coefficient[2] = -0.12
         _figure_fixture_write(
-            paths, "real_sindy_discovery_coefficients.csv", changed_point_frame,
+            paths, "real_sindy_coefficients.csv", changed_stability_point_frame,
         )
         @test_throws ErrorException CFG._write_figure(
-            prepared, "fig_discovery_validation.pdf", figures.discovery_validation,
-            prepared.discovery.inputs, prepared.discovery.input_hashes;
-            height=CFG._DISCOVERY_FIGURE_HEIGHT, role="stale_input_regression",
+            prepared, "fig_discovery_validation.pdf", figures.inclusion_frequency,
+            prepared.stability.inputs, prepared.stability.input_hashes;
+            height=CFG._INCLUSION_FREQUENCY_FIGURE_HEIGHT,
+            role="stale_input_regression",
         )
-        _figure_fixture_write(paths, "real_sindy_discovery_coefficients.csv", point_frame)
+        _figure_fixture_write(
+            paths, "real_sindy_coefficients.csv", stability_point_frame,
+        )
 
         output_inputs = Dict(
-            "fig_discovery_validation.pdf" => prepared.discovery.inputs,
+            "fig_discovery_validation.pdf" => prepared.stability.inputs,
+            "fig_may2024_reconstruction.pdf" =>
+                prepared.discovery.trajectory_inputs,
             "fig_lambda_selection.pdf" => prepared.lambda.inputs,
             "fig_coefficient_stability.pdf" => prepared.stability.inputs,
             "fig_synthetic_recovery.pdf" => prepared.synthetic.inputs,
@@ -492,7 +515,7 @@ end
                 end
             end,
         )
-        @test hook_calls[] == 3
+        @test hook_calls[] == 4
         @test changed_before_failure[]
         @test all(read(path) == prior_bytes[path] for path in transaction_paths)
         @test all(output -> CFG.verify_output_manifest(

@@ -21,6 +21,7 @@ const _BLUE = "#0072B2"
 const _ORANGE = "#D55E00"
 const _GREEN = "#009E73"
 const _PINK = "#CC79A7"
+const _YELLOW = "#E69F00"
 const _BLACK = "#000000"
 const _GREY = "#666666"
 const _TEXT = "#444444"
@@ -28,9 +29,10 @@ const _FONT_FAMILY = "Verdana"
 const _BASE_FONT_SIZE = 24
 const _AXIS_TITLE_FONT_SIZE = 24
 const _FIGURE_WIDTH = 1008
-const _DISCOVERY_FIGURE_HEIGHT = 560
+const _INCLUSION_FREQUENCY_FIGURE_HEIGHT = 360
+const _MAY2024_RECONSTRUCTION_FIGURE_HEIGHT = 540
 const _LAMBDA_FIGURE_HEIGHT = 720
-const _STABILITY_FIGURE_HEIGHT = 800
+const _COEFFICIENT_STABILITY_FIGURE_HEIGHT = 360
 const _SYNTHETIC_FIGURE_HEIGHT = 800
 const _PAIRED_FIGURE_HEIGHT = 560
 
@@ -273,6 +275,8 @@ function _validate_discovery(coefficients, norms, trajectory)
     original == isfinite.(observed) || error(
         "May-2024 original-target flags disagree with persisted observations",
     )
+    velocity = _floats(trajectory, :v_kms, "May-2024 trajectory";
+                       nonnegative=true)
     models = Dict{String,Vector{Float64}}()
     for (name, column) in (
         "SINDy" => :dst_star_sindy_nt,
@@ -286,7 +290,7 @@ function _validate_discovery(coefficients, norms, trajectory)
     all(first(prediction) == first(observed) for prediction in Base.values(models)) || error(
         "May-2024 comparator trajectories do not share the observed anchor",
     )
-    return (; terms, selected, trajectory, time, observed, models)
+    return (; terms, selected, trajectory, time, velocity, observed, models)
 end
 
 function _validate_lambda(candidates, decision)
@@ -532,13 +536,9 @@ function prepare_canonical_figure_inputs(paths=validation_output_paths();
     return (
         paths=normalized_paths,
         package_root=abspath(package_root),
-        discovery=merge(discovery, (inputs=Dict(
-            "point_coefficients" => discovery_coefficients.path,
-            "design_column_norms" => discovery_norms.path,
+        discovery=merge(discovery, (trajectory_inputs=Dict(
             "outer_trajectory" => discovery_trajectory.path,
-        ), input_hashes=Dict(
-            "point_coefficients" => discovery_coefficients.sha256,
-            "design_column_norms" => discovery_norms.sha256,
+        ), trajectory_input_hashes=Dict(
             "outer_trajectory" => discovery_trajectory.sha256,
         ),)),
         lambda=merge(lambda, (inputs=Dict(
@@ -619,42 +619,70 @@ function _horizontal_outside_top_legend!(figure)
     return figure
 end
 
-function _build_discovery_figure(data)
-    selected_indices = findall(data.selected)
-    isempty(selected_indices) && error("discovery support figure requires selected terms")
-    selected_terms = reverse(_display_terms(data.terms[selected_indices]))
-    term_positions = collect(1:length(selected_terms))
-    figure = _figure_canvas(1, 2; height=_DISCOVERY_FIGURE_HEIGHT,
-                            per_subplot_legends=false)
-    plot_bar!(figure, ones(Float64, length(selected_terms)), term_positions;
-        row=1, col=1, orientation="h", color=_BLUE, showlegend=false,
-        xlabel="Selected in full refit", ylabel="Candidate term")
-    xrange!(figure, [-0.05, 1.05]; row=1, col=1)
-    support_axis = figure.fig.layout.fields[:yaxis]
-    support_fields = _attribute_fields(support_axis)
-    support_fields[:tickmode] = "array"
-    support_fields[:tickvals] = term_positions
-    support_fields[:ticktext] = selected_terms
-    support_fields[:range] = [0.5, length(selected_terms) + 0.5]
+function _build_inclusion_frequency_figure(data)
+    order = sortperm(data.inclusion; rev=true, alg=MergeSort)
+    terms = data.terms[order]
+    inclusion = data.inclusion[order]
+    core = inclusion .>= 0.9
+    core == .!iszero.(data.point[order]) || error(
+        "0.9 inclusion core differs from the canonical full-refit support",
+    )
+    positions = collect(1:length(terms))
+    core_indices = findall(core)
+    peripheral_indices = findall(.!core)
+    figure = plot_bar(positions[core_indices], inclusion[core_indices];
+        xlabel="Library Term", ylabel="Inclusion Probability",
+        color=_BLUE, legend="Core (pi >= 0.9)")
+    if !isempty(peripheral_indices)
+        plot_bar!(figure, positions[peripheral_indices], inclusion[peripheral_indices];
+            color=_PINK, legend="Peripheral (pi < 0.9)")
+    end
+    plot_scatter!(figure, [0.5, length(terms) + 0.5], [0.9, 0.9];
+        mode="lines", color=_ORANGE, dash="dash", linewidth=1.5,
+        legend="pi = 0.9 threshold")
+    figure.layout.fields[:xaxis] = merge(
+        get(figure.layout.fields, :xaxis, Dict{Symbol,Any}()),
+        Dict{Symbol,Any}(
+            :tickmode => "array",
+            :tickvals => positions,
+            :ticktext => collect(String, terms),
+            :tickangle => -45,
+        ),
+    )
+    set_legend!(figure; position=:topright)
+    return figure
+end
 
+function _build_may2024_reconstruction_figure(data)
+    figure = subplots(2, 1; show=false)
+    subplot!(figure, 1, 1)
+    plot_scatter!(figure, data.time, data.velocity;
+        mode="lines", color=_YELLOW, linewidth=1.5,
+        legend="V [km/s]")
+    ylabel!(figure, "V [km/s]")
+
+    subplot!(figure, 2, 1)
     plot_scatter!(figure, data.time, data.observed;
-        row=1, col=2, mode="lines", color=_BLACK, dash="solid", linewidth=2.4,
-        legend="Observed Dst*")
+        mode="lines", color=_BLACK, linewidth=2.5,
+        legend="Observed")
     styles = (
-        ("SINDy", "SINDy", _BLUE, "solid"),
-        ("Simplified Burton", "Simplified Burton", _ORANGE, "dash"),
-        ("Published Burton", "Published Burton", _PINK, "dot"),
-        ("O'Brien--McPherron", "O'Brien-McPherron", _GREEN, "dashdot"),
+        ("SINDy", "SINDy (11-term)", _BLUE, "solid"),
+        ("Published Burton", "Burton (1975)", _ORANGE, "dash"),
+        ("O'Brien--McPherron", "O'Brien-McP (2000)", _GREEN, "dashdot"),
     )
     for (data_name, display_name, color, dash) in styles
         plot_scatter!(figure, data.time, data.models[data_name];
-            row=1, col=2, mode="lines", color, dash, linewidth=1.8,
+            mode="lines", color, dash, linewidth=2,
             legend=display_name)
     end
-    xlabel!(figure, "Time from shared anchor [h]"; row=1, col=2)
-    ylabel!(figure, "Dst* [nT]"; row=1, col=2)
-    _horizontal_outside_top_legend!(figure)
-    return _submitted_style!(figure; height=_DISCOVERY_FIGURE_HEIGHT, top_margin=90)
+    xlabel!(figure, "Time [hours from shared anchor]")
+    ylabel!(figure, "Dst* [nT]")
+    subplot_legends!(figure; position=:topright)
+    legend2 = figure.fig.layout.fields[:legend2]
+    legend2[:y] = figure.fig.layout.fields[:yaxis2][:domain][1] + 0.02
+    legend2[:yanchor] = "bottom"
+    legend2[:xanchor] = "right"
+    return figure
 end
 
 function _build_lambda_figure(data)
@@ -703,49 +731,28 @@ function _interval_segments(labels, lower, upper)
 end
 
 function _build_stability_figure(data)
-    all_terms = reverse(_display_terms(data.terms))
-    all_positions = collect(1:length(all_terms))
-    figure = _figure_canvas(1, 2; height=_STABILITY_FIGURE_HEIGHT,
-                            per_subplot_legends=false)
-    plot_bar!(figure, reverse(data.inclusion), all_positions;
-        row=1, col=1, orientation="h", color=_BLUE, showlegend=false,
-        xlabel="Inclusion frequency", ylabel="Candidate term")
-    xrange!(figure, [0.0, 1.0]; row=1, col=1)
-    left_axis = figure.fig.layout.fields[:yaxis]
-    left_fields = _attribute_fields(left_axis)
-    left_fields[:tickmode] = "array"
-    left_fields[:tickvals] = all_positions
-    left_fields[:ticktext] = all_terms
-    left_fields[:range] = [0.5, length(all_terms) + 0.5]
-
     has_scale = isfinite.(data.medians) .& .!iszero.(data.medians)
     valid_indices = findall(has_scale)
     scales = abs.(data.medians[has_scale])
-    term_positions = Float64.(length(data.terms) .- reverse(valid_indices) .+ 1)
-    lower = reverse(data.lower[has_scale] ./ scales)
-    upper = reverse(data.upper[has_scale] ./ scales)
-    medians = reverse(data.medians[has_scale] ./ scales)
-    point = reverse(data.point[has_scale] ./ scales)
-    interval_x, interval_y = _interval_segments(term_positions, lower, upper)
-    plot_scatter!(figure, interval_x, interval_y;
-        row=1, col=2, mode="lines", color=_GREY, dash="solid", linewidth=1.6,
+    term_positions = Float64.(valid_indices)
+    lower = data.lower[has_scale] ./ scales
+    upper = data.upper[has_scale] ./ scales
+    medians = data.medians[has_scale] ./ scales
+    point = data.point[has_scale] ./ scales
+    interval_y, interval_x = _interval_segments(term_positions, lower, upper)
+    figure = plot_scatter(interval_x, interval_y;
+        xlabel="Library Term Index", ylabel="Normalized Coefficient",
+        mode="lines", color=_GREY, dash="solid", linewidth=1.6,
         legend="2.5% to 97.5% range")
-    plot_scatter!(figure, medians, term_positions;
-        row=1, col=2, mode="markers", color=_BLUE, marker_size=7,
+    plot_scatter!(figure, term_positions, medians;
+        mode="markers", color=_BLUE, marker_size=10,
         marker_symbol="circle", legend="Conditional median")
-    plot_scatter!(figure, point, term_positions;
-        row=1, col=2, mode="markers", color=_ORANGE, marker_size=7,
+    plot_scatter!(figure, term_positions, point;
+        mode="markers", color=_ORANGE, marker_size=10,
         marker_symbol="diamond", legend="Full refit")
-    xlabel!(figure, "Normalized coefficient"; row=1, col=2)
-    right_axis = figure.fig.layout.fields[:yaxis2]
-    right_fields = _attribute_fields(right_axis)
-    right_fields[:tickmode] = "array"
-    right_fields[:tickvals] = all_positions
-    right_fields[:ticktext] = all_terms
-    right_fields[:range] = [0.5, length(all_terms) + 0.5]
-    right_fields[:showticklabels] = false
-    _horizontal_outside_top_legend!(figure)
-    return _submitted_style!(figure; height=_STABILITY_FIGURE_HEIGHT, top_margin=70)
+    update_yaxes!(figure; zeroline=true, zerolinecolor=_BLACK, zerolinewidth=1.2)
+    set_legend!(figure; position=:topright)
+    return figure
 end
 
 function _build_synthetic_figure(data)
@@ -828,7 +835,10 @@ end
 
 function build_canonical_figures(prepared)
     return (
-        discovery_validation=_build_discovery_figure(prepared.discovery),
+        inclusion_frequency=_build_inclusion_frequency_figure(prepared.stability),
+        may2024_reconstruction=_build_may2024_reconstruction_figure(
+            prepared.discovery,
+        ),
         lambda_selection=_build_lambda_figure(prepared.lambda),
         coefficient_stability=_build_stability_figure(prepared.stability),
         synthetic_recovery=_build_synthetic_figure(prepared.synthetic),
@@ -889,18 +899,25 @@ function run_canonical_figure_generation(paths=validation_output_paths();
     prepared = prepare_canonical_figure_inputs(paths; package_root)
     figures = build_canonical_figures(prepared)
     specs = (
-        (name="fig_discovery_validation.pdf", figure=figures.discovery_validation,
-         inputs=prepared.discovery.inputs, input_hashes=prepared.discovery.input_hashes,
-         height=_DISCOVERY_FIGURE_HEIGHT,
-         role="required_domain_discovery_and_untouched_validation"),
+        (name="fig_discovery_validation.pdf", figure=figures.inclusion_frequency,
+         inputs=prepared.stability.inputs,
+         input_hashes=prepared.stability.input_hashes,
+         height=_INCLUSION_FREQUENCY_FIGURE_HEIGHT,
+         role="full_width_vertical_inclusion_frequency"),
+        (name="fig_may2024_reconstruction.pdf",
+         figure=figures.may2024_reconstruction,
+         inputs=prepared.discovery.trajectory_inputs,
+         input_hashes=prepared.discovery.trajectory_input_hashes,
+         height=_MAY2024_RECONSTRUCTION_FIGURE_HEIGHT,
+         role="full_width_untouched_may2024_validation"),
         (name="fig_lambda_selection.pdf", figure=figures.lambda_selection,
          inputs=prepared.lambda.inputs, input_hashes=prepared.lambda.input_hashes,
          height=_LAMBDA_FIGURE_HEIGHT,
          role="fixed_60_point_one_standard_error_selection"),
         (name="fig_coefficient_stability.pdf", figure=figures.coefficient_stability,
          inputs=prepared.stability.inputs, input_hashes=prepared.stability.input_hashes,
-         height=_STABILITY_FIGURE_HEIGHT,
-         role="500_draw_full_library_coefficient_stability"),
+         height=_COEFFICIENT_STABILITY_FIGURE_HEIGHT,
+         role="full_width_500_draw_coefficient_stability"),
         (name="fig_synthetic_recovery.pdf", figure=figures.synthetic_recovery,
          inputs=prepared.synthetic.inputs, input_hashes=prepared.synthetic.input_hashes,
          height=_SYNTHETIC_FIGURE_HEIGHT,
@@ -925,7 +942,7 @@ function run_canonical_figure_generation(paths=validation_output_paths();
             _after_figure_hook(spec.name, output)
         end
         Set(basename.(outputs)) == Set(keys(CANONICAL_FIGURE_ARTIFACT_INVENTORY)) ||
-            error("canonical figure generation did not produce the locked five-file inventory")
+            error("canonical figure generation did not produce the locked figure inventory")
         for path in outputs
             verify_output_manifest(path;
                 package_root=prepared.package_root,
