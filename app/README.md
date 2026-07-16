@@ -30,7 +30,10 @@ Configuration via environment variables:
 |---|---|---|
 | `SWM_HOST` | `127.0.0.1` | bind address (`0.0.0.0` for LAN) |
 | `SWM_PORT` | `8723` | port |
-| `SOLARSINDY_LOG` | auto-discovered | path to the live forecast log; if unset, the server looks for `live_forecasts/live_forecast_log.csv` in the package root and then the parent project |
+| `SWM_JULIA_THREADS` | `2` | Julia threads used by the shell launchers so upstream refreshes cannot block API requests |
+| `SOLARSINDY_LOG` | `../var/monitor/live_forecast_log.csv` | path to the live forecast log |
+| `SOLARSINDY_OPERATIONAL_OUTPUT_DIR` | `../validation/output/operational` | regenerated replay artifacts; complete artifacts take priority in the UI |
+| `SOLARSINDY_OPERATIONAL_EVIDENCE_DIR` | (auto) | explicit replay-evidence override; missing artifacts fail closed |
 | `SWM_WEBHOOK_URL` | (none) | if set, POST an alert on every threat-level change (Slack/Discord/generic JSON) |
 
 Offline use: `./vendor-plotly.sh` downloads Plotly locally; otherwise the page falls back to
@@ -56,6 +59,7 @@ All endpoints return JSON; the dashboard is served from the same origin.
 | `GET /api/history?hours=72` | recent verified forecasts (observed vs predicted) |
 | `GET /api/swpc` | NOAA SWPC upstream: L1 solar wind, Kp, G/S/R scales, alerts |
 | `GET /api/dbdt?station=FRD` | live ground dB/dt nowcast + Pulkkinen tier + exceedances |
+| `GET /api/storm_replay` | latest complete regenerated or frozen storm-replay evidence |
 | `GET /api/alerts` | active alerts + combined overall alert level/reasons |
 
 ## How it stays honest
@@ -64,9 +68,9 @@ The integrity rules of this project carry into the UI:
 
 - **No bare point forecasts.** Every forecast is shown with its calibrated 90% interval, and the
   threat "watch" flag is driven by the *worst credible* value within that band, not just the point.
-- **Lead time is stated against physics.** Forecast horizons beyond the last complete hour assume
-  measured L1 look-ahead while the target-hour wind is already upstream-observed, then
-  regime-aware Bz/By relaxation beyond the L1-known window. The genuine upstream lead
+- **Lead time is stated against physics.** Forecast steps use ballistically propagated L1 forcing
+  when the corresponding upstream window has sufficient coverage, then regime-aware Bz/By
+  relaxation beyond the measured L1 window. The genuine upstream lead
   for a *new* disturbance is the L1 advection time (~30–60 min). Multi-day
   confident-severity lead needs CME models not yet in this system.
 - **Calibration is computed from the log, not asserted.** Coverage and RMSE are recomputed from the
@@ -94,10 +98,10 @@ These thresholds are the widely used scheme across the geomagnetic-storm literat
 ## Data & provenance
 
 - **Dst forecast**: the project's **V2** nowcaster: interpretable discovered sparse equation,
-  causal correction, online adaptive-conformal intervals, measured L1 look-ahead, regime-aware
-  Bz/By relaxation, and guarded fallback selection. The pre-upgrade baseline remains in the log
+  causal correction, online adaptive-conformal intervals, ballistically propagated L1 forcing,
+  regime-aware Bz/By relaxation, and guarded fallback selection. The pre-upgrade baseline remains in the log
   only for same-row audit.
-- **Solar wind (L1)**: NOAA SWPC real-time products (`solar-wind/plasma-7-day`, `mag-7-day`) for live
+- **Solar wind (L1)**: NOAA SWPC real-time products (`rtsw_wind_1m`, `rtsw_mag_1m`) for live
   issuance; the NASA OMNI archive (CDAWeb) is used for offline calibration and historical replay.
   **Dst**: Kyoto WDC (via NOAA SWPC `kyoto-dst`). **Ground dB/dt** (future layer): USGS/INTERMAGNET.
 - Forecasts are **locked when issued and scored only after the target hour is observed** — the log

@@ -5,23 +5,22 @@
 #   1. issue immutable V2 forecasts at horizons [1,2,3,6] h
 #      (locked before their target observations exist; duplicate pending targets
 #      are reused by the live verification layer),
-#   2. refresh observations from the live Dst feed (reconciles revisions),
-#   3. verify any pending rows whose target observation has now arrived,
-#   4. capture and score a prospective external Dst snapshot,
-#   5. rewrite the locked-live comparison report.
+#   2. refresh observations from the shared Dst snapshot (this also verifies
+#      pending targets; the narrower verifier is retained as an error fallback),
+#   3. capture and score a prospective external Dst snapshot,
+#   4. rewrite the locked-live comparison report.
 # Then sleep and repeat. As the long accrual daemon it never exits on pending==0,
 # so locked rows keep accumulating over restarts. Per-step try/catch keeps a
 # transient feed/network failure from killing the daemon.
 #
 # Follows the locked-live verification workflow (docs/src/live-verification.md).
 #
-# Output/state directory (log, report, calibration, snapshots) is parameterized so
-# a fresh clone can run against a scratch directory while the deployed shim keeps
-# writing the existing live locations unchanged.
+# The output/state directory (log, report, calibration, snapshots) is
+# parameterized so a fresh clone can run against a scratch directory while the
+# package-native service uses `var/monitor` by default.
 #
 # Env:
-#   SOLARSINDY_MONITOR_DIR     output/state directory (default "live_forecasts",
-#                              resolved against the working directory)
+#   SOLARSINDY_MONITOR_DIR     output/state directory (default <package>/var/monitor)
 #   SOLARSINDY_V2_CALIBRATION  V2 calibration CSV (default <dir>/operational_v2_calibration.csv;
 #                              falls back to the package-bundled calibration when absent)
 #   SOLARSINDY_MONITOR_ONCE=1  run exactly one cycle, then exit (also --once)
@@ -38,7 +37,9 @@ using CSV
 using DataFrames
 using Dates
 
-const MONITOR_DIR = get(ENV, "SOLARSINDY_MONITOR_DIR", "live_forecasts")
+const PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
+const MONITOR_DIR = get(ENV, "SOLARSINDY_MONITOR_DIR",
+                        joinpath(PACKAGE_ROOT, "var", "monitor"))
 const LOG = joinpath(MONITOR_DIR, "live_forecast_log.csv")
 const REPORT = joinpath(MONITOR_DIR, "live_comparison_report.md")
 const OUTAGE_SENTINEL = joinpath(MONITOR_DIR, "OUTAGE.md")   # persistent alert artifact the dashboard can serve
@@ -108,15 +109,15 @@ end
 # path (e.g. a retired upstream feed) can no longer look healthy in the logs.
 function newest_issuance_age_hours()
     isfile(LOG) || return nothing
-    df = try
-        CSV.read(LOG, DataFrame)
+    rows = try
+        CSV.Rows(LOG; select=[:issue_time_utc], reusebuffer=true)
     catch e
         e isa InterruptException && rethrow()
         return nothing
     end
-    ("issue_time_utc" in names(df)) || return nothing
     latest = nothing
-    for s in df.issue_time_utc
+    for row in rows
+        s = row.issue_time_utc
         ismissing(s) && continue
         str = String(string(s))
         t = tryparse(DateTime, str)
@@ -165,6 +166,8 @@ function _retain_live_forecast_log!(log_path::AbstractString, max_rows::Int)
     return _with_forecast_log_lock(path) do
         _recover_append_transaction!(path)
         _live_require_regular_target(path)
+        state = _valid_live_state(path)
+        state !== nothing && Int(state["row_count"]) <= max_rows && return 0
         df = CSV.read(path, DataFrame)
         n = nrow(df)
         n <= max_rows && return 0
@@ -180,21 +183,49 @@ end
 
 # Run one cycle; returns the number of horizons that issued successfully.
 function cycle!()
+    base_cfg = LiveVerifyConfig(; mode=:issue, model=:v2, horizon_hours=first(HORIZONS),
+                                log_path=LOG, v2_calibration_path=V2_CALIB)
+    inputs = try
+        prepare_issue_inputs(base_cfg)
+    catch e
+        e isa InterruptException && rethrow()
+        logln("WARN prepare issuance inputs failed: ", sprint(showerror, e))
+        return 0
+    end
     issued_ok = 0
+    trajectory_horizon = maximum(HORIZONS)
     for h in HORIZONS
         guarded("issue h=$h", () ->
             issue_forecast(LiveVerifyConfig(; mode=:issue, model=:v2, horizon_hours=h,
-                                            log_path=LOG, v2_calibration_path=V2_CALIB))) &&
+                                            log_path=LOG, v2_calibration_path=V2_CALIB);
+                           inputs=inputs, write_trajectory=h == trajectory_horizon,
+                           verbose=false)) &&
             (issued_ok += 1)
     end
     cfg = LiveVerifyConfig(; log_path=LOG, report_path=REPORT)
-    guarded("refresh_observations", () -> refresh_observations!(cfg))
-    guarded("verify_pending", () -> verify_pending!(cfg))
+    dst_times, dst_vals = inputs.dst
+    refreshed = guarded(
+        "refresh_observations",
+        () -> refresh_observations!(cfg; dst_times=dst_times, dst_vals=dst_vals),
+    )
+    refreshed || guarded(
+        "verify_pending_fallback",
+        () -> verify_pending!(cfg; dst_times=dst_times, dst_vals=dst_vals),
+    )
     guarded("forecast_log_retention", () -> _retain_live_forecast_log!(LOG, MAX_LOG_ROWS))
-    guarded("external_dst_snapshot", () -> capture_and_score_external_dst_snapshot!(EXTERNAL_DST_CFG))
-    guarded("comparison_report", () -> write_live_comparison_report(cfg.log_path, cfg.report_path))
-    guarded("summary", () -> begin
+    observations = DataFrame(
+        observed_time_utc=DateTime.(dst_times),
+        observed_dst_nt=Float64.(dst_vals),
+    )
+    guarded(
+        "external_dst_snapshot",
+        () -> capture_and_score_external_dst_snapshot!(
+            EXTERNAL_DST_CFG; observations=observations,
+        ),
+    )
+    guarded("comparison_report_and_summary", () -> begin
         df = CSV.read(LOG, DataFrame)
+        write_live_comparison_report(cfg.log_path, cfg.report_path; df=df)
         pend = count(ismissing, df.observation_dst_nt)
         logln("log rows=", nrow(df), " pending=", pend)
     end)

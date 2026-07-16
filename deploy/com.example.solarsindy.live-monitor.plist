@@ -10,11 +10,12 @@
 
     __JULIA_BIN__     absolute path to the julia executable (e.g. output of `which julia`)
     __CLONE_DIR__     absolute path to the SolarSINDy.jl clone (the --project environment)
-    __WORKDIR__       working directory; the monitor writes into __WORKDIR__/live_forecasts
-                      unless SOLARSINDY_MONITOR_DIR is set below
 
-  The monitor writes its log, comparison report, calibration lookups, and external Dst
-  snapshots under SOLARSINDY_MONITOR_DIR (default "live_forecasts" relative to WorkingDirectory).
+  The monitor writes its bounded forecast log, comparison report, state, outage sentinel,
+  and external Dst snapshots under SOLARSINDY_MONITOR_DIR (default
+  __CLONE_DIR__/var/monitor). Console output is discarded because launchd does not rotate
+  StandardOutPath/StandardErrorPath files; persistent status belongs in those bounded
+  operational artifacts.
 -->
 <plist version="1.0">
 <dict>
@@ -29,13 +30,13 @@
   </array>
 
   <key>WorkingDirectory</key>
-  <string>__WORKDIR__</string>
+  <string>__CLONE_DIR__</string>
 
   <!-- Optional overrides; uncomment and edit as needed.
   <key>EnvironmentVariables</key>
   <dict>
     <key>SOLARSINDY_MONITOR_DIR</key>
-    <string>__WORKDIR__/live_forecasts</string>
+    <string>__CLONE_DIR__/var/monitor</string>
     <key>LIVE_MONITOR_INTERVAL_SEC</key>
     <string>3600</string>
   </dict>
@@ -51,9 +52,9 @@
   <integer>60</integer>
 
   <key>StandardOutPath</key>
-  <string>__WORKDIR__/live_forecasts/live_monitor.out</string>
+  <string>/dev/null</string>
 
   <key>StandardErrorPath</key>
-  <string>__WORKDIR__/live_forecasts/live_monitor.err</string>
+  <string>/dev/null</string>
 </dict>
 </plist>

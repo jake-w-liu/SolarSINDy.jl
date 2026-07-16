@@ -13,6 +13,7 @@ using HTTP, JSON3, Dates
 
 const SWPC_BASE = "https://services.swpc.noaa.gov"
 const SWPC_TTL = 50.0                       # seconds; SWPC products update ~1/min
+const SWPC_REQUEST_WAIT_S = 2.0              # bounded wait; refresh continues in background
 const _SWPC_CACHE = Ref{Any}(nothing)       # (fetch_time::Float64, snapshot)
 const _SWPC_LOCK = ReentrantLock()
 const _SWPC_REFRESH_TASK = Ref{Union{Nothing,Task}}(nothing)
@@ -288,6 +289,9 @@ function _run_swpc_refresh(; build_fn=_build_swpc_snapshot)
                 stale = lock(_SWPC_LOCK) do
                     c = _SWPC_CACHE[]; c === nothing ? nothing : c[2]
                 end
+                # Preserve the last source snapshot, but advance the retry clock. Otherwise an
+                # upstream outage makes every dashboard request launch the same failed refresh.
+                cache_result = true
                 stale === nothing ? out : stale
             end
         catch e
@@ -295,6 +299,7 @@ function _run_swpc_refresh(; build_fn=_build_swpc_snapshot)
             stale = lock(_SWPC_LOCK) do
                 c = _SWPC_CACHE[]; c === nothing ? nothing : c[2]
             end
+            cache_result = true
             if stale !== nothing
                 @warn "SWPC snapshot build failed; serving cached" exception=e
                 stale
@@ -315,19 +320,41 @@ end
 function _start_swpc_refresh_locked()
     task = _SWPC_REFRESH_TASK[]
     if task === nothing || istaskdone(task)
-        task = @async _run_swpc_refresh()
+        # HTTP/DNS failures can block an OS thread despite Julia task scheduling. Run refreshes
+        # on the thread pool so they cannot stall the request loop when the app uses its default
+        # two-thread launcher.
+        task = Threads.@spawn _run_swpc_refresh()
         _SWPC_REFRESH_TASK[] = task
     end
     return task
 end
 
-function swpc_snapshot()
+function _unavailable_swpc_snapshot()
+    return (source = "NOAA SWPC", fetched_utc = jdt(now(UTC)), available = false,
+            solar_wind = Dict{Symbol,Any}(:available => false), kp = nothing,
+            scales = nothing, alerts = NamedTuple[])
+end
+
+function swpc_snapshot(; wait_timeout::Real=SWPC_REQUEST_WAIT_S)
+    isfinite(wait_timeout) && wait_timeout >= 0 ||
+        throw(ArgumentError("wait_timeout must be finite and nonnegative"))
     fresh, task = lock(_SWPC_LOCK) do
         c = _SWPC_CACHE[]
         c !== nothing && (time() - c[1]) <= SWPC_TTL ? (c[2], nothing) :
             (nothing, _start_swpc_refresh_locked())
     end
-    return fresh === nothing ? fetch(task) : fresh
+    fresh !== nothing && return fresh
+
+    # Never let a stalled DNS/HTTP operation pin an API request. Keep exactly one in-flight task
+    # (so repeated polls cannot leak tasks or allocations); its explicit HTTP timeouts normally
+    # finish it shortly, after which the next request observes the refreshed cache.
+    completed = Base.timedwait(() -> istaskdone(task), Float64(wait_timeout); pollint=0.01)
+    completed === :ok && return fetch(task)
+    stale = lock(_SWPC_LOCK) do
+        c = _SWPC_CACHE[]
+        c === nothing ? nothing : c[2]
+    end
+    return stale === nothing ? _unavailable_swpc_snapshot() : stale
 end
 
 function swpc_snapshot_cached_or_refresh()
@@ -342,9 +369,7 @@ function swpc_snapshot_cached_or_refresh()
     end
     fresh !== nothing && return fresh
     stale !== nothing && return stale
-    return (source = "NOAA SWPC", fetched_utc = jdt(now(UTC)), available = false,
-            solar_wind = Dict{Symbol,Any}(:available => false), kp = nothing,
-            scales = nothing, alerts = NamedTuple[])
+    return _unavailable_swpc_snapshot()
 end
 
 # Honest threshold-based upstream indicator (NOT a fused scalar): flags "elevated" when any

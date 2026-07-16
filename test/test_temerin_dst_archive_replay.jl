@@ -4,15 +4,11 @@ using Test
 using DataFrames
 using Dates
 
-const TEMERIN_DST_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "..", "live_forecasts",
+const TEMERIN_DST_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "validation", "operational",
                                                     "temerin_dst_archive_replay.jl"))
+include(TEMERIN_DST_REPLAY_SCRIPT)
 
 @testset "Temerin-Li Dst archive replay helpers" begin
-    if !isfile(TEMERIN_DST_REPLAY_SCRIPT)
-        @test_skip "research-workspace Temerin-Li Dst replay script is not present"
-    else
-        include(TEMERIN_DST_REPLAY_SCRIPT)
-
         rows = parse_temerin_dst_text(_sample_temerin_text(); source = "sample")
         @test nrow(rows) == 4
         @test rows.valid_utc[1] == DateTime(2024, 5, 1, 0, 1, 20)
@@ -55,7 +51,6 @@ const TEMERIN_DST_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "..", "live_
         broken_gap = copy(scored)
         broken_gap.match_abs_gap_min[1] = 99.0
         @test_throws ErrorException _validate_temerin_rows(broken_gap; max_match_gap_min = 5.0)
-    end
 end
 
 end # module TemerinDstArchiveReplayTests

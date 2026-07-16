@@ -43,6 +43,26 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         @test attempts[] == 1
     end
 
+    @testset "A/D: future-dated feeds fail closed at the clock-skew boundary" begin
+        issue_time = DateTime(2026, 7, 15, 12)
+        at_tolerance = issue_time + LIVE_FUTURE_CLOCK_TOLERANCE
+        @test _validate_feed_timestamps(
+            issue_time, at_tolerance, at_tolerance, at_tolerance,
+        ) === nothing
+        @test_throws ErrorException _validate_feed_timestamps(
+            issue_time, issue_time + Hour(1), issue_time, issue_time,
+        )
+        @test_throws ErrorException _validate_feed_timestamps(
+            issue_time, issue_time, issue_time + Hour(1), issue_time,
+        )
+        @test_throws ErrorException _validate_feed_timestamps(
+            issue_time, issue_time, issue_time, issue_time + Hour(24),
+        )
+        @test_throws ArgumentError _validate_feed_timestamps(
+            issue_time, issue_time, issue_time, issue_time; tolerance=Minute(-1),
+        )
+    end
+
     @testset "D: argument parser accepts v2 workflow options" begin
         cfg = _parse_args([
             "--fit-v2-calibration",
@@ -140,6 +160,110 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         @test expert.baseline_spread_nt == 4.0
         @test expert.v1_minus_persistence_nt == 2.0
         @test expert.obrien_minus_v1_nt == -1.0
+
+        # The fitted residual layer uses the driver window aligned with the Dst
+        # anchor, never the final rollout-step driver.  Pin both the correction
+        # input and the log-schema distinction so an arriving shock cannot move
+        # the live feature basis away from the replay/training convention.
+        anchor = (; V=420.0, Bz=-3.0, By=1.0, n=5.0,
+                  Pdyn=dynamic_pressure(5.0, 420.0))
+        target_step = (; V=800.0, Bz=-20.0, By=6.0, n=18.0,
+                       Pdyn=dynamic_pressure(18.0, 800.0))
+        cal = OperationalV2Calibration(
+            Symbol[:V_kms], Float64[0.0], Float64[1.0], Float64[0.0, 0.01],
+            1.0, "anchor-feature-regression",
+        )
+        anchor_features = _v2_features(-40.0, anchor)
+        target_features = _v2_features(-40.0, target_step)
+        @test SolarSINDy.operational_v2_correction(cal, anchor_features) ≈ 4.2
+        @test SolarSINDy.operational_v2_correction(cal, target_features) ≈ 8.0
+        selected = _select_model_prediction(
+            :v2, cal, -40.0, anchor, -45.0, -55.0, -35.0;
+            features=anchor_features,
+        )
+        @test selected.v2_correction ≈ 4.2
+
+        audit = _driver_audit_fields(anchor, target_step)
+        @test _ANCHOR_FEATURE_DRIVER_BASIS ==
+              "anchor_aligned_ballistically_propagated_l1_hour"
+        @test audit.V_kms == anchor.V
+        @test audit.Pdyn_npa == anchor.Pdyn
+        @test audit.target_step_V_kms == target_step.V
+        @test audit.target_step_Pdyn_npa == target_step.Pdyn
+    end
+
+    @testset "Monitor cycle inputs are fetched once and keep one issue timestamp" begin
+        issue_time = DateTime(2026, 7, 15, 12, 34, 56)
+        plasma_calls = Ref(0)
+        mag_calls = Ref(0)
+        dst_calls = Ref(0)
+        plasma = DataFrame(time_tag=[issue_time], speed=[500.0], density=[5.0])
+        mag = DataFrame(time_tag=[issue_time], bz_gsm=[-4.0], by_gsm=[1.0])
+        dst = ([issue_time - Hour(1)], [-40.0])
+        prepared = prepare_issue_inputs(
+            LiveVerifyConfig(; model=:v1);
+            issue_time=issue_time,
+            plasma_fn=() -> (plasma_calls[] += 1; plasma),
+            mag_fn=() -> (mag_calls[] += 1; mag),
+            dst_fn=() -> (dst_calls[] += 1; dst),
+        )
+
+        @test (plasma_calls[], mag_calls[], dst_calls[]) == (1, 1, 1)
+        @test prepared.issue_time == issue_time
+        @test prepared.plasma === plasma
+        @test prepared.mag === mag
+        @test prepared.dst === dst
+    end
+
+    @testset "Forked forecast states share immutable model data and preserve predictions" begin
+        t0 = DateTime(2026, 7, 15, 12)
+        coefficients = joinpath(get_data_dir(), "real_sindy_discovery_coefficients.csv")
+        ensemble = joinpath(get_data_dir(), "real_ensemble_inclusion.csv")
+        template = init_forecast(
+            coefficients_csv=coefficients,
+            ensemble_csv=ensemble,
+            t0=t0,
+            dst0=-40.0,
+        )
+        forked = _fork_forecast_state(template, t0, -40.0)
+
+        @test forked.lib === template.lib
+        @test forked.ξ_primary === template.ξ_primary
+        @test forked.ξ_ensemble === template.ξ_ensemble
+        @test forked.history !== template.history
+        direct = step_forecast!(template, t0 + Hour(1), 500.0, -6.0, 2.0, 7.0,
+                                dynamic_pressure(7.0, 500.0))
+        cloned = step_forecast!(forked, t0 + Hour(1), 500.0, -6.0, 2.0, 7.0,
+                                dynamic_pressure(7.0, 500.0))
+        @test (direct.t, direct.dst_predicted, direct.dst_median,
+               direct.dst_ci_05, direct.dst_ci_95) ==
+              (cloned.t, cloned.dst_predicted, cloned.dst_median,
+               cloned.dst_ci_05, cloned.dst_ci_95)
+        @test isnan(direct.dst_observed) && isnan(cloned.dst_observed)
+    end
+
+    @testset "Deployed conformal sidecar is paired to the point calibration bytes" begin
+        mktempdir() do tmp
+            point_path = joinpath(tmp, "point.csv")
+            write(point_path, "point calibration bytes\n")
+            cfg = LiveVerifyConfig(; model=:v2, v2_calibration_path=point_path)
+            @test _load_conformal_for_model(cfg) === nothing
+
+            cal = fit_conformal(
+                zeros(20), fill(6.0, 20), ones(20), fill(-10.0, 20),
+            )
+            sidecar_path = _conformal_path(point_path)
+            point_sha = bytes2hex(sha256(read(point_path)))
+            write_conformal_calibration(
+                sidecar_path, cal; point_calibration_sha256=point_sha,
+            )
+            loaded = _load_conformal_for_model(cfg)
+            @test loaded.coverage == cal.coverage
+            @test loaded.global_stratum.half_width == cal.global_stratum.half_width
+
+            write(point_path, "changed point calibration bytes\n")
+            @test_throws ArgumentError _load_conformal_for_model(cfg)
+        end
     end
 
     @testset "A/D: append preserves old log rows while adding baseline columns" begin
@@ -770,18 +894,20 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
     @testset "A/D: replay_recent_table builds causal predicted-vs-observed rows" begin
         t0 = DateTime(2026, 6, 6, 0)
         times = collect(t0:Hour(1):t0 + Hour(4))
+        minute_times = [t + Minute(m) for t in times for m in 0:9]
+        hour_idx = repeat(0:4; inner=10)
         plasma = DataFrame(
-            time_tag=times,
-            density=[4.0, 4.2, 4.4, 4.6, 4.8],
-            speed=[410.0, 420.0, 430.0, 440.0, 450.0],
-            temperature=fill(100_000.0, length(times)),
+            time_tag=minute_times,
+            density=4.0 .+ 0.2 .* hour_idx,
+            speed=410.0 .+ 10.0 .* hour_idx,
+            temperature=fill(100_000.0, length(minute_times)),
         )
         mag = DataFrame(
-            time_tag=times,
-            bx_gsm=zeros(length(times)),
-            by_gsm=[1.0, 1.1, 1.2, 1.3, 1.4],
-            bz_gsm=[-1.0, -1.2, -1.4, -1.6, -1.8],
-            bt=[1.4, 1.6, 1.8, 2.0, 2.2],
+            time_tag=minute_times,
+            bx_gsm=zeros(length(minute_times)),
+            by_gsm=1.0 .+ 0.1 .* hour_idx,
+            bz_gsm=-1.0 .- 0.2 .* hour_idx,
+            bt=1.4 .+ 0.2 .* hour_idx,
         )
         dst_vals = [-20.0, -21.0, -23.0, -22.0, -24.0]
 
@@ -1239,16 +1365,19 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         # Missing column → zero, never an error.
         @test _window_finite_count(plasma, :bz_gsm, t0, t1) == 0
 
-        # Gap classification (the issue/refuse decision, isolated for testing). Matches the paper's
-        # safety contract: a missing speed OR a missing Bz window refuses issuance (:hard), because
-        # either primary driver falling back to a quiet default can under-warn a fast storm; only a
-        # secondary (density/By) gap issues a flagged row (:partial).
-        @test _driver_gap_status(3, 2) == :ok
-        @test _driver_gap_status(0, 2) == :hard      # missing speed alone → refuse (was :partial)
-        @test _driver_gap_status(3, 0) == :hard      # missing Bz alone → refuse (was :partial)
+        # The live hourly mean needs ten finite minute samples. Pin the exact
+        # brownout boundary: 0/1/9 are insufficient; 10 is accepted.
+        @test LIVE_MIN_HOURLY_DRIVER_SAMPLES == 10
+        for n in (0, 1, 9)
+            @test _driver_gap_status(n, 10) == :hard
+            @test _driver_gap_status(10, n) == :hard
+            @test _driver_gap_status(10, 10, n, 10) == :partial
+            @test _driver_gap_status(10, 10, 10, n) == :partial
+        end
+        @test _driver_gap_status(10, 10) == :ok
         @test _driver_gap_status(0, 0) == :hard
-        @test _driver_gap_status(3, 2, 0, 1) == :partial   # density-only gap → issue but flag
-        @test _driver_gap_status(3, 2, 1, 0) == :partial   # By-only gap → issue but flag
+        @test _driver_gap_status(10, 10, 10, 10) == :ok
+        @test_throws ArgumentError _driver_gap_status(-1, 10)
     end
 
     @testset "P1-1: an all-NaN density/By trailing window flags a driver gap" begin
@@ -1259,24 +1388,24 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         # density/By trailing samples must classify the window as a (partial) gap.
         t0 = DateTime(2026, 6, 6, 0)
         t1 = DateTime(2026, 6, 6, 1)
-        times = [DateTime(2026, 6, 6, 0, 5), DateTime(2026, 6, 6, 0, 35)]
-        plasma = DataFrame(time_tag=times, speed=[410.0, 420.0], density=[NaN, NaN])
-        mag = DataFrame(time_tag=times, bz_gsm=[-2.0, -3.0], by_gsm=[NaN, NaN])
+        times = t0 .+ Minute.(0:9)
+        plasma = DataFrame(time_tag=times, speed=fill(415.0, 10), density=fill(NaN, 10))
+        mag = DataFrame(time_tag=times, bz_gsm=fill(-2.5, 10), by_gsm=fill(NaN, 10))
 
         n_speed = _window_finite_count(plasma, :speed, t0, t1)
         n_bz = _window_finite_count(mag, :bz_gsm, t0, t1)
         n_density = _window_finite_count(plasma, :density, t0, t1)
         n_by = _window_finite_count(mag, :by_gsm, t0, t1)
-        @test n_speed == 2 && n_bz == 2
+        @test n_speed == 10 && n_bz == 10
         # The logged finite-counts for the fabricated drivers are exactly zero.
         @test n_density == 0
         @test n_by == 0
         # Speed+Bz present but density empty → flagged as a data gap (not :ok).
         @test _driver_gap_status(n_speed, n_bz, n_density, n_by) != :ok
-        @test _driver_gap_status(2, 2, 0, 3) == :partial   # density-only gap
-        @test _driver_gap_status(2, 2, 3, 0) == :partial   # By-only gap
+        @test _driver_gap_status(10, 10, 0, 10) == :partial   # density-only gap
+        @test _driver_gap_status(10, 10, 10, 0) == :partial   # By-only gap
         # No gap when all four drivers have finite trailing samples.
-        @test _driver_gap_status(2, 2, 3, 3) == :ok
+        @test _driver_gap_status(10, 10, 10, 10) == :ok
     end
 
     @testset "P1-2: intermediate all-NaN driver hours increment the fallback counter" begin
@@ -1286,13 +1415,21 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         # intermediate hour ⇒ count > 0; the same span with all hours finite ⇒ 0.
         anchor = DateTime(2026, 6, 6, 0)
         n_steps = 3
-        # Hours [0,1),[1,2),[2,3). Make hour [1,2) all-NaN for speed and Bz.
-        ptimes = [DateTime(2026, 6, 6, 0, 30), DateTime(2026, 6, 6, 1, 30),
-                  DateTime(2026, 6, 6, 2, 30)]
-        plasma_gap = DataFrame(time_tag=ptimes, speed=[410.0, NaN, 430.0],
-                               density=[5.0, 5.0, 5.0])
-        mag_gap = DataFrame(time_tag=ptimes, bz_gsm=[-1.0, NaN, -3.0],
-                            by_gsm=[1.0, 1.0, 1.0])
+        # Hours [0,1),[1,2),[2,3). Each good hour has exactly ten samples;
+        # hour [1,2) is all-NaN for every driver.
+        ptimes = [anchor + Hour(h) + Minute(m) for h in 0:2 for m in 0:9]
+        hour_idx = repeat(0:2; inner=10)
+        middle_gap = hour_idx .== 1
+        plasma_gap = DataFrame(
+            time_tag=ptimes,
+            speed=ifelse.(middle_gap, NaN, 410.0 .+ 10.0 .* hour_idx),
+            density=ifelse.(middle_gap, NaN, 5.0),
+        )
+        mag_gap = DataFrame(
+            time_tag=ptimes,
+            bz_gsm=ifelse.(middle_gap, NaN, -1.0 .- hour_idx),
+            by_gsm=ifelse.(middle_gap, NaN, 1.0),
+        )
 
         # Sum the source-of-truth per-step predicate the issuance loop uses.
         count_fallback(plasma, mag) = sum(
@@ -1305,11 +1442,17 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         @test _step_driver_fallback(plasma_gap, mag_gap, anchor + Hour(1))
         @test !_step_driver_fallback(plasma_gap, mag_gap, anchor)
 
-        plasma_ok = DataFrame(time_tag=ptimes, speed=[410.0, 420.0, 430.0],
-                              density=[5.0, 5.0, 5.0])
-        mag_ok = DataFrame(time_tag=ptimes, bz_gsm=[-1.0, -2.0, -3.0],
-                           by_gsm=[1.0, 1.0, 1.0])
+        plasma_ok = DataFrame(time_tag=ptimes, speed=410.0 .+ 10.0 .* hour_idx,
+                              density=fill(5.0, length(ptimes)))
+        mag_ok = DataFrame(time_tag=ptimes, bz_gsm=-1.0 .- hour_idx,
+                           by_gsm=fill(1.0, length(ptimes)))
         @test count_fallback(plasma_ok, mag_ok) == 0
+
+        # Exact per-hour threshold for the shared fallback predicate.
+        for n in (0, 1, 9)
+            @test _step_driver_fallback(plasma_ok[1:n, :], mag_ok[1:n, :], anchor)
+        end
+        @test !_step_driver_fallback(plasma_ok[1:10, :], mag_ok[1:10, :], anchor)
     end
 
     @testset "P1-3: multi-step v1 issuance is rejected; v1 h=1 and any v2 are allowed" begin
@@ -1378,15 +1521,15 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         # Source window for the step is [step_time-1h-lag, min(step_time-lag, latest_common_sw)).
         # latest_common_sw = step_time-80min caps src_hi so the window is [01:10, 01:40) → 30 min → f=0.5.
         latest_common_sw = step_time - Minute(80)
-        inside = [DateTime(2026, 6, 6, 1, 15), DateTime(2026, 6, 6, 1, 25), DateTime(2026, 6, 6, 1, 35)]
+        inside = DateTime(2026, 6, 6, 1, 11) .+ Minute.(0:9)
         # Leakage bait: rows at/after latest_common_sw with wild values must never enter the result.
         outside = [DateTime(2026, 6, 6, 1, 45), DateTime(2026, 6, 6, 2, 0)]
         plasma = DataFrame(time_tag=vcat(inside, outside),
-                           speed=vcat(fill(600.0, 3), fill(9999.0, 2)),
-                           density=vcat(fill(8.0, 3), fill(999.0, 2)))
+                           speed=vcat(fill(600.0, 10), fill(9999.0, 2)),
+                           density=vcat(fill(8.0, 10), fill(999.0, 2)))
         mag = DataFrame(time_tag=vcat(inside, outside),
-                        bz_gsm=vcat(fill(-10.0, 3), fill(50.0, 2)),
-                        by_gsm=vcat(fill(3.0, 3), fill(-40.0, 2)))
+                        bz_gsm=vcat(fill(-10.0, 10), fill(50.0, 2)),
+                        by_gsm=vcat(fill(3.0, 10), fill(-40.0, 2)))
 
         s = _subhourly_driver_with_status(plasma, mag, step_time, recent, latest_common_sw)
         @test s.l1_measured
@@ -1395,25 +1538,101 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         @test s.driver.Bz ≈ f * (-10.0) + (1 - f) * recent.Bz atol = 1e-9  # -6
         @test s.driver.By ≈ f * 3.0 + (1 - f) * recent.By atol = 1e-9      # 2
         @test s.driver.n ≈ f * 8.0 + (1 - f) * recent.n atol = 1e-9        # 6.5
-        # Pdyn is a blend of Pdyn VALUES (window mean Pdyn, then blend), not Pdyn of the blended V,n.
+        # Pressure is derived from the blended density and speed, preserving the
+        # canonical proton dynamic-pressure identity used by the model.
         meas_pdyn = 1.6726e-6 * 8.0 * 600.0^2
-        @test s.driver.Pdyn ≈ f * meas_pdyn + (1 - f) * recent.Pdyn atol = 1e-9
+        @test s.driver.Pdyn ≈ dynamic_pressure(s.driver.n, s.driver.V) atol = 1e-12
+        @test s.driver.Pdyn != f * meas_pdyn + (1 - f) * recent.Pdyn
 
         # Leakage guard: dropping the post-latest_common_sw rows leaves the result bitwise identical.
-        plasma_clean = DataFrame(time_tag=inside, speed=fill(600.0, 3), density=fill(8.0, 3))
-        mag_clean = DataFrame(time_tag=inside, bz_gsm=fill(-10.0, 3), by_gsm=fill(3.0, 3))
+        plasma_clean = DataFrame(time_tag=inside, speed=fill(600.0, 10), density=fill(8.0, 10))
+        mag_clean = DataFrame(time_tag=inside, bz_gsm=fill(-10.0, 10), by_gsm=fill(3.0, 10))
         s_clean = _subhourly_driver_with_status(plasma_clean, mag_clean, step_time, recent, latest_common_sw)
         @test s_clean.driver == s.driver
 
         # Full coverage: latest_common_sw >= step_time-lag makes f→1, so the driver is the pure window mean.
         full_common = step_time                                   # well past step_time - lag
-        wide = [DateTime(2026, 6, 6, 1, 30), DateTime(2026, 6, 6, 2, 0)]  # inside [step_time-110min, step_time-50min)=[01:10,02:10)
-        plasma_full = DataFrame(time_tag=wide, speed=fill(700.0, 2), density=fill(9.0, 2))
-        mag_full = DataFrame(time_tag=wide, bz_gsm=fill(-14.0, 2), by_gsm=fill(5.0, 2))
+        wide = DateTime(2026, 6, 6, 1, 15) .+ Minute.(0:5:45)  # inside [01:10,02:10)
+        plasma_full = DataFrame(time_tag=wide, speed=fill(700.0, 10), density=fill(9.0, 10))
+        mag_full = DataFrame(time_tag=wide, bz_gsm=fill(-14.0, 10), by_gsm=fill(5.0, 10))
         s_full = _subhourly_driver_with_status(plasma_full, mag_full, step_time, recent, full_common)
         @test s_full.l1_measured
         @test s_full.driver.V ≈ 700.0 atol = 1e-9                 # pure window mean at f=1
         @test s_full.driver.Bz ≈ -14.0 atol = 1e-9
+    end
+
+    @testset "V2 tail: subhour L1 branch rejects sparse, NaN, and partial windows" begin
+        recent = (V=500.0, Bz=-2.0, By=1.0, n=5.0,
+                  Pdyn=dynamic_pressure(5.0, 500.0))
+        step_time = DateTime(2026, 6, 6, 3)
+        latest_common_sw = step_time - Minute(80)
+        times = DateTime(2026, 6, 6, 1, 11) .+ Minute.(0:9)
+        plasma = DataFrame(time_tag=times, speed=fill(600.0, 10), density=fill(8.0, 10))
+        mag = DataFrame(time_tag=times, bz_gsm=fill(-10.0, 10), by_gsm=fill(3.0, 10))
+
+        for n in (0, 1, 9)
+            sparse = _subhourly_driver_with_status(
+                plasma[1:n, :], mag[1:n, :], step_time, recent, latest_common_sw,
+            )
+            @test !sparse.l1_measured
+            @test sparse.driver == recent
+        end
+        exact = _subhourly_driver_with_status(
+            plasma, mag, step_time, recent, latest_common_sw,
+        )
+        @test exact.l1_measured
+
+        plasma_nan = copy(plasma)
+        mag_nan = copy(mag)
+        plasma_nan.speed .= NaN
+        plasma_nan.density .= NaN
+        mag_nan.bz_gsm .= NaN
+        mag_nan.by_gsm .= NaN
+        all_nan = _subhourly_driver_with_status(
+            plasma_nan, mag_nan, step_time, recent, latest_common_sw,
+        )
+        @test !all_nan.l1_measured
+        @test all_nan.driver == recent
+
+        partial_mag = copy(mag)
+        partial_mag.by_gsm .= NaN
+        partial = _subhourly_driver_with_status(
+            plasma, partial_mag, step_time, recent, latest_common_sw,
+        )
+        @test !partial.l1_measured
+        @test partial.driver == recent
+    end
+
+    @testset "V2 tail: ballistic arrival is identical across completed and look-ahead steps" begin
+        recent = (V=500.0, Bz=-1.0, By=0.0, n=5.0,
+                  Pdyn=dynamic_pressure(5.0, 500.0))
+        # At 500 km/s, L1 transit is 50 min. A shock measured at 01:15 belongs
+        # to Earth hour [02:00,03:00), not the preceding completed hour.
+        quiet_times = DateTime(2026, 6, 6, 0, 15) .+ Minute.(0:9)
+        shock_times = DateTime(2026, 6, 6, 1, 15) .+ Minute.(0:9)
+        times = vcat(quiet_times, shock_times)
+        plasma = DataFrame(time_tag=times,
+                           speed=vcat(fill(500.0, 10), fill(800.0, 10)),
+                           density=vcat(fill(5.0, 10), fill(20.0, 10)))
+        mag = DataFrame(time_tag=times,
+                        bz_gsm=vcat(fill(-1.0, 10), fill(-20.0, 10)),
+                        by_gsm=zeros(20))
+        latest_common_sw = DateTime(2026, 6, 6, 1, 40)
+
+        before_arrival = _subhourly_driver_with_status(
+            plasma, mag, DateTime(2026, 6, 6, 2), recent, latest_common_sw,
+        )
+        at_arrival = _subhourly_driver_with_status(
+            plasma, mag, DateTime(2026, 6, 6, 3), recent, latest_common_sw,
+        )
+        @test before_arrival.l1_measured
+        @test before_arrival.driver.V == 500.0
+        @test before_arrival.driver.Bz == -1.0
+        @test at_arrival.l1_measured
+        @test at_arrival.driver.V > before_arrival.driver.V
+        @test at_arrival.driver.Bz < before_arrival.driver.Bz
+        @test at_arrival.driver.Pdyn ≈
+              dynamic_pressure(at_arrival.driver.n, at_arrival.driver.V) atol=1e-12
     end
 
     @testset "M-mem: memory features and freshest-pair tail rate degrade loudly on Dst gaps" begin
@@ -1425,16 +1644,52 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         mag = DataFrame(time_tag=[t - Minute(30)], bz_gsm=[-8.0], by_gsm=[2.0])
 
         # Signs/values pinned against the training-side _lagged_difference convention (v[t]-v[t-lag]).
-        m = _live_v2_memory_features(plasma, mag, dst_times, dst_vals, t, drv)
+        m = _live_v2_memory_features(plasma, mag, dst_times, dst_vals, t, drv, t)
         @test m.dst_delta_1h_nt == -30.0                         # -70 - (-40)
         @test m.dst_delta_3h_nt == -50.0                         # -70 - (-20)
         @test m.dst_delta_3h_nt != m.dst_delta_1h_nt
+
+        # Driver memory follows consecutive anchor-aligned, ballistically
+        # propagated source hours, matching `add_operational_v2_features!`.
+        # With V=500 km/s the source windows end 50 min before each Earth-hour
+        # anchor.  Distinct values in three consecutive windows make an
+        # accidental target-step-minus-anchor difference immediately visible.
+        source_values = (
+            (t - Hour(3) - Minute(50), 500.0, 1.0, 5.0),
+            (t - Hour(2) - Minute(50), 500.0, -2.0, 5.0),
+            (t - Hour(1) - Minute(50), 500.0, -8.0, 5.0),
+        )
+        mem_times = DateTime[]
+        mem_speed = Float64[]
+        mem_density = Float64[]
+        mem_bz = Float64[]
+        mem_by = Float64[]
+        for (start, speed, bz, density) in source_values
+            append!(mem_times, start .+ Minute.(0:9))
+            append!(mem_speed, fill(speed, 10))
+            append!(mem_density, fill(density, 10))
+            append!(mem_bz, fill(bz, 10))
+            append!(mem_by, zeros(10))
+        end
+        mem_plasma = DataFrame(
+            time_tag=mem_times, speed=mem_speed, density=mem_density,
+        )
+        mem_mag = DataFrame(time_tag=mem_times, bz_gsm=mem_bz, by_gsm=mem_by)
+        anchor_drv = (V=500.0, Bz=-8.0, By=0.0, n=5.0,
+                      Pdyn=dynamic_pressure(5.0, 500.0))
+        aligned = _live_v2_memory_features(
+            mem_plasma, mem_mag, dst_times, dst_vals, t, anchor_drv, t,
+        )
+        @test aligned.Bz_delta_1h_nt == -6.0
+        @test aligned.VBsouth_delta_1h_mvm == 3.0
+        @test aligned.VBsouth_mean_3h_mvm ≈ 5 / 3 atol=1e-12
+        @test aligned.Bsouth_mean_3h_nt ≈ 10 / 3 atol=1e-12
 
         # Interior gap at t-3h zeros the calibrated memory tuple (guard), and the 3h delta is NOT
         # silently forced equal to the 1h delta by a cascading fallback (the documented regression).
         gap3_t = [t - Hour(2), t - Hour(1), t]
         gap3_v = [-25.0, -40.0, -70.0]
-        z = _live_v2_memory_features(plasma, mag, gap3_t, gap3_v, t, drv)
+        z = _live_v2_memory_features(plasma, mag, gap3_t, gap3_v, t, drv, t)
         @test z == _zero_v2_memory_features()
         @test z.dst_delta_1h_nt == 0.0 && z.dst_delta_3h_nt == 0.0
 

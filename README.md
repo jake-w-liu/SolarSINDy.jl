@@ -13,7 +13,7 @@ The package is organized as two layers:
 2. **Operational forecasting (v2).** A causal post-processing layer corrects
    the v1 point forecast and attaches **distribution-free conformal predictive
    intervals** with finite-sample coverage. V2 then applies
-   measured L1 look-ahead, regime-aware Bz/By relaxation, and guarded fallback selection,
+   ballistically propagated L1 forcing, regime-aware Bz/By relaxation, and guarded fallback selection,
    producing the calibrated Dst forecast used by the live monitor and dashboard.
 
 ## Capabilities
@@ -33,8 +33,8 @@ The package is organized as two layers:
 - stratified split-conformal predictive intervals with finite-sample coverage, stratified
   by lead time × geomagnetic activity regime
 - adaptive (online) conformal updating under distribution shift
-- V2 tail: measured L1 look-ahead while target-hour wind is already
-  upstream-observed, then regime-aware Bz/By relaxation that lengthens during rapid
+- V2 tail: ballistically propagated L1 forcing when the corresponding upstream window
+  has sufficient coverage, then regime-aware Bz/By relaxation that lengthens during rapid
   Dst deepening
 - guarded component selection over corrected SINDy, uncorrected SINDy v1, persistence,
   Burton, Burton-full, and O'Brien–McPherron, deployed only after chronological validation
@@ -179,20 +179,17 @@ Dst snapshot, and rewrites the comparison report. It runs from a fresh clone:
 git clone https://github.com/jake-w-liu/SolarSINDy.jl.git
 julia --project=SolarSINDy.jl -e 'using Pkg; Pkg.instantiate()'
 
-# One cycle against the live feeds, writing into a chosen directory, then exit:
-SOLARSINDY_MONITOR_DIR=./live_forecasts \
-  julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_monitor.jl --once
+# One cycle against the live feeds, then exit:
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_monitor.jl --once
 
 # Continuous daemon (default 3600 s cadence):
-SOLARSINDY_MONITOR_DIR=./live_forecasts \
-  julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_monitor.jl
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_monitor.jl
 ```
 
 Configuration is by environment variable:
 
 - `SOLARSINDY_MONITOR_DIR` — output/state directory for the log, comparison report, outage
-  sentinel, and external-Dst snapshots (default `live_forecasts`, resolved against the working
-  directory).
+  sentinel, and external-Dst snapshots (default `<clone>/var/monitor`).
 - `SOLARSINDY_V2_CALIBRATION` — V2 calibration CSV (default `<dir>/operational_v2_calibration.csv`).
   When the directory has no calibration, the monitor falls back to the bundled locked calibration
   in [`deploy/`](deploy/) and emits a warning. The conformal interval sidecar is looked up next to
@@ -205,8 +202,11 @@ Configuration is by environment variable:
 ### macOS launchd service
 
 [`deploy/com.example.solarsindy.live-monitor.plist`](deploy/com.example.solarsindy.live-monitor.plist)
-is a launchd template. Replace the `__PLACEHOLDER__` paths (julia binary, clone directory, working
-directory), copy it to `~/Library/LaunchAgents/`, and `launchctl load` it.
+is a launchd template. Replace the Julia-binary and clone-directory placeholders, create
+`var/monitor/`, copy the file to `~/Library/LaunchAgents/`, and `launchctl load` it. The
+template sends supervisor console output to `/dev/null` so an unattended daemon cannot grow
+unrotated stdout/stderr files; bounded forecast, state, report, and outage artifacts remain in
+`var/monitor/`.
 
 ### Artifact regeneration
 
@@ -234,7 +234,8 @@ cd SolarSINDy.jl/app
 ./run.sh                 # → http://127.0.0.1:8723
 ```
 
-It auto-discovers the live forecast log (or set `SOLARSINDY_LOG=/path/to/live_forecast_log.csv`),
+It reads `<clone>/var/monitor/live_forecast_log.csv` by default (or set
+`SOLARSINDY_LOG=/path/to/live_forecast_log.csv`),
 falls back to the Plotly CDN when no vendored copy is present, and POSTs webhook alerts on
 threat-level changes when `SWM_WEBHOOK_URL` is set. The dashboard has its own lightweight
 environment (`app/Project.toml`) and test suite (`app/test/runtests.jl`, also run by the package

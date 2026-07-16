@@ -68,11 +68,26 @@ jdt(dt) = (dt === missing || dt === nothing) ? nothing : string(dt) * "Z"
 const _TIME_COLS = ["issue_time_utc", "latest_solar_wind_utc", "latest_dst_time_utc", "target_time_utc"]
 const _LOG_CACHE = Ref{Any}(nothing)
 const _LOG_LOCK = ReentrantLock()
+const _CALIBRATION_CACHE = Ref{Any}(nothing)
+const _CALIBRATION_LOCK = ReentrantLock()
+const _LATEST_CYCLE_CACHE = Ref{Any}(nothing)
+const _LATEST_CYCLE_LOCK = ReentrantLock()
+const _VERIFIED_ROWS_CACHE = Ref{Any}(nothing)
+const _VERIFIED_ROWS_LOCK = ReentrantLock()
+const _HISTORY_CACHE = Ref{Any}(nothing)
+const _HISTORY_LOCK = ReentrantLock()
 
 function _log_file_identity(path::AbstractString)
     resolved = realpath(path)
     info = stat(path)
     return (resolved, info.device, info.inode, info.size, info.mtime, info.ctime)
+end
+
+function _cached_log_key(df::DataFrame)
+    return lock(_LOG_LOCK) do
+        cached = _LOG_CACHE[]
+        cached !== nothing && cached[2] === df ? (cached[1], objectid(df)) : nothing
+    end
 end
 
 function _canonical_missing_log_path(path::AbstractString)
@@ -154,7 +169,7 @@ const _CYCLE_TOL = Minute(5)   # intra-cycle issue-time spread is seconds; cycle
 
 _sort_by_target!(cyc) = (hasproperty(cyc, :target_time_utc_dt) && sort!(cyc, :target_time_utc_dt); cyc)
 
-function latest_cycle(df::DataFrame)
+function _latest_cycle_uncached(df::DataFrame)
     nrow(df) == 0 && return df
     if hasproperty(df, :issue_time_utc_dt)
         iss = df.issue_time_utc_dt
@@ -175,14 +190,28 @@ function latest_cycle(df::DataFrame)
     return df[1:0, :]   # nothing usable; downstream build_* handle the no-cycle case
 end
 
+
+function latest_cycle(df::DataFrame)
+    key = _cached_log_key(df)
+    key === nothing && return _latest_cycle_uncached(df)
+    return lock(_LATEST_CYCLE_LOCK) do
+        cached = _LATEST_CYCLE_CACHE[]
+        if cached === nothing || cached[1] != key
+            cached = (key, _latest_cycle_uncached(df))
+            _LATEST_CYCLE_CACHE[] = cached
+        end
+        return cached[2]
+    end
+end
+
 # Verified rows: a real forecast (target strictly AFTER both the issue time and the last observed Dst — a
 # 0-lead row is not a forecast and is what the locked comparison report excludes), with a FINITE observation
 # and a finite V2 point + band. jnum(obs) rejects NaN/Inf observations that would otherwise reach the
 # calibration summary and make JSON serialization throw.
-function verified_rows(df::DataFrame)
-    nrow(df) == 0 && return df
+function _verified_rows_uncached(df::DataFrame)
+    nrow(df) == 0 && return view(df, Int[], :)
     (hasproperty(df, :target_time_utc_dt) &&
-     hasproperty(df, :observation_dst_nt)) || return df[1:0, :]
+     hasproperty(df, :observation_dst_nt)) || return view(df, Int[], :)
     has_issue  = hasproperty(df, :issue_time_utc_dt)
     has_anchor = hasproperty(df, :latest_dst_time_utc_dt)
     keep = trues(nrow(df))
@@ -198,7 +227,21 @@ function verified_rows(df::DataFrame)
         keep[i] = valid_lead && jnum(_rowget(r, :observation_dst_nt)) !== nothing &&
                   jnum(_v2_pred(r)) !== nothing && lo !== nothing && hi !== nothing && lo <= hi
     end
-    return df[keep, :]
+    return view(df, keep, :)
+end
+
+
+function verified_rows(df::DataFrame)
+    key = _cached_log_key(df)
+    key === nothing && return _verified_rows_uncached(df)
+    return lock(_VERIFIED_ROWS_LOCK) do
+        cached = _VERIFIED_ROWS_CACHE[]
+        if cached === nothing || cached[1] != key
+            cached = (key, _verified_rows_uncached(df))
+            _VERIFIED_ROWS_CACHE[] = cached
+        end
+        return cached[2]
+    end
 end
 
 # ---- calibration summary (computed from the log, not a static report) ------------------
@@ -255,7 +298,7 @@ end
 
 _prefer_metric(primary, fallback) = primary === nothing ? fallback : primary
 
-function calibration_summary(df::DataFrame)
+function _compute_calibration_summary(df::DataFrame)
     # Live interval method = source of the most recent issued forecast cycle.
     cyc = latest_cycle(df)
     live_src = _valid_live_cycle(cyc) ? string(_common_cycle_field(cyc, :interval_source)) : "unknown"
@@ -335,6 +378,19 @@ function calibration_summary(df::DataFrame)
             deepest_obs_dst_nt=jnum(round(minimum(obs); digits=1)),
             n_storm_verified=count(obs .< -50),
             by_source=by_source)
+end
+
+function calibration_summary(df::DataFrame)
+    key = _cached_log_key(df)
+    key === nothing && return _compute_calibration_summary(df)
+    return lock(_CALIBRATION_LOCK) do
+        cached = _CALIBRATION_CACHE[]
+        if cached === nothing || cached[1] != key
+            cached = (key, _compute_calibration_summary(df))
+            _CALIBRATION_CACHE[] = cached
+        end
+        return cached[2]
+    end
 end
 
 # ---- payload builders ------------------------------------------------------------------
@@ -513,12 +569,12 @@ end
 
 """Storm-time replay summary: serves the offline replay report and its scored-row provenance.
 Defensive (never throws): missing/unreadable artifacts return available=false."""
-function build_storm_replay(log_path::AbstractString)
-    dir = dirname(log_path)
+function build_storm_replay(log_path::AbstractString; evidence_dir=nothing)
+    dir = evidence_dir === nothing ? dirname(log_path) : String(evidence_dir)
     report = joinpath(dir, "storm_replay_report.md")
     scored = joinpath(dir, "storm_replay_scored.csv")
     isfile(report) || return (available=false,
-                              reason="no storm-replay report; run live_forecasts/storm_replay.jl")
+                              reason="no storm-replay report; run validation/operational/storm_replay.jl")
     md = try
         read(report, String)
     catch e
@@ -607,7 +663,7 @@ function build_status(df::DataFrame)
                     point_min_dst_nt=point_min, worst_credible_dst_nt=worst_cred,
                     basis="Dst storm-intensity scale (-30/-50/-100/-200 nT)"),
             lead_time=(forecast_horizon_hours=horizon_max,
-                       driver_assumption="L1 measured look-ahead, then regime-aware relaxation beyond the L1-known window, with a near-term extreme-Dst inertia guard",
+                       driver_assumption="Ballistically propagated L1 forcing, then regime-aware relaxation beyond the measured L1 window, with a near-term extreme-Dst inertia guard",
                        physical_upstream_lead_min=[30, 60],
                        note="Genuine upstream lead for new severity is the L1 advection time (~30-60 min). " *
                             "Multi-day lead requires CME eruption/propagation models, not yet in this system."),
@@ -616,11 +672,10 @@ function build_status(df::DataFrame)
             served_model_version=string(_common_cycle_field(cyc, :sub_hourly_model_version)))
 end
 
-"""Recent verified track record (observed vs predicted with band) for the last `hours`."""
-function build_history(df::DataFrame, hours::Real=72)
+function _build_history_uncached(df::DataFrame, hours::Real, reference_time::DateTime)
     v = verified_rows(df)
     nrow(v) == 0 && return (rows=[], coverage_90=nothing, rmse_nt=nothing, hours=hours)
-    cutoff = now(UTC) - Hour(round(Int, hours))
+    cutoff = reference_time - Hour(round(Int, hours))
     rows = NamedTuple[]
     for r in eachrow(v)
         t = _rowget(r, :target_time_utc_dt)
@@ -651,9 +706,25 @@ function build_history(df::DataFrame, hours::Real=72)
             rmse_nt_all=_prefer_metric(cal.v2_rmse_nt, cal.rmse_nt))
 end
 
+
+"""Recent verified track record (observed vs predicted with band) for the last `hours`."""
+function build_history(df::DataFrame, hours::Real=72)
+    reference_time = now(UTC)
+    log_key = _cached_log_key(df)
+    log_key === nothing && return _build_history_uncached(df, hours, reference_time)
+    key = (log_key, Float64(hours), floor(reference_time, Hour))
+    return lock(_HISTORY_LOCK) do
+        cached = _HISTORY_CACHE[]
+        if cached === nothing || cached[1] != key
+            cached = (key, _build_history_uncached(df, hours, reference_time))
+            _HISTORY_CACHE[] = cached
+        end
+        return cached[2]
+    end
+end
+
 """Active alert summary derived from the current threat status."""
-function build_alerts(df::DataFrame)
-    st = build_status(df)
+function build_alerts(df::DataFrame, st=build_status(df))
     getproperty(st, :available) == false && return (active=false, alerts=[], generated_utc=st.generated_utc)
     th = st.threat
     alerts = NamedTuple[]

@@ -23,6 +23,20 @@ const APP_DIR    = normpath(joinpath(@__DIR__, ".."))      # SolarSINDy.jl/app
 const PKG_ROOT   = normpath(joinpath(APP_DIR, ".."))       # the package root (SolarSINDy.jl)
 const PUBLIC_DIR = joinpath(APP_DIR, "public")
 
+include(joinpath(@__DIR__, "operational_paths.jl"))
+
+function app_operational_evidence_dir(required_files::AbstractString...)
+    output_override = strip(get(ENV, "SOLARSINDY_OPERATIONAL_OUTPUT_DIR", ""))
+    output_dir = isempty(output_override) ?
+        joinpath(PKG_ROOT, "validation", "output", "operational") : output_override
+    return select_operational_evidence_dir(
+        required_files...;
+        output_dir=output_dir,
+        paper_dir=joinpath(dirname(PKG_ROOT), "paper_v2_monitor", "data", "source", "operational"),
+        package_dir=joinpath(PKG_ROOT, "data", "operational_validation"),
+    )
+end
+
 include(joinpath(@__DIR__, "forecast_api.jl"))
 include(joinpath(@__DIR__, "swpc.jl"))
 include(joinpath(@__DIR__, "geoelectric.jl"))
@@ -31,19 +45,12 @@ include(joinpath(@__DIR__, "forecaster.jl"))
 include(joinpath(@__DIR__, "network.jl"))
 include(joinpath(@__DIR__, "notify.jl"))
 
-# Resolve the live forecast log: $SOLARSINDY_LOG if set, else the first existing candidate
-# (package-local, then a parent project's live_forecasts/ — so the bundled dashboard finds the
-# live log automatically when the package is checked out inside the research project), else the
-# package-local default path (the request handlers degrade gracefully when the file is absent).
+# Resolve the live forecast log: $SOLARSINDY_LOG if set, otherwise the package's
+# runtime-state location. Request handlers degrade gracefully before the first row exists.
 function default_log()
     env = get(ENV, "SOLARSINDY_LOG", "")
     isempty(env) || return env
-    candidates = [joinpath(PKG_ROOT, "live_forecasts", "live_forecast_log.csv"),
-                  joinpath(PKG_ROOT, "..", "live_forecasts", "live_forecast_log.csv")]
-    for c in candidates
-        isfile(c) && return normpath(c)
-    end
-    return normpath(candidates[1])
+    return joinpath(PKG_ROOT, "var", "monitor", "live_forecast_log.csv")
 end
 
 const _CT = Dict(".html"=>"text/html; charset=utf-8", ".js"=>"application/javascript; charset=utf-8",
@@ -124,7 +131,10 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
     elseif path == "/api/forecast"
         return json_response(build_forecast(get_log(log_path), log_path))
     elseif path == "/api/storm_replay"
-        return json_response(build_storm_replay(log_path))
+        evidence_dir = app_operational_evidence_dir(
+            "storm_replay_report.md", "storm_replay_scored.csv",
+        )
+        return json_response(build_storm_replay(log_path; evidence_dir=evidence_dir))
     elseif path == "/api/history"
         q = HTTP.queryparams(query)
         # Validate finiteness before clamping: parse(Float64, "NaN") succeeds and clamp(NaN,…)
@@ -140,8 +150,9 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
     elseif path == "/api/alerts"
         df = get_log(log_path)
         snap = swpc_snapshot_cached_or_refresh()
-        combined = compute_alert_state(build_status(df), upstream_assessment(snap), usgs_dbdt())
-        return json_response(merge(build_alerts(df),
+        status = build_status(df)
+        combined = compute_alert_state(status, upstream_assessment(snap), usgs_dbdt())
+        return json_response(merge(build_alerts(df, status),
                                    (overall_level = combined.level, overall_reasons = combined.reasons)))
     else
         return json_response((error="unknown endpoint", path=path); status=404)

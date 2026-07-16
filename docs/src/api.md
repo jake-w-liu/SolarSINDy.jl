@@ -20,6 +20,7 @@ ensemble_sindy
 sindy_predict
 simulate_sindy
 sweep_lambda
+collinearity_diagnostics
 ```
 
 ## Baselines
@@ -49,6 +50,8 @@ extract_omni2_columns
 parse_omni2
 load_omni2_csv
 clean_omni_data!
+add_original_observation_flags!
+original_sindy_mask
 StormCatalogEntry
 build_storm_catalog
 extract_storm_data
@@ -61,11 +64,16 @@ load_storm_catalog
 
 ```@docs
 rmse
+mae
 correlation
 skill_score
 prediction_efficiency
 metrics_summary
 wilcoxon_signed_rank_p
+paired_storm_statistics
+write_paired_storm_statistics
+holm_adjust
+write_holm_adjustment
 ```
 
 ## Forecasting And Alarms
@@ -86,6 +94,7 @@ AlarmConfig
 default_alarm_config
 classify_severity
 check_alarm
+maybe_fire_horizon_alarm!
 alarm_print
 alarm_log
 fetch_swpc_plasma
@@ -96,6 +105,10 @@ run_monitor
 recover_shadow_state
 DEFAULT_FEED_DEADMAN_THRESHOLD
 feed_deadman_tripped
+storm_lambda_grid
+select_storm_lambda
+write_storm_lambda_selection
+read_storm_lambda_selection
 ```
 
 ## Conformal Calibration
@@ -132,6 +145,10 @@ run_assimilation
 numerical_derivative
 smooth_moving_average
 pressure_correct_dst
+dynamic_pressure
+dst_to_dst_star
+dst_star_to_dst
+resolve_pdyn
 halfwave_rectify
 imf_clock_angle
 get_data_dir

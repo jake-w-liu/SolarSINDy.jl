@@ -7,6 +7,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 JULIA="${JULIA:-julia}"
+JULIA_THREADS="${SWM_JULIA_THREADS:-2}"
 
 if ! command -v "$JULIA" >/dev/null 2>&1; then
   echo "error: '$JULIA' not found. Install Julia 1.10+ (https://julialang.org/downloads/)." >&2
@@ -16,4 +17,4 @@ fi
 echo "Instantiating Julia environment (first run may take a moment)…"
 "$JULIA" --project=. -e 'using Pkg; Pkg.instantiate()'
 
-exec "$JULIA" --project=. src/server.jl
+exec "$JULIA" --threads="$JULIA_THREADS" --project=. src/server.jl

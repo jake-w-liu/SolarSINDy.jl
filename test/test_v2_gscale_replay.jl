@@ -4,15 +4,11 @@ using Test
 using DataFrames
 using Dates
 
-const GSCALE_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "..", "live_forecasts",
+const GSCALE_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "validation", "operational",
                                                "v2_gscale_replay.jl"))
+include(GSCALE_REPLAY_SCRIPT)
 
 @testset "V2 exact Kp/G-scale replay helpers" begin
-    if !isfile(GSCALE_REPLAY_SCRIPT)
-        @test_skip "research-workspace G-scale replay script is not present"
-    else
-        include(GSCALE_REPLAY_SCRIPT)
-
         @testset "GFZ Kp parsing and NOAA G-scale event selection" begin
             @test noaa_g_level(4.999) == 0
             @test noaa_g_level(5.0) == 1
@@ -75,7 +71,6 @@ const GSCALE_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "..", "live_forec
             broken.target_utc[1] = broken.issue_utc[1]
             @test_throws ErrorException _validate_gscale_rows(broken)
         end
-    end
 end
 
 end # module V2GScaleReplayTests

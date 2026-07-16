@@ -33,7 +33,7 @@ The script:
 - fetches the latest SWPC Kyoto Dst observation,
 - anchors the rolling Dst* state to the latest observed Dst,
 - forecasts a strictly future hourly Dst target,
-- appends the locked prediction to `live_forecasts/live_forecast_log.csv`,
+- appends the locked prediction to `SolarSINDy.jl/var/monitor/live_forecast_log.csv`,
 - logs persistence, Burton, BurtonFull, O'Brien--McPherron, and SINDy
   predictions for the same target,
 - polls the Dst feed until the target observation appears,
@@ -108,8 +108,8 @@ locked-live report:
 ```bash
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --comparison-report \
-  --log=live_forecasts/live_forecast_log.csv \
-  --report=live_forecasts/live_comparison_report.md
+  --log=SolarSINDy.jl/var/monitor/live_forecast_log.csv \
+  --report=SolarSINDy.jl/var/monitor/live_comparison_report.md
 ```
 
 The headline comparison in this report is a same-row table:
@@ -150,22 +150,25 @@ forecast; the internal `v2_selected_component` field is audit metadata, not a
 separate headline model.
 
 The logged pre-upgrade baseline remains available for audit and model-comparison
-scores. The V2 product fields add the multi-hour tail: target hours already
-measured at L1 use the upstream look-ahead, and later hours relax Bz/By toward
-quiet with a longer timescale during rapid Dst deepening. The dashboard displays
-this upgraded V2 as the single forecast.
+scores. The V2 product fields add the multi-hour tail: forecast steps with
+sufficient upstream coverage use ballistically propagated L1 forcing, and later
+hours relax Bz/By toward quiet with a longer timescale during rapid Dst deepening.
+The dashboard displays this upgraded V2 as the single forecast.
 
 Fit the calibration from a prior replay or locked live log:
 
 ```bash
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --fit-v2-calibration \
-  --table=live_forecasts/live_replay_144h.csv \
-  --v2-calibration=live_forecasts/operational_v2_calibration.csv \
+  --table=SolarSINDy.jl/validation/output/operational/live_replay_144h.csv \
+  --v2-calibration=SolarSINDy.jl/validation/output/operational/operational_v2_calibration.csv \
   --v2-ridge-grid=0,1,10,100,1000 \
   --v2-validation-fraction=0.15 \
   --v2-selector-margin=0.5
 ```
+
+The monitor's bundled point calibration and conformal sidecar live together in
+`SolarSINDy.jl/deploy/`. Replace them as a pair only after evaluating a new fit.
 
 For a longer research calibration, pair `--replay-omni` with the same fit
 command:
@@ -193,9 +196,9 @@ Then run a calibrated replay or live issue:
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --replay-recent \
   --model=v2 \
-  --v2-calibration=live_forecasts/operational_v2_calibration.csv \
+  --v2-calibration=SolarSINDy.jl/validation/output/operational/operational_v2_calibration.csv \
   --replay-hours=144 \
-  --table=live_forecasts/live_replay_v2_144h.csv
+  --table=SolarSINDy.jl/validation/output/operational/live_replay_v2_144h.csv
 ```
 
 The v2 calibration is not evidence of readiness by itself. It must be

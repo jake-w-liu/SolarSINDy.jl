@@ -23,6 +23,15 @@ function _fmt(x::Float64, w::Int=7; digits::Int=1)
     return lpad(string(round(x, digits=digits)), w)
 end
 
+function _refresh_dst_feed(previous, fetch::Function=fetch_swpc_dst)
+    return try
+        fetch()
+    catch error_value
+        error_value isa InterruptException && rethrow()
+        previous
+    end
+end
+
 """
     run_monitor(; poll_interval_min=5, forecast_horizon_hr=6,
                   alarm_config, coefficients_csv, ensemble_csv,
@@ -39,21 +48,12 @@ clock. Between new bins the last forecast is reused for display and alarms.
 
 `history_cap` bounds the retained per-step forecast history (the monitor never
 reads it back, so it is a rolling window sized for daemon memory safety, about
-83 days of hourly steps by default). `max_log_bytes` triggers single-generation rotation
-of `log_file` so the append-only log cannot grow without bound; set it to `0` to
-disable rotation.
+83 days of hourly steps by default). `max_log_bytes` triggers single-generation
+rotation of `log_file` so the append-only log cannot grow without bound; set it
+to `0` to disable rotation.
 
 Press Ctrl-C to stop.
 """
-function _refresh_dst_feed(previous, fetch::Function=fetch_swpc_dst)
-    return try
-        fetch()
-    catch error_value
-        error_value isa InterruptException && rethrow()
-        previous
-    end
-end
-
 function run_monitor(; poll_interval_min::Int=5,
                        forecast_horizon_hr::Int=6,
                        alarm_config::AlarmConfig=default_alarm_config(),

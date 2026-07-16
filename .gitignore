@@ -14,3 +14,7 @@ figs/
 app/public/vendor/plotly.min.js
 # dashboard server runtime log (local-only)
 app/server.log
+
+# Mutable operational monitor state and validation outputs.
+var/
+validation/output/

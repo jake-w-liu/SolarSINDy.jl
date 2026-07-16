@@ -14,5 +14,6 @@ makedocs(
         "API" => "api.md",
         "Examples" => "examples.md",
         "Live Verification" => "live-verification.md",
+        "EKF V3 Decision" => "ekf-v3-decision.md",
     ],
 )

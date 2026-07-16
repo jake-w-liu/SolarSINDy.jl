@@ -436,20 +436,6 @@ function _widest_finite(history::AbstractVector{<:Real})
     return widest == -Inf ? Inf : widest
 end
 
-"""
-    adaptive_conformal_step!(ac, point, observed)
-
-Process one online step: form the interval around `point` from the current
-residual history at level `1 - α_t`, score coverage against `observed`, then
-append the new absolute residual (respecting the trailing window) and update
-`α_t`. Returns `(lo, hi, half_width, covered, alpha)`. The interval is formed
-BEFORE the observation enters the history (causal).
-
-A non-finite `point`/`observed` (or a non-finite residual) is treated as a
-missing/gap step, mirroring the split-path contract that drops non-finite rows:
-the interval is still reported from the current finite history, but the residual
-is NOT pushed and `α_t` is NOT updated, so a single NaN cannot poison the stream.
-"""
 function _conformal_stream_value(value::Real, label::AbstractString)
     converted = Float64(value)
     isfinite(value) && !isfinite(converted) && throw(ArgumentError(
@@ -483,7 +469,19 @@ function _adaptive_conformal_step!(ac::AdaptiveConformal, point::Float64,
     return (lo=lo, hi=hi, half_width=hw, covered=covered, alpha=ac.alpha_t)
 end
 
+"""
+    adaptive_conformal_step!(ac, point, observed)
 
+Process one online step: form the interval around `point` from the current
+residual history at level `1 - α_t`, score coverage against `observed`, then
+append the new absolute residual (respecting the trailing window) and update
+`α_t`. Returns `(lo, hi, half_width, covered, alpha)`. The interval is formed
+before the observation enters the history.
+
+A non-finite `point` or `observed` value is treated as a missing step. The
+interval is still reported from the current finite history, but the residual is
+not pushed and `α_t` is not updated.
+"""
 function adaptive_conformal_step!(ac::AdaptiveConformal, point::Real, observed::Real)
     _validate_adaptive_conformal(ac)
     point_float = _conformal_stream_value(point, "adaptive conformal point")
@@ -535,9 +533,12 @@ Persist a [`ConformalCalibration`](@ref) to CSV. Row 1 is a `__meta__` record
 holding the nominal coverage, horizon edges, activity threshold, `min_stratum_n`,
 and the largest calibrated horizon; the remaining rows are one per stratum
 (including `global`). The `max_horizon` column is new; readers default it to
-`Inf` when absent so older sidecars still load.
+`Inf` when absent so older sidecars still load. `point_calibration_sha256` can
+bind an operational interval sidecar to the exact point calibration it bands;
+the generic reader ignores that deployment metadata.
 """
-function write_conformal_calibration(path::String, cal::ConformalCalibration)
+function write_conformal_calibration(path::String, cal::ConformalCalibration;
+                                     point_calibration_sha256::AbstractString="")
     dir = dirname(path)
     !isempty(dir) && mkpath(dir)
     rows = NamedTuple[]
@@ -549,6 +550,7 @@ function write_conformal_calibration(path::String, cal::ConformalCalibration)
         horizon_edges=join(string.(cal.horizon_edges), ";"),
         min_stratum_n=cal.min_stratum_n,
         max_horizon=cal.max_horizon,
+        point_calibration_sha256=String(point_calibration_sha256),
     ))
     function _push_stratum(s::ConformalStratum)
         push!(rows, (
@@ -559,6 +561,7 @@ function write_conformal_calibration(path::String, cal::ConformalCalibration)
             horizon_edges="",
             min_stratum_n=cal.min_stratum_n,
             max_horizon=cal.max_horizon,
+            point_calibration_sha256="",
         ))
     end
     _push_stratum(cal.global_stratum)

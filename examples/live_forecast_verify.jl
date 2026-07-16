@@ -18,11 +18,13 @@ using Statistics
 using FileWatching: Pidfile
 
 const KYOTO_DST_JSON_URL = "https://services.swpc.noaa.gov/products/kyoto-dst.json"
-const DEFAULT_LOG_PATH = joinpath("live_forecasts", "live_forecast_log.csv")
-const DEFAULT_REPORT_PATH = joinpath("live_forecasts", "live_comparison_report.md")
-const DEFAULT_V2_CALIBRATION_PATH = normpath(joinpath(
-    @__DIR__, "..", "..", "live_forecasts", "operational_v2_calibration.csv"
-))
+const SOLARSINDY_PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
+const DEFAULT_MONITOR_DIR = joinpath(SOLARSINDY_PACKAGE_ROOT, "var", "monitor")
+const DEFAULT_LOG_PATH = joinpath(DEFAULT_MONITOR_DIR, "live_forecast_log.csv")
+const DEFAULT_REPORT_PATH = joinpath(DEFAULT_MONITOR_DIR, "live_comparison_report.md")
+const DEFAULT_V2_CALIBRATION_PATH = joinpath(
+    SOLARSINDY_PACKAGE_ROOT, "deploy", "operational_v2_calibration.csv",
+)
 const DEFAULT_OMNI_EXTRACTED_PATH = normpath(joinpath(
     @__DIR__, "..", "data", "omni_extracted.csv"
 ))
@@ -38,7 +40,7 @@ Base.@kwdef struct LiveVerifyConfig
     report_path::String = DEFAULT_REPORT_PATH
     replay_hours::Int = 48
     replay_horizons::Vector{Int} = Int[1]
-    table_path::String = joinpath("live_forecasts", "live_replay_table.csv")
+    table_path::String = joinpath(DEFAULT_MONITOR_DIR, "live_replay_table.csv")
     table_limit::Int = 24
     omni_path::String = DEFAULT_OMNI_EXTRACTED_PATH
     omni_year_start::Int = 2024
@@ -94,22 +96,22 @@ function _usage()
       --campaign-horizons=A,B
                             Comma-separated target horizons for --campaign.
                             Default: 1,2,3,6.
-      --log=PATH             CSV log path. Default: live_forecasts/live_forecast_log.csv.
+      --log=PATH             CSV log path. Default: <package>/var/monitor/live_forecast_log.csv.
       --report=PATH          Markdown output path for --comparison-report.
-                            Default: live_forecasts/live_comparison_report.md.
+                            Default: <package>/var/monitor/live_comparison_report.md.
       --replay-hours=N       Recent hourly anchors for --replay-recent. Default: 48.
       --replay-horizons=A,B  Lead times [hr] emitted per anchor in replay tables.
                             Default: 1. Use e.g. 1,2,3,6 to build a multi-horizon
                             conformal calibration table.
       --table=PATH           CSV output path for --replay-recent.
-                            Default: live_forecasts/live_replay_table.csv.
+                            Default: <package>/var/monitor/live_replay_table.csv.
       --table-limit=N        Number of recent rows to print for --replay-recent. Default: 24.
       --omni=PATH            Extracted OMNI CSV for --replay-omni.
                             Default: data/omni_extracted.csv.
       --omni-year-start=N    First OMNI year loaded for --replay-omni. Default: 2024.
       --omni-year-end=N      Last OMNI year loaded for --replay-omni. Default: 2025.
       --v2-calibration=PATH  Calibration path for --model=v2 or --fit-v2-calibration.
-                            Default: live_forecasts/operational_v2_calibration.csv.
+                            Default: <package>/deploy/operational_v2_calibration.csv.
       --v2-train-fraction=N  Chronological fraction used to fit v2 candidates. Default: 0.70.
       --v2-validation-fraction=N
                             Chronological fraction used to select v2 candidates. Default: 0.15.
@@ -161,6 +163,7 @@ function _parse_args(args)::LiveVerifyConfig
     mode = cfg.mode
     model = cfg.model
     model_explicit = false
+    v2_calibration_explicit = false
     poll_seconds = cfg.poll_seconds
     timeout_hours = cfg.timeout_hours
     horizon_hours = cfg.horizon_hours
@@ -240,6 +243,7 @@ function _parse_args(args)::LiveVerifyConfig
             omni_year_end = parse(Int, split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--v2-calibration=")
             v2_calibration_path = split(arg, "=", limit=2)[2]
+            v2_calibration_explicit = true
         elseif startswith(arg, "--v2-train-fraction=")
             v2_train_fraction = parse(Float64, split(arg, "=", limit=2)[2])
         elseif startswith(arg, "--v2-validation-fraction=")
@@ -294,6 +298,9 @@ function _parse_args(args)::LiveVerifyConfig
 
     if mode == :campaign && !model_explicit
         model = :v2
+    end
+    if mode == :fit_v2_calibration && !v2_calibration_explicit
+        v2_calibration_path = joinpath(DEFAULT_MONITOR_DIR, "operational_v2_calibration.csv")
     end
 
     return LiveVerifyConfig(;
@@ -389,8 +396,18 @@ function _finite_mean(v, default::Float64)
     return isempty(vals) ? default : mean(vals)
 end
 
+const LIVE_MIN_HOURLY_DRIVER_SAMPLES = SolarSINDy.MIN_HOURLY_DRIVER_SAMPLES
+const LIVE_FUTURE_CLOCK_TOLERANCE = Minute(2)
+
+function _finite_mean(v, default::Float64, min_samples::Int)
+    min_samples >= 1 || throw(ArgumentError("min_samples must be at least 1"))
+    vals = Float64[Float64(x) for x in v if !ismissing(x) && isfinite(Float64(x))]
+    return length(vals) < min_samples ? default : mean(vals)
+end
+
 function _drivers_for_window(plasma::DataFrame, mag::DataFrame,
-                             t0::DateTime, t1::DateTime; fallback=nothing)
+                             t0::DateTime, t1::DateTime;
+                             fallback=nothing, min_samples::Int=1)
     if fallback === nothing
         v0, n0, bz0, by0 = 400.0, 5.0, 0.0, 0.0
     else
@@ -399,11 +416,11 @@ function _drivers_for_window(plasma::DataFrame, mag::DataFrame,
 
     p = _window(plasma, t0, t1)
     m = _window(mag, t0, t1)
-    V = _finite_mean(p.speed, v0)
-    n = _finite_mean(p.density, n0)
-    Bz = _finite_mean(m.bz_gsm, bz0)
-    By = _finite_mean(m.by_gsm, by0)
-    Pdyn = 1.6726e-6 * n * V^2
+    V = _finite_mean(p.speed, v0, min_samples)
+    n = _finite_mean(p.density, n0, min_samples)
+    Bz = _finite_mean(m.bz_gsm, bz0, min_samples)
+    By = _finite_mean(m.by_gsm, by0, min_samples)
+    Pdyn = dynamic_pressure(n, V)
     return (; V, n, Bz, By, Pdyn)
 end
 
@@ -416,16 +433,20 @@ end
 """
     _step_driver_fallback(plasma, mag, source_hour)
 
-True when the intermediate forecast hour `[source_hour, source_hour+1h)` has no
-finite speed OR no finite Bz sample, so `_drivers_for_window` would carry frozen
-persistence drivers rather than observed solar wind into that step (P1-2). Pure,
-so the per-step fallback bookkeeping in the multi-step issuance loop is testable
-without the live feeds.
+True when any driver in the intermediate forecast hour
+`[source_hour, source_hour+1h)` has fewer than the operational minimum number of
+finite samples. In that case the hourly mean is not observationally supported
+and the rollout must use its explicit fallback policy. Pure, so the coverage
+decision is testable without live feeds.
 """
 function _step_driver_fallback(plasma::DataFrame, mag::DataFrame, source_hour::DateTime)
     src_end = source_hour + Hour(1)
-    return _window_finite_count(plasma, :speed, source_hour, src_end) == 0 ||
-           _window_finite_count(mag, :bz_gsm, source_hour, src_end) == 0
+    return any(<(LIVE_MIN_HOURLY_DRIVER_SAMPLES), (
+        _window_finite_count(plasma, :speed, source_hour, src_end),
+        _window_finite_count(mag, :bz_gsm, source_hour, src_end),
+        _window_finite_count(plasma, :density, source_hour, src_end),
+        _window_finite_count(mag, :by_gsm, source_hour, src_end),
+    ))
 end
 
 """
@@ -434,19 +455,22 @@ end
 Classify solar-wind coverage of the trailing forecast window over all four
 drivers that `_drivers_for_window` would otherwise silently replace with quiet
 defaults (speed→400, density→5, Bz→0, By→0). Matches the documented safety
-contract: `:hard` (refuse to issue) when the speed OR the magnetic-field (Bz)
-window is absent, because fabricating a quiet default for either of the two
-primary drivers can under-warn during a fast-storm interval; `:partial` (issue
-but flag) when only density or By is absent (a secondary driver falls back to a
-quiet default); `:ok` when all four have at least one finite sample. The
-density/By counts default to a nonzero sentinel so legacy two-argument callers
-keep their original meaning. Pure function so the data-gap decision is
-unit-testable without the live feeds.
+contract: `:hard` (refuse to issue) when speed or Bz has fewer than the required
+samples, because fabricating either primary driver can under-warn during a fast
+storm; `:partial` (issue but flag) when only density or By is under-covered; and
+`:ok` when all four meet the sample floor. Density and By default to the
+operational floor so two-argument callers retain their primary-driver meaning.
+Pure function so the data-gap decision is unit-testable without live feeds.
 """
 function _driver_gap_status(n_speed_finite::Int, n_bz_finite::Int,
-                            n_density_finite::Int=1, n_by_finite::Int=1)
-    (n_speed_finite == 0 || n_bz_finite == 0) && return :hard
-    (n_density_finite == 0 || n_by_finite == 0) && return :partial
+                            n_density_finite::Int=LIVE_MIN_HOURLY_DRIVER_SAMPLES,
+                            n_by_finite::Int=LIVE_MIN_HOURLY_DRIVER_SAMPLES;
+                            min_samples::Int=LIVE_MIN_HOURLY_DRIVER_SAMPLES)
+    min_samples >= 1 || throw(ArgumentError("min_samples must be at least 1"))
+    all(>=(0), (n_speed_finite, n_bz_finite, n_density_finite, n_by_finite)) ||
+        throw(ArgumentError("driver sample counts must be nonnegative"))
+    (n_speed_finite < min_samples || n_bz_finite < min_samples) && return :hard
+    (n_density_finite < min_samples || n_by_finite < min_samples) && return :partial
     return :ok
 end
 
@@ -555,13 +579,18 @@ const V2_EXTREME_INERTIA_MAX_H = 2
 const V2_SERVED_TAIL_VERSION = "v2+L1A+Bregime+Pinertia"
 const V1_SERVED_TAIL_VERSION = "v1+L1A+Bregime"
 
-_blend_drivers(frac::Real, measured, recent) = (
-    V = Float64(frac) * measured.V + (1 - Float64(frac)) * recent.V,
-    Bz = Float64(frac) * measured.Bz + (1 - Float64(frac)) * recent.Bz,
-    By = Float64(frac) * measured.By + (1 - Float64(frac)) * recent.By,
-    n = Float64(frac) * measured.n + (1 - Float64(frac)) * recent.n,
-    Pdyn = Float64(frac) * measured.Pdyn + (1 - Float64(frac)) * recent.Pdyn,
-)
+function _blend_drivers(frac::Real, measured, recent)
+    f = clamp(Float64(frac), 0.0, 1.0)
+    V = f * measured.V + (1 - f) * recent.V
+    n = f * measured.n + (1 - f) * recent.n
+    return (
+        V=V,
+        Bz=f * measured.Bz + (1 - f) * recent.Bz,
+        By=f * measured.By + (1 - f) * recent.By,
+        n=n,
+        Pdyn=dynamic_pressure(n, V),
+    )
+end
 
 function _v2_tail_tau(dst_rate_nt_per_h::Real;
                       tau0::Real=V2_TAIL_TAU0_H,
@@ -609,14 +638,24 @@ end
 # measured sub-window with the frozen driver by the known fraction f, mirroring the validated sub-hourly-A.
 function _subhourly_driver_with_status(plasma::DataFrame, mag::DataFrame,
                                        step_time::DateTime, recent,
-                                       latest_common_sw::DateTime)
+                                       latest_common_sw::DateTime;
+                                       min_samples::Int=LIVE_MIN_HOURLY_DRIVER_SAMPLES)
     V = max(recent.V, 1.0)
     lag = Millisecond(round(Int, (L1_DIST_KM / V / 3600.0) * 3_600_000))   # transit L1 -> Earth
     src_lo = step_time - Hour(1) - lag
     src_hi = min(step_time - lag, latest_common_sw)                        # only minutes measured at L1 by issue
     src_hi <= src_lo && return (driver=recent, l1_measured=false)          # nothing measured maps here -> v2/B tail
+    counts = (
+        _window_finite_count(plasma, :speed, src_lo, src_hi),
+        _window_finite_count(mag, :bz_gsm, src_lo, src_hi),
+        _window_finite_count(plasma, :density, src_lo, src_hi),
+        _window_finite_count(mag, :by_gsm, src_lo, src_hi),
+    )
+    all(>=(min_samples), counts) || return (driver=recent, l1_measured=false)
     f = clamp(Dates.value(src_hi - src_lo) / 3_600_000.0, 0.0, 1.0)
-    meas = _drivers_for_window(plasma, mag, src_lo, src_hi; fallback=recent)
+    meas = _drivers_for_window(
+        plasma, mag, src_lo, src_hi; fallback=recent, min_samples=min_samples,
+    )
     return (driver=_blend_drivers(f, meas, recent), l1_measured=true)
 end
 
@@ -629,31 +668,39 @@ _subhourly_driver(plasma::DataFrame, mag::DataFrame, step_time::DateTime,
 # trajectory, not a validated sub-hour forecast: Dst is published only hourly (no sub-hour ground truth) and the
 # discovered ODE is fit on hourly data, so the curve is the hourly-scale model's own interpolation. It tracks the
 # hourly forecast closely because the ring current has little sub-hour structure.
-function _subhour_trajectory(coef_csv, ens_csv, latest_dst_time::DateTime, anchor_dst_star::Float64,
-                             plasma::DataFrame, mag::DataFrame, recent, latest_complete_hour::DateTime,
+function _fork_forecast_state(template::ForecastState, t0::DateTime, dst0::Real;
+                              dt::Real=template.dt)
+    # The library and coefficient arrays are immutable during forecasting, so all
+    # horizon states can share them. Only clock, Dst, and history are per forecast.
+    return ForecastState(
+        t0, Float64(dst0), template.lib, template.ξ_primary, template.ξ_ensemble,
+        Float64(dt), ForecastResult[],
+    )
+end
+
+function _subhour_trajectory(template::ForecastState,
+                             latest_dst_time::DateTime, anchor_dst_star::Float64,
+                             plasma::DataFrame, mag::DataFrame, recent,
                              latest_common_sw::DateTime, v2_correction;
                              dst_rate_nt_per_h::Real=0.0,
                              window_h::Int=6, substeps::Int=4)
-    st = init_forecast(; coefficients_csv=coef_csv, ensemble_csv=ens_csv, t0=latest_dst_time,
-                         dst0=anchor_dst_star, dt=1.0 / substeps)
+    st = _fork_forecast_state(template, latest_dst_time, anchor_dst_star;
+                              dt=1.0 / substeps)
     pts = NamedTuple[]
     correction = ismissing(v2_correction) ? 0.0 : Float64(v2_correction)
     last_known = recent
     hours_since_l1 = 0
     for k in 1:window_h
-        hstart = latest_dst_time + Hour(k - 1)
-        drv = if hstart < latest_complete_hour
+        step_time = latest_dst_time + Hour(k)
+        s = _subhourly_driver_with_status(
+            plasma, mag, step_time, recent, latest_common_sw,
+        )
+        drv = if s.l1_measured
             hours_since_l1 = 0
-            last_known = _drivers_for_window(plasma, mag, hstart, hstart + Hour(1); fallback=recent)
+            last_known = s.driver
         else
-            s = _subhourly_driver_with_status(plasma, mag, latest_dst_time + Hour(k), recent, latest_common_sw)
-            if s.l1_measured
-                hours_since_l1 = 0
-                last_known = s.driver
-            else
-                hours_since_l1 += 1
-                _relaxed_tail_driver(last_known, hours_since_l1, dst_rate_nt_per_h)
-            end
+            hours_since_l1 += 1
+            _relaxed_tail_driver(last_known, hours_since_l1, dst_rate_nt_per_h)
         end
         for s in 1:substeps
             t = latest_dst_time + Millisecond(round(Int, ((k - 1) + s / substeps) * 3_600_000))
@@ -1232,7 +1279,8 @@ end
 function _live_v2_memory_features(plasma::DataFrame, mag::DataFrame,
                                   dst_times, dst_vals,
                                   latest_dst_time::DateTime,
-                                  current_drivers)
+                                  current_drivers,
+                                  latest_common_sw::DateTime)
     dst_map = _dst_lookup(dst_times, dst_vals)
     # Sparse/provisional Dst: if any of the three required hours is missing, return neutral (zeroed) memory features
     # rather than cascading fallbacks that can make the 3 h delta wrongly equal the 1 h delta.
@@ -1241,23 +1289,19 @@ function _live_v2_memory_features(plasma::DataFrame, mag::DataFrame,
     latest_dst = get(dst_map, latest_dst_time, Float64(dst_vals[end]))
     prev1_dst = get(dst_map, latest_dst_time - Hour(1), latest_dst)
     prev3_dst = get(dst_map, latest_dst_time - Hour(3), prev1_dst)
-    prev_drivers = _drivers_for_window(
-        plasma,
-        mag,
-        latest_dst_time - Hour(1),
-        latest_dst_time;
-        fallback=current_drivers,
-    )
+    propagated(end_time) = _subhourly_driver_with_status(
+        plasma, mag, end_time, current_drivers, latest_common_sw,
+    ).driver
+    # Match `add_operational_v2_features!`: the issue-anchor driver at t is
+    # differenced against the independently propagated issue-anchor driver at
+    # t-1 h.  The former live path compared the final rollout-step driver with
+    # the anchor driver, which leaked the forecast horizon into a feature that
+    # was calibrated on consecutive issue anchors.
+    prev_drivers = propagated(latest_dst_time - Hour(1))
     vb_values = Float64[]
     bs_values = Float64[]
     for h in 0:2
-        d = _drivers_for_window(
-            plasma,
-            mag,
-            latest_dst_time - Hour(h + 1),
-            latest_dst_time - Hour(h);
-            fallback=current_drivers,
-        )
+        d = propagated(latest_dst_time - Hour(h))
         push!(vb_values, _vb_south(d))
         push!(bs_values, max(-Float64(d.Bz), 0.0))
     end
@@ -1309,6 +1353,23 @@ function _v2_features(latest_dst::Real, drivers;
     return merge(base, memory, _v2_expert_features(v1_pred_dst, baselines))
 end
 
+const _ANCHOR_FEATURE_DRIVER_BASIS = "anchor_aligned_ballistically_propagated_l1_hour"
+
+function _driver_audit_fields(anchor_drivers, target_step_drivers)
+    return (
+        V_kms=Float64(anchor_drivers.V),
+        Bz_nt=Float64(anchor_drivers.Bz),
+        By_nt=Float64(anchor_drivers.By),
+        n_cm3=Float64(anchor_drivers.n),
+        Pdyn_npa=Float64(anchor_drivers.Pdyn),
+        target_step_V_kms=Float64(target_step_drivers.V),
+        target_step_Bz_nt=Float64(target_step_drivers.Bz),
+        target_step_By_nt=Float64(target_step_drivers.By),
+        target_step_n_cm3=Float64(target_step_drivers.n),
+        target_step_Pdyn_npa=Float64(target_step_drivers.Pdyn),
+    )
+end
+
 function _load_calibration_for_model(cfg::LiveVerifyConfig)
     cfg.model == :v1 && return nothing
     cfg.model == :v2 || error("Unsupported model: $(cfg.model)")
@@ -1319,13 +1380,26 @@ function _load_calibration_for_model(cfg::LiveVerifyConfig)
     return read_operational_v2_calibration(cfg.v2_calibration_path)
 end
 
-# Load the conformal interval calibration sidecar if present (v2 only). Returns
-# nothing when absent, so the workflow stays backward compatible with logs that
-# predate conformal intervals.
+# Load the conformal interval calibration sidecar if present (v2 only). A
+# sidecar is accepted only when its metadata contains the SHA-256 digest of the
+# exact point-calibration file used for issuance.
 function _load_conformal_for_model(cfg::LiveVerifyConfig)
     cfg.model == :v2 || return nothing
     path = _conformal_path(cfg.v2_calibration_path)
     isfile(path) || return nothing
+    rows = CSV.Rows(path; select=[:stratum, :point_calibration_sha256],
+                    strict=true, reusebuffer=true)
+    first_row = iterate(rows)
+    first_row === nothing && throw(ArgumentError("empty conformal sidecar: $path"))
+    meta = first(first_row)
+    String(meta.stratum) == "__meta__" ||
+        throw(ArgumentError("conformal sidecar metadata row is missing: $path"))
+    expected = bytes2hex(sha256(read(cfg.v2_calibration_path)))
+    actual = ismissing(meta.point_calibration_sha256) ? "" :
+             String(meta.point_calibration_sha256)
+    actual == expected || throw(ArgumentError(
+        "conformal sidecar does not match its point calibration: $path",
+    ))
     return read_conformal_calibration(path)
 end
 
@@ -2564,7 +2638,10 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     if conformal === nothing
         @warn "No finite validation rows for conformal calibration; conformal sidecar not written."
     else
-        write_conformal_calibration(conformal_path, conformal)
+        write_conformal_calibration(
+            conformal_path, conformal;
+            point_calibration_sha256=bytes2hex(sha256(read(cfg.v2_calibration_path))),
+        )
         if nrow(holdout_scored) >= 1
             holdout_conformal_coverage = conformal_coverage(
                 conformal,
@@ -2651,37 +2728,87 @@ function _assert_issuable_model(model::Symbol, horizon_hours::Integer)
     return nothing
 end
 
-function issue_forecast(cfg::LiveVerifyConfig)
-    _assert_issuable_model(cfg.model, cfg.horizon_hours)
-    issue_time = now(UTC)
-    plasma = fetch_swpc_plasma(; max_retries=3, retry_delay_sec=1.0)
-    mag = fetch_swpc_mag(; max_retries=3, retry_delay_sec=1.0)
-    dst_times, dst_vals = _fetch_dst()
+function _validate_feed_timestamps(issue_time::DateTime,
+                                   latest_plasma::DateTime,
+                                   latest_mag::DateTime,
+                                   latest_dst::DateTime;
+                                   tolerance::Minute=LIVE_FUTURE_CLOCK_TOLERANCE)
+    tolerance >= Minute(0) || throw(ArgumentError("future-clock tolerance must be nonnegative"))
+    limit = issue_time + tolerance
+    latest_plasma <= limit || error(
+        "Plasma feed timestamp is in the future by " *
+        "$(round(Dates.value(latest_plasma - issue_time) / 3_600_000; digits=2)) h",
+    )
+    latest_mag <= limit || error(
+        "Magnetic-field feed timestamp is in the future by " *
+        "$(round(Dates.value(latest_mag - issue_time) / 3_600_000; digits=2)) h",
+    )
+    latest_dst <= limit || error(
+        "Kyoto Dst feed timestamp is in the future by " *
+        "$(round(Dates.value(latest_dst - issue_time) / 3_600_000; digits=2)) h",
+    )
+    return nothing
+end
+
+function prepare_issue_inputs(cfg::LiveVerifyConfig;
+                              issue_time::DateTime=now(UTC),
+                              plasma_fn::Function=() -> fetch_swpc_plasma(; max_retries=3,
+                                                                         retry_delay_sec=1.0),
+                              mag_fn::Function=() -> fetch_swpc_mag(; max_retries=3,
+                                                                    retry_delay_sec=1.0),
+                              dst_fn::Function=_fetch_dst)
     calibration = _load_calibration_for_model(cfg)
     conformal = _load_conformal_for_model(cfg)
-    # Pairing check: a deployed (non-fallback) v2 calibration should always have its conformal
-    # sidecar. If the sidecar is missing (deleted / partial restore), _resolve_interval silently
-    # reverts to the static interval_scale band the conformal machinery exists to replace — warn
-    # loudly so the operator sees the reversion rather than inferring it from interval_source.
+    return (
+        issue_time=issue_time,
+        plasma=plasma_fn(),
+        mag=mag_fn(),
+        dst=dst_fn(),
+        calibration=calibration,
+        conformal=conformal,
+        model=cfg.model,
+        calibration_path=abspath(cfg.v2_calibration_path),
+    )
+end
+
+function issue_forecast(cfg::LiveVerifyConfig;
+                        inputs=nothing,
+                        write_trajectory::Bool=true,
+                        verbose::Bool=true)
+    _assert_issuable_model(cfg.model, cfg.horizon_hours)
+    prepared = inputs === nothing ? prepare_issue_inputs(cfg) : inputs
+    prepared.model == cfg.model || throw(ArgumentError(
+        "prepared issue inputs were built for model $(prepared.model), not $(cfg.model)",
+    ))
+    prepared.calibration_path == abspath(cfg.v2_calibration_path) || throw(ArgumentError(
+        "prepared issue inputs use a different calibration path",
+    ))
+    issue_time = prepared.issue_time
+    plasma = prepared.plasma
+    mag = prepared.mag
+    dst_times, dst_vals = prepared.dst
+    calibration = prepared.calibration
+    conformal = prepared.conformal
+    # A deployed V2 product is defined by the paired point and conformal calibrations.
+    # Serving the legacy interval-scale band under a calibrated-90% label is fail-open.
     if cfg.model == :v2 && calibration !== nothing &&
        getfield(calibration, :label) != "operational_v2_fallback_v1_equiv" && conformal === nothing
-        @warn("Deployed V2 calibration is missing its conformal sidecar; V2 interval reverts " *
-              "to the static interval_scale band (not the calibrated conformal/ACI interval).",
-              expected_sidecar=_conformal_path(cfg.v2_calibration_path))
+        error("Deployed V2 calibration is missing its paired conformal sidecar: " *
+              _conformal_path(cfg.v2_calibration_path))
     end
 
-    latest_common_sw = min(maximum(plasma.time_tag), maximum(mag.time_tag))
-    latest_complete_hour = _floor_hour(latest_common_sw)
+    latest_plasma = maximum(plasma.time_tag)
+    latest_mag = maximum(mag.time_tag)
+    latest_common_sw = min(latest_plasma, latest_mag)
     # Anchor on the newest Dst hour by timestamp, not feed position: an out-of-order feed or a
     # trailing stale record must not silently anchor the forecast (and the Dst* state) to an old
     # hour, mirroring the replay path's maximum(dst_dt).
     dst_anchor_idx = argmax(dst_times)
     latest_dst_time = dst_times[dst_anchor_idx]
     latest_dst = dst_vals[dst_anchor_idx]
-    target_time = _next_hourly_target(issue_time, cfg.horizon_hours, latest_dst_time)
-    @assert target_time > issue_time
-    @assert target_time > latest_dst_time
-
+    _validate_feed_timestamps(
+        issue_time, latest_plasma, latest_mag, latest_dst_time,
+    )
     # Staleness guard. The finite-count gap check below catches a HARD gap (no finite samples) but NOT a
     # FROZEN feed that still returns old-but-finite rows. Compare the feed vintage to the issue time: the
     # L1/DSCOVR solar wind is minute-cadence, so a multi-hour age means the uplink has stalled and the
@@ -2701,9 +2828,11 @@ function issue_forecast(cfg::LiveVerifyConfig)
         sw_age_hours=round(sw_age_hours; digits=1), dst_age_hours=round(dst_age_hours; digits=1)
     )
 
-    recent_start = latest_common_sw - Hour(1)
-    recent = _drivers_for_window(plasma, mag, recent_start, latest_common_sw)
+    target_time = _next_hourly_target(issue_time, cfg.horizon_hours, latest_dst_time)
+    @assert target_time > issue_time
+    @assert target_time > latest_dst_time
 
+    recent_start = latest_common_sw - Hour(1)
     # Data-coverage guard. The trailing solar-wind window backs both `recent`
     # (the persistence driver beyond the last complete hour) and the issued row.
     # An empty window makes `_drivers_for_window` fall back to quiet defaults
@@ -2720,9 +2849,10 @@ function issue_forecast(cfg::LiveVerifyConfig)
     gap_status = _driver_gap_status(n_speed_finite, n_bz_finite, n_density_finite, n_by_finite)
     if gap_status == :hard
         error(
-            "Solar-wind data gap: the trailing hour [$recent_start, $latest_common_sw] is missing " *
-            "all finite speed samples ($n_speed_finite) or all finite Bz samples ($n_bz_finite). " *
-            "Refusing to issue a forecast built on quiet-time fallback drivers for a primary driver."
+            "Solar-wind data gap: the trailing hour [$recent_start, $latest_common_sw] has " *
+            "only $n_speed_finite finite speed and $n_bz_finite finite Bz samples; " *
+            "at least $LIVE_MIN_HOURLY_DRIVER_SAMPLES of each are required. Refusing to " *
+            "issue a forecast built on under-covered primary drivers."
         )
     end
     driver_data_gap = gap_status != :ok
@@ -2731,15 +2861,22 @@ function issue_forecast(cfg::LiveVerifyConfig)
         n_speed_finite, n_bz_finite, n_density_finite, n_by_finite,
         recent_start, latest_common_sw
     )
+    recent = _drivers_for_window(
+        plasma, mag, recent_start, latest_common_sw;
+        min_samples=LIVE_MIN_HOURLY_DRIVER_SAMPLES,
+    )
     # Convert the anchor Dst to Dst* with the TRAILING wind hour [t-1h, t), matching the replay
     # convention the deployed β-calibration was fit under (_forecast_one_replay uses source window
     # [anchor-1h, anchor)); the previous following-hour window [t, t+1) applied a slightly different
     # input convention than training at dynamic-pressure jumps. The trailing hour is fully elapsed at
     # issue time (Dst lags the wind feed), so it stays causal and is more reliably populated.
-    anchor_drivers = _drivers_for_window(
-        plasma, mag, latest_dst_time - Hour(1), latest_dst_time;
-        fallback=recent,
+    anchor_status = _subhourly_driver_with_status(
+        plasma, mag, latest_dst_time, recent, latest_common_sw,
     )
+    anchor_status.l1_measured || error(
+        "insufficient propagated L1 coverage for the Dst anchor pressure window",
+    )
+    anchor_drivers = anchor_status.driver
     anchor_dst_star = pressure_correct_dst([latest_dst], [anchor_drivers.Pdyn])[1]
 
     coef_csv = joinpath(get_data_dir(), "real_sindy_discovery_coefficients.csv")
@@ -2764,17 +2901,11 @@ function issue_forecast(cfg::LiveVerifyConfig)
     n_steps_driver_fallback = 0
     step_time = latest_dst_time + Hour(1)
     while step_time <= target_time
-        source_hour = step_time - Hour(1)
-        drivers = if source_hour < latest_complete_hour
-            n_steps_driver_fallback +=
-                _step_driver_fallback(plasma, mag, source_hour) ? 1 : 0
-            _drivers_for_window(
-                plasma, mag, source_hour, source_hour + Hour(1);
-                fallback=recent,
-            )
-        else
-            recent
-        end
+        step_driver = _subhourly_driver_with_status(
+            plasma, mag, step_time, recent, latest_common_sw,
+        )
+        step_driver.l1_measured || (n_steps_driver_fallback += 1)
+        drivers = step_driver.driver
         used_drivers = drivers
         result = step_forecast!(
             state,
@@ -2813,7 +2944,8 @@ function issue_forecast(cfg::LiveVerifyConfig)
         dst_times,
         dst_vals,
         latest_dst_time,
-        used_drivers,
+        anchor_drivers,
+        latest_common_sw,
     )
     # Loud degradation: flag (and warn) when the calibrated memory features fell back to neutral
     # because of an interior Kyoto-Dst gap. The regime-aware tail rate is taken from the freshest
@@ -2827,7 +2959,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
     )
     features = _v2_features(
         latest_dst,
-        used_drivers;
+        anchor_drivers;
         memory=memory_features,
         baselines=baseline_predictions,
         v1_pred_dst=v1_pred_dst,
@@ -2836,7 +2968,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
         cfg.model,
         calibration,
         latest_dst,
-        used_drivers,
+        anchor_drivers,
         v1_pred_dst,
         v1_ci05_dst,
         v1_ci95_dst,
@@ -2902,24 +3034,18 @@ function issue_forecast(cfg::LiveVerifyConfig)
     # interior provisional-Dst gap does not collapse the deepening-storm tail to the quiet default.
     dst_rate_nt_per_h = _freshest_dst_rate(dst_times, dst_vals, latest_dst_time)
     try
-        sstate = init_forecast(; coefficients_csv=coef_csv, ensemble_csv=ens_csv, t0=latest_dst_time, dst0=anchor_dst_star)
+        sstate = _fork_forecast_state(state, latest_dst_time, anchor_dst_star)
         sresult = nothing; sst = latest_dst_time + Hour(1); sdrv = recent
         last_known = recent
         hours_since_l1 = 0
         while sst <= target_time
-            sh = sst - Hour(1)
-            sdrv = if sh < latest_complete_hour
+            s = _subhourly_driver_with_status(plasma, mag, sst, recent, latest_common_sw)
+            sdrv = if s.l1_measured
                 hours_since_l1 = 0
-                last_known = _drivers_for_window(plasma, mag, sh, sh + Hour(1); fallback=recent)   # observed hour (== v2)
+                last_known = s.driver
             else
-                s = _subhourly_driver_with_status(plasma, mag, sst, recent, latest_common_sw)      # L1 look-ahead on the tail
-                if s.l1_measured
-                    hours_since_l1 = 0
-                    last_known = s.driver
-                else
-                    hours_since_l1 += 1
-                    _relaxed_tail_driver(last_known, hours_since_l1, dst_rate_nt_per_h)
-                end
+                hours_since_l1 += 1
+                _relaxed_tail_driver(last_known, hours_since_l1, dst_rate_nt_per_h)
             end
             sresult = step_forecast!(sstate, sst, sdrv.V, sdrv.Bz, sdrv.By, sdrv.n, sdrv.Pdyn)
             sst += Hour(1)
@@ -2965,6 +3091,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
     served_pred_dst = sub_hourly_pred_dst
     served_ci05_dst = sub_hourly_ci05
     served_ci95_dst = sub_hourly_ci95
+    driver_audit = _driver_audit_fields(anchor_drivers, used_drivers)
 
     row = DataFrame(
         issue_time_utc=[string(issue_time)],
@@ -2977,7 +3104,7 @@ function issue_forecast(cfg::LiveVerifyConfig)
         horizon_hours=[wall_horizon],
         wall_clock_lead_hours=[wall_horizon],
         model_step_hours=[model_steps],
-        driver_assumption=["observed_solar_wind_until_latest_complete_hour_then_l1_measured_lookahead_then_regime_aware_relaxation_then_extreme_inertia_guard"],
+        driver_assumption=["ballistically_propagated_l1_then_regime_aware_relaxation_then_extreme_inertia_guard"],
         driver_data_gap=[driver_data_gap],
         dst_memory_fallback=[dst_memory_fallback],
         n_speed_finite_trailing_hour=[n_speed_finite],
@@ -2986,11 +3113,17 @@ function issue_forecast(cfg::LiveVerifyConfig)
         n_by_finite_trailing_hour=[n_by_finite],
         n_steps_driver_fallback=[n_steps_driver_fallback],
         interval_source=[interval_source],
-        V_kms=[used_drivers.V],
-        Bz_nt=[used_drivers.Bz],
-        By_nt=[used_drivers.By],
-        n_cm3=[used_drivers.n],
-        Pdyn_npa=[used_drivers.Pdyn],
+        feature_driver_basis=[_ANCHOR_FEATURE_DRIVER_BASIS],
+        V_kms=[driver_audit.V_kms],
+        Bz_nt=[driver_audit.Bz_nt],
+        By_nt=[driver_audit.By_nt],
+        n_cm3=[driver_audit.n_cm3],
+        Pdyn_npa=[driver_audit.Pdyn_npa],
+        target_step_V_kms=[driver_audit.target_step_V_kms],
+        target_step_Bz_nt=[driver_audit.target_step_Bz_nt],
+        target_step_By_nt=[driver_audit.target_step_By_nt],
+        target_step_n_cm3=[driver_audit.target_step_n_cm3],
+        target_step_Pdyn_npa=[driver_audit.target_step_Pdyn_npa],
         Bsouth_nt=[features.Bsouth_nt],
         VBsouth_mvm=[features.VBsouth_mvm],
         Bperp_nt=[features.Bperp_nt],
@@ -3053,11 +3186,11 @@ function issue_forecast(cfg::LiveVerifyConfig)
     try
         _write_subhour_trajectory!(
             joinpath(dirname(cfg.log_path), "subhour_trajectory.json"),
-            append_result.appended,
+            write_trajectory && append_result.appended,
         ) do
             traj = _subhour_trajectory(
-                coef_csv, ens_csv, latest_dst_time, anchor_dst_star, plasma, mag,
-                recent, latest_complete_hour, latest_common_sw,
+                state, latest_dst_time, anchor_dst_star, plasma, mag,
+                recent, latest_common_sw,
                 selected.v2_correction; dst_rate_nt_per_h=dst_rate_nt_per_h,
             )
             Dict("issue_time_utc" => string(issue_time),
@@ -3069,20 +3202,20 @@ function issue_forecast(cfg::LiveVerifyConfig)
         @warn "sub-hour trajectory write failed" exception=(e, catch_backtrace())
     end
 
-    if append_result.appended
+    if verbose && append_result.appended
         println("Logged live forecast row $row_idx: $(cfg.log_path)")
-    else
+    elseif verbose
         println("Using existing pending forecast row $row_idx: $(cfg.log_path)")
     end
-    println("Issue UTC: $issue_time")
-    println("Latest SWPC solar wind: $latest_common_sw")
-    println("Latest observed Kyoto Dst: $latest_dst_time = $latest_dst nT")
-    println("Target observation UTC: $target_time")
     model_label = selected.model_version == "v2" ? "V2" : "SINDy v1"
-    println("Forecast model: $model_label")
-    println("Lead time: $(round(wall_horizon; digits=3)) hr wall-clock, $model_steps model steps")
-    println("Forecast Dst*: $(round(result.dst_predicted; digits=2)) nT")
-    if selected.model_version == "v2"
+    verbose && println("Issue UTC: $issue_time")
+    verbose && println("Latest SWPC solar wind: $latest_common_sw")
+    verbose && println("Latest observed Kyoto Dst: $latest_dst_time = $latest_dst nT")
+    verbose && println("Target observation UTC: $target_time")
+    verbose && println("Forecast model: $model_label")
+    verbose && println("Lead time: $(round(wall_horizon; digits=3)) hr wall-clock, $model_steps model steps")
+    verbose && println("Forecast Dst*: $(round(result.dst_predicted; digits=2)) nT")
+    if verbose && selected.model_version == "v2"
         println(
             "V2 Dst: $(round(served_pred_dst; digits=2)) nT; 90% CI " *
             "[$(round(served_ci05_dst; digits=2)), $(round(served_ci95_dst; digits=2))]"
@@ -3097,19 +3230,19 @@ function issue_forecast(cfg::LiveVerifyConfig)
             "interval scale=$(round(selected.v2_interval_scale; digits=2)); " *
             "component=$(selected.v2_selected_component)"
         )
-    else
+    elseif verbose
         println(
             "$model_label Dst: $(round(pred_dst; digits=2)) nT; 90% CI " *
             "[$(round(ci05_dst; digits=2)), $(round(ci95_dst; digits=2))]"
         )
     end
-    println(
+    verbose && println(
         "Baselines Dst: persistence=$(round(persistence_dst; digits=2)), " *
         "Burton=$(round(burton_dst; digits=2)), " *
         "BurtonFull=$(round(burton_full_dst; digits=2)), " *
         "OBrien=$(round(obrien_dst; digits=2))"
     )
-    println(
+    verbose && println(
         "Forecast drivers: V=$(round(used_drivers.V; digits=1)) km/s, " *
         "Bz=$(round(used_drivers.Bz; digits=2)) nT, " *
         "By=$(round(used_drivers.By; digits=2)) nT, " *
@@ -3665,9 +3798,9 @@ function _newest_issue_time(df::DataFrame)
     return latest
 end
 
-function write_live_comparison_report(log_path::String, report_path::String)
+function write_live_comparison_report(log_path::String, report_path::String; df=nothing)
     isfile(log_path) || error("No forecast log exists at $log_path")
-    df = CSV.read(log_path, DataFrame)
+    df = df === nothing ? CSV.read(log_path, DataFrame) : df
     verified = _verified_indices(df)
     strictly_future = [i for i in verified if _row_is_strictly_future(df, i)]
     invalid_verified = setdiff(verified, strictly_future)

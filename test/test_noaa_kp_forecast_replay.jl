@@ -4,15 +4,11 @@ using Test
 using DataFrames
 using Dates
 
-const NOAA_KP_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "..", "live_forecasts",
+const NOAA_KP_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "validation", "operational",
                                                 "noaa_kp_forecast_replay.jl"))
+include(NOAA_KP_REPLAY_SCRIPT)
 
 @testset "NOAA 3-day Kp forecast archive replay helpers" begin
-    if !isfile(NOAA_KP_REPLAY_SCRIPT)
-        @test_skip "research-workspace NOAA Kp replay script is not present"
-    else
-        include(NOAA_KP_REPLAY_SCRIPT)
-
         rows = parse_noaa_3day_kp_text(_sample_noaa_3day_text(); source = "sample")
         @test nrow(rows) == 19
         @test minimum(rows.target_bin_start_utc) == DateTime(2024, 5, 10, 15)
@@ -49,7 +45,6 @@ const NOAA_KP_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "..", "live_fore
         broken = copy(scored)
         broken.target_bin_start_utc[1] = broken.issue_utc[1] - Hour(1)
         @test_throws ErrorException _validate_noaa_rows(broken)
-    end
 end
 
 end # module NOAAKpForecastReplayTests

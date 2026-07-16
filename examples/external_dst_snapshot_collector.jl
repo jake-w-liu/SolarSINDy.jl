@@ -6,12 +6,11 @@
 # live monitor, and runnable standalone.
 #
 # Output locations are parameterized so the collector writes into the monitor directory. The
-# defaults resolve against the working directory (default "live_forecasts"), which reproduces the
-# deployed layout when run from the project root.
+# default is the package runtime directory (`var/monitor`).
 #
 # Env:
 #   SOLARSINDY_EXTERNAL_DST_DIR  output directory for the external Dst log/report/raw snapshots
-#                                (default SOLARSINDY_MONITOR_DIR, else "live_forecasts")
+#                                (default SOLARSINDY_MONITOR_DIR, else <package>/var/monitor)
 #   SOLARSINDY_EXTERNAL_DST_MAX_ROWS
 #                                maximum retained forecast rows (default 50000)
 #   SOLARSINDY_EXTERNAL_DST_MAX_RAW
@@ -27,8 +26,10 @@ using SHA
 using Statistics
 using FileWatching: Pidfile
 
+const EXTERNAL_DST_PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
+const DEFAULT_EXTERNAL_DST_DIR = joinpath(EXTERNAL_DST_PACKAGE_ROOT, "var", "monitor")
 const EXTERNAL_DST_DIR = get(ENV, "SOLARSINDY_EXTERNAL_DST_DIR",
-                             get(ENV, "SOLARSINDY_MONITOR_DIR", "live_forecasts"))
+                             get(ENV, "SOLARSINDY_MONITOR_DIR", DEFAULT_EXTERNAL_DST_DIR))
 const EXTERNAL_DST_LOG = joinpath(EXTERNAL_DST_DIR, "external_dst_forecast_log.csv")
 const EXTERNAL_DST_REPORT = joinpath(EXTERNAL_DST_DIR, "external_dst_forecast_report.md")
 const EXTERNAL_DST_RAW_DIR = joinpath(EXTERNAL_DST_DIR, "source_cache", "external_dst_snapshots")
@@ -724,7 +725,8 @@ end
 
 function capture_and_score_external_dst_snapshot!(cfg::ExternalDstCollectorConfig = ExternalDstCollectorConfig();
                                                   fetched_utc::DateTime = now(UTC),
-                                                  http_get::Function = HTTP.get)
+                                                  http_get::Function = HTTP.get,
+                                                  observations=nothing)
     isfinite(cfg.max_obs_gap_min) && cfg.max_obs_gap_min >= 0 ||
         throw(ArgumentError("max_obs_gap_min must be finite and nonnegative"))
     cfg.max_log_rows >= 1 || throw(ArgumentError("max_log_rows must be at least 1"))
@@ -740,7 +742,8 @@ function capture_and_score_external_dst_snapshot!(cfg::ExternalDstCollectorConfi
                                        repo_root = cfg.repo_root)
         append!(new_rows, rows; cols = :union)
     end
-    obs = _fetch_observations(cfg.obs_url; http_get = http_get)
+    obs = observations === nothing ?
+          _fetch_observations(cfg.obs_url; http_get = http_get) : observations
 
     return _with_external_dst_lock(cfg.log_path) do
         # Re-read only after acquiring the lock: another collector may have

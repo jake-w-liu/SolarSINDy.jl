@@ -20,7 +20,7 @@
 #
 # OPERATIONAL STATUS: retired from the live forecast path. The EKF predict/update math
 # remains useful research infrastructure, but both deployment candidates failed the later
-# promotion gate recorded in live_forecasts/EKF_V3_DECISION.md:
+# promotion gate recorded in docs/src/ekf-v3-decision.md:
 #   * decay-only constrained EKF: no lead/regime beat the stronger of {v2, persistence}
 #     with a positive 95% CI on the causal G4/G5 storm replay;
 #   * injection-adaptive EKF: worse than decay-only and robustly not promotable across

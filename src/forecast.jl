@@ -1066,22 +1066,6 @@ function read_operational_v2_calibration(path::String)
     )
 end
 
-"""
-    init_forecast(; coefficients_csv, ensemble_csv, t0, dst0, dt=1.0)
-
-Initialise a ForecastState from saved discovery results.
-
-- `coefficients_csv`: path to real_sindy_discovery_coefficients.csv
-- `ensemble_csv`: path to real_ensemble_inclusion.csv (marginal per-term
-  conditional nonzero empirical intervals; legacy `ci_025`/`ci_975` columns
-  are also accepted)
-- `draws_csv`: path to the joint posterior-draws artifact
-  (real_sindy_ensemble_draws.csv; columns = library term names, one draw per row).
-  When present it is resampled and recentered on the deployed coefficients;
-  otherwise the ensemble falls back to marginal per-term sampling with a warning.
-- `t0`: initial DateTime (UTC)
-- `dst0`: initial Dst* value [nT]
-"""
 # Build the coefficient uncertainty ensemble by resampling rows of a joint-draws
 # artifact (columns = library term names, one posterior draw per row), recentered
 # on the deployed point coefficients so it describes the model actually issued.
@@ -1124,6 +1108,22 @@ function _ensemble_from_joint_draws(path::String, term_names::Vector{String},
     return ξ_ensemble
 end
 
+"""
+    init_forecast(; coefficients_csv, ensemble_csv, t0, dst0, dt=1.0)
+
+Initialise a ForecastState from saved discovery results.
+
+- `coefficients_csv`: path to real_sindy_discovery_coefficients.csv
+- `ensemble_csv`: path to real_ensemble_inclusion.csv (marginal per-term
+  conditional nonzero empirical intervals; legacy `ci_025`/`ci_975` columns
+  are also accepted)
+- `draws_csv`: path to the joint posterior-draws artifact
+  (real_sindy_ensemble_draws.csv; columns = library term names, one draw per row).
+  When present it is resampled and recentered on the deployed coefficients;
+  otherwise the ensemble falls back to marginal per-term sampling with a warning.
+- `t0`: initial DateTime (UTC)
+- `dst0`: initial Dst* value [nT]
+"""
 function init_forecast(; coefficients_csv::String,
                          ensemble_csv::String,
                          draws_csv::String=joinpath(dirname(coefficients_csv),

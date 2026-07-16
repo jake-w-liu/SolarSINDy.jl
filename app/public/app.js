@@ -10,6 +10,7 @@ const PULK = [18, 42, 66, 90];   // Pulkkinen 2013 dB/dt thresholds [nT/min]
 const THREAT_CLASSES = ["threat-0","threat-1","threat-2","threat-3","threat-4"];
 const THRESHOLDS = [ {y:-30,l:"minor"}, {y:-50,l:"moderate"}, {y:-100,l:"intense"}, {y:-200,l:"extreme"} ];
 const REFRESH_MS = 60000;
+const FETCH_TIMEOUT_MS = 15000;
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -25,9 +26,15 @@ async function ensurePlotly() {
 }
 
 async function fetchJSON(path) {
-  const r = await fetch(path, { cache: "no-store" });
-  if (!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
-  return r.json();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const r = await fetch(path, { cache: "no-store", signal: controller.signal });
+    if (!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
+    return r.json();
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function relTime(iso) {
@@ -540,6 +547,10 @@ async function refresh() {
   try { await renderNetwork(network); } catch (e) { console.error(e); }
 }
 
-refresh();
-setInterval(refresh, REFRESH_MS);   // fetch fresh data
+async function refreshLoop() {
+  await refresh();
+  setTimeout(refreshLoop, REFRESH_MS); // schedule only after the prior refresh settles
+}
+
+refreshLoop();
 setInterval(tickRelTimes, 1000);     // keep relative timestamps ticking between fetches

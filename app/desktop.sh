@@ -8,12 +8,13 @@ set -euo pipefail
 cd "$(dirname "$0")"
 PORT="${SWM_PORT:-8723}"; HOST="${SWM_HOST:-127.0.0.1}"; URL="http://${HOST}:${PORT}"
 JULIA="${JULIA:-julia}"
+JULIA_THREADS="${SWM_JULIA_THREADS:-2}"
 
 command -v "$JULIA" >/dev/null 2>&1 || { echo "error: '$JULIA' not found (install Julia 1.10+)." >&2; exit 1; }
 
 echo "Instantiating + starting backend…"
 "$JULIA" --project=. -e 'using Pkg; Pkg.instantiate()' >/dev/null 2>&1 || true
-nohup "$JULIA" --project=. src/server.jl > /tmp/swm_desktop.out 2>&1 &
+nohup "$JULIA" --threads="$JULIA_THREADS" --project=. src/server.jl > /tmp/swm_desktop.out 2>&1 &
 SRV=$!
 cleanup() { kill "$SRV" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM

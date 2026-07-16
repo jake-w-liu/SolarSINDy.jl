@@ -254,6 +254,18 @@ end
         @test Set(r.storms) == Set(["May 2024 (Gannon, G5)", "Oct 2024"])
         @test occursin("Storm-time replay", r.report_markdown)
         @test r.report_age_min isa Real
+
+        # A regenerated replay must immediately become the API/UI source without copying files
+        # into the package snapshot.
+        withenv("SOLARSINDY_OPERATIONAL_OUTPUT_DIR" => dir,
+                "SOLARSINDY_OPERATIONAL_EVIDENCE_DIR" => nothing) do
+            @test app_operational_evidence_dir(
+                "storm_replay_report.md", "storm_replay_scored.csv",
+            ) == abspath(dir)
+            payload = JSON3.read(String(api_handler("/api/storm_replay", "", log_path).body))
+            @test payload.available == true
+            @test payload.n_scored == 3
+        end
     end
 
     @testset "dB/dt forecaster flags out-of-validated-range / saturated inputs" begin
@@ -492,6 +504,12 @@ end
         @test build_status(a).available == false
         @test build_forecast(a).available == false
         @test isempty(build_history(a).rows)
+        cached_cycle = latest_cycle(a)
+        cached_verified = verified_rows(a)
+        cached_history = build_history(a)
+        @test latest_cycle(a) === cached_cycle
+        @test verified_rows(a) === cached_verified
+        @test build_history(a).rows === cached_history.rows
         # Forge equal metadata to isolate path identity: p2 must never reuse p1's frame.
         _LOG_CACHE[] = (_log_file_identity(p1), a)
         @test get_log(p2).value == [2]
@@ -501,6 +519,9 @@ end
         # the cache through ctime/inode identity.
         _LOG_CACHE[] = nothing
         cached = get_log(p1)
+        @test latest_cycle(cached) !== cached_cycle
+        @test verified_rows(cached) !== cached_verified
+        @test build_history(cached).rows !== cached_history.rows
         original = stat(p1)
         timestamp_reference = joinpath(dir, "timestamp-reference.csv")
         run(`cp -p $p1 $timestamp_reference`)
@@ -817,20 +838,23 @@ end
         @test kp_current.value == 5.0
         @test parse_dt(kp_current.time_utc) == DateTime(2026, 7, 14, 9)
 
-        # An all-unavailable refresh returns the last good snapshot without overwriting its age.
+        # An unavailable refresh preserves the last source snapshot but advances the retry clock,
+        # preventing every request from hammering an unavailable upstream service.
         good = snapshot_at(reference - Minute(1)); old_fetch = time() - SWPC_TTL - 1
         lock(_SWPC_LOCK) do
             _SWPC_CACHE[] = (old_fetch, good)
             _SWPC_REFRESH_TASK[] = current_task()
         end
+        before_refresh = time()
         out = _run_swpc_refresh(build_fn=() -> (source="test", available=false))
         @test out == good
-        @test _SWPC_CACHE[][1] == old_fetch && _SWPC_CACHE[][2] == good
+        @test before_refresh <= _SWPC_CACHE[][1] <= time()
+        @test _SWPC_CACHE[][2] == good
         lock(_SWPC_LOCK) do; _SWPC_REFRESH_TASK[] = current_task(); end
         @test_throws InterruptException _run_swpc_refresh(
             build_fn=() -> throw(InterruptException()))
         @test _SWPC_REFRESH_TASK[] === nothing
-        @test _SWPC_CACHE[][1] == old_fetch
+        @test _SWPC_CACHE[][1] >= before_refresh
         lock(_SWPC_LOCK) do
             _SWPC_CACHE[] = nothing
             _SWPC_REFRESH_TASK[] = nothing
@@ -850,22 +874,42 @@ end
     @testset "SWPC refresh entry points share one in-flight task" begin
         gate = Channel{Nothing}(0)
         sentinel = (source="test", available=false)
-        held = @async (take!(gate); sentinel)
+        held = Threads.@spawn (take!(gate); sentinel)
         lock(_SWPC_LOCK) do
             _SWPC_CACHE[] = nothing
             _SWPC_REFRESH_TASK[] = held
         end
         @test swpc_snapshot_cached_or_refresh().available == false
         @test lock(_SWPC_LOCK) do; _start_swpc_refresh_locked() === held; end
-        waiter = @async swpc_snapshot()
-        yield()
+        elapsed = @elapsed bounded = swpc_snapshot(wait_timeout=0.02)
+        @test bounded.available == false
+        @test elapsed < 0.5
         @test _SWPC_REFRESH_TASK[] === held
         put!(gate, nothing)
-        @test fetch(waiter) == sentinel
+        @test fetch(held) == sentinel
+        lock(_SWPC_LOCK) do
+            _SWPC_CACHE[] = (time(), sentinel)
+        end
+        @test swpc_snapshot(wait_timeout=0.1) == sentinel
+        @test_throws ArgumentError swpc_snapshot(wait_timeout=-1)
+        @test_throws ArgumentError swpc_snapshot(wait_timeout=Inf)
         lock(_SWPC_LOCK) do
             _SWPC_CACHE[] = nothing
             _SWPC_REFRESH_TASK[] = nothing
         end
+    end
+
+    @testset "launchers reserve capacity for background refresh" begin
+        app_root = normpath(joinpath(@__DIR__, ".."))
+        for launcher in ("run.sh", "desktop.sh")
+            source = read(joinpath(app_root, launcher), String)
+            @test occursin(r"SWM_JULIA_THREADS:-2", source)
+            @test occursin(r"--threads=\"\$JULIA_THREADS\"", source)
+        end
+        dockerfile = read(joinpath(app_root, "Dockerfile"), String)
+        @test occursin(r"JULIA_NUM_THREADS=2", dockerfile)
+        @test occursin("COPY data/operational_validation", dockerfile)
+        @test occursin("-f app/Dockerfile .", dockerfile)
     end
 
     @testset "webhook failures do not expose credentials" begin
