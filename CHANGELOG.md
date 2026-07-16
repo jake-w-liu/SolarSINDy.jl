@@ -2,9 +2,9 @@
 
 All notable changes to `SolarSINDy.jl` will be documented in this file.
 
-## [Unreleased] - 2026-07-13
+## [Unreleased] - 2026-07-16
 
-Correctness, robustness, and completeness audit campaign.
+Correctness, robustness, and operational-readiness improvements.
 
 Causality and leakage:
 
@@ -13,6 +13,8 @@ Causality and leakage:
 - replay separates the driver-completeness mask (anchors) from the observed-Dst mask (scored targets), removing a bias toward easier hours
 - timestamp-based memory features (Dst/Bz/VBsouth deltas and rolling means) so tied multi-horizon issue times and gap-skipped anchors resolve to true hourly differences
 - anchor selection by newest timestamp rather than feed position
+- strict causal issuance cutoffs: source-clock tolerance still diagnoses small timestamp skew, but no post-issue plasma, magnetic-field, or Dst sample can enter a forecast
+- six-hour hard freshness ceilings for both the solar-wind driver and the observed Dst state
 
 Physics and statistics:
 
@@ -20,23 +22,35 @@ Physics and statistics:
 - corrected Burton (1975) injection to the threshold-continuous form (`α = 5.4e-3`, offset at the 0.5 mV/m threshold); pressure-correction constants re-attributed to O'Brien & McPherron (2000)
 - STLSQ final-threshold fixed point so every returned support satisfies the sparsity contract; `collinearity_diagnostics` and an optional true-bootstrap resampling mode for ensemble SINDy
 - interval honesty: monotone-safe stratified-conformal fallback, ACI residual pools keyed on the served model, Eq. (13) projection on served/display centers, and documented bounded-band scope for the adaptive-conformal recursion
+- exact target-step driver provenance for the served sub-hourly relaxed tail, rather than the pre-relaxation hourly driver
 
 Industrial robustness:
 
 - RTSW endpoint migration from the retired array-of-arrays `*-1-day`/`*-7-day.json` products to the named-key `rtsw_{wind,mag}_1m.json` feeds, with active-source selection and physical-range validation
-- forecast-log read-modify-write under a shared lock with identity-based row relocation; scored-row dedup by (anchor, target, model)
-- forecast cycle keyed on issue epoch (not solar-wind vintage), with staleness/expiry flags, health "stale" status, and a bounded-retry Kyoto Dst fetch
+- forecast-log read-modify-write under a shared lock with identity-based row relocation; scored-row dedup by (issue hour, target, model)
+- forecast cycles keyed on the UTC issue hour (not solar-wind vintage or Dst anchor), so a later cycle may legitimately reissue an overlapping target while same-cycle retries remain idempotent
+- staleness/expiry flags, health "stale" status, and a bounded-retry Kyoto Dst fetch
 - monitor advances one model hour per new hourly bin (watchdog against free-run), with bounded history, log rotation, and per-target horizon-alarm dedup
+- fixed-rate live-monitor scheduling subtracts cycle runtime and skips missed slots, preventing cumulative hourly issuance drift and catch-up bursts
+- fixed 1, 2, 3, and 6 h product horizons, with health determined from the exact API cycle contract; partial or internally inconsistent rows remain failed even when all four calls returned
+- hot-log retention rejects limits below four rows, so it cannot truncate a complete product cycle immediately after validation
+- cycle-level interval selection uses ACI only when both point and served residual streams are ready at the model-step lead corresponding to every 1, 2, 3, and 6 h target; otherwise the entire issuance uses the shared static conformal fallback
+- per-key single-flight refreshes, bounded waits, and failure cooldowns for USGS dB/dt and station-network requests, preventing duplicate upstream work without serializing independent stations or hammering a failed service
 
 Dashboard and API:
 
 - log-independent endpoints stay up when the forecast log is absent; internal errors no longer echo the log path
 - input-staleness demotion and served-pipeline capability labels surfaced to the front end
+- stale or unavailable status responses clear previously displayed metrics and WATCH state instead of leaving an obsolete forecast on screen
+- responsive WATCH placement in normal document flow so it cannot cover metric labels
+- deployment parity across the committed Julia 1.12.6 app environment, Docker image, bundled models, and operational-evidence path; launchers now fail closed when Julia or dependency setup is unsuitable
 
 Provenance and tests:
 
 - discovery provenance sidecar, persisted served point fit, and a joint posterior-draws ensemble artifact; fill-fabricated storm rows excluded from discovery
 - the joint-draws artifact (`data/real_sindy_ensemble_draws.csv`) is local-only and not committed; regenerate it with `validation/generate_ensemble_draws.jl` (`init_forecast` falls back to marginal per-term sampling when it is absent)
+- canonical and legacy PlotlySupply figure generation preserves the submitted full-width and vertical-panel geometry without loading the desktop synchronization layer
+- canonical source identity excludes generated validation output and records portable forward-slash paths
 - new deterministic test oracles covering the fixes above
 
 ## [0.1.0] - 2026-03-20

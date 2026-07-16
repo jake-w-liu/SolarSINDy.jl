@@ -17,8 +17,48 @@ const DBDT_TIERS = ("Quiet", "Active", "Strong", "Severe", "Extreme")
 const DBDT_TTL = 55.0
 const DBDT_MAX_AGE_MIN = 10.0
 const DBDT_CACHE_MAX = 32
+const USGS_REFRESH_WAIT_S = 4.0
 const _DBDT_CACHE = Dict{Tuple{String,Int},Any}()  # (station, window_minutes) => (fetch_time, nowcast)
+const _DBDT_REFRESH_TASKS = Dict{Tuple{String,Int},Task}()
 const _DBDT_LOCK = ReentrantLock()
+
+# Start at most one refresh per cache key. The gate makes registry publication happen before the
+# worker can finish and clean itself up. Network work never holds the cache lock; callers wait only
+# for a bounded interval, while the one worker may finish in the background and populate the cache.
+function _start_keyed_refresh!(inflight::Dict, cache_lock::ReentrantLock, key, work::Function)
+    return lock(cache_lock) do
+        existing = get(inflight, key, nothing)
+        existing !== nothing && !istaskdone(existing) && return existing
+
+        gate = Channel{Nothing}(1)
+        task = Threads.@spawn begin
+            take!(gate)
+            try
+                try
+                    (; value=work(), error=nothing)
+                catch e
+                    (; value=nothing, error=(e, catch_backtrace()))
+                end
+            finally
+                lock(cache_lock) do
+                    get(inflight, key, nothing) === current_task() && delete!(inflight, key)
+                end
+            end
+        end
+        inflight[key] = task
+        put!(gate, nothing)
+        return task
+    end
+end
+
+function _await_keyed_refresh(task::Task, wait_timeout::Real)
+    isfinite(wait_timeout) && wait_timeout >= 0 ||
+        throw(ArgumentError("wait_timeout must be finite and nonnegative"))
+    completed = Base.timedwait(
+        () -> istaskdone(task), Float64(wait_timeout); pollint=0.01,
+    )
+    return completed === :ok ? fetch(task) : nothing
+end
 
 function dbdt_tier(v)
     (v === nothing || !(v isa Real) || !isfinite(v)) && return (level = nothing, label = "—")
@@ -241,20 +281,10 @@ function _observation_time(val, field::Symbol)
     return dt === missing ? nothing : dt
 end
 
-function usgs_dbdt(; station::AbstractString = "FRD", minutes::Int = 120,
-                   compute_fn=_compute_dbdt, reference::DateTime=now(UTC))
-    code = _checked_station(station)
-    2 <= minutes <= 1440 || throw(ArgumentError("minutes must be in 2:1440"))
-    key = (code, minutes)
-    # Hold the lock only to read the cache; fetch OUTSIDE it so one slow/hanging upstream
-    # cannot serialize every concurrent poller behind the mutex for the full timeout.
+function _refresh_dbdt(key::Tuple{String,Int}, compute_fn, reference::DateTime)
+    code, minutes = key
     cached_entry = lock(_DBDT_LOCK) do
-        c = get(_DBDT_CACHE, key, nothing)
-        c
-    end
-    if cached_entry !== nothing && (time() - cached_entry[1]) <= DBDT_TTL
-        fresh = _current_dbdt_result(cached_entry[2]; reference=reference, cached=true)
-        get(fresh, :available, false) && return fresh
+        get(_DBDT_CACHE, key, nothing)
     end
     val = try
         compute_fn(code, minutes)
@@ -263,15 +293,31 @@ function usgs_dbdt(; station::AbstractString = "FRD", minutes::Int = 120,
         stale = cached_entry === nothing ? nothing :
                 _current_dbdt_result(cached_entry[2]; reference=reference, cached=true)
         if stale !== nothing
+            lock(_DBDT_LOCK) do
+                _bounded_time_cache_put!(
+                    _DBDT_CACHE, key, (time(), cached_entry[2]), DBDT_CACHE_MAX,
+                )
+            end
             @warn "dB/dt nowcast failed; serving cached" station=code exception=e
             return stale
         end
-        return (station=code, available=false, error=string(e))
+        failed = (station=code, available=false, error=string(e))
+        lock(_DBDT_LOCK) do
+            _bounded_time_cache_put!(_DBDT_CACHE, key, (time(), failed), DBDT_CACHE_MAX)
+        end
+        return failed
     end
     val = _current_dbdt_result(val; reference=reference)
     if !get(val, :available, false)
-        return cached_entry === nothing ? val :
-               _current_dbdt_result(cached_entry[2]; reference=reference, cached=true)
+        selected = cached_entry === nothing ? val :
+                   _current_dbdt_result(cached_entry[2]; reference=reference, cached=true)
+        cached_value = cached_entry === nothing ? val : cached_entry[2]
+        lock(_DBDT_LOCK) do
+            _bounded_time_cache_put!(
+                _DBDT_CACHE, key, (time(), cached_value), DBDT_CACHE_MAX,
+            )
+        end
+        return selected
     end
     # A slower overlapping request must not replace a newer observation that another
     # request stored while this one was fetching.
@@ -285,6 +331,9 @@ function usgs_dbdt(; station::AbstractString = "FRD", minutes::Int = 120,
             val_time = _observation_time(val, :current_time_utc)
             if get(latest, :available, false) && latest_time !== nothing &&
                (val_time === nothing || latest_time > val_time)
+                _bounded_time_cache_put!(
+                    _DBDT_CACHE, key, (time(), latest_entry[2]), DBDT_CACHE_MAX,
+                )
                 return latest
             end
         end
@@ -292,4 +341,48 @@ function usgs_dbdt(; station::AbstractString = "FRD", minutes::Int = 120,
         return val
     end
     return selected
+end
+
+function usgs_dbdt(; station::AbstractString = "FRD", minutes::Int = 120,
+                   compute_fn=_compute_dbdt, reference::DateTime=now(UTC),
+                   wait_timeout::Real=USGS_REFRESH_WAIT_S)
+    code = _checked_station(station)
+    2 <= minutes <= 1440 || throw(ArgumentError("minutes must be in 2:1440"))
+    isfinite(wait_timeout) && wait_timeout >= 0 ||
+        throw(ArgumentError("wait_timeout must be finite and nonnegative"))
+    key = (code, minutes)
+    # Hold the lock only to inspect cache/flight state. The refresh task owns all upstream work,
+    # coalescing concurrent same-key misses without serializing independent station windows.
+    cached_entry = lock(_DBDT_LOCK) do
+        get(_DBDT_CACHE, key, nothing)
+    end
+    if cached_entry !== nothing && (time() - cached_entry[1]) <= DBDT_TTL
+        return _current_dbdt_result(cached_entry[2]; reference=reference, cached=true)
+    end
+
+    task = _start_keyed_refresh!(
+        _DBDT_REFRESH_TASKS, _DBDT_LOCK, key,
+        () -> _refresh_dbdt(key, compute_fn, reference),
+    )
+    outcome = _await_keyed_refresh(task, wait_timeout)
+    if outcome === nothing
+        stale = lock(_DBDT_LOCK) do
+            get(_DBDT_CACHE, key, nothing)
+        end
+        return stale === nothing ?
+               (station=code, available=false, error="dB/dt refresh still in progress") :
+               _current_dbdt_result(stale[2]; reference=reference, cached=true)
+    end
+    if outcome.error !== nothing
+        err, _ = outcome.error
+        err isa InterruptException && throw(err)
+        stale = lock(_DBDT_LOCK) do
+            get(_DBDT_CACHE, key, nothing)
+        end
+        stale !== nothing && return _current_dbdt_result(
+            stale[2]; reference=reference, cached=true,
+        )
+        return (station=code, available=false, error=string(err))
+    end
+    return outcome.value
 end

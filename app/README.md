@@ -1,10 +1,10 @@
 # Space-Weather Threat Monitor
 
 A 100% open-source dashboard over a live geomagnetic-storm (**Dst**) forecaster. It turns the
-locked-live forecast log into an honest, calibrated threat view: current storm level, the Dst
+forecast log into a calibrated threat view: current storm level, the Dst
 forecast **with its calibrated 90% uncertainty band**, a **rolling forecast-vs-observed track**
-(each locked forecast plotted against the observation that later arrived), an explicit lead-time
-statement, the verified track record, and the Sun → grid warning chain.
+(each issued forecast plotted against the observation that later arrived), an explicit lead-time
+statement, the scored track record, and the Sun → grid warning chain.
 
 This dashboard ships **as part of [`SolarSINDy.jl`](../)** — it is the operational front-end over
 the package's V2 forecaster. A Julia REST backend (no web framework — just
@@ -20,9 +20,10 @@ cd app
 ./desktop.sh                   # or: launch as a standalone desktop app window
 ```
 
-First run instantiates the Julia environment (needs Julia ≥ 1.10). `run.sh` serves the
+First run instantiates the committed Julia 1.12.6 environment. `run.sh` serves the
 dashboard at the URL; `desktop.sh` additionally opens it as a standalone app window (Chrome/Edge
-`--app`, with a default-browser fallback) and stops the backend on exit.
+`--app`, with a default-browser fallback) while keeping the backend attached to the terminal
+until you press Ctrl-C.
 
 Configuration via environment variables:
 
@@ -53,16 +54,16 @@ All endpoints return JSON; the dashboard is served from the same origin.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/health` | liveness + log path/age |
+| `GET /api/health` | complete-cycle health (`ok`, `no_log`, `stale`, or `incomplete`), log age, and server time |
 | `GET /api/status` | Dst threat level, lead time, calibration summary, SWPC upstream snapshot |
 | `GET /api/forecast` | latest forecast cycle: per-horizon point + 90% band |
-| `GET /api/history?hours=72` | recent verified forecasts (observed vs predicted) |
+| `GET /api/history?hours=72` | recent scored forecasts (observed vs predicted) |
 | `GET /api/swpc` | NOAA SWPC upstream: L1 solar wind, Kp, G/S/R scales, alerts |
 | `GET /api/dbdt?station=FRD` | live ground dB/dt nowcast + Pulkkinen tier + exceedances |
-| `GET /api/storm_replay` | latest complete regenerated or frozen storm-replay evidence |
+| `GET /api/storm_replay` | storm-replay results from regenerated outputs or the bundled snapshot |
 | `GET /api/alerts` | active alerts + combined overall alert level/reasons |
 
-## How it stays honest
+## How forecasts are scored
 
 The integrity rules of this project carry into the UI:
 
@@ -73,10 +74,10 @@ The integrity rules of this project carry into the UI:
   relaxation beyond the measured L1 window. The genuine upstream lead
   for a *new* disturbance is the L1 advection time (~30–60 min). Multi-day
   confident-severity lead needs CME models not yet in this system.
-- **Calibration is computed from the log, not asserted.** Coverage and RMSE are recomputed from the
-  verified rows every load, with the full baseline set (pre-upgrade baseline, SINDy v1,
+- **Calibration is computed from the log.** Coverage and RMSE are recomputed from the
+  scored rows every load, with the full baseline set (pre-upgrade baseline, SINDy v1,
   persistence, O'Brien) and a per-method breakdown. V2 and every baseline are scored on the same
-  verified targets, so the UI never compares methods on mismatched samples.
+  observed targets, so the UI never compares methods on mismatched samples.
 
 ## Threat scale
 
@@ -91,24 +92,24 @@ points are **−50 / −100 / −200 nT**, with an extended minor tier at **−3
 | 3 | −100 to −200 | Intense storm |
 | 4 | < −200 | Extreme storm |
 
-These thresholds are the widely used scheme across the geomagnetic-storm literature
-(e.g., Gonzalez et al. 1994, *What is a geomagnetic storm?*, JGR; Loewe & Prölss 1997).
-*Verify exact editions/DOIs before formal citation.*
+These thresholds follow the classifications used by
+[Gonzalez et al. (1994)](https://doi.org/10.1029/93JA02867) and
+[Loewe and Prölss (1997)](https://doi.org/10.1029/96JA04020).
 
 ## Data & provenance
 
 - **Dst forecast**: the project's **V2** nowcaster: interpretable discovered sparse equation,
   causal correction, online adaptive-conformal intervals, ballistically propagated L1 forcing,
   regime-aware Bz/By relaxation, and guarded fallback selection. The pre-upgrade baseline remains in the log
-  only for same-row audit.
+  only for same-row comparison.
 - **Solar wind (L1)**: NOAA SWPC real-time products (`rtsw_wind_1m`, `rtsw_mag_1m`) for live
   issuance; the NASA OMNI archive (CDAWeb) is used for offline calibration and historical replay.
-  **Dst**: Kyoto WDC (via NOAA SWPC `kyoto-dst`). **Ground dB/dt** (future layer): USGS/INTERMAGNET.
+  **Dst**: Kyoto WDC (via NOAA SWPC `kyoto-dst`). **Ground dB/dt**: USGS geomagnetic
+  observatory data, with calibrated FRD and CMO forecasts.
 - Forecasts are **locked when issued and scored only after the target hour is observed** — the log
   is an honest, immutable track record.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE). 100% open source; open data; dependencies pinned via
-`Project.toml` compat bounds and resolved by `Pkg.instantiate()` on first run (commit the
-generated `Manifest.toml` if you need byte-exact pinning for a deployment).
+MIT — see [`LICENSE`](LICENSE). 100% open source; open data; dependencies are resolved from
+the committed `Manifest.toml` by `Pkg.instantiate()` on first run.

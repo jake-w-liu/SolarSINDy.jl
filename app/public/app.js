@@ -84,6 +84,13 @@ function renderThreat(st) {
     el.classList.add("threat-unknown");
     $("threat-level").textContent = "—";
     $("threat-label").textContent = st && st.message ? st.message : "awaiting forecast data";
+    $("cur-dst").textContent = "—";
+    $("worst-dst").textContent = "—";
+    $("horizon").textContent = "—";
+    const wf = $("watch-flag");
+    wf.textContent = "";
+    wf.classList.add("hidden");
+    $("model-line").textContent = st && st.message ? `Forecast unavailable: ${st.message}` : "Forecast unavailable.";
     return;
   }
   const th = st.threat;
@@ -163,6 +170,7 @@ function forecastTrack(history, cutoffMs) {
 
 async function renderForecast(forecast, history, status) {
   if (!(await ensurePlotly())) { setError("Could not load the Plotly library (offline and no vendored copy)."); return; }
+  history = history || { rows: [] };
   const cap = $("forecast-caption");
   $("interval-badge").textContent = forecast && forecast.interval_source ? `interval: ${forecast.interval_source}` : "—";
   if (!forecast || !forecast.horizons || forecast.horizons.length === 0) {
@@ -256,8 +264,14 @@ async function renderForecast(forecast, history, status) {
 }
 
 async function renderHistory(history) {
-  if (!(await ensurePlotly())) return;
   const cap = $("history-caption");
+  if (!history || !Array.isArray(history.rows)) {
+    $("cov-badge").textContent = "—";
+    if (window.Plotly) Plotly.purge("history-plot");
+    cap.textContent = "Forecast history is currently unavailable.";
+    return;
+  }
+  if (!(await ensurePlotly())) return;
   const rows = (history.rows || []).filter(r => r.observed_dst_nt != null && r.pred_dst_nt != null);
   $("cov-badge").textContent = history.coverage_90 != null ? `coverage ${fmt(history.coverage_90,3)}` : "—";
   if (rows.length === 0) { Plotly.purge("history-plot"); cap.textContent = "No verified forecasts in this window yet."; return; }
@@ -382,7 +396,8 @@ async function renderDbdt(dbdt) {
   if (!dbdt || dbdt.available === false) {
     const stale = dbdt && dbdt.stale;
     badge.textContent = stale ? "stale" : "unavailable"; badge.style.color = "var(--ink-mute)";
-    stats.innerHTML = ""; if (window.Plotly) Plotly.purge("dbdt-plot");
+    stats.innerHTML = ""; $("dbdt-forecast").innerHTML = "";
+    if (window.Plotly) Plotly.purge("dbdt-plot");
     cap.textContent = stale
       ? "The latest USGS ground-magnetometer sample is too old or future-dated for a live dB/dt assessment."
       : "USGS ground-magnetometer feed currently unreachable — it throttles intermittently; this panel fills in automatically on the next refresh once the feed responds. The Dst forecast above is unaffected.";
@@ -532,12 +547,22 @@ async function refresh() {
     // Show forecast ISSUE age, not the status generation time: a stale cycle would otherwise
     // read "updated seconds ago" because generated_utc is always now.
     const upd = $("updated");
-    const issued = status.forecast_issue_utc || status.generated_utc;
-    upd.dataset.reltime = issued; upd.dataset.relprefix = "forecast issued ";
-    upd.textContent = "forecast issued " + relTime(issued);
+    if (status.available === false) {
+      delete upd.dataset.reltime; delete upd.dataset.relprefix;
+      upd.textContent = "forecast unavailable";
+    } else {
+      const issued = status.forecast_issue_utc || status.generated_utc;
+      upd.dataset.reltime = issued; upd.dataset.relprefix = "forecast issued ";
+      upd.textContent = "forecast issued " + relTime(issued);
+    }
     try { renderThreat(status); browserNotify(status); renderUpstream(status); renderCalib(status); renderPipeline(status, dbdt); }
     catch (e) { console.error(e); }
+    if (status.available === false) $("health-dot").className = "dot dot-bad";
   } else {
+    renderThreat(null);
+    const upd = $("updated");
+    delete upd.dataset.reltime; delete upd.dataset.relprefix;
+    upd.textContent = "forecast unavailable";
     setError("Backend status unavailable; other panels may still update.");
     $("health-dot").className = "dot dot-bad";
   }

@@ -61,6 +61,149 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         @test_throws ArgumentError _validate_feed_timestamps(
             issue_time, issue_time, issue_time, issue_time; tolerance=Minute(-1),
         )
+        @test _latest_causal_index(
+            [issue_time - Minute(1), issue_time + Minute(1), issue_time],
+            issue_time,
+            "test",
+        ) == 3
+        @test_throws ErrorException _latest_causal_index(
+            [issue_time + Second(30)], issue_time, "test",
+        )
+    end
+
+    @testset "A/D: tolerated source-clock skew never enters an issued forecast" begin
+        mktempdir() do dir
+            issue_time = DateTime(2026, 7, 15, 12, 30)
+            sw_times = collect((issue_time - Hour(3)):Minute(1):issue_time)
+            causal_plasma = DataFrame(
+                time_tag=sw_times,
+                speed=fill(500.0, length(sw_times)),
+                density=fill(6.0, length(sw_times)),
+            )
+            causal_mag = DataFrame(
+                time_tag=sw_times,
+                bz_gsm=fill(-4.0, length(sw_times)),
+                by_gsm=fill(1.0, length(sw_times)),
+            )
+            future_times = [issue_time + Second(30), issue_time + Minute(1)]
+            skewed_plasma = vcat(
+                causal_plasma,
+                DataFrame(time_tag=future_times, speed=[1200.0, 1200.0], density=[50.0, 50.0]),
+            )
+            skewed_mag = vcat(
+                causal_mag,
+                DataFrame(time_tag=future_times, bz_gsm=[-100.0, -100.0], by_gsm=[50.0, 50.0]),
+            )
+            latest_dst_time = floor(issue_time, Hour)
+            dst_times = collect((latest_dst_time - Hour(6)):Hour(1):latest_dst_time)
+            dst_values = collect(range(-20.0, -44.0; length=length(dst_times)))
+            skewed_dst = (vcat(dst_times, [issue_time + Minute(1)]),
+                          vcat(dst_values, [-800.0]))
+
+            configs = [LiveVerifyConfig(;
+                model=:v2,
+                horizon_hours=1,
+                log_path=joinpath(dir, "forecast_$i.csv"),
+                report_path=joinpath(dir, "report_$i.md"),
+            ) for i in 1:2]
+            causal_inputs = prepare_issue_inputs(
+                configs[1]; issue_time,
+                plasma_fn=() -> causal_plasma,
+                mag_fn=() -> causal_mag,
+                dst_fn=() -> (dst_times, dst_values),
+            )
+            skewed_inputs = prepare_issue_inputs(
+                configs[2]; issue_time,
+                plasma_fn=() -> skewed_plasma,
+                mag_fn=() -> skewed_mag,
+                dst_fn=() -> skewed_dst,
+            )
+            redirect_stdout(devnull) do
+                issue_forecast(configs[1]; inputs=causal_inputs, write_trajectory=false, verbose=false)
+                issue_forecast(configs[2]; inputs=skewed_inputs, write_trajectory=false, verbose=false)
+            end
+            causal_row = CSV.read(configs[1].log_path, DataFrame)[1, :]
+            skewed_row = CSV.read(configs[2].log_path, DataFrame)[1, :]
+
+            @test DateTime(skewed_row.latest_solar_wind_utc) == issue_time
+            @test DateTime(skewed_row.latest_dst_time_utc) == latest_dst_time
+            @test skewed_row.latest_dst_nt == last(dst_values)
+            for column in (
+                :anchor_dst_star_nt, :target_time_utc, :V_kms, :Bz_nt, :By_nt,
+                :n_cm3, :Pdyn_npa, :target_step_V_kms, :target_step_Bz_nt,
+                :target_step_By_nt, :target_step_n_cm3, :target_step_Pdyn_npa,
+                :v1_pred_dst_nt, :v2_pred_dst_nt, :served_pred_dst_nt,
+                :served_pred_dst_ci05_nt, :served_pred_dst_ci95_nt,
+            )
+                @test isequal(skewed_row[column], causal_row[column])
+            end
+        end
+    end
+
+    @testset "Monitor-selected ACI policy fails closed without both residual streams" begin
+        calls = Ref(0)
+        unavailable = (args...; kwargs...) -> (calls[] += 1; nothing)
+        @test _aci_interval_for_policy(
+            :static, "unused.csv", -20.0, 3;
+            latest_dst=-30.0, pred_col=:v2_pred_dst_nt, interval_fn=unavailable,
+        ) === nothing
+        @test calls[] == 0
+        @test _aci_interval_for_policy(
+            :auto, "unused.csv", -20.0, 3;
+            latest_dst=-30.0, pred_col=:v2_pred_dst_nt, interval_fn=unavailable,
+        ) === nothing
+        @test calls[] == 1
+        @test_throws ErrorException _aci_interval_for_policy(
+            :aci, "unused.csv", -20.0, 3;
+            latest_dst=-30.0, pred_col=:served_pred_dst_nt, interval_fn=unavailable,
+        )
+        available = (args...; kwargs...) -> (-35.0, -5.0)
+        @test _aci_interval_for_policy(
+            :aci, "unused.csv", -20.0, 3;
+            latest_dst=-30.0, pred_col=:served_pred_dst_nt, interval_fn=available,
+        ) == (-35.0, -5.0)
+        @test_throws ArgumentError _aci_interval_for_policy(
+            :mixed, "unused.csv", -20.0, 3;
+            latest_dst=-30.0, pred_col=:v2_pred_dst_nt, interval_fn=available,
+        )
+    end
+
+    @testset "A/D: materially stale Dst state fails closed" begin
+        mktempdir() do dir
+            issue_time = DateTime(2026, 7, 15, 12, 30)
+            sw_times = collect((issue_time - Hour(12)):Minute(1):issue_time)
+            plasma = DataFrame(
+                time_tag=sw_times,
+                speed=fill(500.0, length(sw_times)),
+                density=fill(6.0, length(sw_times)),
+            )
+            mag = DataFrame(
+                time_tag=sw_times,
+                bz_gsm=fill(-4.0, length(sw_times)),
+                by_gsm=fill(1.0, length(sw_times)),
+            )
+            latest_dst_time = issue_time - Hour(7)
+            dst_times = collect((latest_dst_time - Hour(6)):Hour(1):latest_dst_time)
+            dst_values = collect(range(-20.0, -44.0; length=length(dst_times)))
+            cfg = LiveVerifyConfig(;
+                model=:v2,
+                horizon_hours=1,
+                log_path=joinpath(dir, "live_forecast_log.csv"),
+                report_path=joinpath(dir, "live_comparison_report.md"),
+            )
+            inputs = prepare_issue_inputs(
+                cfg; issue_time,
+                plasma_fn=() -> plasma,
+                mag_fn=() -> mag,
+                dst_fn=() -> (dst_times, dst_values),
+            )
+
+            @test LIVE_MAX_DST_AGE_HOURS == 6.0
+            @test_throws ErrorException issue_forecast(
+                cfg; inputs, write_trajectory=false, verbose=false,
+            )
+            @test !isfile(cfg.log_path)
+        end
     end
 
     @testset "D: argument parser accepts v2 workflow options" begin
@@ -190,6 +333,52 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         @test audit.Pdyn_npa == anchor.Pdyn
         @test audit.target_step_V_kms == target_step.V
         @test audit.target_step_Pdyn_npa == target_step.Pdyn
+    end
+
+    @testset "Issued target-step audit follows the served relaxed tail" begin
+        mktempdir() do dir
+            issue_time = DateTime(2026, 7, 15, 12, 30)
+            sw_times = collect((issue_time - Hour(12)):Minute(1):issue_time)
+            plasma = DataFrame(
+                time_tag=sw_times,
+                speed=fill(500.0, length(sw_times)),
+                density=fill(6.0, length(sw_times)),
+            )
+            mag = DataFrame(
+                time_tag=sw_times,
+                bz_gsm=fill(-4.0, length(sw_times)),
+                by_gsm=fill(1.0, length(sw_times)),
+            )
+            latest_dst_time = _floor_hour(issue_time) - Hour(1)
+            dst_times = collect((latest_dst_time - Hour(12)):Hour(1):latest_dst_time)
+            dst_values = collect(range(-20.0, -44.0; length=length(dst_times)))
+            cfg = LiveVerifyConfig(;
+                model=:v2,
+                horizon_hours=6,
+                log_path=joinpath(dir, "live_forecast_log.csv"),
+                report_path=joinpath(dir, "live_comparison_report.md"),
+            )
+            inputs = prepare_issue_inputs(
+                cfg;
+                issue_time,
+                plasma_fn=() -> plasma,
+                mag_fn=() -> mag,
+                dst_fn=() -> (dst_times, dst_values),
+            )
+            redirect_stdout(devnull) do
+                issue_forecast(cfg; inputs, write_trajectory=false, verbose=false)
+            end
+
+            row = CSV.read(cfg.log_path, DataFrame)[1, :]
+            # The final four target hours lie beyond measured L1 coverage. With
+            # dDst/dt = -2 nT/h, the served driver uses the exact four-hour
+            # relaxation rather than the frozen pre-upgrade persistence driver.
+            relax = exp(-4 / _v2_tail_tau(-2.0))
+            @test row.target_step_Bz_nt ≈ -4.0 * relax atol=1e-12
+            @test row.target_step_By_nt ≈ 1.0 * relax atol=1e-12
+            @test row.target_step_Bz_nt != -4.0
+            @test row.Bz_nt == -4.0  # anchor-feature provenance remains unchanged
+        end
     end
 
     @testset "Monitor cycle inputs are fetched once and keep one issue timestamp" begin
@@ -332,6 +521,14 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             written = CSV.read(log_path, DataFrame)
             @test nrow(written) == 1
             @test string(written[1, :issue_time_utc]) == "2026-06-06T04:10:00"
+
+            # A later hourly product may forecast the same target from the same provisional
+            # Dst anchor. That reissuance is distinct even though its target and model match.
+            next_cycle = copy(row)
+            next_cycle.issue_time_utc .= "2026-06-06T05:01:00"
+            third = _append_forecast!(log_path, next_cycle; return_status=true)
+            @test third == (row_idx=2, appended=true)
+            @test nrow(CSV.read(log_path, DataFrame)) == 2
         end
     end
 
@@ -472,6 +669,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             )
             # Repeat the oldest identity at the end. Once the bounded cache is
             # incomplete, duplicate lookup must still return the earliest row.
+            log[n, :issue_time_utc] = log[1, :issue_time_utc]
             log[n, :latest_dst_time_utc] = log[1, :latest_dst_time_utc]
             log[n, :target_time_utc] = log[1, :target_time_utc]
             CSV.write(log_path, log)
@@ -491,7 +689,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             # Scoring a cached pending row removes it from both the checkpoint
             # and the authoritative pending scan.
             resolved_idx = n - 1
-            resolved_key = _pending_key(log[resolved_idx, :latest_dst_time_utc],
+            resolved_key = _pending_key(log[resolved_idx, :issue_time_utc],
                                         log[resolved_idx, :target_time_utc], "v2")
             @test verify_pending!(LiveVerifyConfig(; log_path=log_path);
                                   dst_times=[targets[resolved_idx]],
@@ -713,7 +911,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             report_path = joinpath(tmp, "comparison.md")
             log = DataFrame(
                 issue_time_utc=[
-                    "2026-06-06T07:06:43.957",
+                    "2026-06-06T06:06:43.957",
                     "2026-06-06T07:23:05.548",
                     "2026-06-06T09:15:00",
                 ],
@@ -723,7 +921,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                     "2026-06-06T10:00:00",
                 ],
                 model_version=["v2", "v2", "v2"],
-                wall_clock_lead_hours=[0.89, 0.62, 0.75],
+                wall_clock_lead_hours=[1.89, 0.62, 0.75],
                 pred_dst_nt=[-39.38, -39.12, -35.0],
                 pred_dst_ci05_nt=[-44.94, -42.23, -40.0],
                 pred_dst_ci95_nt=[-33.82, -36.01, -30.0],

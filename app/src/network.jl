@@ -11,6 +11,7 @@
 const NET_TTL = 55.0
 const NET_CACHE_MAX = 16
 const _NET_CACHE = Dict{Tuple,Any}()             # station tuple => (fetch_time, results)
+const _NET_REFRESH_TASKS = Dict{Tuple,Task}()
 const _NET_LOCK = ReentrantLock()
 # Latitude-spread US/territory observatories (low-lat -> auroral); missing ones are skipped.
 const NET_STATIONS = ["SJG", "FRD", "BSL", "TUC", "BOU", "NEW", "CMO", "BRW"]
@@ -100,24 +101,11 @@ function _merge_station_rows(fetched, cached, codes)
     return rows, used_cache
 end
 
-function usgs_network(; stations::Vector{String} = NET_STATIONS,
-                      brief_fn=_station_brief, reference::DateTime=now(UTC))
-    isempty(stations) && throw(ArgumentError("stations must not be empty"))
-    length(stations) <= 32 || throw(ArgumentError("at most 32 stations are allowed"))
-    codes = unique(_checked_station.(stations))
-    key = Tuple(codes)
-    # Lock only to read the cache; fetch all stations OUTSIDE it so one slow USGS station
-    # cannot hold the mutex (and stall every poller) for the whole asyncmap timeout.
+function _refresh_usgs_network(key::Tuple, codes::Vector{String}, brief_fn,
+                               reference::DateTime)
     cached_entry = lock(_NET_LOCK) do
-        c = get(_NET_CACHE, key, nothing)
-        c
+        get(_NET_CACHE, key, nothing)
     end
-    st = cached_entry === nothing ? nothing :
-         _current_stations(cached_entry[2]; reference=reference)
-    cached_fresh = cached_entry !== nothing && (time() - cached_entry[1]) <= NET_TTL
-    cached_fresh && !isempty(st) &&
-        return (generated_utc=jdt(now(UTC)), available=true, stale=false, cached=true,
-                n_stations=length(st), thresholds=collect(PULK), stations=st)
     fetched = try
             # Limited concurrency (ntasks=3): fast enough, but polite to USGS — firing all
             # stations at once triggers rate-limiting that fails every request.
@@ -142,8 +130,12 @@ function usgs_network(; stations::Vector{String} = NET_STATIONS,
     else
         st = lock(_NET_LOCK) do
             latest_entry = get(_NET_CACHE, key, nothing)
-            latest_entry === nothing ? Any[] :
-                _current_stations(latest_entry[2]; reference=reference)
+            cached_value = latest_entry === nothing ? Any[] : latest_entry[2]
+            current = _current_stations(cached_value; reference=reference)
+            _bounded_time_cache_put!(
+                _NET_CACHE, key, (time(), cached_value), NET_CACHE_MAX,
+            )
+            current
         end
         used_cache = !isempty(st)
     end
@@ -151,4 +143,60 @@ function usgs_network(; stations::Vector{String} = NET_STATIONS,
     return (generated_utc = jdt(now(UTC)), available=available, stale=!available,
             cached=available && used_cache, n_stations = length(st),
             thresholds = collect(PULK), stations = st)
+end
+
+function usgs_network(; stations::Vector{String} = NET_STATIONS,
+                      brief_fn=_station_brief, reference::DateTime=now(UTC),
+                      wait_timeout::Real=USGS_REFRESH_WAIT_S)
+    isempty(stations) && throw(ArgumentError("stations must not be empty"))
+    length(stations) <= 32 || throw(ArgumentError("at most 32 stations are allowed"))
+    isfinite(wait_timeout) && wait_timeout >= 0 ||
+        throw(ArgumentError("wait_timeout must be finite and nonnegative"))
+    codes = unique(_checked_station.(stations))
+    key = Tuple(codes)
+    # Cache and in-flight bookkeeping are brief lock sections. Each station tuple owns at most one
+    # refresh task, while different tuples can refresh independently on the thread pool.
+    cached_entry = lock(_NET_LOCK) do
+        get(_NET_CACHE, key, nothing)
+    end
+    st = cached_entry === nothing ? nothing :
+         _current_stations(cached_entry[2]; reference=reference)
+    cached_fresh = cached_entry !== nothing && (time() - cached_entry[1]) <= NET_TTL
+    if cached_fresh
+        available = !isempty(st)
+        return (generated_utc=jdt(now(UTC)), available=available, stale=!available,
+                cached=available, n_stations=length(st), thresholds=collect(PULK),
+                stations=st)
+    end
+
+    task = _start_keyed_refresh!(
+        _NET_REFRESH_TASKS, _NET_LOCK, key,
+        () -> _refresh_usgs_network(key, codes, brief_fn, reference),
+    )
+    outcome = _await_keyed_refresh(task, wait_timeout)
+    if outcome === nothing
+        st = lock(_NET_LOCK) do
+            latest_entry = get(_NET_CACHE, key, nothing)
+            latest_entry === nothing ? Any[] :
+                _current_stations(latest_entry[2]; reference=reference)
+        end
+        available = !isempty(st)
+        return (generated_utc=jdt(now(UTC)), available=available, stale=!available,
+                cached=available, n_stations=length(st), thresholds=collect(PULK),
+                stations=st)
+    end
+    if outcome.error !== nothing
+        err, _ = outcome.error
+        err isa InterruptException && throw(err)
+        st = lock(_NET_LOCK) do
+            latest_entry = get(_NET_CACHE, key, nothing)
+            latest_entry === nothing ? Any[] :
+                _current_stations(latest_entry[2]; reference=reference)
+        end
+        available = !isempty(st)
+        return (generated_utc=jdt(now(UTC)), available=available, stale=!available,
+                cached=available, n_stations=length(st), thresholds=collect(PULK),
+                stations=st, error=string(err))
+    end
+    return outcome.value
 end

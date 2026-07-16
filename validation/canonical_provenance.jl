@@ -53,23 +53,32 @@ function _provenance_source_files(root::AbstractString)
     for dir_name in ("src", "validation")
         dir = joinpath(root, dir_name)
         isdir(dir) || continue
-        for (walk_root, _, names) in walkdir(dir)
+        for (walk_root, subdirs, names) in walkdir(dir)
+            # Readiness reports and other generated validation artifacts are outputs,
+            # not implementation sources. Including their timestamped contents makes
+            # source identity change merely by rerunning validation.
+            if dir_name == "validation" && normpath(walk_root) == normpath(dir)
+                filter!(name -> name != "output", subdirs)
+            end
             for name in names
                 path = joinpath(walk_root, name)
                 isfile(path) && push!(files, path)
             end
         end
     end
-    sort!(files; by=path -> relpath(path, root))
+    sort!(files; by=path -> _provenance_relpath(path, root))
     isempty(files) && throw(ArgumentError("no source files found under $root"))
     return files
 end
+
+_provenance_relpath(path::AbstractString, root::AbstractString) =
+    replace(relpath(path, root), Base.Filesystem.path_separator => '/')
 
 function provenance_source_tree_sha256(root::AbstractString)
     absolute_root = abspath(root)
     records = String[]
     for path in _provenance_source_files(absolute_root)
-        push!(records, relpath(path, absolute_root) * "\0" * provenance_sha256(path))
+        push!(records, _provenance_relpath(path, absolute_root) * "\0" * provenance_sha256(path))
     end
     return bytes2hex(SHA.sha256(join(records, "\n")))
 end

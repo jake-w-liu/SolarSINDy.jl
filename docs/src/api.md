@@ -1,4 +1,7 @@
-# API
+# Core API
+
+Forecast issuance, alarms, calibration, and assimilation are documented in the
+[operational API](operational-api.md).
 
 ## Module
 
@@ -74,69 +77,6 @@ paired_storm_statistics
 write_paired_storm_statistics
 holm_adjust
 write_holm_adjustment
-```
-
-## Forecasting And Alarms
-
-```@docs
-ForecastState
-ForecastResult
-OperationalV2Calibration
-operational_v2_feature_tuple
-init_forecast
-step_forecast!
-forecast_ahead
-fit_operational_v2_calibration
-operational_v2_predict
-StormSeverity
-Alarm
-AlarmConfig
-default_alarm_config
-classify_severity
-check_alarm
-maybe_fire_horizon_alarm!
-alarm_print
-alarm_log
-fetch_swpc_plasma
-fetch_swpc_mag
-fetch_swpc_dst
-fetch_realtime_solar_wind
-run_monitor
-recover_shadow_state
-DEFAULT_FEED_DEADMAN_THRESHOLD
-feed_deadman_tripped
-storm_lambda_grid
-select_storm_lambda
-write_storm_lambda_selection
-read_storm_lambda_selection
-```
-
-## Conformal Calibration
-
-```@docs
-ConformalCalibration
-ConformalStratum
-fit_conformal
-conformal_stratum
-conformal_halfwidth
-conformal_interval
-conformal_coverage
-write_conformal_calibration
-read_conformal_calibration
-AdaptiveConformal
-init_adaptive_conformal
-adaptive_conformal_step!
-run_adaptive_conformal
-```
-
-## Online Assimilation
-
-```@docs
-AssimilationFilter
-init_assimilation
-assimilation_predict!
-assimilation_update!
-run_assimilation
 ```
 
 ## Utilities

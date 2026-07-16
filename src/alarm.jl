@@ -7,6 +7,33 @@ Geomagnetic storm severity levels based on Dst* thresholds.
 """
 @enum StormSeverity QUIET MODERATE INTENSE SUPERINTENSE
 
+@doc """
+    QUIET
+
+Storm-severity category used when no configured storm threshold is crossed.
+""" QUIET
+
+@doc """
+    MODERATE
+
+First nonquiet storm-severity category. The default alarm threshold is
+`Dst* = -50 nT`.
+""" MODERATE
+
+@doc """
+    INTENSE
+
+Intermediate storm-severity category. The default alarm threshold is
+`Dst* = -100 nT`.
+""" INTENSE
+
+@doc """
+    SUPERINTENSE
+
+Highest storm-severity category. The default alarm threshold is
+`Dst* = -200 nT`.
+""" SUPERINTENSE
+
 """
     Alarm
 

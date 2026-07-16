@@ -248,6 +248,14 @@ const OPERATIONAL_V2_BASELINE_COLUMNS = Pair{Symbol,Symbol}[
     :storm_guard => :storm_guard_dst_nt,
 ]
 
+"""
+    default_operational_v2_calibration(; feature_names, interval_scale, label)
+
+Construct an untrained [`OperationalV2Calibration`](@ref) with zero residual
+correction, unit feature scales, and the requested interval scale. By default,
+the calibration uses `DEFAULT_OPERATIONAL_V2_FEATURES` and leaves V1 point
+forecasts unchanged.
+"""
 function default_operational_v2_calibration(;
         feature_names::Vector{Symbol}=copy(DEFAULT_OPERATIONAL_V2_FEATURES),
         interval_scale::Real=1.0,
@@ -914,6 +922,14 @@ function _row_baselines(df::DataFrame, row_idx::Int)
     return baselines
 end
 
+"""
+    score_operational_v2(df, cal)
+
+Apply `cal` row by row to a copy of `df` and return the copy with derived V2
+features, predictions, intervals, residuals, coverage indicators, and selected
+component metadata. Required forecast, observation, and calibration-feature
+columns must be present.
+"""
 function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
     out = add_operational_v2_features!(copy(df))
     _require_columns(out, vcat(
@@ -974,6 +990,12 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
     return out
 end
 
+"""
+    write_operational_v2_calibration(path, cal)
+
+Write `cal` to the package's versioned CSV calibration schema, creating the
+parent directory when needed. Return `path` after the atomic write completes.
+"""
 function write_operational_v2_calibration(path::String,
                                           cal::OperationalV2Calibration)
     dir = dirname(path)
@@ -1020,6 +1042,13 @@ function write_operational_v2_calibration(path::String,
     return path
 end
 
+"""
+    read_operational_v2_calibration(path)
+
+Read and validate an [`OperationalV2Calibration`](@ref) from the package's CSV
+calibration schema. Older files without selector fields use the documented V2
+selector defaults.
+"""
 function read_operational_v2_calibration(path::String)
     df = CSV.read(path, DataFrame)
     _require_columns(df, [:feature, :feature_mean, :feature_scale,

@@ -12,6 +12,13 @@ end
 const CFG = Main.CanonicalFigureGeneration
 const _FIGURE_TEST_PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
 
+@testset "Legacy multi-panel generator does not start desktop synchronization" begin
+    source = read(joinpath(
+        _FIGURE_TEST_PACKAGE_ROOT, "validation", "generate_real_figures.jl",
+    ), String)
+    @test occursin("subplots(2, 1; sync=false, show=false)", source)
+end
+
 function _figure_fixture_write(paths, filename, frame;
                                producer=CFG.CANONICAL_DATA_ARTIFACT_INVENTORY[filename])
     path = joinpath(paths.data, filename)
@@ -254,6 +261,7 @@ end
 
         figures = CFG.build_canonical_figures(prepared)
         @test length(figures.inclusion_frequency.data) == 3
+        @test !(figures.may2024_reconstruction.fig isa CFG.SyncPlot)
         @test length(figures.may2024_reconstruction.fig.data) == 5
         @test length(figures.lambda_selection.fig.data) == 5
         @test length(figures.coefficient_stability.data) == 3

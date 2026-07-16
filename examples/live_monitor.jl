@@ -26,11 +26,11 @@
 #   SOLARSINDY_MONITOR_ONCE=1  run exactly one cycle, then exit (also --once)
 #   LIVE_MONITOR_INTERVAL_SEC  seconds between cycles (default 3600)
 #   LIVE_MONITOR_MAX_CYCLES    stop after N cycles (default 0 = run forever; testing)
-#   LIVE_MONITOR_HORIZONS      comma list of horizons (default "1,2,3,6")
-#   LIVE_MONITOR_DEADMAN_CYCLES consecutive all-failed cycles before the issuance dead-man trips
-#   LIVE_MONITOR_MAX_LOG_ROWS   maximum rows retained in the hot forecast log (default 50000)
+#   LIVE_MONITOR_DEADMAN_CYCLES consecutive incomplete cycles before the issuance dead-man trips
+#   LIVE_MONITOR_MAX_LOG_ROWS   maximum hot-log rows; must hold a full cycle (default 50000)
 
 include(joinpath(@__DIR__, "live_forecast_verify.jl"))
+include(joinpath(@__DIR__, "..", "app", "src", "forecast_api.jl"))
 include(joinpath(@__DIR__, "external_dst_snapshot_collector.jl"))
 
 using CSV
@@ -65,8 +65,8 @@ const V2_CALIB = _resolve_v2_calibration()
 const INTERVAL = parse(Int, get(ENV, "LIVE_MONITOR_INTERVAL_SEC", "3600"))
 const RUN_ONCE = get(ENV, "SOLARSINDY_MONITOR_ONCE", "0") == "1" || ("--once" in ARGS)
 const MAX_CYCLES = RUN_ONCE ? 1 : parse(Int, get(ENV, "LIVE_MONITOR_MAX_CYCLES", "0"))
-const HORIZONS = unique(parse.(Int, split(get(ENV, "LIVE_MONITOR_HORIZONS", "1,2,3,6"), ",")))
-# Consecutive all-horizon-failed cycles before the issuance dead-man trips. Uses the
+const HORIZONS = LIVE_CYCLE_HORIZONS  # one shared monitor/API product contract
+# Consecutive incomplete horizon cycles before the issuance dead-man trips. Uses the
 # package-level feed_deadman_tripped predicate (realtime.jl) so the escalation threshold
 # is shared and unit-tested.
 const ISSUE_DEADMAN_THRESHOLD = parse(Int, get(ENV, "LIVE_MONITOR_DEADMAN_CYCLES", string(DEFAULT_FEED_DEADMAN_THRESHOLD)))
@@ -74,10 +74,11 @@ const MAX_LOG_ROWS = parse(Int, get(ENV, "LIVE_MONITOR_MAX_LOG_ROWS", "50000"))
 
 INTERVAL >= 1 || error("LIVE_MONITOR_INTERVAL_SEC must be at least 1")
 MAX_CYCLES >= 0 || error("LIVE_MONITOR_MAX_CYCLES must be nonnegative")
-!isempty(HORIZONS) && all(>(0), HORIZONS) ||
-    error("LIVE_MONITOR_HORIZONS must contain positive integers")
 ISSUE_DEADMAN_THRESHOLD >= 1 || error("LIVE_MONITOR_DEADMAN_CYCLES must be at least 1")
-MAX_LOG_ROWS >= 1 || error("LIVE_MONITOR_MAX_LOG_ROWS must be at least 1")
+MAX_LOG_ROWS >= length(HORIZONS) || error(
+    "LIVE_MONITOR_MAX_LOG_ROWS must be at least $(length(HORIZONS)) " *
+    "to retain one complete $(join(HORIZONS, '/')) h product cycle",
+)
 
 # External Dst snapshot collector config pinned to the monitor directory. repo_root keeps the
 # stored raw_path column relative to the directory's parent, matching the deployed layout.
@@ -91,8 +92,8 @@ const EXTERNAL_DST_CFG = ExternalDstCollectorConfig(;
 stamp() = Dates.format(now(UTC), dateformat"yyyy-mm-ddTHH:MM:SS") * "Z"
 logln(args...) = (println("MONITOR ", stamp(), "  ", args...); flush(stdout))
 
-# Run one body step, reporting but never propagating failures. Returns true on success so the
-# cycle can distinguish a fully-failed issuance (dead-man input) from a healthy one.
+# Run one body step, reporting but never propagating failures. The issuance path counts these
+# call results for diagnostics, then validates the completed log cycle independently.
 function guarded(label, f)
     try
         f()
@@ -129,7 +130,8 @@ function newest_issuance_age_hours()
     return (now(UTC) - latest) / Millisecond(3_600_000)
 end
 
-function write_outage_sentinel(first_fail::AbstractString, consecutive::Int)
+function write_outage_sentinel(first_fail::AbstractString, consecutive::Int;
+                               path::AbstractString=OUTAGE_SENTINEL)
     age = newest_issuance_age_hours()
     age_txt = age === nothing ? "unknown" : string(round(age; digits=1), " h")
     body = string(
@@ -138,14 +140,15 @@ function write_outage_sentinel(first_fail::AbstractString, consecutive::Int)
         "First failed cycle UTC: ", first_fail, "\n",
         "Consecutive failed cycles: ", consecutive, "\n",
         "Newest issued forecast age: ", age_txt, "\n\n",
-        "The live monitor issued no forecast for ", consecutive,
+        "The live monitor did not complete every required forecast horizon for ", consecutive,
         " consecutive cycle(s). Cause: upstream feed fetch or issuance error ",
-        "(see the WARN issue lines in the monitor stdout log). This file persists ",
+        "(check /api/health and /api/swpc, then confirm that the SWPC and Kyoto Dst ",
+        "feeds are current). This file persists ",
         "until issuance recovers, at which point the monitor removes it.\n",
     )
     try
-        mkpath(dirname(OUTAGE_SENTINEL))
-        open(OUTAGE_SENTINEL, "w") do io; write(io, body); end
+        mkpath(dirname(path))
+        open(path, "w") do io; write(io, body); end
     catch e
         e isa InterruptException && rethrow()
         logln("WARN could not write outage sentinel: ", sprint(showerror, e))
@@ -153,14 +156,82 @@ function write_outage_sentinel(first_fail::AbstractString, consecutive::Int)
     return nothing
 end
 
+function _complete_issuance_cycle(log_path::AbstractString, issue_time::DateTime,
+                                  interval_policy::Symbol=:auto)
+    interval_policy = _checked_interval_policy(interval_policy)
+    isfile(log_path) || return false
+    df = _load_log(log_path)
+    cycle = _latest_cycle_uncached(df)
+    _valid_live_cycle(cycle) || return false
+    issues = collect(skipmissing(cycle.issue_time_utc_dt))
+    isempty(issues) && return false
+    floor(maximum(issues), Hour) == floor(issue_time, Hour) || return false
+    source = _common_cycle_field(cycle, :interval_source)
+    interval_policy == :aci && return source == "aci"
+    interval_policy == :static && return source != "aci"
+    return true
+end
+
 clear_outage_sentinel() = (isfile(OUTAGE_SENTINEL) && rm(OUTAGE_SENTINEL; force=true); nothing)
+
+# Advance a fixed-rate cycle deadline without catch-up bursts. Sleeping for a full interval after
+# each completed cycle accumulates fetch/runtime latency and eventually skips an hourly product.
+# This schedule stays anchored to the original cadence. If work spans several slots, fully elapsed
+# slots are skipped and at most the latest deadline is served immediately, so the daemon never
+# emits a multi-cycle catch-up burst.
+function _advance_cycle_deadline(previous_deadline::Real, now_seconds::Real,
+                                 interval_seconds::Real)
+    all(isfinite, (previous_deadline, now_seconds, interval_seconds)) ||
+        throw(ArgumentError("cycle scheduling inputs must be finite"))
+    interval_seconds > 0 || throw(ArgumentError("cycle interval must be positive"))
+    deadline = Float64(previous_deadline) + Float64(interval_seconds)
+    skipped = 0
+    if now_seconds > deadline
+        skipped = floor(Int, (Float64(now_seconds) - deadline) / Float64(interval_seconds))
+        deadline += skipped * Float64(interval_seconds)
+    end
+    return (deadline=deadline, skipped=skipped)
+end
+
+_cycle_clock_seconds() = time_ns() / 1.0e9
+
+_monitor_aci_ready(log_path::AbstractString, model_steps::Integer,
+                   latest_dst::Real, pred_col::Symbol) =
+    _aci_interval_from_log(
+        log_path, 0.0, model_steps; latest_dst=latest_dst, pred_col=pred_col,
+    ) !== nothing
+
+# Choose one interval policy before any horizon is written. Both the baseline-center and served-
+# center residual streams must be mature for every required model-step lead before the batch may use
+# ACI; otherwise every horizon uses its shared static/conformal fallback.
+function _monitor_interval_policy(inputs;
+                                  log_path::AbstractString=LOG,
+                                  horizons=HORIZONS,
+                                  readiness_fn::Function=_monitor_aci_ready)
+    issue_time = inputs.issue_time
+    dst_times, dst_vals = inputs.dst
+    dst_idx = _latest_causal_index(dst_times, issue_time, "Kyoto Dst")
+    latest_dst_time = dst_times[dst_idx]
+    latest_dst = Float64(dst_vals[dst_idx])
+    for horizon in horizons
+        target = _next_hourly_target(issue_time, horizon, latest_dst_time)
+        model_steps = Int((target - latest_dst_time) / Hour(1))
+        for pred_col in (:v2_pred_dst_nt, :served_pred_dst_nt)
+            readiness_fn(log_path, model_steps, latest_dst, pred_col) || return :static
+        end
+    end
+    return :aci
+end
 
 # Bound the operational hot log under the same cross-process lock used by
 # issuance and verification. Retention is FIFO by append order; rebuilding the
 # sidecar clears order-dependent ACI checkpoints so the next query replays only
 # the retained authoritative rows.
 function _retain_live_forecast_log!(log_path::AbstractString, max_rows::Int)
-    max_rows >= 1 || throw(ArgumentError("max_rows must be at least 1"))
+    max_rows >= length(HORIZONS) || throw(ArgumentError(
+        "max_rows must be at least $(length(HORIZONS)) to retain one complete " *
+        "$(join(HORIZONS, '/')) h product cycle",
+    ))
     isfile(log_path) || return 0
     path = String(log_path)
     return _with_forecast_log_lock(path) do
@@ -181,7 +252,37 @@ function _retain_live_forecast_log!(log_path::AbstractString, max_rows::Int)
     end
 end
 
-# Run one cycle; returns the number of horizons that issued successfully.
+function _issue_horizon_cycle!(inputs;
+                               issue_fn::Function=issue_forecast,
+                               log_path::AbstractString=LOG,
+                               calibration_path::AbstractString=V2_CALIB,
+                               complete_fn::Function=_complete_issuance_cycle,
+                               interval_policy::Symbol)
+    interval_policy = _checked_interval_policy(interval_policy)
+    interval_policy == :auto && throw(ArgumentError(
+        "live monitor horizon batches require an explicit coherent interval policy",
+    ))
+    issued_ok = 0
+    trajectory_horizon = maximum(HORIZONS)
+    for h in HORIZONS
+        issued_ok += guarded("issue h=$h", () -> begin
+            issue_fn(LiveVerifyConfig(; mode=:issue, model=:v2, horizon_hours=h,
+                                      log_path=String(log_path),
+                                      v2_calibration_path=String(calibration_path));
+                     inputs=inputs, write_trajectory=h == trajectory_horizon,
+                     verbose=false, interval_policy=interval_policy)
+            nothing
+        end)
+    end
+    complete = guarded("validate issued cycle", () -> begin
+        complete_fn(log_path, inputs.issue_time, interval_policy) || error(
+            "latest log rows do not form one API-valid $(join(HORIZONS, '/')) h cycle",
+        )
+    end)
+    return (succeeded=issued_ok, complete=complete)
+end
+
+# Run one cycle; returns both successful calls and whether the log contains one API-valid cycle.
 function cycle!()
     base_cfg = LiveVerifyConfig(; mode=:issue, model=:v2, horizon_hours=first(HORIZONS),
                                 log_path=LOG, v2_calibration_path=V2_CALIB)
@@ -190,18 +291,17 @@ function cycle!()
     catch e
         e isa InterruptException && rethrow()
         logln("WARN prepare issuance inputs failed: ", sprint(showerror, e))
-        return 0
+        return (succeeded=0, complete=false)
     end
-    issued_ok = 0
-    trajectory_horizon = maximum(HORIZONS)
-    for h in HORIZONS
-        guarded("issue h=$h", () ->
-            issue_forecast(LiveVerifyConfig(; mode=:issue, model=:v2, horizon_hours=h,
-                                            log_path=LOG, v2_calibration_path=V2_CALIB);
-                           inputs=inputs, write_trajectory=h == trajectory_horizon,
-                           verbose=false)) &&
-            (issued_ok += 1)
+    interval_policy = try
+        _monitor_interval_policy(inputs)
+    catch e
+        e isa InterruptException && rethrow()
+        logln("WARN select coherent interval policy failed: ", sprint(showerror, e))
+        return (succeeded=0, complete=false)
     end
+    logln("forecast interval policy: ", interval_policy)
+    issuance = _issue_horizon_cycle!(inputs; interval_policy=interval_policy)
     cfg = LiveVerifyConfig(; log_path=LOG, report_path=REPORT)
     dst_times, dst_vals = inputs.dst
     refreshed = guarded(
@@ -229,7 +329,7 @@ function cycle!()
         pend = count(ismissing, df.observation_dst_nt)
         logln("log rows=", nrow(df), " pending=", pend)
     end)
-    return issued_ok
+    return issuance
 end
 
 function main()
@@ -240,10 +340,11 @@ function main()
     cycles = 0
     consecutive_failures = 0
     first_failure = ""
+    cycle_deadline = _cycle_clock_seconds()
     while true
         cycles += 1
         logln("cycle ", cycles, " begin")
-        issued_ok = cycle!()
+        issuance = cycle!()
 
         # Log-freshness self-check every cycle: the report can no longer read healthy during an
         # issuance gap because the age of the newest issued row is surfaced here and in the report.
@@ -252,10 +353,12 @@ function main()
                 logln("newest issuance age: ", round(age; digits=2), " h")
         end
 
-        if issued_ok == 0
+        if !issuance.complete
             consecutive_failures += 1
             isempty(first_failure) && (first_failure = stamp())
-            logln("WARN no forecast issued this cycle (consecutive failed cycles=",
+            logln("WARN incomplete forecast cycle: ", issuance.succeeded, "/", length(HORIZONS),
+                  " horizon calls succeeded but the latest rows were not one API-valid cycle ",
+                  "(consecutive failed cycles=",
                   consecutive_failures, "/", ISSUE_DEADMAN_THRESHOLD, ")")
             if feed_deadman_tripped(consecutive_failures; threshold=ISSUE_DEADMAN_THRESHOLD)
                 write_outage_sentinel(first_failure, consecutive_failures)
@@ -279,7 +382,16 @@ function main()
 
         logln("cycle ", cycles, " done")
         (0 < MAX_CYCLES <= cycles) && break
-        sleep(INTERVAL)
+        schedule = _advance_cycle_deadline(
+            cycle_deadline, _cycle_clock_seconds(), INTERVAL,
+        )
+        cycle_deadline = schedule.deadline
+        schedule.skipped > 0 && logln(
+            "WARN cycle runtime passed ", schedule.skipped,
+            " fully elapsed scheduled slot(s); cadence remains fixed-rate",
+        )
+        remaining = cycle_deadline - _cycle_clock_seconds()
+        remaining > 0 && sleep(remaining)
     end
     logln("stop after ", cycles, " cycle(s)")
 end

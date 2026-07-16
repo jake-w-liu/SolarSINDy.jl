@@ -7,7 +7,7 @@
 # Endpoints:
 #   GET /                -> dashboard (public/index.html)
 #   GET /<static>        -> public/<static>   (whitelisted extensions, traversal-guarded)
-#   GET /api/health      -> liveness + log age
+#   GET /api/health      -> log age + complete-cycle health
 #   GET /api/status      -> current threat status, lead time, calibration
 #   GET /api/forecast    -> latest forecast cycle (point + 90% band per horizon)
 #   GET /api/history?hours=72 -> recent verified track record
@@ -167,13 +167,28 @@ function make_handler(log_path::AbstractString)
             if path == "/api/health"
                 ok = isfile(log_path)
                 age = ok ? round((time() - mtime(log_path)) / 60; digits=1) : nothing
+                cycle = ok ? try
+                    latest_cycle(get_log(log_path))
+                catch e
+                    e isa InterruptException && rethrow()
+                    DataFrame()
+                end : DataFrame()
+                cycle_complete = ok && _valid_live_cycle(cycle)
+                cycle_state = ok && nrow(cycle) > 0 ? _cycle_staleness(cycle) : nothing
+                cycle_stale = cycle_state !== nothing && (
+                    cycle_state.stale || cycle_state.expired || cycle_state.invalid_future
+                )
                 # The daemon rewrites the log every cycle, so a file mtime older than the
                 # staleness window means it has stopped issuing — report "stale" (dashboard dot
-                # turns red), not "ok", instead of implying a live feed behind frozen data.
+                # turns red). A recent file is still unhealthy when its latest issue hour lacks
+                # the complete, internally consistent 1/2/3/6 h product cycle.
                 status = !ok ? "no_log" :
-                         (age !== nothing && age > STALE_CYCLE_HOURS * 60 ? "stale" : "ok")
+                         ((age !== nothing && age > STALE_CYCLE_HOURS * 60) || cycle_stale) ?
+                             "stale" :
+                         !cycle_complete ? "incomplete" : "ok"
                 return json_response((status = status,
                                       log_age_min=age,
+                                      cycle_complete=cycle_complete,
                                       server_time_utc=string(now(UTC)) * "Z"))
             elseif startswith(path, "/api/")
                 return api_handler(path, uri.query === nothing ? "" : uri.query, log_path)

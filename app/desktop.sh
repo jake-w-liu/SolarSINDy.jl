@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Desktop launcher: start the backend and open the dashboard as a standalone app window
 # (a lightweight desktop wrap — no Electron build needed; uses a Chromium-family browser in
-# --app mode, falling back to the default browser). One command, auto-stops the server on exit.
+# --app mode, falling back to the default browser). Ctrl-C stops the attached backend.
 #
 #   ./desktop.sh
 set -euo pipefail
@@ -10,10 +10,14 @@ PORT="${SWM_PORT:-8723}"; HOST="${SWM_HOST:-127.0.0.1}"; URL="http://${HOST}:${P
 JULIA="${JULIA:-julia}"
 JULIA_THREADS="${SWM_JULIA_THREADS:-2}"
 
-command -v "$JULIA" >/dev/null 2>&1 || { echo "error: '$JULIA' not found (install Julia 1.10+)." >&2; exit 1; }
+command -v "$JULIA" >/dev/null 2>&1 || { echo "error: '$JULIA' not found (install Julia 1.12.6+)." >&2; exit 1; }
+if ! "$JULIA" --startup-file=no -e 'exit(VERSION >= v"1.12.6" ? 0 : 1)' >/dev/null 2>&1; then
+  echo "error: the monitor app requires Julia 1.12.6 or newer." >&2
+  exit 1
+fi
 
 echo "Instantiating + starting backend…"
-"$JULIA" --project=. -e 'using Pkg; Pkg.instantiate()' >/dev/null 2>&1 || true
+"$JULIA" --project=. -e 'using Pkg; Pkg.instantiate()' >/dev/null
 nohup "$JULIA" --threads="$JULIA_THREADS" --project=. src/server.jl > /tmp/swm_desktop.out 2>&1 &
 SRV=$!
 cleanup() { kill "$SRV" 2>/dev/null || true; }
@@ -45,6 +49,6 @@ open_window() {
   else echo "Open ${URL} in your browser."; fi
 }
 
-echo "Space-Weather Threat Monitor running at ${URL}  (close the window or press Ctrl-C to quit)."
+echo "Space-Weather Threat Monitor running at ${URL}  (press Ctrl-C here to stop the backend)."
 open_window
 wait "$SRV"

@@ -163,9 +163,11 @@ _rowget(row, name::Symbol) = hasproperty(row, name) ? getproperty(row, name) : m
 # L1 feed stalls across issue boundaries, several hourly cycles share one latest_solar_wind_utc;
 # keying on that vintage would merge superseded issues into one payload (conflicting horizons per
 # target, a stale issue/anchor, and threat minima computed over superseded forecasts). Per-row
-# issue timestamps within one cycle differ by seconds, so we keep rows whose issue time is within
-# a short tolerance of the newest. Returns a sub-DataFrame sorted by target time.
-const _CYCLE_TOL = Minute(5)   # intra-cycle issue-time spread is seconds; cycles are ~1 h apart
+# issue timestamps within one cycle may differ by seconds, so the product identity is the UTC issue
+# hour and `_valid_live_cycle` separately bounds the within-cycle spread. This prevents adjacent-hour
+# cycles from mixing while accepting the sequential-per-horizon writer and a short retry. Returns a
+# sub-DataFrame sorted by target time.
+const _CYCLE_TOL = Minute(5)   # sidecar matching tolerance; live-cycle grouping uses issue hour
 
 _sort_by_target!(cyc) = (hasproperty(cyc, :target_time_utc_dt) && sort!(cyc, :target_time_utc_dt); cyc)
 
@@ -175,7 +177,10 @@ function _latest_cycle_uncached(df::DataFrame)
         iss = df.issue_time_utc_dt
         if !isempty(collect(skipmissing(iss)))
             tmax = maximum(skipmissing(iss))
-            keep = coalesce.(iss .>= (tmax - _CYCLE_TOL), false)
+            issue_hour = floor(tmax, Hour)
+            keep = map(iss) do issue
+                issue !== missing && floor(issue, Hour) == issue_hour
+            end
             return _sort_by_target!(df[keep, :])
         end
     end
@@ -515,6 +520,7 @@ function _valid_live_cycle(cyc::DataFrame)
     end
     issue_hour = floor(first(issues), Hour)
     all(issue -> floor(issue, Hour) == issue_hour, issues) || return false
+    maximum(issues) - minimum(issues) <= _CYCLE_TOL || return false
     expected_targets = [issue_hour + Hour(h) for h in LIVE_CYCLE_HORIZONS]
     return targets == expected_targets
 end

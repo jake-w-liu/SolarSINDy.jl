@@ -398,6 +398,9 @@ end
 
 const LIVE_MIN_HOURLY_DRIVER_SAMPLES = SolarSINDy.MIN_HOURLY_DRIVER_SAMPLES
 const LIVE_FUTURE_CLOCK_TOLERANCE = Minute(2)
+const LIVE_MAX_SOLAR_WIND_AGE_HOURS = 6.0
+const LIVE_MAX_DST_AGE_HOURS = 6.0
+const LIVE_WARN_SOLAR_WIND_AGE_HOURS = 2.0
 
 function _finite_mean(v, default::Float64, min_samples::Int)
     min_samples >= 1 || throw(ArgumentError("min_samples must be at least 1"))
@@ -740,7 +743,7 @@ function _with_forecast_log_lock(f, log_path::String; timeout_sec::Float64=30.0,
     end
 end
 
-const _LIVE_STATE_VERSION = 1
+const _LIVE_STATE_VERSION = 2
 const _LIVE_STATE_TAIL_BYTES = 4096
 # Exact O(1) duplicate lookup for the most recently appended unresolved rows.
 # Older unresolved identities remain authoritative in the CSV and are streamed
@@ -773,25 +776,26 @@ function _log_fingerprint(path::AbstractString)
     )
 end
 
-function _pending_key(latest, target, model)
-    return string(_parse_dt(latest), '\x1f', _parse_dt(target), '\x1f', String(model))
+function _pending_key(issue, target, model)
+    issue_hour = _floor_hour(_parse_dt(issue))
+    return string(issue_hour, '\x1f', _parse_dt(target), '\x1f', String(model))
 end
 
 function _incoming_pending_key(row::DataFrame)
     nrow(row) == 1 || throw(ArgumentError("forecast append requires exactly one row"))
-    required = (:latest_dst_time_utc, :target_time_utc, :model_version)
+    required = (:issue_time_utc, :target_time_utc, :model_version)
     all(String(c) in names(row) for c in required) || return nothing
     any(ismissing(row[1, c]) for c in required) && return nothing
-    return _pending_key(row[1, :latest_dst_time_utc], row[1, :target_time_utc],
+    return _pending_key(row[1, :issue_time_utc], row[1, :target_time_utc],
                         row[1, :model_version])
 end
 
 function _csv_pending_key(csv_row, columns::Set{Symbol})
-    required = (:latest_dst_time_utc, :target_time_utc, :model_version,
+    required = (:issue_time_utc, :target_time_utc, :model_version,
                 :observation_dst_nt)
     all(in(columns), required) || return nothing
     ismissing(getproperty(csv_row, :observation_dst_nt)) || return nothing
-    vals = (getproperty(csv_row, :latest_dst_time_utc),
+    vals = (getproperty(csv_row, :issue_time_utc),
             getproperty(csv_row, :target_time_utc),
             getproperty(csv_row, :model_version))
     any(ismissing, vals) && return nothing
@@ -1040,7 +1044,8 @@ function _append_forecast!(log_path::String, row::DataFrame; return_status::Bool
         if dup_idx !== nothing
             println(
                 "Skipped duplicate pending forecast row $dup_idx: " *
-                "latest_dst=$(row[1, :latest_dst_time_utc]) target=$(row[1, :target_time_utc]) " *
+                "issue_hour=$(_floor_hour(_parse_dt(row[1, :issue_time_utc]))) " *
+                "target=$(row[1, :target_time_utc]) " *
                 "model=$(row[1, :model_version])"
             )
             return return_status ? (; row_idx=Int(dup_idx), appended=false) : Int(dup_idx)
@@ -1079,15 +1084,15 @@ function _append_forecast!(log_path::String, row::DataFrame; return_status::Bool
 end
 
 function _pending_duplicate_forecast_row(df::DataFrame, row::DataFrame)
-    required = (:latest_dst_time_utc, :target_time_utc, :model_version, :observation_dst_nt)
+    required = (:issue_time_utc, :target_time_utc, :model_version, :observation_dst_nt)
     all(String(c) in names(df) for c in required) || return nothing
     all(String(c) in names(row) for c in required[1:3]) || return nothing
-    latest = _parse_dt(row[1, :latest_dst_time_utc])
+    issue_hour = _floor_hour(_parse_dt(row[1, :issue_time_utc]))
     target = _parse_dt(row[1, :target_time_utc])
     model = String(row[1, :model_version])
     for i in 1:nrow(df)
         ismissing(df[i, :observation_dst_nt]) || continue
-        _parse_dt(df[i, :latest_dst_time_utc]) == latest || continue
+        _floor_hour(_parse_dt(df[i, :issue_time_utc])) == issue_hour || continue
         _parse_dt(df[i, :target_time_utc]) == target || continue
         String(df[i, :model_version]) == model || continue
         return i
@@ -1095,16 +1100,17 @@ function _pending_duplicate_forecast_row(df::DataFrame, row::DataFrame)
     return nothing
 end
 
-# Locate a forecast row by its identity key (latest_dst_time, target_time, model_version), returning
+# Locate a forecast row by its product identity key (issue hour, target time, model version), returning
 # the row index or nothing. Positional row indices go stale across processes once a concurrent
 # writer rewrites the log, so cross-process score-and-write paths re-locate by identity under the
 # lock rather than trusting a stored index.
-function _locate_forecast_row(df::DataFrame, latest_dst_time::DateTime,
+function _locate_forecast_row(df::DataFrame, issue_time::DateTime,
                               target_time::DateTime, model_version::AbstractString)
-    required = (:latest_dst_time_utc, :target_time_utc, :model_version)
+    required = (:issue_time_utc, :target_time_utc, :model_version)
     all(String(c) in names(df) for c in required) || return nothing
+    issue_hour = _floor_hour(issue_time)
     for i in 1:nrow(df)
-        _parse_dt(df[i, :latest_dst_time_utc]) == latest_dst_time || continue
+        _floor_hour(_parse_dt(df[i, :issue_time_utc])) == issue_hour || continue
         _parse_dt(df[i, :target_time_utc]) == target_time || continue
         String(df[i, :model_version]) == model_version || continue
         return i
@@ -1610,14 +1616,14 @@ end
 
 function _pending_from_dataframe(df::DataFrame)
     columns = Set(Symbol.(names(df)))
-    required = (:latest_dst_time_utc, :target_time_utc, :model_version,
+    required = (:issue_time_utc, :target_time_utc, :model_version,
                 :observation_dst_nt)
     all(in(columns), required) || return (Dict{String,Int}(), true)
     pending = Dict{String,Int}()
     complete = true
     for row_idx in 1:nrow(df)
         ismissing(df[row_idx, :observation_dst_nt]) || continue
-        vals = (df[row_idx, :latest_dst_time_utc], df[row_idx, :target_time_utc],
+        vals = (df[row_idx, :issue_time_utc], df[row_idx, :target_time_utc],
                 df[row_idx, :model_version])
         any(ismissing, vals) && continue
         key = _pending_key(vals...)
@@ -1696,6 +1702,34 @@ function _aci_interval_from_log(log_path::AbstractString, center::Real,
         e isa InterruptException && rethrow()
         return nothing
     end
+end
+
+const _ISSUE_INTERVAL_POLICIES = (:auto, :static, :aci)
+
+function _checked_interval_policy(policy::Symbol)
+    policy in _ISSUE_INTERVAL_POLICIES || throw(ArgumentError(
+        "interval_policy must be one of $(join(_ISSUE_INTERVAL_POLICIES, ", ")), got $policy",
+    ))
+    return policy
+end
+
+# Standalone issuance keeps `:auto`: use ACI when this row's residual stream is ready and otherwise
+# retain the static/conformal interval. The live monitor passes one explicit policy to every horizon.
+# An explicit `:aci` selection must never silently degrade between the batch preflight and issuance.
+function _aci_interval_for_policy(policy::Symbol, log_path::AbstractString, center::Real,
+                                  horizon_steps::Integer;
+                                  latest_dst::Real, pred_col::Symbol,
+                                  interval_fn::Function=_aci_interval_from_log)
+    selected = _checked_interval_policy(policy)
+    selected == :static && return nothing
+    interval = interval_fn(
+        log_path, center, horizon_steps; latest_dst=latest_dst, pred_col=pred_col,
+    )
+    interval === nothing && selected == :aci && error(
+        "Explicit ACI interval policy is unavailable for $pred_col at " *
+        "model_step_hours=$(Int(horizon_steps))",
+    )
+    return interval
 end
 
 """
@@ -2750,6 +2784,21 @@ function _validate_feed_timestamps(issue_time::DateTime,
     return nothing
 end
 
+function _latest_causal_index(times::AbstractVector{<:DateTime},
+                              issue_time::DateTime,
+                              source::AbstractString)
+    best_idx = 0
+    for idx in eachindex(times)
+        timestamp = times[idx]
+        if timestamp <= issue_time &&
+           (best_idx == 0 || timestamp > times[best_idx])
+            best_idx = idx
+        end
+    end
+    best_idx != 0 || error("$source feed has no sample at or before issue time $issue_time")
+    return best_idx
+end
+
 function prepare_issue_inputs(cfg::LiveVerifyConfig;
                               issue_time::DateTime=now(UTC),
                               plasma_fn::Function=() -> fetch_swpc_plasma(; max_retries=3,
@@ -2774,8 +2823,10 @@ end
 function issue_forecast(cfg::LiveVerifyConfig;
                         inputs=nothing,
                         write_trajectory::Bool=true,
-                        verbose::Bool=true)
+                        verbose::Bool=true,
+                        interval_policy::Symbol=:auto)
     _assert_issuable_model(cfg.model, cfg.horizon_hours)
+    interval_policy = _checked_interval_policy(interval_policy)
     prepared = inputs === nothing ? prepare_issue_inputs(cfg) : inputs
     prepared.model == cfg.model || throw(ArgumentError(
         "prepared issue inputs were built for model $(prepared.model), not $(cfg.model)",
@@ -2797,33 +2848,48 @@ function issue_forecast(cfg::LiveVerifyConfig;
               _conformal_path(cfg.v2_calibration_path))
     end
 
-    latest_plasma = maximum(plasma.time_tag)
-    latest_mag = maximum(mag.time_tag)
+    raw_latest_plasma = maximum(plasma.time_tag)
+    raw_latest_mag = maximum(mag.time_tag)
+    raw_dst_anchor_idx = argmax(dst_times)
+    _validate_feed_timestamps(
+        issue_time, raw_latest_plasma, raw_latest_mag, dst_times[raw_dst_anchor_idx],
+    )
+    # The tolerance above diagnoses small source-clock skew; it does not make post-issue
+    # samples causal. Select the newest sample at or before the recorded issue time for
+    # every source. All downstream solar-wind windows are capped at latest_common_sw.
+    latest_plasma_idx = _latest_causal_index(plasma.time_tag, issue_time, "Plasma")
+    latest_mag_idx = _latest_causal_index(mag.time_tag, issue_time, "Magnetic-field")
+    dst_anchor_idx = _latest_causal_index(dst_times, issue_time, "Kyoto Dst")
+    latest_plasma = plasma.time_tag[latest_plasma_idx]
+    latest_mag = mag.time_tag[latest_mag_idx]
     latest_common_sw = min(latest_plasma, latest_mag)
-    # Anchor on the newest Dst hour by timestamp, not feed position: an out-of-order feed or a
-    # trailing stale record must not silently anchor the forecast (and the Dst* state) to an old
-    # hour, mirroring the replay path's maximum(dst_dt).
-    dst_anchor_idx = argmax(dst_times)
+    # Anchor on the newest causal Dst hour by timestamp, not feed position: an out-of-order
+    # feed or a trailing stale/future record must not move the Dst* state away from the
+    # information set available at issuance.
     latest_dst_time = dst_times[dst_anchor_idx]
     latest_dst = dst_vals[dst_anchor_idx]
-    _validate_feed_timestamps(
-        issue_time, latest_plasma, latest_mag, latest_dst_time,
-    )
     # Staleness guard. The finite-count gap check below catches a HARD gap (no finite samples) but NOT a
     # FROZEN feed that still returns old-but-finite rows. Compare the feed vintage to the issue time: the
     # L1/DSCOVR solar wind is minute-cadence, so a multi-hour age means the uplink has stalled and the
-    # forecast would be anchored to stale drivers (model steps silently balloon). Refuse gross solar-wind
-    # staleness (mirrors the :hard refuse); warn on moderate solar-wind or Dst staleness (Kyoto provisional
-    # Dst routinely lags a few hours, so that is a warning, not a refusal).
+    # forecast would be anchored to stale drivers (model steps silently balloon). The same failure occurs
+    # when the Dst state freezes: the rollout advances from an old ring-current state without observational
+    # re-anchoring. The existing six-hour stale threshold is therefore a hard ceiling for both sources;
+    # Kyoto's routine shorter provisional lag remains admissible.
     sw_age_hours  = Dates.value(issue_time - latest_common_sw) / 3_600_000
     dst_age_hours = Dates.value(issue_time - latest_dst_time)  / 3_600_000
-    if sw_age_hours > 6
+    if sw_age_hours > LIVE_MAX_SOLAR_WIND_AGE_HOURS
         error(
             "Solar-wind feed stale: latest common sample is $(round(sw_age_hours; digits=1)) h before the " *
             "issue time (frozen/stalled L1 feed). Refusing to issue a forecast anchored to stale drivers."
         )
     end
-    (sw_age_hours > 2 || dst_age_hours > 6) && @warn(
+    if dst_age_hours > LIVE_MAX_DST_AGE_HOURS
+        error(
+            "Kyoto Dst feed stale: latest state is $(round(dst_age_hours; digits=1)) h before the " *
+            "issue time. Refusing to issue a forecast from an unobserved ring-current rollout."
+        )
+    end
+    sw_age_hours > LIVE_WARN_SOLAR_WIND_AGE_HOURS && @warn(
         "Stale input feed at issuance; forecast anchored to aged data.",
         sw_age_hours=round(sw_age_hours; digits=1), dst_age_hours=round(dst_age_hours; digits=1)
     )
@@ -2996,8 +3062,10 @@ function issue_forecast(cfg::LiveVerifyConfig;
     # Key the ACI residual pool on the SAME model whose center is being banded (v1 residuals for a
     # v1 issuance), so a v1 point forecast is never handed a v2-calibrated band tagged "aci".
     aci_pred_col = selected.model_version == "v2" ? :v2_pred_dst_nt : :v1_pred_dst_nt
-    let aci = _aci_interval_from_log(cfg.log_path, pred_dst, model_steps;
-                                     latest_dst=latest_dst, pred_col=aci_pred_col)
+    let aci = _aci_interval_for_policy(
+        interval_policy, cfg.log_path, pred_dst, model_steps;
+        latest_dst=latest_dst, pred_col=aci_pred_col,
+    )
         if aci !== nothing
             ci05_dst, ci95_dst, interval_source = aci[1], aci[2], "aci"
         end
@@ -3030,6 +3098,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
     reference_ci05_dst = selected.model_version == "v2" ? v2_ci05_log : ci05_dst
     reference_ci95_dst = selected.model_version == "v2" ? v2_ci95_log : ci95_dst
     sub_hourly_pred_dst = reference_pred_dst
+    served_target_drivers = used_drivers
     # Tail relaxation rate from the freshest contiguous Dst pair (not the zeroed memory tuple), so an
     # interior provisional-Dst gap does not collapse the deepening-storm tail to the quiet default.
     dst_rate_nt_per_h = _freshest_dst_rate(dst_times, dst_vals, latest_dst_time)
@@ -3054,6 +3123,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
             sv1 = _dst_from_dst_star(sresult.dst_predicted, sdrv.Pdyn)   # target-step Pdyn (sub-hourly tail), not the stale v2 driver
             # v2 mode adds the residual correction; v1 mode (no correction) serves the raw L1 prediction (avoid sv1+missing).
             sub_hourly_pred_dst = ismissing(selected.v2_correction) ? sv1 : sv1 + selected.v2_correction
+            served_target_drivers = sdrv
         end
     catch e
         e isa InterruptException && rethrow()
@@ -3080,8 +3150,10 @@ function issue_forecast(cfg::LiveVerifyConfig;
     # premise breaks exactly where the L1/relaxation/inertia tail moves the center (storm onsets).
     # Fail-safe to the shifted pre-upgrade band while served history is insufficient (returns nothing).
     if selected.model_version == "v2"
-        served_aci = _aci_interval_from_log(cfg.log_path, sub_hourly_pred_dst, model_steps;
-                                            latest_dst=latest_dst, pred_col=:served_pred_dst_nt)
+        served_aci = _aci_interval_for_policy(
+            interval_policy, cfg.log_path, sub_hourly_pred_dst, model_steps;
+            latest_dst=latest_dst, pred_col=:served_pred_dst_nt,
+        )
         if served_aci !== nothing && isfinite(served_aci[1]) && isfinite(served_aci[2])
             sub_hourly_ci05, sub_hourly_ci95 = served_aci[1], served_aci[2]
         end
@@ -3091,7 +3163,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
     served_pred_dst = sub_hourly_pred_dst
     served_ci05_dst = sub_hourly_ci05
     served_ci95_dst = sub_hourly_ci95
-    driver_audit = _driver_audit_fields(anchor_drivers, used_drivers)
+    driver_audit = _driver_audit_fields(anchor_drivers, served_target_drivers)
 
     row = DataFrame(
         issue_time_utc=[string(issue_time)],
@@ -3243,15 +3315,15 @@ function issue_forecast(cfg::LiveVerifyConfig;
         "OBrien=$(round(obrien_dst; digits=2))"
     )
     verbose && println(
-        "Forecast drivers: V=$(round(used_drivers.V; digits=1)) km/s, " *
-        "Bz=$(round(used_drivers.Bz; digits=2)) nT, " *
-        "By=$(round(used_drivers.By; digits=2)) nT, " *
-        "n=$(round(used_drivers.n; digits=2)) cm^-3, " *
-        "Pdyn=$(round(used_drivers.Pdyn; digits=3)) nPa"
+        "Forecast drivers: V=$(round(served_target_drivers.V; digits=1)) km/s, " *
+        "Bz=$(round(served_target_drivers.Bz; digits=2)) nT, " *
+        "By=$(round(served_target_drivers.By; digits=2)) nT, " *
+        "n=$(round(served_target_drivers.n; digits=2)) cm^-3, " *
+        "Pdyn=$(round(served_target_drivers.Pdyn; digits=3)) nPa"
     )
 
-    return (; row_idx, latest_dst_time, target_time, pred_dst, ci05_dst, ci95_dst,
-            model_version=selected.model_version)
+    return (; row_idx, issue_time, latest_dst_time, target_time,
+            pred_dst, ci05_dst, ci95_dst, model_version=selected.model_version)
 end
 
 function verify_pending!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=nothing)
@@ -3405,10 +3477,12 @@ function wait_for_observation(cfg::LiveVerifyConfig, forecast)
                 _recover_append_transaction!(cfg.log_path)
                 previous_state = _valid_live_state(cfg.log_path)
                 df = CSV.read(cfg.log_path, DataFrame)
-                ridx = _locate_forecast_row(df, forecast.latest_dst_time, target, forecast.model_version)
+                ridx = _locate_forecast_row(df, forecast.issue_time, target,
+                                            forecast.model_version)
                 ridx === nothing && error(
                     "wait_for_observation: forecast row not found by identity " *
-                    "(latest_dst=$(forecast.latest_dst_time), target=$target, model=$(forecast.model_version)) " *
+                    "(issue_hour=$(_floor_hour(forecast.issue_time)), target=$target, " *
+                    "model=$(forecast.model_version)) " *
                     "in $(cfg.log_path)"
                 )
                 r = _score_row!(df, ridx, observed)
@@ -3467,13 +3541,14 @@ function _copy_config(cfg::LiveVerifyConfig; kwargs...)
     return LiveVerifyConfig(; values...)
 end
 
-# Re-locate a campaign forecast's current log row by identity (latest_dst_time, target,
-# model_version) when those fields are present, else fall back to the stored positional row_idx.
+# Re-locate a campaign forecast's current log row by identity (issue hour, target,
+# model version) when those fields are present, else fall back to the stored positional row_idx.
 # Identity is robust to a concurrent writer having rewritten the log, where a positional index goes
 # stale across processes and would mis-score the wrong row.
 function _forecast_row_index(df::DataFrame, f)
-    if all(hasproperty(f, k) for k in (:latest_dst_time, :target_time, :model_version))
-        ridx = _locate_forecast_row(df, f.latest_dst_time, f.target_time, String(f.model_version))
+    if all(hasproperty(f, k) for k in (:issue_time, :target_time, :model_version))
+        ridx = _locate_forecast_row(df, f.issue_time, f.target_time,
+                                    String(f.model_version))
         ridx !== nothing && return ridx
     end
     return hasproperty(f, :row_idx) ? Int(f.row_idx) : nothing
@@ -3735,20 +3810,26 @@ function _model_residual(df::DataFrame, row_idx::Int, pred_col::Symbol)
     return observed - pred
 end
 
-# Forecast identity key (latest_dst_time, target_time, model_version) as strings, coalescing a
-# missing model_version to "v1" (matching _row_model_version), or nothing when the time fields are
-# absent/missing. Used to deduplicate scored rows in pooled metrics.
+# Forecast identity key (issue hour, target time, model version) as strings, coalescing a
+# missing model version to "v1" (matching _row_model_version), or nothing when the time fields are
+# absent/missing. Forecasts for the same target in different hourly issue cycles remain distinct.
 function _forecast_identity_key(df::DataFrame, i::Int)
-    (String(:latest_dst_time_utc) in names(df) && String(:target_time_utc) in names(df)) || return nothing
-    (ismissing(df[i, :latest_dst_time_utc]) || ismissing(df[i, :target_time_utc])) && return nothing
-    return (String(string(df[i, :latest_dst_time_utc])),
+    (String(:issue_time_utc) in names(df) && String(:target_time_utc) in names(df)) || return nothing
+    (ismissing(df[i, :issue_time_utc]) || ismissing(df[i, :target_time_utc])) && return nothing
+    issue = try
+        _floor_hour(_parse_dt(df[i, :issue_time_utc]))
+    catch e
+        e isa InterruptException && rethrow()
+        return nothing
+    end
+    return (String(string(issue)),
             String(string(df[i, :target_time_utc])),
             _row_model_version(df, i))
 end
 
-# Deduplicate scored rows by forecast identity (latest_dst_time, target_time, model_version),
-# keeping the earliest issue_time. A handful of pre-2026-06-26 rows predate the append-time
-# pending-dedup guard, so duplicate (anchor,target,model) pairs remain in the raw log and would be
+# Deduplicate scored rows by forecast identity (issue hour, target time, model version),
+# keeping the earliest issue timestamp. A handful of pre-2026-06-26 rows predate the append-time
+# pending-dedup guard, so duplicate rows from the same hourly product cycle remain in the raw log and would be
 # double-counted in pooled RMSE/MAE/coverage; scoring-time dedup removes that overweighting without
 # mutating the raw log. Rows lacking a usable identity key are kept as-is. Returns (kept_indices in
 # input order, n_dropped).
@@ -3804,7 +3885,7 @@ function write_live_comparison_report(log_path::String, report_path::String; df=
     verified = _verified_indices(df)
     strictly_future = [i for i in verified if _row_is_strictly_future(df, i)]
     invalid_verified = setdiff(verified, strictly_future)
-    # Exclude pre-guard duplicate (anchor,target,model) scored rows from pooled metrics/coverage.
+    # Exclude pre-guard same-cycle duplicate scored rows from pooled metrics/coverage.
     valid_verified, n_duplicate_dropped = _dedup_scored_indices(df, strictly_future)
     pending = _pending_indices(df)
     model_specs = _standard_model_columns(df)
@@ -3838,7 +3919,7 @@ function write_live_comparison_report(log_path::String, report_path::String; df=
     push!(lines, "")
     push!(lines, "Verified rows used: $(length(valid_verified))")
     push!(lines, "Invalid verified rows excluded: $(length(invalid_verified))")
-    push!(lines, "Duplicate (anchor,target,model) scored rows excluded: $(n_duplicate_dropped)")
+    push!(lines, "Duplicate (issue hour, target, model) scored rows excluded: $(n_duplicate_dropped)")
     push!(lines, "Pending rows: $(length(pending))")
     push!(lines, "Same-row forecast comparison rows: $(length(comparison_rows))")
     if !ismissing(coverage)
@@ -4020,12 +4101,12 @@ function summarize_log(log_path::String)
         "BurtonFull" => :burton_full_dst_nt,
         "OBrienMcP" => :obrien_dst_nt,
     ]
-    # Deduplicate scored rows by (anchor,target,model) so a handful of pre-guard duplicate rows do
+    # Deduplicate scored rows by (issue hour, target, model) so pre-guard duplicate rows do
     # not double-count in the pooled metrics/coverage (see _dedup_scored_indices).
     verified = _verified_indices(df)
     kept, n_duplicate_dropped = _dedup_scored_indices(df, verified)
     n_duplicate_dropped > 0 && println(
-        "(excluded $n_duplicate_dropped duplicate (anchor,target,model) scored row(s) from pooled metrics)")
+        "(excluded $n_duplicate_dropped duplicate (issue hour, target, model) scored row(s) from pooled metrics)")
     for (name, col) in model_specs
         (col == :v1_pred_dst_nt || String(col) in names(df)) || continue
         preds, obs = _metric_rows_for_indices(df, col, kept)

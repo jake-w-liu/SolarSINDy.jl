@@ -129,8 +129,26 @@ function init_assimilation(lib::CandidateLibrary, xi_full::AbstractVector{<:Real
                               Q, observation_var, step, bounds)
 end
 
+"""
+    current_dst(f)
+
+Return the current Dst* state estimate from an [`AssimilationFilter`](@ref).
+"""
 current_dst(f::AssimilationFilter) = f.mean[1]
+
+"""
+    current_coeffs(f)
+
+Return a copy of the current adapted-coefficient estimates from an
+[`AssimilationFilter`](@ref), in the order given by `f.adapt_idx`.
+"""
 current_coeffs(f::AssimilationFilter) = f.mean[2:end]
+
+"""
+    dst_variance(f)
+
+Return the current Dst* marginal variance from an [`AssimilationFilter`](@ref).
+"""
 dst_variance(f::AssimilationFilter) = f.cov[1, 1]
 
 # `AssimilationFilter` is intentionally mutable so long-running experiments can

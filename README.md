@@ -195,9 +195,15 @@ Configuration is by environment variable:
   in [`deploy/`](deploy/) and emits a warning. The conformal interval sidecar is looked up next to
   the calibration (`*_conformal.csv`), also bundled in `deploy/`.
 - `SOLARSINDY_MONITOR_ONCE=1` (or `--once`) — run exactly one cycle, then exit (CI/verification).
-- `LIVE_MONITOR_INTERVAL_SEC`, `LIVE_MONITOR_HORIZONS`, `LIVE_MONITOR_MAX_CYCLES`,
-  `LIVE_MONITOR_DEADMAN_CYCLES` — cadence, issued horizons, cycle cap, and issuance dead-man
-  threshold.
+- `LIVE_MONITOR_INTERVAL_SEC`, `LIVE_MONITOR_MAX_CYCLES`, and
+  `LIVE_MONITOR_DEADMAN_CYCLES` — cadence, cycle cap, and issuance dead-man threshold. The
+  product horizons are fixed at 1, 2, 3, and 6 h to match the dashboard/API cycle contract. The
+  cadence is fixed-rate: cycle runtime is subtracted from the next wait and fully elapsed slots are
+  skipped instead of accumulating drift or producing catch-up bursts. Interval selection is also
+  atomic across the four-row product: ACI is used only when its point and served residual streams
+  are ready at every horizon; otherwise every row uses the static conformal fallback.
+- `LIVE_MONITOR_MAX_LOG_ROWS` — maximum retained hot-log rows (default 50,000). Values below
+  four are rejected so retention cannot delete part of the latest product cycle.
 
 ### macOS launchd service
 

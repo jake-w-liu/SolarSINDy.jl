@@ -304,21 +304,21 @@ end
 # interval); a hit raises it (tightening).
 #
 # Coverage guarantee — scope. The Gibbs & Candès (2021) distribution-free bound
-# |mean(err) - α*| ≤ (α_1 + γ)/(γ T) → α* holds for the IDEALIZED recursion in
+# |mean(err) - α*| ≤ (max(α_1, 1-α_1) + γ)/(γ T) holds for the IDEALIZED recursion in
 # which α_t is UNCLAMPED and the prediction set SATURATES to the whole real line
-# whenever α_t ≤ 0 (and to the empty set when α_t ≥ 1). The telescoping proof needs
+# whenever α_t < 0 (and to the empty set when α_t > 1). The telescoping proof needs
 # exactly that: during a miss burst α_t must be allowed to go negative and the band
 # to become infinite so the accumulated miscoverage "debt" is repaid later.
 #
 # This implementation deliberately trades that worst-case guarantee for BOUNDED,
-# operationally usable bands: α_t is clamped to [0, 1] (line ~310) and the widest
+# operationally usable bands: α_t is clamped to [0, 1] and the widest
 # band is the empirical sample maximum (`_empirical_halfwidth` at level ≥ 1), never
 # an infinite interval. Under sustained, unprecedented drift the clamp discards
-# miscoverage debt, so the (α_1 + γ)/(γ T) bound is NOT guaranteed as written;
+# miscoverage debt, so the idealized bound is NOT guaranteed as written;
 # realized coverage is instead validated empirically (unit tests + live
 # monitoring). Merely widening the α_t range would not restore the bound while the
 # band is still capped at the sample max — restoring the theorem would require
-# serving an infinite interval whenever α_t ≤ 0, which is useless for a forecast
+# serving an infinite interval whenever α_t < 0, which is useless for a forecast
 # product. The bounded-band behavior is the intended, safer operational choice.
 # ---------------------------------------------------------------------------
 

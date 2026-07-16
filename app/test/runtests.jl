@@ -349,6 +349,29 @@ end
         @test fc.issue_time_utc == string(iss_new) * "Z"
     end
 
+    @testset "latest_cycle does not merge restart cycles across an hour boundary" begin
+        boundary = floor(now(UTC), Hour)
+        old_issue = boundary - Minute(1)
+        new_issue = boundary + Minute(1)
+        old_cycle = live_cycle_fixture(old_issue; latest_dst=-10.0)
+        new_cycle = live_cycle_fixture(new_issue; latest_dst=-20.0)
+        cyc = latest_cycle(vcat(old_cycle, new_cycle))
+        @test nrow(cyc) == length(LIVE_CYCLE_HORIZONS)
+        @test all(==(new_issue), cyc.issue_time_utc_dt)
+        @test _valid_live_cycle(cyc)
+    end
+
+    @testset "live cycle rejects widely separated retries within one issue hour" begin
+        issue = DateTime(2026, 7, 15, 12, 1)
+        spread = live_cycle_fixture(issue)
+        spread.issue_time_utc_dt[end] += Minute(6)
+        spread.horizon_hours[end] =
+            (spread.target_time_utc_dt[end] - spread.issue_time_utc_dt[end]) /
+            Millisecond(3_600_000)
+        @test nrow(latest_cycle(spread)) == length(LIVE_CYCLE_HORIZONS)
+        @test !_valid_live_cycle(spread)
+    end
+
     @testset "latest cycle requires the full horizon set and common metadata" begin
         issue = now(UTC) - Minute(10)
         valid = live_cycle_fixture(issue)
@@ -444,6 +467,7 @@ end
         health = h(HTTP.Request("GET", "/api/health"))
         health_body = JSON3.read(String(health.body))
         @test health.status == 200 && !haskey(health_body, :log_path)
+        @test health_body.status == "no_log" && !health_body.cycle_complete
         @test !occursin(abspath(missing_path), String(health.body))
         # NaN hours reaches the crash path only with verified rows present -> use a real temp log
         now0 = floor(now(UTC), Hour)
@@ -465,6 +489,43 @@ end
         body = JSON3.read(String(rn.body))
         @test body.hours == 72.0 && body.n >= 1                    # NaN -> 72, verified row scored
         _LOG_CACHE[] = nothing                                      # leave the cache clean for other tests
+    end
+
+    @testset "health endpoint requires one complete, current product cycle" begin
+        function write_cycle(path, issue; keep=1:length(LIVE_CYCLE_HORIZONS))
+            raw = live_cycle_fixture(issue)[collect(keep), :]
+            rename!(raw,
+                :issue_time_utc_dt => :issue_time_utc,
+                :latest_solar_wind_utc_dt => :latest_solar_wind_utc,
+                :latest_dst_time_utc_dt => :latest_dst_time_utc,
+                :target_time_utc_dt => :target_time_utc,
+            )
+            CSV.write(path, raw)
+            return path
+        end
+        health(path) = JSON3.read(String(
+            make_handler(path)(HTTP.Request("GET", "/api/health")).body,
+        ))
+
+        dir = mktempdir()
+        current_issue = now(UTC) - Second(1)
+        current_path = write_cycle(joinpath(dir, "current.csv"), current_issue)
+        _LOG_CACHE[] = nothing
+        current = health(current_path)
+        @test current.status == "ok" && current.cycle_complete
+
+        partial_path = write_cycle(
+            joinpath(dir, "partial.csv"), current_issue; keep=1:3,
+        )
+        _LOG_CACHE[] = nothing
+        partial = health(partial_path)
+        @test partial.status == "incomplete" && !partial.cycle_complete
+
+        stale_path = write_cycle(joinpath(dir, "stale.csv"), now(UTC) - Hour(4))
+        _LOG_CACHE[] = nothing
+        stale = health(stale_path)
+        @test stale.status == "stale" && stale.cycle_complete
+        _LOG_CACHE[] = nothing
     end
 
     @testset "sub-hour trajectory served only for the matching cycle" begin
@@ -702,19 +763,22 @@ end
         @test !fr.available && fr.stale && fr.invalid_future && fr.age_minutes == -5.0
         @test _station_parse("TST", future; reference=reference) === nothing
 
-        # An unavailable refresh neither replaces nor re-dates the last good observation.
+        # An unavailable refresh preserves the last source observation while advancing the
+        # retry clock, so repeated requests cannot hammer the failed upstream service.
         empty!(_DBDT_CACHE)
         good = (station="FRD", available=true, current_time_utc=jdt(reference - Minute(1)))
         old_fetch = time() - DBDT_TTL - 1
         _DBDT_CACHE[("FRD", 120)] = (old_fetch, good)
         fallback = usgs_dbdt(station="frd", minutes=120, reference=reference,
-                             compute_fn=(s, m) -> (station=s, available=false))
+                             compute_fn=(s, m) -> (station=s, available=false),
+                             wait_timeout=30.0)
         @test fallback.available && fallback.cached
-        @test _DBDT_CACHE[("FRD", 120)][1] == old_fetch
+        @test _DBDT_CACHE[("FRD", 120)][1] > old_fetch
         _DBDT_CACHE[("FRD", 120)] = (old_fetch,
             (station="FRD", available=true, current_time_utc=jdt(reference - Minute(20))))
         rejected = usgs_dbdt(station="FRD", minutes=120, reference=reference,
-                             compute_fn=(s, m) -> (station=s, available=false))
+                             compute_fn=(s, m) -> (station=s, available=false),
+                             wait_timeout=30.0)
         @test !rejected.available && rejected.stale
 
         # An overlapping slower refresh cannot overwrite a newer observation.
@@ -729,13 +793,14 @@ end
                 _DBDT_CACHE[("FRD", 120)] = (time(), newer)
                 older
             end,
+            wait_timeout=30.0,
         )
         @test raced.cached && raced.current_time_utc == newer.current_time_utc
         @test _DBDT_CACHE[("FRD", 120)][2].current_time_utc == newer.current_time_utc
         empty!(_DBDT_CACHE)
         @test_throws InterruptException usgs_dbdt(
             station="FRD", minutes=120, reference=reference,
-            compute_fn=(s, m) -> throw(InterruptException()))
+            compute_fn=(s, m) -> throw(InterruptException()), wait_timeout=30.0)
         @test_throws ArgumentError usgs_dbdt(station="bad/station")
         @test_throws ArgumentError usgs_dbdt(station="FRD", minutes=1)
 
@@ -750,12 +815,14 @@ end
         row = (station="FRD", time_utc=jdt(reference - Minute(1)))
         old_net_fetch = time() - NET_TTL - 1
         _NET_CACHE[("FRD",)] = (old_net_fetch, [row])
-        net = usgs_network(stations=["frd"], brief_fn=s -> nothing, reference=reference)
+        net = usgs_network(stations=["frd"], brief_fn=s -> nothing, reference=reference,
+                           wait_timeout=30.0)
         @test net.available && net.cached && net.n_stations == 1
-        @test _NET_CACHE[("FRD",)][1] == old_net_fetch
+        @test _NET_CACHE[("FRD",)][1] > old_net_fetch
         _NET_CACHE[("FRD",)] = (old_net_fetch,
                                  [(station="FRD", time_utc=jdt(reference - Minute(20)))])
-        net_stale = usgs_network(stations=["FRD"], brief_fn=s -> nothing, reference=reference)
+        net_stale = usgs_network(stations=["FRD"], brief_fn=s -> nothing,
+                                 reference=reference, wait_timeout=30.0)
         @test !net_stale.available && net_stale.stale && isempty(net_stale.stations)
 
         # Partial and overlapping refreshes retain current missing stations and
@@ -768,6 +835,7 @@ end
         partial = usgs_network(
             stations=["FRD", "CMO"], reference=reference,
             brief_fn=s -> s == "FRD" ? frd_old : nothing,
+            wait_timeout=30.0,
         )
         @test partial.available && partial.cached && partial.n_stations == 2
         @test only(filter(r -> r.station == "FRD", partial.stations)).time_utc ==
@@ -776,7 +844,8 @@ end
               cmo_current.time_utc
         empty!(_NET_CACHE)
         @test_throws InterruptException usgs_network(
-            stations=["FRD"], brief_fn=s -> throw(InterruptException()), reference=reference)
+            stations=["FRD"], brief_fn=s -> throw(InterruptException()), reference=reference,
+            wait_timeout=30.0)
         @test_throws ArgumentError usgs_network(stations=String[])
         @test_throws ArgumentError usgs_network(stations=["bad/station"])
 
@@ -787,6 +856,213 @@ end
         @test length(_NET_CACHE) == NET_CACHE_MAX
         @test !haskey(_NET_CACHE, ("S1",))
         empty!(_DBDT_CACHE); empty!(_NET_CACHE)
+    end
+
+    @testset "USGS refreshes coalesce by key and retry after failure" begin
+        reference = DateTime(2026, 7, 14, 12)
+        sample_time = jdt(reference - Minute(1))
+
+        lock(_DBDT_LOCK) do
+            empty!(_DBDT_CACHE)
+            empty!(_DBDT_REFRESH_TASKS)
+        end
+        calls = Threads.Atomic{Int}(0)
+        release = Channel{Nothing}(6)
+        compute = (station, minutes) -> begin
+            Threads.atomic_add!(calls, 1)
+            take!(release)
+            (station=station, available=true, window=minutes,
+             current_time_utc=sample_time)
+        end
+        requests = [Threads.@spawn usgs_dbdt(
+            station="FRD", minutes=120, compute_fn=compute, reference=reference,
+            wait_timeout=30.0,
+        ) for _ in 1:6]
+        started = Base.timedwait(() -> calls[] >= 1, 2.0; pollint=0.01)
+        sleep(0.05) # let every caller join the published in-flight task
+        foreach(_ -> put!(release, nothing), 1:6)
+        results = fetch.(requests)
+        @test started === :ok
+        @test calls[] == 1
+        @test all(r -> r.available && r.station == "FRD", results)
+        @test lock(_DBDT_LOCK) do; isempty(_DBDT_REFRESH_TASKS); end
+
+        # A key-local flight must not serialize a distinct station/window key.
+        lock(_DBDT_LOCK) do
+            empty!(_DBDT_CACHE)
+            empty!(_DBDT_REFRESH_TASKS)
+        end
+        distinct_calls = Threads.Atomic{Int}(0)
+        distinct_release = Channel{Nothing}(2)
+        distinct_compute = (station, minutes) -> begin
+            Threads.atomic_add!(distinct_calls, 1)
+            take!(distinct_release)
+            (station=station, available=true, window=minutes,
+             current_time_utc=sample_time)
+        end
+        distinct = [
+            Threads.@spawn(usgs_dbdt(station="FRD", minutes=60,
+                compute_fn=distinct_compute, reference=reference, wait_timeout=30.0)),
+            Threads.@spawn(usgs_dbdt(station="CMO", minutes=120,
+                compute_fn=distinct_compute, reference=reference, wait_timeout=30.0)),
+        ]
+        independent = Base.timedwait(() -> distinct_calls[] == 2, 2.0; pollint=0.01)
+        foreach(_ -> put!(distinct_release, nothing), 1:2)
+        distinct_results = fetch.(distinct)
+        @test independent === :ok
+        @test distinct_calls[] == 2
+        @test Set(r.station for r in distinct_results) == Set(("FRD", "CMO"))
+
+        # One failing worker is shared. Its cleanup removes the in-flight task, while the
+        # short negative-cache TTL suppresses immediate hammering and permits a later retry.
+        lock(_DBDT_LOCK) do
+            empty!(_DBDT_CACHE)
+            empty!(_DBDT_REFRESH_TASKS)
+        end
+        failed_calls = Threads.Atomic{Int}(0)
+        failed_release = Channel{Nothing}(4)
+        failing_compute = (station, minutes) -> begin
+            Threads.atomic_add!(failed_calls, 1)
+            take!(failed_release)
+            error("injected dB/dt refresh failure")
+        end
+        failures = [Threads.@spawn usgs_dbdt(
+            station="FRD", minutes=120, compute_fn=failing_compute, reference=reference,
+            wait_timeout=30.0,
+        ) for _ in 1:4]
+        failure_started = Base.timedwait(() -> failed_calls[] >= 1, 2.0; pollint=0.01)
+        sleep(0.05)
+        foreach(_ -> put!(failed_release, nothing), 1:4)
+        failed_results = fetch.(failures)
+        @test failure_started === :ok
+        @test failed_calls[] == 1
+        @test all(r -> !r.available && occursin("injected", r.error), failed_results)
+        @test lock(_DBDT_LOCK) do; isempty(_DBDT_REFRESH_TASKS); end
+        retry_calls = Ref(0)
+        retried = usgs_dbdt(
+            station="FRD", minutes=120, reference=reference, wait_timeout=30.0,
+            compute_fn=(station, minutes) -> begin
+                retry_calls[] += 1
+                (station=station, available=true, current_time_utc=sample_time)
+            end,
+        )
+        @test !retried.available
+        @test retry_calls[] == 0
+        lock(_DBDT_LOCK) do
+            cached = _DBDT_CACHE[("FRD", 120)]
+            _DBDT_CACHE[("FRD", 120)] = (time() - DBDT_TTL - 1, cached[2])
+        end
+        retried = usgs_dbdt(
+            station="FRD", minutes=120, reference=reference, wait_timeout=30.0,
+            compute_fn=(station, minutes) -> begin
+                retry_calls[] += 1
+                (station=station, available=true, current_time_utc=sample_time)
+            end,
+        )
+        @test retried.available
+        @test retry_calls[] == 1
+
+        # A stuck owner cannot pin request tasks; it may finish and clean up in the background.
+        lock(_DBDT_LOCK) do
+            empty!(_DBDT_CACHE)
+            empty!(_DBDT_REFRESH_TASKS)
+        end
+        timeout_release = Channel{Nothing}(1)
+        elapsed = @elapsed pending = usgs_dbdt(
+            station="FRD", minutes=120, reference=reference, wait_timeout=0.02,
+            compute_fn=(station, minutes) -> begin
+                take!(timeout_release)
+                (station=station, available=true, current_time_utc=sample_time)
+            end,
+        )
+        @test !pending.available
+        @test elapsed < 0.5
+        put!(timeout_release, nothing)
+        @test Base.timedwait(
+            () -> lock(_DBDT_LOCK) do; isempty(_DBDT_REFRESH_TASKS); end,
+            2.0; pollint=0.01,
+        ) === :ok
+        @test_throws ArgumentError usgs_dbdt(wait_timeout=-1)
+        @test_throws ArgumentError usgs_dbdt(wait_timeout=Inf)
+
+        lock(_NET_LOCK) do
+            empty!(_NET_CACHE)
+            empty!(_NET_REFRESH_TASKS)
+        end
+        network_calls = Threads.Atomic{Int}(0)
+        brief = station -> begin
+            Threads.atomic_add!(network_calls, 1)
+            sleep(0.05)
+            (station=station, time_utc=sample_time)
+        end
+        network_requests = [Threads.@spawn usgs_network(
+            stations=["FRD", "CMO"], brief_fn=brief, reference=reference,
+            wait_timeout=30.0,
+        ) for _ in 1:5]
+        network_results = fetch.(network_requests)
+        @test network_calls[] == 2 # one call per station, not per HTTP requester
+        @test all(r -> r.available && r.n_stations == 2, network_results)
+        @test lock(_NET_LOCK) do; isempty(_NET_REFRESH_TASKS); end
+
+        lock(_NET_LOCK) do
+            empty!(_NET_CACHE)
+            empty!(_NET_REFRESH_TASKS)
+        end
+        network_fail_calls = Threads.Atomic{Int}(0)
+        network_release = Channel{Nothing}(4)
+        bad_brief = station -> begin
+            Threads.atomic_add!(network_fail_calls, 1)
+            take!(network_release)
+            error("injected network refresh failure")
+        end
+        network_failures = [Threads.@spawn usgs_network(
+            stations=["FRD"], brief_fn=bad_brief, reference=reference,
+            wait_timeout=30.0,
+        ) for _ in 1:4]
+        network_failure_started = Base.timedwait(
+            () -> network_fail_calls[] >= 1, 2.0; pollint=0.01,
+        )
+        sleep(0.05)
+        foreach(_ -> put!(network_release, nothing), 1:4)
+        network_failed_results = fetch.(network_failures)
+        @test network_failure_started === :ok
+        @test network_fail_calls[] == 1
+        @test all(r -> !r.available, network_failed_results)
+        @test lock(_NET_LOCK) do; isempty(_NET_REFRESH_TASKS); end
+        network_retry_calls = Ref(0)
+        network_retry = usgs_network(
+            stations=["FRD"], reference=reference, wait_timeout=30.0,
+            brief_fn=station -> begin
+                network_retry_calls[] += 1
+                (station=station, time_utc=sample_time)
+            end,
+        )
+        @test !network_retry.available
+        @test network_retry_calls[] == 0
+        lock(_NET_LOCK) do
+            cached = _NET_CACHE[("FRD",)]
+            _NET_CACHE[("FRD",)] = (time() - NET_TTL - 1, cached[2])
+        end
+        network_retry = usgs_network(
+            stations=["FRD"], reference=reference, wait_timeout=30.0,
+            brief_fn=station -> begin
+                network_retry_calls[] += 1
+                (station=station, time_utc=sample_time)
+            end,
+        )
+        @test network_retry.available
+        @test network_retry_calls[] == 1
+        @test_throws ArgumentError usgs_network(wait_timeout=-1)
+        @test_throws ArgumentError usgs_network(wait_timeout=Inf)
+
+        lock(_DBDT_LOCK) do
+            empty!(_DBDT_CACHE)
+            empty!(_DBDT_REFRESH_TASKS)
+        end
+        lock(_NET_LOCK) do
+            empty!(_NET_CACHE)
+            empty!(_NET_REFRESH_TASKS)
+        end
     end
 
     @testset "SWPC assessments require current source timestamps" begin
@@ -905,11 +1181,52 @@ end
             source = read(joinpath(app_root, launcher), String)
             @test occursin(r"SWM_JULIA_THREADS:-2", source)
             @test occursin(r"--threads=\"\$JULIA_THREADS\"", source)
+            @test occursin("VERSION >= v\"1.12.6\"", source)
         end
+        @test !occursin("Pkg.instantiate()' >/dev/null 2>&1 || true",
+                        read(joinpath(app_root, "desktop.sh"), String))
+        desktop_source = read(joinpath(app_root, "desktop.sh"), String)
+        @test occursin("Pkg.instantiate()' >/dev/null\n", desktop_source)
+        @test occursin("press Ctrl-C here to stop the backend", desktop_source)
+        @test !occursin("close the window or press Ctrl-C", desktop_source)
         dockerfile = read(joinpath(app_root, "Dockerfile"), String)
+        @test occursin("FROM julia:1.12.6-bookworm", dockerfile)
+        @test occursin(
+            "julia = \"1.12.6\"",
+            read(joinpath(app_root, "Project.toml"), String),
+        )
         @test occursin(r"JULIA_NUM_THREADS=2", dockerfile)
         @test occursin("COPY data/operational_validation", dockerfile)
+        @test occursin("COPY app/models ./models", dockerfile)
+        @test occursin(
+            "SOLARSINDY_OPERATIONAL_EVIDENCE_DIR=/app/data/operational_validation",
+            dockerfile,
+        )
         @test occursin("-f app/Dockerfile .", dockerfile)
+    end
+
+    @testset "threat watch remains in layout flow" begin
+        css = read(joinpath(@__DIR__, "..", "public", "style.css"), String)
+        js = read(joinpath(@__DIR__, "..", "public", "app.js"), String)
+        @test occursin("grid-template-areas: \"left right\" \"watch watch\"", css)
+        @test occursin("grid-template-areas: \"left\" \"right\" \"watch\"", css)
+        @test occursin("grid-area: watch; position: static", css)
+        @test !occursin("position: absolute; right: 18px; bottom: 12px", css)
+        @test occursin("justify-self: stretch", css)
+        @test occursin("wf.textContent = \"\"", js)
+        @test occursin("wf.classList.add(\"hidden\")", js)
+        @test occursin("renderThreat(null);", js)
+        @test count(occursin("delete upd.dataset.reltime", line)
+                    for line in eachline(IOBuffer(js))) == 2
+        @test count(occursin("upd.textContent = \"forecast unavailable\"", line)
+                    for line in eachline(IOBuffer(js))) == 2
+        @test occursin("history = history || { rows: [] };", js)
+        @test occursin("if (!history || !Array.isArray(history.rows))", js)
+        @test occursin("\$(\"dbdt-forecast\").innerHTML = \"\";", js)
+        @test occursin("if (status.available === false) \$(\"health-dot\")", js)
+        for metric in ("cur-dst", "worst-dst", "horizon")
+            @test occursin("\$(\"" * metric * "\").textContent = \"—\"", js)
+        end
     end
 
     @testset "webhook failures do not expose credentials" begin

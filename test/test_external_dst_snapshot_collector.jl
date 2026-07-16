@@ -291,6 +291,112 @@ end
 
 @testset "Live monitor forecast-log retention" begin
     L = LiveMonitorRetentionTestHarness
+    @test L.HORIZONS == (1, 2, 3, 6)
+    @test L._advance_cycle_deadline(100.0, 120.0, 60.0) ==
+          (deadline=160.0, skipped=0)
+    @test L._advance_cycle_deadline(100.0, 160.0, 60.0) ==
+          (deadline=160.0, skipped=0)
+    @test L._advance_cycle_deadline(100.0, 161.0, 60.0) ==
+          (deadline=160.0, skipped=0)
+    @test L._advance_cycle_deadline(100.0, 281.0, 60.0) ==
+          (deadline=280.0, skipped=2)
+    @test L._advance_cycle_deadline(280.0, 282.0, 60.0) ==
+          (deadline=340.0, skipped=0)
+    @test_throws ArgumentError L._advance_cycle_deadline(0.0, 1.0, 0.0)
+    @test_throws ArgumentError L._advance_cycle_deadline(0.0, Inf, 1.0)
+    issue = L.DateTime(2026, 7, 15, 12, 10)
+    targets = L.floor(issue, L.Hour) .+ L.Hour.(collect(L.HORIZONS))
+    cycle_rows = L.DataFrame(
+        issue_time_utc=fill(string(issue), length(L.HORIZONS)),
+        latest_solar_wind_utc=fill(string(issue - L.Minute(1)), length(L.HORIZONS)),
+        latest_dst_time_utc=fill(string(L.floor(issue, L.Hour) - L.Hour(1)), length(L.HORIZONS)),
+        target_time_utc=string.(targets),
+        horizon_hours=[(target - issue) / L.Millisecond(3_600_000) for target in targets],
+        latest_dst_nt=fill(-20.0, length(L.HORIZONS)),
+        observation_dst_nt=fill(missing, length(L.HORIZONS)),
+        served_pred_dst_nt=fill(-25.0, length(L.HORIZONS)),
+        served_pred_dst_ci05_nt=fill(-35.0, length(L.HORIZONS)),
+        served_pred_dst_ci95_nt=fill(-15.0, length(L.HORIZONS)),
+        v2_pred_dst_nt=fill(-25.0, length(L.HORIZONS)),
+        v2_pred_dst_ci05_nt=fill(-35.0, length(L.HORIZONS)),
+        v2_pred_dst_ci95_nt=fill(-15.0, length(L.HORIZONS)),
+        interval_source=fill("aci", length(L.HORIZONS)),
+        model_version=fill("v2", length(L.HORIZONS)),
+        sub_hourly_model_version=fill("v2+L1A+Bregime+Pinertia", length(L.HORIZONS)),
+    )
+    mktempdir() do dir
+        log_path = joinpath(dir, "cycle.csv")
+        L.CSV.write(log_path, cycle_rows)
+        @test L._complete_issuance_cycle(log_path, issue)
+        @test L._complete_issuance_cycle(log_path, issue, :aci)
+        @test !L._complete_issuance_cycle(log_path, issue, :static)
+        @test !L._complete_issuance_cycle(log_path, issue + L.Hour(1))
+        static_rows = copy(cycle_rows)
+        static_rows.interval_source .= "conformal"
+        L.CSV.write(log_path, static_rows)
+        @test L._complete_issuance_cycle(log_path, issue, :static)
+        @test !L._complete_issuance_cycle(log_path, issue, :aci)
+        L.CSV.write(log_path, cycle_rows[1:3, :])
+        @test !L._complete_issuance_cycle(log_path, issue)
+    end
+
+    # The issued record is a NamedTuple; the monitor counts the guarded call result and then
+    # validates the resulting log cycle independently of the payload type.
+    called = Int[]
+    inputs = (issue_time=issue,)
+    policies = Symbol[]
+    fake_issue = function (cfg; interval_policy, kwargs...)
+        push!(called, cfg.horizon_hours)
+        push!(policies, interval_policy)
+        return (row_idx=length(called),)
+    end
+    issued = L._issue_horizon_cycle!(
+        inputs; issue_fn=fake_issue,
+        log_path="unused.csv", calibration_path=L.V2_CALIB,
+        complete_fn=(path, timestamp, policy) -> true,
+        interval_policy=:static,
+    )
+    @test issued == (succeeded=4, complete=true)
+    @test called == collect(L.HORIZONS)
+    @test policies == fill(:static, length(L.HORIZONS))
+    @test_throws ArgumentError L._issue_horizon_cycle!(
+        inputs; issue_fn=fake_issue,
+        log_path="unused.csv", calibration_path=L.V2_CALIB,
+        complete_fn=(path, timestamp, policy) -> true,
+        interval_policy=:auto,
+    )
+
+    policy_inputs = (
+        issue_time=issue,
+        dst=([issue - L.Hour(1), L.floor(issue, L.Hour)], [-22.0, -20.0]),
+    )
+    readiness_calls = Tuple{Int,Symbol}[]
+    all_ready = function (path, model_steps, latest_dst, pred_col)
+        push!(readiness_calls, (model_steps, pred_col))
+        return true
+    end
+    @test L._monitor_interval_policy(
+        policy_inputs; log_path="unused.csv", readiness_fn=all_ready,
+    ) == :aci
+    @test Set(readiness_calls) == Set(
+        (steps, pred_col) for steps in L.HORIZONS
+        for pred_col in (:v2_pred_dst_nt, :served_pred_dst_nt)
+    )
+    partial_served = (path, model_steps, latest_dst, pred_col) ->
+        !(model_steps == maximum(L.HORIZONS) && pred_col == :served_pred_dst_nt)
+    @test L._monitor_interval_policy(
+        policy_inputs; log_path="unused.csv", readiness_fn=partial_served,
+    ) == :static
+
+    mktempdir() do dir
+        sentinel = joinpath(dir, "OUTAGE.md")
+        L.write_outage_sentinel("2026-07-15T12:00:00Z", 3; path=sentinel)
+        body = read(sentinel, String)
+        @test occursin("/api/health", body)
+        @test occursin("/api/swpc", body)
+        @test occursin("Kyoto Dst", body)
+        @test !occursin("stdout log", body)
+    end
     mktempdir() do dir
         path = joinpath(dir, "live.csv")
         base = L.DateTime(2026, 7, 1)
@@ -304,15 +410,16 @@ end
         )
         L.CSV.write(path, rows)
         L._load_or_rebuild_live_state!(path)
-        @test L._retain_live_forecast_log!(path, 3) == 3
+        @test L._retain_live_forecast_log!(path, 4) == 2
         retained = L.CSV.read(path, L.DataFrame)
-        @test retained.marker == [4, 5, 6]
+        @test retained.marker == [3, 4, 5, 6]
         state = L._read_live_state(path)
         @test state !== nothing
-        @test state["row_count"] == 3
+        @test state["row_count"] == 4
         @test L._state_matches_log(state, path)
         @test isempty(state["aci_streams"])
-        @test L._retain_live_forecast_log!(path, 3) == 0
+        @test L._retain_live_forecast_log!(path, 4) == 0
         @test_throws ArgumentError L._retain_live_forecast_log!(path, 0)
+        @test_throws ArgumentError L._retain_live_forecast_log!(path, 3)
     end
 end

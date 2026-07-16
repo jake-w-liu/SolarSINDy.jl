@@ -657,7 +657,7 @@ function _build_inclusion_frequency_figure(data)
 end
 
 function _build_may2024_reconstruction_figure(data)
-    figure = subplots(2, 1; show=false)
+    figure = subplots(2, 1; sync=false, show=false)
     subplot!(figure, 1, 1)
     plot_scatter!(figure, data.time, data.velocity;
         mode="lines", color=_YELLOW, linewidth=1.5,

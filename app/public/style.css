@@ -54,8 +54,10 @@ main { max-width: var(--content-max); margin: 0 auto; padding: 18px 20px 8px; }
 
 /* threat banner */
 .threat {
-  position: relative; display: flex; align-items: center; justify-content: space-between;
-  gap: 20px; margin: 18px 0; padding: 20px 24px; border-radius: 16px;
+  position: relative; display: grid; align-items: center;
+  grid-template-columns: minmax(230px, 1fr) auto;
+  grid-template-areas: "left right" "watch watch";
+  gap: 12px 20px; margin: 18px 0; padding: 20px 24px; border-radius: 16px;
   border: 1px solid var(--card-edge); box-shadow: var(--shadow);
   background: linear-gradient(180deg, var(--bg-soft), var(--card));
   overflow: hidden;
@@ -69,15 +71,16 @@ main { max-width: var(--content-max); margin: 0 auto; padding: 18px 20px 8px; }
 .threat-0 .threat-level { color: var(--t0); } .threat-1 .threat-level { color: var(--t1); }
 .threat-2 .threat-level { color: var(--t2); } .threat-3 .threat-level { color: var(--t3); }
 .threat-4 .threat-level { color: var(--t4); }
-.threat-left { min-width: 230px; }
+.threat-left { grid-area: left; min-width: 230px; }
 .threat-level { font-size: 2.4rem; font-weight: 800; line-height: 1.05; letter-spacing: .5px; }
 .threat-label { color: var(--ink-soft); font-size: .95rem; margin-top: 2px; }
-.threat-right { display: flex; gap: 26px; flex-wrap: wrap; }
+.threat-right { grid-area: right; display: flex; gap: 26px; flex-wrap: wrap; justify-self: end; }
 .metric { display: flex; flex-direction: column; align-items: flex-end; }
 .metric-val { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 .metric-key { font-size: .72rem; color: var(--ink-mute); text-transform: uppercase; letter-spacing: .6px; }
 .watch-flag {
-  position: absolute; right: 18px; bottom: 12px; font-size: .76rem; color: #2b1b00;
+  grid-area: watch; position: static; justify-self: end; max-width: 100%;
+  font-size: .76rem; color: #2b1b00;
   background: var(--t1); padding: 3px 10px; border-radius: 999px; font-weight: 700;
 }
 
@@ -158,15 +161,20 @@ main { max-width: var(--content-max); margin: 0 auto; padding: 18px 20px 8px; }
   .grid-2 { grid-template-columns: 1fr; }
   .topbar-inner { align-items: flex-start; flex-direction: column; gap: 8px; }
   .brand { align-items: flex-start; width: 100%; }
-  .threat { flex-direction: column; align-items: flex-start; }
-  .threat-right { gap: 18px; }
+  .threat {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "left" "right" "watch";
+    align-items: start;
+  }
+  .threat-right { gap: 18px; justify-self: stretch; }
+  .watch-flag { justify-self: start; }
   .metric { align-items: flex-start; }
 }
 
 @media (max-width: 520px) {
   main { padding: 18px 20px 8px; }
   .topbar-inner { width: calc(100% - 40px); }
-  .threat { padding: 20px 24px 54px; }
+  .threat { padding: 20px 24px; }
   .threat-left { min-width: 0; width: 100%; }
   .threat-level { font-size: 2.1rem; }
   .threat-right {
@@ -179,9 +187,7 @@ main { max-width: var(--content-max); margin: 0 auto; padding: 18px 20px 8px; }
   .metric-val { font-size: 1.35rem; }
   .metric-key { overflow-wrap: anywhere; }
   .watch-flag {
-    left: 24px;
-    right: 24px;
-    bottom: 12px;
+    justify-self: stretch;
     max-width: none;
     border-radius: 10px;
     line-height: 1.25;
