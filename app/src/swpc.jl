@@ -17,9 +17,9 @@ const SWPC_REQUEST_WAIT_S = 2.0              # bounded wait; refresh continues i
 const _SWPC_CACHE = Ref{Any}(nothing)       # (fetch_time::Float64, snapshot)
 const _SWPC_LOCK = ReentrantLock()
 const _SWPC_REFRESH_TASK = Ref{Union{Nothing,Task}}(nothing)
-# All NOAA/USGS refresh workers share one slot. The shipped server has two Julia threads;
-# serializing potentially blocking DNS/TLS/HTTP work guarantees that at least one remains
-# available for request handlers. Cache locks stay independent and are never held here.
+# All NOAA/USGS refresh workers share one slot. Serializing potentially blocking DNS/TLS/HTTP
+# work limits it to one server thread and leaves the rest available for request handlers. Cache
+# locks stay independent and are never held here.
 const _UPSTREAM_REFRESH_LOCK = ReentrantLock()
 _with_upstream_refresh_slot(work::Function) = lock(work, _UPSTREAM_REFRESH_LOCK)
 # Solar-wind inputs older than this no longer represent current upstream conditions. RTSW
@@ -325,8 +325,8 @@ function _start_swpc_refresh_locked()
     task = _SWPC_REFRESH_TASK[]
     if task === nothing || istaskdone(task)
         # HTTP/DNS failures can block an OS thread despite Julia task scheduling. Run refreshes
-        # on the thread pool so they cannot stall the request loop when the app uses its default
-        # two-thread launcher.
+        # on the thread pool so they cannot stall the request loop when the app uses its
+        # multithreaded launcher.
         task = Threads.@spawn _run_swpc_refresh()
         _SWPC_REFRESH_TASK[] = task
     end

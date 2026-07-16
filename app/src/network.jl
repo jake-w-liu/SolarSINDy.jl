@@ -109,7 +109,7 @@ function _refresh_usgs_network(key::Tuple, codes::Vector{String}, brief_fn,
     end
     fetched = try
         _with_upstream_refresh_slot() do
-            # One station request at a time keeps the two-thread server responsive even when
+            # One station request at a time keeps the multithreaded server responsive even when
             # DNS/TLS/HTTP blocks an OS thread. This runs in the background, and the UI keeps
             # serving the last complete network snapshot while the next one is assembled.
             [r for r in asyncmap(brief_fn, codes; ntasks=1) if r !== nothing]

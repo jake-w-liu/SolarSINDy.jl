@@ -31,7 +31,8 @@ Configuration via environment variables:
 |---|---|---|
 | `SWM_HOST` | `127.0.0.1` | bind address (`0.0.0.0` for LAN) |
 | `SWM_PORT` | `8723` | port |
-| `SWM_JULIA_THREADS` | `2` | Julia threads used by the shell launchers so upstream refreshes cannot block API requests |
+| `SWM_JULIA_THREADS` | `4` | Julia threads used by the shell launchers; one serialized upstream refresh can run while concurrent API requests remain responsive |
+| `JULIA_NUM_THREADS` | `4` in Docker | Julia threads for the Docker or direct-Julia launch path; the shell launchers use `SWM_JULIA_THREADS` |
 | `SOLARSINDY_LOG` | `../var/monitor/live_forecast_log.csv` | path to the live forecast log |
 | `SOLARSINDY_OPERATIONAL_OUTPUT_DIR` | `../validation/output/operational` | regenerated replay artifacts; complete artifacts take priority in the UI |
 | `SOLARSINDY_OPERATIONAL_EVIDENCE_DIR` | (auto) | explicit replay-evidence override; missing artifacts fail closed |

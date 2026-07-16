@@ -987,7 +987,7 @@ end
         @test lock(_DBDT_LOCK) do; isempty(_DBDT_REFRESH_TASKS); end
 
         # Distinct keys retain distinct in-flight identities, but their external work shares the
-        # global upstream slot so one of the server's two Julia threads remains available.
+        # global upstream slot so blocking external work occupies at most one server thread.
         lock(_DBDT_LOCK) do
             empty!(_DBDT_CACHE)
             empty!(_DBDT_REFRESH_TASKS)
@@ -1483,7 +1483,7 @@ end
         app_root = normpath(joinpath(@__DIR__, ".."))
         for launcher in ("run.sh", "desktop.sh")
             source = read(joinpath(app_root, launcher), String)
-            @test occursin(r"SWM_JULIA_THREADS:-2", source)
+            @test occursin(r"SWM_JULIA_THREADS:-4", source)
             @test occursin(r"--threads=\"\$JULIA_THREADS\"", source)
             @test occursin("VERSION >= v\"1.12.6\"", source)
         end
@@ -1499,7 +1499,7 @@ end
             "julia = \"1.12.6\"",
             read(joinpath(app_root, "Project.toml"), String),
         )
-        @test occursin(r"JULIA_NUM_THREADS=2", dockerfile)
+        @test occursin(r"JULIA_NUM_THREADS=4", dockerfile)
         @test occursin("COPY data/operational_validation", dockerfile)
         @test occursin("COPY app/models ./models", dockerfile)
         @test occursin(

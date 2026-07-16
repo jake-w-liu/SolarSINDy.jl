@@ -18,6 +18,6 @@ COPY app/models ./models
 COPY data/operational_validation ./data/operational_validation
 
 ENV SWM_HOST=0.0.0.0 SWM_PORT=8723 SOLARSINDY_LOG=/data/live_forecast_log.csv \
-    SOLARSINDY_OPERATIONAL_EVIDENCE_DIR=/app/data/operational_validation JULIA_NUM_THREADS=2
+    SOLARSINDY_OPERATIONAL_EVIDENCE_DIR=/app/data/operational_validation JULIA_NUM_THREADS=4
 EXPOSE 8723
 CMD ["julia", "--project=.", "src/server.jl"]

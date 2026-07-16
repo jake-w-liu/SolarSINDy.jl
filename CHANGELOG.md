@@ -36,7 +36,7 @@ Industrial robustness:
 - hot-log retention rejects limits below four rows, so it cannot truncate a complete product cycle immediately after validation
 - cycle-level interval selection uses ACI only when both point and served residual streams are ready at the model-step lead corresponding to every 1, 2, 3, and 6 h target; otherwise the entire issuance uses the shared static conformal fallback
 - per-key single-flight refreshes, bounded waits, and failure cooldowns for USGS dB/dt and station-network requests, preventing duplicate work or repeated requests to a failed service
-- one shared NOAA/USGS execution slot for potentially blocking DNS, TLS, and HTTP work, leaving request-handling capacity available in the shipped two-thread server while cached or unavailable responses return immediately
+- one shared NOAA/USGS execution slot for potentially blocking DNS, TLS, and HTTP work, leaving the other server threads available while cached or unavailable responses return immediately
 - observed dB/dt nowcast fallback from FRD to CMO for the default dashboard path; explicit station requests remain exact and never fall back silently
 - dB/dt artifact schema 3 records quasi-definitive ground provenance, bow-shock-shifted OMNI training drivers, the unshifted L1 live source, and a mandatory disabled-serving flag; offline values are empirical exceedance scores rather than calibrated probabilities
 - the live dB/dt route fails closed at the unvalidated L1-to-bow-shock feature transfer: it serves the observed ground nowcast but withholds the retrospective 30-minute forecast instead of evaluating it on a different driver time reference
@@ -47,6 +47,8 @@ Dashboard and API:
 - input-staleness demotion and served-pipeline capability labels surfaced to the front end
 - stale or unavailable status responses clear previously displayed metrics and WATCH state instead of leaving an obsolete forecast on screen
 - responsive WATCH placement in normal document flow so it cannot cover metric labels
+- a bounded four-thread default across shell and Docker launch paths, leaving request capacity during the serialized upstream refresh while preserving the one-request public-data gate
+- WCAG-AA contrast for muted labels on every dashboard background surface
 - conformal WATCH values are identified as the lower edge of a displayed calibrated 90% interval, without treating the symmetric interval as a one-sided confidence bound or storm probability; value-equivalent legacy API keys remain for already-loaded clients
 - ground dB/dt is presented as a GIC-hazard indicator, with the four values identified as unit-converted Pulkkinen et al. threshold magnitudes rather than a reproduction of their nonoverlapping-window protocol or named grid-risk tiers; unsupported generic geoelectric/GIC risk categories were removed
 - browser notifications use the stronger of the point-forecast and interval-edge WATCH ranges; unsupported explicit dB/dt stations and malformed query encodings return HTTP 400 instead of aliasing to FRD or surfacing as server errors
