@@ -2,7 +2,7 @@
 
 All notable changes to `SolarSINDy.jl` will be documented in this file.
 
-## [Unreleased] - 2026-07-16
+## [Unreleased] - 2026-07-17
 
 Correctness, robustness, and operational-readiness improvements.
 
@@ -35,7 +35,11 @@ Industrial robustness:
 - fixed 1, 2, 3, and 6 h product horizons, with health determined from the exact API cycle contract; partial or internally inconsistent rows remain failed even when all four calls returned
 - hot-log retention rejects limits below four rows, so it cannot truncate a complete product cycle immediately after validation
 - cycle-level interval selection uses ACI only when both point and served residual streams are ready at the model-step lead corresponding to every 1, 2, 3, and 6 h target; otherwise the entire issuance uses the shared static conformal fallback
-- per-key single-flight refreshes, bounded waits, and failure cooldowns for USGS dB/dt and station-network requests, preventing duplicate upstream work without serializing independent stations or hammering a failed service
+- per-key single-flight refreshes, bounded waits, and failure cooldowns for USGS dB/dt and station-network requests, preventing duplicate work or repeated requests to a failed service
+- one shared NOAA/USGS execution slot for potentially blocking DNS, TLS, and HTTP work, leaving request-handling capacity available in the shipped two-thread server while cached or unavailable responses return immediately
+- observed dB/dt nowcast fallback from FRD to CMO for the default dashboard path; explicit station requests remain exact and never fall back silently
+- dB/dt artifact schema 3 records quasi-definitive ground provenance, bow-shock-shifted OMNI training drivers, the unshifted L1 live source, and a mandatory disabled-serving flag; offline values are empirical exceedance scores rather than calibrated probabilities
+- the live dB/dt route fails closed at the unvalidated L1-to-bow-shock feature transfer: it serves the observed ground nowcast but withholds the retrospective 30-minute forecast instead of evaluating it on a different driver time reference
 
 Dashboard and API:
 
@@ -43,6 +47,9 @@ Dashboard and API:
 - input-staleness demotion and served-pipeline capability labels surfaced to the front end
 - stale or unavailable status responses clear previously displayed metrics and WATCH state instead of leaving an obsolete forecast on screen
 - responsive WATCH placement in normal document flow so it cannot cover metric labels
+- conformal WATCH values are identified as the lower edge of a displayed calibrated 90% interval, without treating the symmetric interval as a one-sided confidence bound or storm probability; value-equivalent legacy API keys remain for already-loaded clients
+- ground dB/dt is presented as a GIC-hazard indicator, with the four values identified as unit-converted Pulkkinen et al. threshold magnitudes rather than a reproduction of their nonoverlapping-window protocol or named grid-risk tiers; unsupported generic geoelectric/GIC risk categories were removed
+- browser notifications use the stronger of the point-forecast and interval-edge WATCH ranges; unsupported explicit dB/dt stations and malformed query encodings return HTTP 400 instead of aliasing to FRD or surfacing as server errors
 - deployment parity across the committed Julia 1.12.6 app environment, Docker image, bundled models, and operational-evidence path; launchers now fail closed when Julia or dependency setup is unsuitable
 
 Provenance and tests:
@@ -50,7 +57,9 @@ Provenance and tests:
 - discovery provenance sidecar, persisted served point fit, and a joint posterior-draws ensemble artifact; fill-fabricated storm rows excluded from discovery
 - the joint-draws artifact (`data/real_sindy_ensemble_draws.csv`) is local-only and not committed; regenerate it with `validation/generate_ensemble_draws.jl` (`init_forecast` falls back to marginal per-term sampling when it is absent)
 - canonical and legacy PlotlySupply figure generation preserves the submitted full-width and vertical-panel geometry without loading the desktop synchronization layer
+- equal-length normalization of Chromium PDF title and timestamp metadata makes repeated PlotlySupply exports byte-identical without changing PDF object offsets or plotted content
 - canonical source identity excludes generated validation output and records portable forward-slash paths
+- external-Dst snapshot collection stages network responses before installation and enforces bidirectional raw/log ownership markers under a canonical lock order, preventing shared-path races and unsafe cleanup
 - new deterministic test oracles covering the fixes above
 
 ## [0.1.0] - 2026-03-20

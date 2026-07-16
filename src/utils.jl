@@ -127,7 +127,9 @@ const PROTON_PDYN_COEFF = 1.6726e-6
 """
 Pressure-correction constants for `Dst* = Dst - b√Pdyn + c`. Values
 `b = 7.26` nT·nPa^(-1/2) and `c = 11.0` nT are from O'Brien & McPherron (2000);
-Burton et al. (1975) used the different pair `b = 0.20`, `c = 20` nT.
+Burton et al. (1975) expressed pressure as energy density and used `b = 0.20`
+nT·(eV cm⁻³)^(-1/2), equivalent to approximately `15.8` nT·nPa^(-1/2), with
+`c = 20` nT. Runtime pressure is in nPa and uses the O'Brien--McPherron pair above.
 """
 const DST_STAR_B = 7.26
 const DST_STAR_C = 11.0

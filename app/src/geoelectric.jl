@@ -1,6 +1,7 @@
-# geoelectric.jl — geoelectric field (the actual GIC driver) from ground magnetic variations,
-# via the plane-wave (magnetotelluric) method. Supports a 1-D uniform half-space (default) and a
-# 1-D LAYERED earth (Wait recursion for the surface impedance).
+# geoelectric.jl — geoelectric field from ground magnetic variations via the plane-wave
+# (magnetotelluric) method. Local geoelectric field supplies the electric forcing for GIC, but
+# current in a particular grid also depends on site conductivity and network geometry. Supports
+# a 1-D uniform half-space (default) and a 1-D LAYERED earth (Wait recursion for the impedance).
 #
 # Frequency domain (Viljanen/Pulkkinen plane-wave method):
 #   uniform half-space surface impedance:  Z(w) = sqrt(i w mu0 rho)          [rho = 1/sigma]
@@ -131,16 +132,3 @@ end
 # Real GIC requires a site-specific ground model; these are coarse end-members for demonstration.
 const EARTH_RESISTIVE   = [(2.0e4, 1.5e4), (5.0e2, 0.0)]   # resistive shield over a deep conductor
 const EARTH_CONDUCTIVE  = [(2.0e1, 4.0e3), (1.0e3, 0.0)]   # conductive sediments over resistive basement
-
-# Approximate geoelectric GIC-risk tiers [V/km]. Coarse — real risk depends on grid topology;
-# for reference, the 1989 Québec collapse involved fields of order ~1–2 V/km in resistive ground.
-const GEO_TIERS = ("Quiet", "Low", "Moderate", "High", "Severe")
-const GEO_EDGES = (0.1, 0.5, 2.0, 5.0)
-function geo_tier(e)
-    (e === nothing || !(e isa Real) || !isfinite(e)) && return (level = nothing, label = "—")
-    e < GEO_EDGES[1] && return (level = 0, label = GEO_TIERS[1])
-    e < GEO_EDGES[2] && return (level = 1, label = GEO_TIERS[2])
-    e < GEO_EDGES[3] && return (level = 2, label = GEO_TIERS[3])
-    e < GEO_EDGES[4] && return (level = 3, label = GEO_TIERS[4])
-    return (level = 4, label = GEO_TIERS[5])
-end

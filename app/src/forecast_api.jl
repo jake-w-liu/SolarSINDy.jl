@@ -4,9 +4,9 @@
 # turns it into honest JSON payloads. Design principles:
 #   * The locked log is the single source of truth. This layer never re-computes a
 #     forecast; it serves exactly what was issued and (later) verified.
-#   * Threat is assessed from the *calibrated lower bound* of the predictive interval,
-#     not only the point forecast, so the worst credible storm within the 90% band drives
-#     the alert.
+#   * A watch is assessed from the most negative lower edge among the displayed calibrated
+#     predictive intervals, not only from the point forecast. The watch is a conservative
+#     screen, not a one-sided confidence statement or a storm probability.
 #   * Calibration (coverage, RMSE) is recomputed from the log itself, so the dashboard
 #     cannot drift from a stale report file.
 #
@@ -601,7 +601,7 @@ function build_storm_replay(log_path::AbstractString; evidence_dir=nothing)
     return (available=true, report_age_min=age, n_scored=n, storms=storms, report_markdown=md)
 end
 
-"""Threat status: current observation + worst credible storm over the latest cycle."""
+"""Threat status: current observation and most negative edge among the latest 90% intervals."""
 function build_status(df::DataFrame)
     cyc = latest_cycle(df)
     cal = calibration_summary(df)
@@ -647,11 +647,12 @@ function build_status(df::DataFrame)
     preds = [Float64(_v2_pred(r)) for r in eachrow(cyc)]
     lbs = [Float64(_v2_ci05(r)) for r in eachrow(cyc)]
     point_min = minimum(preds)
-    worst_cred = minimum(lbs)
+    interval_lower_edge_min = minimum(lbs)
     lvl_pt, lbl_pt = dst_threat_level(point_min)
-    lvl_wc, lbl_wc = dst_threat_level(worst_cred)
+    lvl_wc, lbl_wc = dst_threat_level(interval_lower_edge_min)
     # Reported threat level is the point-forecast level; a "watch" flag fires when the
-    # calibrated lower bound reaches a stronger storm tier than the point forecast.
+    # lower edge of a displayed calibrated interval reaches a stronger storm tier than the
+    # point forecast. This does not turn the marginal interval into a one-sided bound.
     watch = lvl_wc > lvl_pt
     horizon_max = (h = filter(!isnothing,
         [jnum(_rowget(r, :horizon_hours)) for r in eachrow(cyc)]);
@@ -666,7 +667,12 @@ function build_status(df::DataFrame)
             forecast_issue_utc=jdt(stale.issue_max),
             threat=(level=lvl_pt, label=lbl_pt, watch=watch,
                     watch_level=lvl_wc, watch_label=lbl_wc,
-                    point_min_dst_nt=point_min, worst_credible_dst_nt=worst_cred,
+                    point_min_dst_nt=point_min,
+                    interval_lower_edge_min_dst_nt=interval_lower_edge_min,
+                    # Deprecated value-equivalent aliases for already-loaded dashboards and API
+                    # clients. New code and all visible labels use interval_lower_edge_min_dst_nt.
+                    lower_bound_min_dst_nt=interval_lower_edge_min,
+                    worst_credible_dst_nt=interval_lower_edge_min,
                     basis="Dst storm-intensity scale (-30/-50/-100/-200 nT)"),
             lead_time=(forecast_horizon_hours=horizon_max,
                        driver_assumption="Ballistically propagated L1 forcing, then regime-aware relaxation beyond the measured L1 window, with a near-term extreme-Dst inertia guard",
@@ -741,8 +747,9 @@ function build_alerts(df::DataFrame, st=build_status(df))
     end
     if th.watch && th.watch_level > th.level
         push!(alerts, (severity=th.watch_label, level=th.watch_level, kind="watch",
-                       message="Calibrated 90% lower bound reaches $(round(th.worst_credible_dst_nt; digits=0)) nT " *
-                               "($(th.watch_label)); storm cannot be excluded at the 90% level."))
+                       message="A displayed calibrated 90% interval extends to " *
+                               "$(round(th.interval_lower_edge_min_dst_nt; digits=0)) nT " *
+                               "($(th.watch_label) range) at one or more horizons."))
     end
     return (active=!isempty(alerts), generated_utc=st.generated_utc,
             threat_level=th.level, threat_label=th.label, alerts=alerts)

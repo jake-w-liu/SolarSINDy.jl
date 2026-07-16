@@ -126,7 +126,7 @@ main { max-width: var(--content-max); margin: 0 auto; padding: 18px 20px 8px; }
 .atime { color: var(--ink-mute); min-width: 80px; font-size: .76rem; }
 .asum { color: var(--ink-soft); }
 
-/* calibrated dB/dt forecast strip */
+/* Offline-replay dB/dt forecast strip; the live API intentionally leaves it empty. */
 .forecast-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; margin: 2px 0 8px;
   padding: 8px 12px; background: rgba(78,161,255,0.07); border: 1px solid var(--card-edge); border-radius: 10px; font-size: .85rem; }
 .forecast-strip:empty { display: none; }

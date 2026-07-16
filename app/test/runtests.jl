@@ -3,9 +3,10 @@
 # or from the project root:
 #   julia --startup-file=no --project=SolarSINDy.jl app/test/runtests.jl
 #
-# The headline guarantee these tests protect is the forecaster<->export contract: the live
-# dB/dt forecast must equal the paper3 conformal model recomputed independently from the
-# exported JSON. A drift in feature order, standardization, scale, or quantile is caught here.
+# The headline dB/dt contract is fail-closed serving plus offline replay/export equivalence:
+# the API withholds the time-reference-mismatched forecast, while an explicitly requested replay
+# must equal the exported ridge + historical-residual calculation. Feature, scale, and quantile
+# drift is caught here.
 
 using Test, JSON3, Statistics, HTTP
 
@@ -19,7 +20,7 @@ struct _InterruptingSWPCText end
 Base.String(::_InterruptingSWPCText) = throw(InterruptException())
 
 # ---- independent re-implementation of export_forecaster.jl's documented formula ----
-# forecast = expm1(zhat + q * s(x)); P(y>thr) = mean(rn > (log1p(thr)-zhat)/s); cap at log(2001).
+# forecast = expm1(zhat + q*s(x)); empirical score = mean(rn > cutoff); cap at log(2001).
 function golden_forecast(model, dbdt_recent::Vector{Float64}, V, Bz)
     w = dbdt_recent[max(1, end-29):end]
     dnow, dmean, dmax = w[end], mean(w), maximum(w)
@@ -76,39 +77,74 @@ end
         for (station, V, Bz) in (("FRD", 520.0, -8.0), ("CMO", 600.0, -12.0))
             m = load_forecaster(; station=station)
             @test m !== nothing
-            fc = forecast_dbdt(recent, V, Bz; station=station)
+            @test forecast_dbdt(recent, V, Bz; station=station) === nothing
+            fc = forecast_dbdt(recent, V, Bz; station=station,
+                               offline_replay=true)
             @test fc !== nothing
             gp, gub, gexc, ẑ, s = golden_forecast(m, recent, V, Bz)
-            # live forecast must match the independently recomputed export formula
+            # Explicit offline replay must match the independently recomputed export formula.
             @test isapprox(fc.point_dbdt, round(max(gp, 0.0); digits=2); atol=0.02)
-            @test isapprox(fc.ub90_dbdt, round(gub; digits=2); atol=0.05)
+            @test isapprox(fc.ub90_dbdt, round(max(gub, 0.0); digits=2); atol=0.05)
             @test length(fc.exceedance) == length(gexc)
             for (k, e) in enumerate(fc.exceedance)
                 @test e.threshold == gexc[k][1]
-                @test isapprox(e.prob, round(gexc[k][2]; digits=3); atol=0.01)
+                @test isapprox(e.empirical_score, round(gexc[k][2]; digits=3); atol=0.01)
             end
             @test fc.station == station
             @test fc.horizon_min == 30
+            @test fc.source == "offline ridge + historical residual sample"
+            @test fc.training_ground_data_product == "quasi-definitive"
+            @test fc.live_ground_data_product == "adjusted (provisional)"
+            @test fc.training_driver_product == "OMNI_HRO_1MIN"
+            @test fc.training_driver_propagation == "bow-shock-nose time shifted"
+            @test fc.driver_time_reference_aligned == false
+            @test fc.serving_enabled == false
             # interval sanity: upper bound is above the point forecast
             @test fc.ub90_dbdt >= fc.point_dbdt
         end
     end
 
-    @testset "physical regimes: quiet < storm, auroral >= mid-latitude, no blow-up" begin
+    @testset "offline artifact regression vectors and numerical cap" begin
         quiet = fill(0.5, 30)
         storm = collect(range(20.0, 120.0; length=30))
-        q = forecast_dbdt(quiet, 380.0, 1.0; station="FRD")
-        s = forecast_dbdt(storm, 700.0, -20.0; station="FRD")
+        q = forecast_dbdt(quiet, 380.0, 1.0; station="FRD", offline_replay=true)
+        s = forecast_dbdt(storm, 700.0, -20.0; station="FRD", offline_replay=true)
         @test q.point_dbdt < s.point_dbdt
-        @test q.exceedance[1].prob <= s.exceedance[1].prob     # P(>18) rises with the storm
-        # same drivers: auroral (CMO) bound >= mid-latitude (FRD) bound
-        af = forecast_dbdt(storm, 700.0, -20.0; station="CMO")
-        @test af.ub90_dbdt >= s.ub90_dbdt
-        # out-of-range input must not overflow: physical cap ~2000 nT/min
+        @test q.exceedance[1].empirical_score <= s.exceedance[1].empirical_score
+        # Exercise the second station without imposing a universal cross-latitude ordering.
+        af = forecast_dbdt(storm, 700.0, -20.0; station="CMO", offline_replay=true)
+        @test isfinite(af.point_dbdt) && isfinite(af.ub90_dbdt)
+        @test af.serving_enabled == false
+        # Out-of-range input must not overflow the explicit numerical safety cap.
         blow = fill(5000.0, 30)
-        b = forecast_dbdt(blow, 1200.0, -60.0; station="CMO")
+        b = forecast_dbdt(blow, 1200.0, -60.0; station="CMO", offline_replay=true)
         @test isfinite(b.point_dbdt) && b.point_dbdt <= 2001.0
         @test isfinite(b.ub90_dbdt) && b.ub90_dbdt <= 2001.0
+    end
+
+    @testset "dB/dt forecast requires a contiguous 30-minute history" begin
+        @test forecast_dbdt(fill(2.0, 29), 420.0, -3.0;
+                            station="FRD", offline_replay=true) === nothing
+        invalid = fill(2.0, 30); invalid[10] = NaN
+        @test forecast_dbdt(invalid, 420.0, -3.0;
+                            station="FRD", offline_replay=true) === nothing
+
+        start = DateTime(2026, 7, 16, 0, 0)
+        rows = [(t=Dates.format(start + Minute(index - 1),
+                                dateformat"yyyy-mm-ddTHH:MM:SS") * "Z",
+                 dbdt=2.0 + index / 10) for index in 1:30]
+        @test forecast_dbdt_observations(rows, 420.0, -3.0;
+                                         station="FRD") === nothing
+        @test forecast_dbdt_observations(rows, 420.0, -3.0;
+                                         station="FRD", offline_replay=true) !== nothing
+        gapped = copy(rows)
+        gapped[15] = merge(gapped[15],
+                           (t=Dates.format(start + Minute(30),
+                                           dateformat"yyyy-mm-ddTHH:MM:SS") * "Z",))
+        @test forecast_dbdt_observations(gapped, 420.0, -3.0;
+                                         station="FRD", offline_replay=true) === nothing
+        @test forecast_dbdt_observations(rows[1:29], 420.0, -3.0;
+                                         station="FRD", offline_replay=true) === nothing
     end
 
     @testset "per-station cache returns the right model" begin
@@ -122,13 +158,31 @@ end
 
     @testset "forecaster thresholds are positive, integral, and Int-representable" begin
         artifact(thresholds) = (
+            artifact_schema_version=3,
             station="FRD",
+            training_ground_data_product="quasi-definitive",
+            live_ground_data_product="adjusted (provisional)",
+            training_driver_product="OMNI_HRO_1MIN",
+            training_driver_propagation="bow-shock-nose time shifted",
+            available_live_driver_product="NOAA SWPC real-time solar wind at L1",
+            driver_time_reference_aligned=false,
+            serving_enabled=false,
+            serving_blocker="time-reference mismatch",
+            forecast_horizon_minutes=30,
+            issue_cadence_minutes=1,
+            overlapping_targets=true,
             features=["dbdt_now", "dbdt_mean30", "dbdt_max30", "dbdt_std30",
                       "V", "Bz", "Bs", "VBs"],
             mu=zeros(8), sigma=ones(8), beta=zeros(9), rn_calib=[0.0, 1.0],
             thresholds=thresholds,
         )
         @test _valid_forecaster_artifact(artifact([18.0, 42.0]), "FRD")
+        @test !_valid_forecaster_artifact(
+            merge(artifact([18.0]), (artifact_schema_version=2,)), "FRD")
+        @test !_valid_forecaster_artifact(
+            merge(artifact([18.0]), (serving_enabled=true,)), "FRD")
+        @test !_valid_forecaster_artifact(
+            merge(artifact([18.0]), (driver_time_reference_aligned=true,)), "FRD")
         @test !_valid_forecaster_artifact(artifact([18.5]), "FRD")
         @test !_valid_forecaster_artifact(artifact([Float64(typemax(Int))]), "FRD")
         @test !_valid_forecaster_artifact(artifact([1.0e100]), "FRD")
@@ -203,15 +257,21 @@ end
         end
     end
 
-    @testset "exported model self-consistency (coverage proxy)" begin
-        # the residual grid's exact 0.90 quantile is what the live forecaster targets;
-        # the grid must be sorted/monotone and the 0.90 quantile finite and positive-ish.
+    @testset "exported offline model self-consistency" begin
+        # The residual grid must be sorted and its empirical 0.90 quantile finite.
         for station in ("FRD", "CMO")
             m = load_forecaster(; station=station)
             rn = Float64.(m.rn_calib)
             @test issorted(rn)
             @test isfinite(quantile(rn, 0.90))
             @test haskey(m, :cap_note)              # cap convention documented in the artifact
+            @test m.artifact_schema_version == 3
+            @test m.training_ground_data_product == "quasi-definitive"
+            @test m.live_ground_data_product == "adjusted (provisional)"
+            @test m.training_driver_product == "OMNI_HRO_1MIN"
+            @test m.driver_time_reference_aligned == false
+            @test m.serving_enabled == false
+            @test haskey(m, :dataset_sha256)
         end
     end
 
@@ -236,6 +296,28 @@ end
         @test_throws ArgumentError geoelectric_field([0.0], [0.0], Inf)
         @test_throws ArgumentError geoelectric_field([0.0, NaN], [0.0, 1.0], 60.0)
         @test_throws ArgumentError geoelectric_field([0.0, 1.0], [0.0, Inf], 60.0)
+    end
+
+    @testset "dB/dt bands preserve published numeric thresholds without risk labels" begin
+        expected = [
+            (0.0, 0, "Below 18 nT/min"),
+            (17.999, 0, "Below 18 nT/min"),
+            (18.0, 1, "At least 18 nT/min"),
+            (42.0, 2, "At least 42 nT/min"),
+            (66.0, 3, "At least 66 nT/min"),
+            (90.0, 4, "At least 90 nT/min"),
+        ]
+        for (value, level, label) in expected
+            band = dbdt_tier(value)
+            @test band.level == level
+            @test band.label == label
+        end
+        @test dbdt_tier(-1.0) == (level=nothing, label="—")
+        @test dbdt_tier(true) == (level=nothing, label="—")
+        @test dbdt_tier(NaN) == (level=nothing, label="—")
+        @test !isdefined(@__MODULE__, :GEO_TIERS)
+        @test !isdefined(@__MODULE__, :GEO_EDGES)
+        @test !isdefined(@__MODULE__, :geo_tier)
     end
 
     @testset "Phase D: storm-replay endpoint payload" begin
@@ -268,16 +350,18 @@ end
         end
     end
 
-    @testset "dB/dt forecaster flags out-of-validated-range / saturated inputs" begin
-        # A merely quiet-to-mild dB/dt history forecasts within the validated range.
-        normal = forecast_dbdt(fill(2.0, 30), 420.0, -3.0; station="FRD")
+    @testset "offline dB/dt replay flags out-of-validated-range / saturated inputs" begin
+        # A merely quiet-to-mild dB/dt history replays within the validated range.
+        normal = forecast_dbdt(fill(2.0, 30), 420.0, -3.0;
+                               station="FRD", offline_replay=true)
         if normal !== nothing                      # only if the FRD artifact is present
             @test haskey(normal, :reliable)
             @test normal.reliable == true
             @test normal.saturated == false
             # An absurd dB/dt history (far outside the ~1.7 nT/min calibration mean) must be
-            # flagged unreliable/saturated rather than surfaced as a confident Extreme forecast.
-            extreme = forecast_dbdt(fill(5000.0, 30), 1200.0, -80.0; station="FRD")
+            # flagged unreliable/saturated rather than surfaced as a confident estimate.
+            extreme = forecast_dbdt(fill(5000.0, 30), 1200.0, -80.0;
+                                    station="FRD", offline_replay=true)
             @test extreme !== nothing
             @test extreme.reliable == false
             @test (extreme.out_of_validated_range || extreme.saturated)
@@ -343,7 +427,17 @@ end
         @test st.available == true
         @test st.forecast_issue_utc == string(iss_new) * "Z"          # newest issue, not superseded
         @test st.latest_observation.dst_nt == -20.0                   # anchor from newest cycle
-        @test st.threat.worst_credible_dst_nt == -43.0               # min over newest cycle, not -99
+        @test st.threat.interval_lower_edge_min_dst_nt ==
+              st.threat.lower_bound_min_dst_nt ==
+              st.threat.worst_credible_dst_nt == -43.0              # min over newest cycle, not -99
+        @test st.threat.level == 0
+        @test st.threat.watch == true
+        @test st.threat.watch_level == 1
+        alerts = build_alerts(df, st).alerts
+        @test any(alert -> alert.kind == "watch" && alert.level == 1, alerts)
+        watch = only(filter(alert -> alert.kind == "watch", alerts))
+        @test occursin("displayed calibrated 90% interval", watch.message)
+        @test !occursin("cannot be excluded", watch.message)
         fc = build_forecast(df)
         @test length(fc.horizons) == 4
         @test fc.issue_time_utc == string(iss_new) * "Z"
@@ -674,6 +768,7 @@ end
     end
 
     @testset "dB/dt uses elapsed time and cache windows are isolated" begin
+        @test USGS_LIVE_DATA_TYPE == "adjusted"
         reference = now(UTC)
         times = jdt.([reference - Minute(4), reference - Minute(2)])
         @test _dbdt_series(times, [0.0, 20.0], [0.0, 0.0])[2] == 10.0
@@ -683,7 +778,9 @@ end
              values=[(metadata=(element="X",), values=[0.0, 20.0]),
                      (metadata=(element="Y",), values=[0.0, 0.0])],
              metadata=(intermagnet=(imo=(coordinates=[-77.0, 39.0, 0.0], name="Test"),),))
-        @test _station_parse("TST", d; reference=reference).current_dbdt == 10.0
+        station_row = _station_parse("TST", d; reference=reference)
+        @test station_row.current_dbdt == 10.0
+        @test station_row.data_type == "adjusted"
 
         # The impedance transform uses the actual uniform cadence, and refuses
         # an irregular cadence instead of treating every row as one minute.
@@ -698,6 +795,7 @@ end
         expected_geoe = _geoe_nowcast(long_x, zeros(20), 120.0)
         @test nc2.geoelectric !== nothing
         @test nc2.geoelectric.current_vkm ≈ round(expected_geoe.current; digits=3)
+        @test !hasproperty(nc2.geoelectric, :tier)
 
         irregular_times = [reference - Minute(21) + Minute(i) +
                            (i >= 10 ? Minute(1) : Minute(0)) for i in 0:19]
@@ -749,6 +847,7 @@ end
         d = payload(times, x)
         nc = _compute_dbdt("TST", 120; fetch_fn=(s, m) -> d, reference=reference)
         @test nc.available && nc.current_dbdt == 0.5
+        @test nc.data_type == "adjusted"
         @test nc.max30_dbdt == 0.5
         @test nc.n_minutes == 30
         @test all(parse_dt(p.t) > reference - Minute(60) for p in nc.series)
@@ -887,7 +986,8 @@ end
         @test all(r -> r.available && r.station == "FRD", results)
         @test lock(_DBDT_LOCK) do; isempty(_DBDT_REFRESH_TASKS); end
 
-        # A key-local flight must not serialize a distinct station/window key.
+        # Distinct keys retain distinct in-flight identities, but their external work shares the
+        # global upstream slot so one of the server's two Julia threads remains available.
         lock(_DBDT_LOCK) do
             empty!(_DBDT_CACHE)
             empty!(_DBDT_REFRESH_TASKS)
@@ -906,10 +1006,18 @@ end
             Threads.@spawn(usgs_dbdt(station="CMO", minutes=120,
                 compute_fn=distinct_compute, reference=reference, wait_timeout=30.0)),
         ]
-        independent = Base.timedwait(() -> distinct_calls[] == 2, 2.0; pollint=0.01)
-        foreach(_ -> put!(distinct_release, nothing), 1:2)
+        published = Base.timedwait(
+            () -> lock(_DBDT_LOCK) do; length(_DBDT_REFRESH_TASKS) == 2; end,
+            2.0; pollint=0.01,
+        )
+        first_started = Base.timedwait(() -> distinct_calls[] == 1, 2.0; pollint=0.01)
+        put!(distinct_release, nothing)
+        second_started = Base.timedwait(() -> distinct_calls[] == 2, 2.0; pollint=0.01)
+        put!(distinct_release, nothing)
         distinct_results = fetch.(distinct)
-        @test independent === :ok
+        @test published === :ok
+        @test first_started === :ok
+        @test second_started === :ok
         @test distinct_calls[] == 2
         @test Set(r.station for r in distinct_results) == Set(("FRD", "CMO"))
 
@@ -1175,6 +1283,202 @@ end
         end
     end
 
+    @testset "live-source API routes never wait for third-party refreshes" begin
+        # A held refresh is a deterministic oracle for the request contract: each route must
+        # return its unavailable/cached payload promptly and leave the one in-flight worker intact.
+        swpc_gate = Channel{Nothing}(0)
+        swpc_held = Threads.@spawn (take!(swpc_gate); (source="test", available=false))
+        lock(_SWPC_LOCK) do
+            _SWPC_CACHE[] = nothing
+            _SWPC_REFRESH_TASK[] = swpc_held
+        end
+        try
+            elapsed = @elapsed response = api_handler("/api/swpc", "", "unused.csv")
+            payload = JSON3.read(String(response.body))
+            @test response.status == 200
+            @test payload.available == false
+            @test elapsed < 1.5
+            @test _SWPC_REFRESH_TASK[] === swpc_held
+        finally
+            put!(swpc_gate, nothing)
+            fetch(swpc_held)
+            lock(_SWPC_LOCK) do
+                _SWPC_CACHE[] = nothing
+                _SWPC_REFRESH_TASK[] = nothing
+            end
+        end
+
+        dbdt_key = ("FRD", 120)
+        dbdt_gate = Channel{Nothing}(0)
+        dbdt_held = Threads.@spawn (take!(dbdt_gate); nothing)
+        lock(_DBDT_LOCK) do
+            empty!(_DBDT_CACHE)
+            empty!(_DBDT_REFRESH_TASKS)
+            _DBDT_REFRESH_TASKS[dbdt_key] = dbdt_held
+        end
+        try
+            elapsed = @elapsed response = api_handler("/api/dbdt", "station=FRD", "unused.csv")
+            payload = JSON3.read(String(response.body))
+            @test response.status == 200
+            @test payload.available == false
+            @test elapsed < 1.5
+            @test _DBDT_REFRESH_TASKS[dbdt_key] === dbdt_held
+
+            # An explicit unsupported or malformed station is rejected. It must never alias to
+            # FRD, start a new worker, or increase the bounded cache/in-flight key sets.
+            handler = make_handler("unused.csv")
+            for query in (
+                "station=ZZZ", "station=FRD%20", "station=bad%2Fstation", "station=",
+                "station=%", "station=%GG", "station=%FF",
+            )
+                invalid = handler(HTTP.Request("GET", "/api/dbdt?$query"))
+                invalid_payload = JSON3.read(String(invalid.body))
+                @test invalid.status == 400
+                @test invalid_payload.available == false
+                expected_error = query in ("station=%", "station=%GG", "station=%FF") ?
+                                 "malformed query" : "unsupported station"
+                @test String(invalid_payload.error) == expected_error
+                @test collect(keys(_DBDT_REFRESH_TASKS)) == [dbdt_key]
+                @test isempty(_DBDT_CACHE)
+            end
+        finally
+            put!(dbdt_gate, nothing)
+            fetch(dbdt_held)
+            lock(_DBDT_LOCK) do
+                empty!(_DBDT_CACHE)
+                empty!(_DBDT_REFRESH_TASKS)
+            end
+        end
+
+        # The dashboard's implicit station may fall back only to the other calibrated station;
+        # an explicit request above remains pinned to FRD.
+        reference = now(UTC)
+        cmo = (
+            station="CMO", available=true, stale=false, invalid_future=false,
+            age_minutes=0.0, current_dbdt=1.0,
+            current_tier=(level=0, label="Below 18 nT/min"),
+            current_time_utc=jdt(reference), max30_dbdt=2.0,
+            max30_tier=(level=0, label="Below 18 nT/min"), thresholds=collect(PULK),
+            exceedances=NamedTuple[], geoelectric=nothing, n_minutes=1,
+            series=[(t=jdt(reference), dbdt=1.0)],
+        )
+        lock(_DBDT_LOCK) do
+            _DBDT_CACHE[("FRD", 120)] = (time(), (station="FRD", available=false))
+            _DBDT_CACHE[("CMO", 120)] = (time(), cmo)
+        end
+        lock(_SWPC_LOCK) do
+            _SWPC_CACHE[] = (time(), _unavailable_swpc_snapshot())
+        end
+        fallback = JSON3.read(String(api_handler("/api/dbdt", "", "unused.csv").body))
+        @test fallback.available == true
+        @test String(fallback.station) == "CMO"
+        @test fallback.forecast === nothing
+        @test fallback.forecast_status.available == false
+        @test occursin("not aligned", String(fallback.forecast_status.reason))
+        lock(_DBDT_LOCK) do
+            empty!(_DBDT_CACHE)
+        end
+        lock(_SWPC_LOCK) do
+            _SWPC_CACHE[] = nothing
+            _SWPC_REFRESH_TASK[] = nothing
+        end
+
+        network_key = Tuple(unique(NET_STATIONS))
+        network_gate = Channel{Nothing}(0)
+        network_held = Threads.@spawn (take!(network_gate); nothing)
+        lock(_NET_LOCK) do
+            empty!(_NET_CACHE)
+            empty!(_NET_REFRESH_TASKS)
+            _NET_REFRESH_TASKS[network_key] = network_held
+        end
+        try
+            elapsed = @elapsed response = api_handler("/api/network", "", "unused.csv")
+            payload = JSON3.read(String(response.body))
+            @test response.status == 200
+            @test payload.available == false
+            @test payload.n_stations == 0
+            @test elapsed < 1.5
+            @test _NET_REFRESH_TASKS[network_key] === network_held
+        finally
+            put!(network_gate, nothing)
+            fetch(network_held)
+            lock(_NET_LOCK) do
+                empty!(_NET_CACHE)
+                empty!(_NET_REFRESH_TASKS)
+            end
+        end
+
+        history_handler = make_handler("unused.csv")
+        for query in ("hours=%", "hours=%GG", "hours=%FF")
+            malformed = history_handler(HTTP.Request("GET", "/api/history?$query"))
+            malformed_payload = JSON3.read(String(malformed.body))
+            @test malformed.status == 400
+            @test malformed_payload.available == false
+            @test String(malformed_payload.error) == "malformed query"
+        end
+        nonfinite = history_handler(HTTP.Request("GET", "/api/history?hours=NaN"))
+        @test nonfinite.status == 200
+        @test JSON3.read(String(nonfinite.body)).hours == 72.0
+    end
+
+    @testset "NOAA and USGS workers share one upstream execution slot" begin
+        lock(_SWPC_LOCK) do
+            _SWPC_CACHE[] = nothing
+            _SWPC_REFRESH_TASK[] = nothing
+        end
+        lock(_DBDT_LOCK) do
+            empty!(_DBDT_CACHE)
+            empty!(_DBDT_REFRESH_TASKS)
+        end
+        active = Threads.Atomic{Int}(0)
+        maximum_active = Threads.Atomic{Int}(0)
+        calls = Threads.Atomic{Int}(0)
+        release = Channel{Nothing}(2)
+        function gated_probe(value)
+            Threads.atomic_add!(calls, 1)
+            now_active = Threads.atomic_add!(active, 1) + 1
+            while true
+                prior = maximum_active[]
+                prior >= now_active && break
+                Threads.atomic_cas!(maximum_active, prior, now_active) == prior && break
+            end
+            try
+                take!(release)
+                return value
+            finally
+                Threads.atomic_add!(active, -1)
+            end
+        end
+
+        swpc_task = Threads.@spawn _run_swpc_refresh(
+            build_fn=() -> gated_probe((source="test", available=true)),
+        )
+        dbdt_task = Threads.@spawn usgs_dbdt(
+            station="FRD", minutes=120, wait_timeout=30.0,
+            compute_fn=(station, minutes) -> gated_probe((
+                station=station, available=true, current_time_utc=jdt(now(UTC)),
+            )),
+        )
+        @test Base.timedwait(() -> calls[] == 1, 2.0; pollint=0.01) === :ok
+        @test maximum_active[] == 1
+        put!(release, nothing)
+        @test Base.timedwait(() -> calls[] == 2, 2.0; pollint=0.01) === :ok
+        @test maximum_active[] == 1
+        put!(release, nothing)
+        @test fetch(swpc_task).available == true
+        @test fetch(dbdt_task).available == true
+        @test active[] == 0
+        @test maximum_active[] == 1
+        lock(_SWPC_LOCK) do
+            _SWPC_CACHE[] = nothing
+            _SWPC_REFRESH_TASK[] = nothing
+        end
+        lock(_DBDT_LOCK) do
+            empty!(_DBDT_CACHE)
+            empty!(_DBDT_REFRESH_TASKS)
+        end
+    end
+
     @testset "launchers reserve capacity for background refresh" begin
         app_root = normpath(joinpath(@__DIR__, ".."))
         for launcher in ("run.sh", "desktop.sh")
@@ -1208,6 +1512,12 @@ end
     @testset "threat watch remains in layout flow" begin
         css = read(joinpath(@__DIR__, "..", "public", "style.css"), String)
         js = read(joinpath(@__DIR__, "..", "public", "app.js"), String)
+        html = read(joinpath(@__DIR__, "..", "public", "index.html"), String)
+        served_source = join(
+            (read(joinpath(APPSRC, name), String)
+             for name in sort(filter(name -> endswith(name, ".jl"), readdir(APPSRC)))),
+            "\n",
+        )
         @test occursin("grid-template-areas: \"left right\" \"watch watch\"", css)
         @test occursin("grid-template-areas: \"left\" \"right\" \"watch\"", css)
         @test occursin("grid-area: watch; position: static", css)
@@ -1224,6 +1534,21 @@ end
         @test occursin("if (!history || !Array.isArray(history.rows))", js)
         @test occursin("\$(\"dbdt-forecast\").innerHTML = \"\";", js)
         @test occursin("if (status.available === false) \$(\"health-dot\")", js)
+        @test occursin("const lvl = Math.max(pointLevel, watchLevel);", js)
+        @test occursin("const alertLabel = watchLevel > pointLevel ? th.watch_label : th.label;", js)
+        @test occursin("const body = watchLevel > pointLevel", js)
+        @test occursin("A displayed calibrated 90% interval extends to", js)
+        @test occursin("interval_lower_edge_min_dst_nt", js)
+        @test !occursin("? status.threat.level : 0", js)
+        for unsupported in ("GIC driver", "GIC forecast", "GIC alert thresholds",
+                            "Pulkkinen tier", "GIC risk", "storm cannot be excluded",
+                            "90% lower bound")
+            @test !occursin(unsupported, js)
+            @test !occursin(unsupported, html)
+            @test !occursin(unsupported, served_source)
+        end
+        @test occursin("GIC-hazard indicator", html)
+        @test occursin("90% interval lower edge", html)
         for metric in ("cur-dst", "worst-dst", "horizon")
             @test occursin("\$(\"" * metric * "\").textContent = \"—\"", js)
         end

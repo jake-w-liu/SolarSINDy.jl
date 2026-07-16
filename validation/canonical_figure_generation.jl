@@ -652,6 +652,8 @@ function _build_inclusion_frequency_figure(data)
             :tickangle => -45,
         ),
     )
+    # Top-right is the least obstructive inside position: the occupied bars and threshold line
+    # leave the most clear space above the low-inclusion terms at the right edge.
     set_legend!(figure; position=:topright)
     return figure
 end

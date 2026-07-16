@@ -1,8 +1,9 @@
-# network.jl — multi-station dB/dt network nowcast for the GIC alert map.
+# network.jl — multi-station ground-dB/dt threshold map.
 #
-# Fetches several USGS observatories concurrently and reports each station's current dB/dt +
-# Pulkkinen tier + geographic coordinates (taken from the API's own metadata, not hardcoded),
-# for a spatial alert map. Reuses the dB/dt convention and Pulkkinen tiers from dbdt.jl;
+# Fetches several USGS observatories serially in a background refresh and reports each
+# station's current dB/dt + threshold-magnitude band + geographic coordinates (from the API's
+# own metadata, not hardcoded),
+# for a spatial indicator map. Reuses the dB/dt convention and threshold bands from dbdt.jl;
 # depends on _fetch_usgs, _num, dbdt_tier, jdt_str (defined there).
 #
 # Robust: each station fetch degrades independently (a slow/missing station is omitted, not
@@ -44,7 +45,7 @@ function _station_parse(station::AbstractString, d; reference::DateTime=now(UTC)
         mx = isempty(recent) ? cur : maximum(recent)
         coords = d.metadata.intermagnet.imo.coordinates    # [lon, lat, elev]
         name = String(d.metadata.intermagnet.imo.name)
-        return (station = station, name = name,
+        return (station = station, name = name, data_type = USGS_LIVE_DATA_TYPE,
                 lon = Float64(coords[1]), lat = Float64(coords[2]),
                 current_dbdt = round(cur; digits=2), max_dbdt = round(mx; digits=2),
                 tier = dbdt_tier(mx), time_utc = jdt_str(times[cur_i]),
@@ -107,9 +108,12 @@ function _refresh_usgs_network(key::Tuple, codes::Vector{String}, brief_fn,
         get(_NET_CACHE, key, nothing)
     end
     fetched = try
-            # Limited concurrency (ntasks=3): fast enough, but polite to USGS — firing all
-            # stations at once triggers rate-limiting that fails every request.
-            [r for r in asyncmap(brief_fn, codes; ntasks=min(3, length(codes))) if r !== nothing]
+        _with_upstream_refresh_slot() do
+            # One station request at a time keeps the two-thread server responsive even when
+            # DNS/TLS/HTTP blocks an OS thread. This runs in the background, and the UI keeps
+            # serving the last complete network snapshot while the next one is assembled.
+            [r for r in asyncmap(brief_fn, codes; ntasks=1) if r !== nothing]
+        end
     catch e
         e isa InterruptException && rethrow()
         e isa CapturedException && e.ex isa InterruptException && throw(e.ex)
@@ -155,7 +159,7 @@ function usgs_network(; stations::Vector{String} = NET_STATIONS,
     codes = unique(_checked_station.(stations))
     key = Tuple(codes)
     # Cache and in-flight bookkeeping are brief lock sections. Each station tuple owns at most one
-    # refresh task, while different tuples can refresh independently on the thread pool.
+    # refresh task; potentially blocking upstream work then enters the shared execution slot.
     cached_entry = lock(_NET_LOCK) do
         get(_NET_CACHE, key, nothing)
     end

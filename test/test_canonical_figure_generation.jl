@@ -12,6 +12,34 @@ end
 const CFG = Main.CanonicalFigureGeneration
 const _FIGURE_TEST_PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
 
+function _canonical_plotly_pdf_fixture(label::AbstractString)
+    objects = [
+        "<</Title (jl_ABCDEFGHIJ.html) /Creator (Chromium) /Producer (Skia/PDF) " *
+            "/CreationDate (D:20260716110000+00'00') " *
+            "/ModDate (D:20260716110000+00'00')>>",
+        "<</Type /Catalog /Pages 3 0 R>>",
+        "<</Type /Pages /Kids [4 0 R] /Count 1>>",
+        "<</Type /Page /Parent 3 0 R /MediaBox [0 0 10 10] /Resources <<>> " *
+            "/Contents 5 0 R>>",
+        "<</Length $(ncodeunits(label) + 1)>>\nstream\n$label\nendstream",
+    ]
+    io = IOBuffer()
+    write(io, "%PDF-1.4\n")
+    offsets = Int[]
+    for (index, object) in enumerate(objects)
+        push!(offsets, position(io))
+        write(io, "$index 0 obj\n$object\nendobj\n")
+    end
+    xref_offset = position(io)
+    write(io, "xref\n0 $(length(objects) + 1)\n0000000000 65535 f \n")
+    for offset in offsets
+        write(io, lpad(string(offset), 10, '0') * " 00000 n \n")
+    end
+    write(io, "trailer\n<</Size $(length(objects) + 1) /Root 2 0 R /Info 1 0 R>>\n" *
+              "startxref\n$xref_offset\n%%EOF\n")
+    return take!(io)
+end
+
 @testset "Legacy multi-panel generator does not start desktop synchronization" begin
     source = read(joinpath(
         _FIGURE_TEST_PACKAGE_ROOT, "validation", "generate_real_figures.jl",
@@ -488,7 +516,7 @@ end
         for output in outputs
             name = basename(output)
             CFG.write_manifested_figure(
-                output, path -> write(path, "%PDF-1.4\nold-$name\n%%EOF\n");
+                output, path -> write(path, _canonical_plotly_pdf_fixture("old-$name"));
                 producer_script=producer,
                 input_paths=output_inputs[name],
                 selection_record=(kind="valid_prior_figure", figure=name),
@@ -505,7 +533,7 @@ end
             CFG._assert_inputs_unchanged(inputs, input_hashes)
             output = joinpath(prepared.paths.figs, name)
             return CFG.write_manifested_figure(
-                output, path -> write(path, "%PDF-1.4\nnew-$name\n%%EOF\n");
+                output, path -> write(path, _canonical_plotly_pdf_fixture("new-$name"));
                 producer_script=producer, input_paths=inputs,
                 selection_record=(kind="replacement_figure", figure=name, role),
                 backend="PlotlySupply.jl", deterministic=true,

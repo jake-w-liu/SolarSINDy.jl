@@ -6,7 +6,7 @@
 
 const WONG = { obs: "#e69f00", fcst: "#0072b2", band: "rgba(0,114,178,0.20)" };
 const TIER_COLORS = ["#2e9e6b", "#c9a227", "#d55e00", "#c0392b", "#8e44ad"];
-const PULK = [18, 42, 66, 90];   // Pulkkinen 2013 dB/dt thresholds [nT/min]
+const PULK = [18, 42, 66, 90];   // Unit-converted Pulkkinen et al. (2013) threshold magnitudes [nT/min]
 const THREAT_CLASSES = ["threat-0","threat-1","threat-2","threat-3","threat-4"];
 const THRESHOLDS = [ {y:-30,l:"minor"}, {y:-50,l:"moderate"}, {y:-100,l:"intense"}, {y:-200,l:"extreme"} ];
 const REFRESH_MS = 60000;
@@ -15,6 +15,9 @@ const FETCH_TIMEOUT_MS = 15000;
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const fmt = (x, d=0) => (x === null || x === undefined || Number.isNaN(x)) ? "—" : Number(x).toFixed(d);
+const intervalLowerEdge = (th) => th
+  ? (th.interval_lower_edge_min_dst_nt ?? th.lower_bound_min_dst_nt ?? th.worst_credible_dst_nt)
+  : null;
 
 async function ensurePlotly() {
   for (let i = 0; i < 120; i++) {
@@ -98,13 +101,14 @@ function renderThreat(st) {
   $("threat-level").textContent = th.label.toUpperCase();
   $("threat-label").textContent = th.basis;
   $("cur-dst").textContent = fmt(st.latest_observation ? st.latest_observation.dst_nt : null, 0);
-  $("worst-dst").textContent = fmt(th.worst_credible_dst_nt, 0);
+  const lowerEdge = intervalLowerEdge(th);
+  $("worst-dst").textContent = fmt(lowerEdge, 0);
   const lt = st.lead_time || {};
   $("horizon").textContent = lt.forecast_horizon_hours != null ? `${fmt(lt.forecast_horizon_hours,1)} h` : "—";
 
   const wf = $("watch-flag");
   if (th.watch) {
-    wf.textContent = `WATCH · 90% band reaches ${fmt(th.worst_credible_dst_nt,0)} nT (${th.watch_label})`;
+    wf.textContent = `WATCH · a calibrated 90% interval extends to ${fmt(lowerEdge,0)} nT (${th.watch_label} range)`;
     wf.classList.remove("hidden");
   } else { wf.classList.add("hidden"); }
 
@@ -258,7 +262,7 @@ async function renderForecast(forecast, history, status) {
   const src = forecast.interval_source || "—";
   cap.innerHTML = `Solid blue: V2 issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
     + `<span data-reltime="${forecast.latest_solar_wind_utc}">${relTime(forecast.latest_solar_wind_utc)}</span>. L1 look-ahead drives target hours already measured upstream; beyond the L1-known window, Bz/By relax toward quiet with a longer timescale during rapid Dst deepening. `
-    + `Shaded: the calibrated 90% interval (${src}); the severity scale uses its lower bound. `
+    + `Shaded: the calibrated 90% interval (${src}); a watch appears when a displayed interval's lower edge enters a stronger Dst range than the point forecast. `
     + `Dotted blue: previously issued V2 forecasts for hours that now have observed Dst (orange). `
     + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Genuine new-disturbance lead is the L1 transit (~30–60 min).`;
 }
@@ -403,7 +407,7 @@ async function renderDbdt(dbdt) {
       : "USGS ground-magnetometer feed currently unreachable — it throttles intermittently; this panel fills in automatically on the next refresh once the feed responds. The Dst forecast above is unaffected.";
     return;
   }
-  stn.textContent = "· USGS " + dbdt.station;
+  stn.textContent = "· USGS " + dbdt.station + " adjusted (provisional)";
   const ct = dbdt.current_tier, mt = dbdt.max30_tier;
   const col = (lvl) => lvl == null ? "var(--ink-soft)" : TIER_COLORS[lvl];
   badge.textContent = ct.label; badge.style.color = col(ct.level);
@@ -414,24 +418,22 @@ async function renderDbdt(dbdt) {
     stat(fmt(dbdt.max30_dbdt, 1), "30-min max", " nT/min", col(mt.level));
   const ge = dbdt.geoelectric;
   if (ge) {
-    const gcol = col(ge.tier.level);
-    statsHtml += stat(fmt(ge.max_vkm, 2), "geoelectric (30-min max)", " V/km", gcol) +
-                 stat(ge.tier.label, "GIC risk", "", gcol);
+    statsHtml += stat(fmt(ge.max_vkm, 2), "estimated |E| (30-min max)", " V/km", "var(--accent)");
   }
   stats.innerHTML = statsHtml;
 
-  // calibrated next-30-min FORECAST (paper3 online conformal), when both feeds are live
+  // Fixed-historical-residual next-30-min forecast, when both feeds are live.
   const fcEl = $("dbdt-forecast"), fc = dbdt.forecast;
   if (fc) {
     const exc = fc.exceedance.map(e => {
       const lvl = Math.min(PULK.indexOf(e.threshold) + 1, 4);
-      const col = e.prob >= 0.5 ? TIER_COLORS[lvl] : "var(--ink-mute)";
-      return `<span class="exc"><b style="color:${col}">${Math.round(e.prob * 100)}%</b> &gt;${e.threshold}</span>`;
+      const col = e.empirical_score >= 0.5 ? TIER_COLORS[lvl] : "var(--ink-mute)";
+      return `<span class="exc"><b style="color:${col}">${Math.round(e.empirical_score * 100)}%</b> &gt;${e.threshold}</span>`;
     }).join("");
     fcEl.innerHTML = `<span class="fc-label">forecast · next ${fc.horizon_min} min</span>`
       + `<span class="fc-pt">${fmt(fc.point_dbdt, 1)} nT/min</span>`
-      + `<span class="fc-ub">90% ≤ ${fmt(fc.ub90_dbdt, 1)}</span>`
-      + `<span class="fc-exc">P(exceed): ${exc}</span>`
+      + `<span class="fc-ub">historical 90% upper estimate ≤ ${fmt(fc.ub90_dbdt, 1)}</span>`
+      + `<span class="fc-exc">historical exceedance score: ${exc}</span>`
       + (fc.stale_inputs
           ? `<span class="fc-stale" style="color:var(--t2)">⚠ L1 inputs ${fmt(fc.input_age_min, 0)} min old — unreliable</span>`
           : "");
@@ -451,23 +453,27 @@ async function renderDbdt(dbdt) {
     layout.yaxis.title.text = "dB/dt [nT/min]"; layout.yaxis.range = [0, ymax]; layout.margin.t = 8;
     await Plotly.react("dbdt-plot", [{ x, y, mode:"lines", line:{ color:"#4ea1ff", width:2 }, fill:"tozeroy", fillcolor:"rgba(78,161,255,0.12)" }], layout, { displayModeBar:false, responsive:true });
   }
-  let capHtml = `Observed horizontal ground d<i>B</i>/d<i>t</i> = √(Δ<i>X</i>²+Δ<i>Y</i>²) per minute at USGS ${dbdt.station} (mid-latitude). `
-    + `Dotted lines are the Pulkkinen et al. (2013) GIC alert thresholds (18/42/66/90 nT/min). This is a <strong>nowcast</strong> of the current GIC driver, not a forecast.`;
-  if (ge) capHtml += ` Geoelectric field <i>E</i> (the quantity that drives GIC) via the plane-wave method, `
-    + `1-D uniform half-space ρ = ${fmt(ge.rho_ohm_m, 0)} Ω·m — a coarse estimate; real GIC also depends on 3-D ground and grid topology.`;
+  let capHtml = `Observed horizontal ground d<i>B</i>/d<i>t</i> = √(Δ<i>X</i>²+Δ<i>Y</i>²)/Δ<i>t</i>, with Δ<i>t</i> in minutes, at USGS ${dbdt.station}. The adjusted near-real-time product is provisional and can be revised during archival quality control. `
+    + `Dotted lines are the four unit-converted Pulkkinen et al. (2013) threshold magnitudes (18/42/66/90 nT/min); this display does not reproduce that study's nonoverlapping 20-min validation protocol. `
+    + `The plotted series is an observed <strong>nowcast</strong> and a GIC-hazard indicator, not a GIC measurement or grid-impact forecast.`;
+  if (ge) capHtml += ` Estimated <i>E</i> uses a 1-D uniform reference ground (ρ = ${fmt(ge.rho_ohm_m, 0)} Ω·m); `
+    + `it is not a site-specific field measurement, GIC estimate, or grid-risk category.`;
+  if (fc) capHtml += ` The next-30-min forecast combines a ridge point model trained on archival USGS quasi-definitive data with a fixed historical normalized-residual distribution, while the live input is the provisional adjusted product; `
+    + `its upper estimate and empirical exceedance scores are not per-issue probabilities or online-updated coverage guarantees.`;
+  else capHtml += ` The retrospective 30-min model is not served live because its OMNI training drivers are time-shifted to the bow-shock nose whereas the available real-time feed is measured at L1; the observed nowcast remains available.`;
   cap.innerHTML = capHtml;
 }
 
 function renderPipeline(status, dbdt) {
   const sw = (status && status.upstream && status.upstream.solar_wind) || {};
   const l1 = sw.available ? `Bz ${fmt(sw.bz_gsm_nt, 1)} nT · ${fmt(sw.speed_kms, 0)} km/s` : "DSCOVR/ACE · OMNI";
-  const gic = (dbdt && dbdt.available) ? `${fmt(dbdt.current_dbdt, 1)} nT/min · ${dbdt.current_tier.label}` : "USGS ground mag";
+  const dbdtIndicator = (dbdt && dbdt.available) ? `${fmt(dbdt.current_dbdt, 1)} nT/min · ${dbdt.current_tier.label}` : "USGS ground mag";
   const stages = [
     { ic:"☉", nm:"Eruption", ds:"Flare / CME launch", tag:"future", tl:"not in this system (T2)" },
     { ic:"🪐", nm:"CME transit", ds:"Heliosphere → arrival", tag:"future", tl:"CME models (T2)" },
     { ic:"🛰", nm:"L1 solar wind", ds:l1, tag:"live", tl:"live (SWPC)" },
     { ic:"🧲", nm:"Dst (ring current)", ds:"This forecaster (v2)", tag:"live", tl:"live nowcast" },
-    { ic:"📈", nm:"dB/dt (GIC driver)", ds:gic, tag:"live", tl:"live (USGS)" },
+    { ic:"📈", nm:"dB/dt indicator", ds:dbdtIndicator, tag:"live", tl:"live (USGS)" },
     { ic:"⚡", nm:"GIC / grid", ds:"Transformer stress", tag:"future", tl:"T3/T4" },
   ];
   const tagClass = { live:"tag-live", research:"tag-research", future:"tag-future" };
@@ -507,8 +513,8 @@ async function renderNetwork(net) {
            lataxis: { range: [14, 73] }, lonaxis: { range: [-172, -58] } },
   };
   await Plotly.react("network-plot", [trace], layout, { displayModeBar: false, responsive: true });
-  cap.innerHTML = `30-min max ground d<i>B</i>/d<i>t</i> across USGS observatories (marker size + colour = Pulkkinen tier). `
-    + `Auroral-latitude stations (Alaska) respond first and strongest in a storm; elevated mid-latitude stations indicate a severe, low-latitude-reaching event.`;
+  cap.innerHTML = `Thirty-minute maximum ground d<i>B</i>/d<i>t</i> across available USGS observatories; marker size shows magnitude and colour shows the threshold-magnitude band. `
+    + `The map is a spatial magnetic-variation indicator, not a GIC measurement or grid-impact map; local electric fields and network topology are required for those quantities.`;
 }
 
 // Browser desktop notification on threat escalation (client-side; complements the server
@@ -516,12 +522,19 @@ async function renderNetwork(net) {
 let _lastNotifiedLevel = null;
 function browserNotify(status) {
   if (!("Notification" in window)) return;
-  const lvl = (status && status.available) ? status.threat.level : 0;
+  const th = (status && status.available) ? status.threat : null;
+  const pointLevel = th && Number.isFinite(th.level) ? th.level : 0;
+  const watchLevel = th && th.watch && Number.isFinite(th.watch_level) ? th.watch_level : pointLevel;
+  const lvl = Math.max(pointLevel, watchLevel);
   if (Notification.permission === "default") Notification.requestPermission().catch(() => {});
   if (Notification.permission === "granted" && _lastNotifiedLevel !== null && lvl > _lastNotifiedLevel) {
     try {
+      const alertLabel = watchLevel > pointLevel ? th.watch_label : th.label;
+      const body = watchLevel > pointLevel
+        ? `A displayed calibrated 90% interval extends to ${fmt(intervalLowerEdge(th), 0)} nT (${alertLabel} range).`
+        : `The point forecast reaches the ${alertLabel} range.`;
       new Notification("⛬ Space-Weather alert", {
-        body: `Threat escalated to ${status.threat.label}. 90% band worst case ${fmt(status.threat.worst_credible_dst_nt, 0)} nT.`,
+        body,
       });
     } catch (e) { /* notifications best-effort */ }
   }

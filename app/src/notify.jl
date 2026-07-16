@@ -1,7 +1,7 @@
 # notify.jl — alert escalation + outbound webhook for the threat monitor.
 #
-# Combines the three live layers (Dst forecast level, calibrated-band watch, SWPC upstream
-# indicator, ground dB/dt tier) into one overall alert level, and POSTs to a configured
+# Combines the live layers (Dst forecast level, calibrated-band watch, SWPC upstream
+# indicator, ground-dB/dt threshold band) into one application routing priority, and POSTs to a configured
 # webhook ONLY on a level transition (no per-poll spam). Slack/Discord/generic compatible
 # (payload carries both a `text` field and the structured fields).
 #
@@ -19,7 +19,10 @@ function compute_alert_state(status, upstream_status, dbdt)
     if getproperty(status, :available) == true && !_status_stale(status)
         th = status.threat
         if th.level >= 1; level = max(level, th.level); push!(reasons, "Dst forecast $(th.label)"); end
-        if th.watch; level = max(level, th.watch_level); push!(reasons, "90% band reaches $(th.watch_label)"); end
+        if th.watch
+            level = max(level, th.watch_level)
+            push!(reasons, "a calibrated 90% interval extends into the $(th.watch_label) range")
+        end
     end
     if upstream_status !== nothing && getproperty(upstream_status, :available) == true &&
        getproperty(upstream_status, :elevated) == true
@@ -28,8 +31,10 @@ function compute_alert_state(status, upstream_status, dbdt)
     if dbdt !== nothing && getproperty(dbdt, :available) == true
         dl = dbdt.current_tier.level
         if dl !== nothing && dl >= 1
+            # The shared integer is an application notification priority only. It does not
+            # physically cross-calibrate a dB/dt threshold band with a Dst storm class.
             level = max(level, dl)
-            push!(reasons, "ground dB/dt $(dbdt.current_tier.label) ($(dbdt.current_dbdt) nT/min)")
+            push!(reasons, "ground dB/dt threshold band $(dbdt.current_tier.label) ($(dbdt.current_dbdt) nT/min)")
         end
     end
     return (level = level, reasons = reasons)
@@ -108,7 +113,10 @@ function start_notify_loop(log_path::AbstractString; interval::Int = 300)
                 df = get_log(log_path)
                 status = build_status(df)
                 snap = swpc_snapshot()
-                st = compute_alert_state(status, upstream_assessment(snap), usgs_dbdt())
+                st = compute_alert_state(
+                    status, upstream_assessment(snap),
+                    dashboard_dbdt_nowcast(; wait_timeout=USGS_REFRESH_WAIT_S),
+                )
                 r = maybe_notify!(st; url = url, now_utc = string(now(UTC)) * "Z")
                 getproperty(r, :fired) == true && @info "alert webhook fired" level=st.level
             catch e

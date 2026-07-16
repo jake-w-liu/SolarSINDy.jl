@@ -1,19 +1,24 @@
-# dbdt.jl — live dB/dt (geomagnetically-induced-current driver) nowcast from USGS real-time
-# ground-magnetometer data. Matches paper3's convention exactly:
-#   dB/dt = sqrt(dX^2 + dY^2) per 1-min step  [nT/min];  Pulkkinen et al. (2013) thresholds
-#   18 / 42 / 66 / 90 nT/min.
+# dbdt.jl — live ground-dB/dt nowcast from USGS real-time magnetometer data. Matches the
+# dB/dt-paper convention exactly:
+#   dB/dt = sqrt(dX^2 + dY^2) / elapsed minutes  [nT/min].
+# Pulkkinen et al. (2013) used 18 / 42 / 66 / 90 nT/min as event thresholds for model
+# validation. Ground dB/dt is an indicator of potential GIC hazard, not a GIC measurement or
+# a universal grid-impact scale.
 #
-# This is an honest *nowcast* of the currently observed ground dB/dt (the actual GIC driver),
-# NOT the paper3 conformal forecast. Robust: graceful degradation if USGS is unreachable;
-# short-TTL cache so frequent dashboard polls do not hammer the public service.
+# This is an observed ground-dB/dt *nowcast*, distinct from the retrospective offline-replay
+# model in `forecaster.jl`.
+# Robust: graceful degradation if USGS is unreachable; short-TTL cache so frequent dashboard
+# polls do not hammer the public service.
 #
 # Depends on jnum/jdt from forecast_api.jl (included before this file).
 
 using HTTP, JSON3, Dates
 
 const USGS_BASE = "https://geomag.usgs.gov/ws/data/"
-const PULK = (18.0, 42.0, 66.0, 90.0)        # Pulkkinen 2013 dB/dt alert thresholds [nT/min]
-const DBDT_TIERS = ("Quiet", "Active", "Strong", "Severe", "Extreme")
+const USGS_LIVE_DATA_TYPE = "adjusted"  # provisional near-real-time observatory product
+const PULK = (18.0, 42.0, 66.0, 90.0)  # Pulkkinen et al. (2013) validation thresholds [nT/min]
+const DBDT_BAND_LABELS = ("Below 18 nT/min", "At least 18 nT/min", "At least 42 nT/min",
+                          "At least 66 nT/min", "At least 90 nT/min")
 const DBDT_TTL = 55.0
 const DBDT_MAX_AGE_MIN = 10.0
 const DBDT_CACHE_MAX = 32
@@ -61,12 +66,13 @@ function _await_keyed_refresh(task::Task, wait_timeout::Real)
 end
 
 function dbdt_tier(v)
-    (v === nothing || !(v isa Real) || !isfinite(v)) && return (level = nothing, label = "—")
-    v < PULK[1] && return (level = 0, label = DBDT_TIERS[1])
-    v < PULK[2] && return (level = 1, label = DBDT_TIERS[2])
-    v < PULK[3] && return (level = 2, label = DBDT_TIERS[3])
-    v < PULK[4] && return (level = 3, label = DBDT_TIERS[4])
-    return (level = 4, label = DBDT_TIERS[5])
+    (v === nothing || !(v isa Real) || v isa Bool || !isfinite(v) || v < 0) &&
+        return (level = nothing, label = "—")
+    v < PULK[1] && return (level = 0, label = DBDT_BAND_LABELS[1])
+    v < PULK[2] && return (level = 1, label = DBDT_BAND_LABELS[2])
+    v < PULK[3] && return (level = 2, label = DBDT_BAND_LABELS[3])
+    v < PULK[4] && return (level = 3, label = DBDT_BAND_LABELS[4])
+    return (level = 4, label = DBDT_BAND_LABELS[5])
 end
 
 _num(x) = (x === nothing || x === missing) ? nothing : (x isa Real ? Float64(x) : tryparse(Float64, String(x)))
@@ -96,7 +102,7 @@ function _fetch_usgs(station::AbstractString, minutes::Int)
     t1 = now(UTC); t0 = t1 - Minute(minutes)
     f(t) = Dates.format(t, "yyyy-mm-ddTHH:MM:SS") * "Z"
     url = string(USGS_BASE, "?id=", station, "&starttime=", f(t0), "&endtime=", f(t1),
-                 "&elements=X,Y&format=json&sampling_period=60")
+                 "&elements=X,Y&format=json&sampling_period=60&type=", USGS_LIVE_DATA_TYPE)
     try
         # Fail fast when USGS throttles or stalls. The dashboard is single-process, so
         # a slow third-party dB/dt nowcast must not block status/forecast endpoints.
@@ -212,7 +218,8 @@ function _compute_dbdt(station::AbstractString, minutes::Int;
     # series for plotting (finite points only, last ~60 min)
     cutoff60 = dts[cur_i] - Minute(60)
     keep = [i for i in finite_idx if dts[i] > cutoff60 && dts[i] <= dts[cur_i]]
-    series = [(t = jdt_str(times[i]), dbdt = round(dbdt[i]; digits=2)) for i in keep]
+    # Preserve full precision for the downstream forecast; the browser formats display values.
+    series = [(t = jdt_str(times[i]), dbdt = dbdt[i]) for i in keep]
 
     # Frequency-domain impedance assumes uniform sampling. Preserve the dB/dt
     # nowcast for an irregular but ordered feed, but do not publish a physically
@@ -231,7 +238,7 @@ function _compute_dbdt(station::AbstractString, minutes::Int;
     end
 
     ct = dbdt_tier(current); mt = dbdt_tier(max30)
-    return (station = station, available = true,
+    return (station = station, data_type = USGS_LIVE_DATA_TYPE, available = true,
             stale = false, invalid_future = false, age_minutes = freshness.age_min,
             current_dbdt = round(current; digits=2), current_tier = ct,
             current_time_utc = jdt_str(times[cur_i]),
@@ -239,7 +246,7 @@ function _compute_dbdt(station::AbstractString, minutes::Int;
             thresholds = collect(PULK), exceedances = exceed,
             geoelectric = geoe === nothing ? nothing :
                 (current_vkm = round(geoe.current; digits=3), max_vkm = round(geoe.max; digits=3),
-                 tier = geo_tier(geoe.max), rho_ohm_m = geoe.rho,
+                 rho_ohm_m = geoe.rho,
                  note = "1-D uniform half-space estimate"),
             n_minutes = length(keep), series = series)
 end
@@ -287,7 +294,9 @@ function _refresh_dbdt(key::Tuple{String,Int}, compute_fn, reference::DateTime)
         get(_DBDT_CACHE, key, nothing)
     end
     val = try
-        compute_fn(code, minutes)
+        _with_upstream_refresh_slot() do
+            compute_fn(code, minutes)
+        end
     catch e
         e isa InterruptException && rethrow()
         stale = cached_entry === nothing ? nothing :
@@ -351,8 +360,8 @@ function usgs_dbdt(; station::AbstractString = "FRD", minutes::Int = 120,
     isfinite(wait_timeout) && wait_timeout >= 0 ||
         throw(ArgumentError("wait_timeout must be finite and nonnegative"))
     key = (code, minutes)
-    # Hold the lock only to inspect cache/flight state. The refresh task owns all upstream work,
-    # coalescing concurrent same-key misses without serializing independent station windows.
+    # Hold the lock only to inspect cache/flight state. Each key retains an independent in-flight
+    # identity; potentially blocking upstream work then enters the shared execution slot.
     cached_entry = lock(_DBDT_LOCK) do
         get(_DBDT_CACHE, key, nothing)
     end

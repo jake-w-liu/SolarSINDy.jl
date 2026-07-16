@@ -43,6 +43,17 @@ include(joinpath(@__DIR__, "geoelectric.jl"))
 include(joinpath(@__DIR__, "dbdt.jl"))
 include(joinpath(@__DIR__, "forecaster.jl"))
 include(joinpath(@__DIR__, "network.jl"))
+
+function dashboard_dbdt_nowcast(; wait_timeout::Real=0.0)
+    first_result = nothing
+    for station in FORECASTER_STATIONS
+        candidate = usgs_dbdt(; station=station, wait_timeout=wait_timeout)
+        first_result === nothing && (first_result = candidate)
+        get(candidate, :available, false) && return candidate
+    end
+    return first_result
+end
+
 include(joinpath(@__DIR__, "notify.jl"))
 
 # Resolve the live forecast log: $SOLARSINDY_LOG if set, otherwise the package's
@@ -62,6 +73,17 @@ content_type(path) = get(_CT, lowercase(splitext(path)[2]), "application/octet-s
 json_response(obj; status::Int=200) =
     HTTP.Response(status, ["Content-Type" => "application/json; charset=utf-8",
                            "Cache-Control" => "no-store"], JSON3.write(obj))
+
+function _safe_queryparams(query::AbstractString)
+    params = try
+        HTTP.queryparams(query)
+    catch e
+        e isa InterruptException && rethrow()
+        return nothing
+    end
+    all(isvalid(key) && isvalid(value) for (key, value) in params) || return nothing
+    return params
+end
 
 function serve_static(path::AbstractString)
     rel = lstrip(path, '/')
@@ -94,40 +116,43 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
         return json_response(merge(build_status(get_log(log_path)),
                                    (upstream = snap, upstream_status = upstream_assessment(snap))))
     elseif path == "/api/swpc"
-        return json_response(swpc_snapshot())
+        # Dashboard requests must not inherit third-party latency. A cold or expired cache starts
+        # exactly one background refresh and returns the last snapshot (or unavailable) immediately;
+        # the front-end's next poll observes the completed refresh.
+        return json_response(swpc_snapshot_cached_or_refresh())
     elseif path == "/api/dbdt"
-        q = HTTP.queryparams(query)
-        station = uppercase(get(q, "station", "FRD"))
+        q = _safe_queryparams(query)
+        q === nothing && return json_response(
+            (available=false, error="malformed query"); status=400,
+        )
+        requested_station = get(q, "station", nothing)
+        station = uppercase(requested_station === nothing ? first(FORECASTER_STATIONS) : requested_station)
         # Whitelist against the known observatory set: bounds the _DBDT_CACHE and the outbound
         # USGS request rate against arbitrary station codes. The bundled front-end never sends a
         # station param, and NET_STATIONS covers both forecaster models (FRD, CMO) and the map.
-        station in NET_STATIONS || (station = "FRD")
-        nc = usgs_dbdt(; station=station)
-        fc = nothing                                             # calibrated next-30-min forecast (paper3 conformal)
-        if getproperty(nc, :available) == true
-            # swpc_snapshot's error fallback has no :solar_wind field; access it safely.
-            sw = get(swpc_snapshot(), :solar_wind, nothing)
-            if sw !== nothing && get(sw, :available, false)
-                fc = forecast_dbdt([s.dbdt for s in nc.series], get(sw, :speed_kms, nothing),
-                                   get(sw, :bz_gsm_nt, nothing); station=station)
-                if fc !== nothing
-                    # A reachable-but-stalled L1 feed must not drive a "reliable" 30-min forecast
-                    # from frozen inputs: flag stale inputs and demote reliability.
-                    freshness = solar_wind_input_freshness(sw)
-                    age = freshness.age_min
-                    stale_inputs = freshness.stale
-                    fc = merge(fc, (stale_inputs = stale_inputs,
-                                    input_age_min = (age === nothing ? nothing : round(age; digits=1)),
-                                    invalid_future_inputs = freshness.invalid_future,
-                                    mag_time_utc = get(sw, :mag_time_utc, nothing),
-                                    plasma_time_utc = get(sw, :plasma_time_utc, nothing)))
-                    stale_inputs && (fc = merge(fc, (reliable = false,)))
-                end
-            end
+        if requested_station !== nothing && !(station in NET_STATIONS)
+            return json_response((available=false, error="unsupported station"); status=400)
         end
-        return json_response(fc === nothing ? nc : merge(nc, (forecast = fc,)))
+        # The default dashboard selects the first available FRD/CMO ground nowcast so a
+        # station-specific outage does not blank the panel. An explicit station query remains
+        # exact and never falls back silently.
+        nc = requested_station === nothing ?
+             dashboard_dbdt_nowcast(; wait_timeout=0.0) :
+             usgs_dbdt(; station=station, wait_timeout=0.0)
+        station = String(get(nc, :station, station))
+        # The retrospective artifact was fit with OMNI HRO drivers time-shifted to the
+        # bow-shock nose. NOAA RTSW supplies unshifted L1 observations. Feeding the newest L1
+        # value into that artifact changes the feature time reference, so the live forecast is
+        # disabled until a tested L1-to-bow-shock alignment is available. The observed ground
+        # nowcast remains valid and independent of this model-transfer boundary.
+        forecast_status = (
+            available=false,
+            reason="disabled: live L1 drivers are not aligned to the bow-shock-shifted training features",
+        )
+        return json_response(merge(nc, (forecast=nothing,
+                                        forecast_status=forecast_status)))
     elseif path == "/api/network"
-        return json_response(usgs_network())
+        return json_response(usgs_network(; wait_timeout=0.0))
     elseif path == "/api/forecast"
         return json_response(build_forecast(get_log(log_path), log_path))
     elseif path == "/api/storm_replay"
@@ -136,7 +161,10 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
         )
         return json_response(build_storm_replay(log_path; evidence_dir=evidence_dir))
     elseif path == "/api/history"
-        q = HTTP.queryparams(query)
+        q = _safe_queryparams(query)
+        q === nothing && return json_response(
+            (available=false, error="malformed query"); status=400,
+        )
         # Validate finiteness before clamping: parse(Float64, "NaN") succeeds and clamp(NaN,…)
         # returns NaN (never triggering the catch), which then throws in Hour(round(Int, NaN)).
         hours = try
@@ -151,7 +179,10 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
         df = get_log(log_path)
         snap = swpc_snapshot_cached_or_refresh()
         status = build_status(df)
-        combined = compute_alert_state(status, upstream_assessment(snap), usgs_dbdt())
+        combined = compute_alert_state(
+            status, upstream_assessment(snap),
+            dashboard_dbdt_nowcast(; wait_timeout=0.0),
+        )
         return json_response(merge(build_alerts(df, status),
                                    (overall_level = combined.level, overall_reasons = combined.reasons)))
     else

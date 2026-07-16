@@ -232,8 +232,18 @@ A self-contained operational dashboard ships in [`app/`](app/): a minimal-depend
 `HTTP.jl` backend serving a Plotly UI over the locked-live forecast log — current storm level,
 the Dst forecast with its calibrated 90% band, a **rolling forecast-vs-observed track** (every
 locked forecast plotted against the observation that later arrived), the verified track record,
-calibration/skill, ground d*B*/d*t* with a conformal exceedance forecast, and the Sun → grid
+calibration/skill, a live ground-d*B*/d*t* nowcast, and the Sun → grid
 warning chain.
+
+The ground-d*B*/d*t* panel uses the provisional USGS adjusted near-real-time product and is a
+GIC-hazard indicator; archival quality control can revise the live magnetic vectors. The bundled
+retrospective forecaster uses quasi-definitive ground data and bow-shock-shifted OMNI drivers, so
+it is not served from the newest unshifted L1 observation. Its
+18/42/66/90 nT/min lines are the unit-converted threshold magnitudes used by
+[Pulkkinen et al. (2013)](https://doi.org/10.1002/swe.20056), not a reproduction of that
+study's nonoverlapping 20-minute validation protocol or universal grid-risk categories. The optional electric-field value is a
+1-D reference-ground estimate; a GIC or grid-impact calculation additionally requires site
+conductivity and network topology.
 
 ```bash
 cd SolarSINDy.jl/app
@@ -346,9 +356,8 @@ Useful scripts: `download_omni.jl`, `real_data_discovery.jl`, `phase_dependent_d
 julia --project=SolarSINDy.jl SolarSINDy.jl/test/runtests.jl
 ```
 
-Current result: **835/835 passing**. The suite uses independent
-expectations — analytical checks, conservation/limiting cases, and regression baselines —
-rather than tautologies. Coverage includes:
+The suite uses independent expectations—analytical checks, conservation and limiting cases,
+and regression baselines—rather than tautologies. Coverage includes:
 
 - analytical checks for the classical baselines
 - SINDy synthetic recovery

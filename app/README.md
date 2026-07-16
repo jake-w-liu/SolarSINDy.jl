@@ -46,11 +46,17 @@ JSON payload (`{text, level, reasons, ...}`) **only when the level changes** —
 all-clear, never per-poll spam. With the dashboard open, the browser also raises a desktop
 notification on escalation (with permission).
 
+The combined integer is an application notification-routing priority, not a physical
+cross-calibration between Dst storm classes and ground-dB/dt threshold bands.
+
 Docker: see the header of [`Dockerfile`](Dockerfile).
 
 ## API
 
 All endpoints return JSON; the dashboard is served from the same origin.
+New clients should read `threat.interval_lower_edge_min_dst_nt`. The value-equivalent
+`threat.lower_bound_min_dst_nt` and `threat.worst_credible_dst_nt` keys remain temporarily for
+compatibility with older clients.
 
 | Endpoint | Purpose |
 |---|---|
@@ -59,16 +65,24 @@ All endpoints return JSON; the dashboard is served from the same origin.
 | `GET /api/forecast` | latest forecast cycle: per-horizon point + 90% band |
 | `GET /api/history?hours=72` | recent scored forecasts (observed vs predicted) |
 | `GET /api/swpc` | NOAA SWPC upstream: L1 solar wind, Kp, G/S/R scales, alerts |
-| `GET /api/dbdt?station=FRD` | live ground dB/dt nowcast + Pulkkinen tier + exceedances |
+| `GET /api/dbdt` | live ground dB/dt nowcast from the provisional USGS adjusted product; selects the first available FRD/CMO feed and reports why the retrospective forecast is disabled |
+| `GET /api/dbdt?station=FRD` | exact station-specific dB/dt response, without automatic fallback; unsupported stations or malformed query encodings return HTTP 400 |
+| `GET /api/network` | current multi-station USGS dB/dt map |
 | `GET /api/storm_replay` | storm-replay results from regenerated outputs or the bundled snapshot |
 | `GET /api/alerts` | active alerts + combined overall alert level/reasons |
+
+The live-source endpoints return the last complete cached snapshot immediately and refresh NOAA
+or USGS data in the background. A cold cache therefore reports `available=false` until a later poll
+rather than holding the dashboard request open on DNS, TLS, or a public-data outage.
 
 ## How forecasts are scored
 
 The integrity rules of this project carry into the UI:
 
-- **No bare point forecasts.** Every forecast is shown with its calibrated 90% interval, and the
-  threat "watch" flag is driven by the *worst credible* value within that band, not just the point.
+- **No bare point forecasts.** Every forecast is shown with its calibrated 90% interval. A
+  watch appears when the most negative lower edge among the displayed intervals enters a
+  stronger Dst range than the point forecast; it is not a one-sided confidence bound or a
+  storm probability.
 - **Lead time is stated against physics.** Forecast steps use ballistically propagated L1 forcing
   when the corresponding upstream window has sufficient coverage, then regime-aware Bz/By
   relaxation beyond the measured L1 window. The genuine upstream lead
@@ -104,8 +118,19 @@ These thresholds follow the classifications used by
   only for same-row comparison.
 - **Solar wind (L1)**: NOAA SWPC real-time products (`rtsw_wind_1m`, `rtsw_mag_1m`) for live
   issuance; the NASA OMNI archive (CDAWeb) is used for offline calibration and historical replay.
-  **Dst**: Kyoto WDC (via NOAA SWPC `kyoto-dst`). **Ground dB/dt**: USGS geomagnetic
-  observatory data, with calibrated FRD and CMO forecasts.
+  **Dst**: Kyoto WDC (via NOAA SWPC `kyoto-dst`). **Ground dB/dt**: the provisional USGS
+  adjusted near-real-time observatory product. The fixed-historical-residual FRD and CMO
+  forecasts were trained on archival quasi-definitive ground data and bow-shock-shifted OMNI
+  drivers. They are bundled for reproducibility but are not served against the newest unshifted
+  L1 values. This fail-closed boundary avoids an unvalidated time-reference and ground-product
+  transfer. The retrospective empirical exceedance scores are not per-issue probabilities.
+  Archival quality control can revise the live magnetic vectors. Ground dB/dt is a GIC-hazard
+  indicator; the displayed 18/42/66/90 nT/min values are the unit-converted
+  [Pulkkinen et al. (2013)](https://doi.org/10.1002/swe.20056) threshold magnitudes, not a
+  reproduction of that study's nonoverlapping 20-minute protocol or universal grid-risk
+  categories. The optional electric-field value uses a generic 1-D reference
+  ground and does not estimate GIC or grid impact without a site-specific conductivity model and
+  network topology.
 - Forecasts are **locked when issued and scored only after the target hour is observed** — the log
   is an honest, immutable track record.
 

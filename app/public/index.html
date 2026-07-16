@@ -36,7 +36,7 @@
       </div>
       <div class="threat-right">
         <div class="metric"><span class="metric-val" id="cur-dst">&mdash;</span><span class="metric-key">current Dst (nT)</span></div>
-        <div class="metric"><span class="metric-val" id="worst-dst">&mdash;</span><span class="metric-key">worst credible (90%)</span></div>
+        <div class="metric"><span class="metric-val" id="worst-dst">&mdash;</span><span class="metric-key">90% interval lower edge (nT)</span></div>
         <div class="metric"><span class="metric-val" id="horizon">&mdash;</span><span class="metric-key">forecast horizon</span></div>
       </div>
       <div id="watch-flag" class="watch-flag hidden"></div>
@@ -63,10 +63,10 @@
       <p class="caption" id="forecast-caption"></p>
     </section>
 
-    <!-- Ground dB/dt — the actual GIC driver, live from USGS magnetometers -->
+    <!-- Ground dB/dt — a GIC-hazard indicator, live from USGS magnetometers -->
     <section class="card" id="dbdt-card">
       <div class="card-head">
-        <h2>Ground d<i>B</i>/d<i>t</i> &mdash; GIC driver <span id="dbdt-station" class="muted"></span></h2>
+        <h2>Ground d<i>B</i>/d<i>t</i> &mdash; GIC-hazard indicator <span id="dbdt-station" class="muted"></span></h2>
         <span class="src-badge" id="dbdt-badge">&mdash;</span>
       </div>
       <div class="dbdt-stats" id="dbdt-stats"></div>
@@ -75,10 +75,10 @@
       <p class="caption" id="dbdt-caption"></p>
     </section>
 
-    <!-- Multi-station dB/dt alert map (spatial GIC-driver view across the US/Alaska network) -->
+    <!-- Multi-station ground-dB/dt threshold map across the US/Alaska network -->
     <section class="card" id="network-card">
       <div class="card-head">
-        <h2>d<i>B</i>/d<i>t</i> network — GIC alert map</h2>
+        <h2>d<i>B</i>/d<i>t</i> network &mdash; threshold map</h2>
         <span class="src-badge" id="network-badge">&mdash;</span>
       </div>
       <div id="network-plot" class="plot"></div>
@@ -112,7 +112,7 @@
 
   <footer class="footer">
     <p>
-      100% open source (MIT). Data: NASA OMNI (L1 solar wind), Kyoto WDC (Dst), USGS/INTERMAGNET (ground dB/dt).
+      100% open source (MIT). Live data: NOAA SWPC (L1 solar wind), Kyoto WDC (Dst), and USGS (ground dB/dt); NASA OMNI supplies the historical archive.
       Forecasts are <strong>locked when issued and scored only after the target is observed</strong>.
       This is a research tool, not an operational authority &mdash; for official alerts see NOAA SWPC.
     </p>

@@ -17,9 +17,13 @@ const SWPC_REQUEST_WAIT_S = 2.0              # bounded wait; refresh continues i
 const _SWPC_CACHE = Ref{Any}(nothing)       # (fetch_time::Float64, snapshot)
 const _SWPC_LOCK = ReentrantLock()
 const _SWPC_REFRESH_TASK = Ref{Union{Nothing,Task}}(nothing)
-# Solar-wind inputs older than this no longer represent current upstream conditions for the
-# 30-min GIC forecast (RTSW products update ~1/min, and the physical L1 lead is ~30-60 min, so
-# a >15-min gap means the driver forecast would run on frozen values).
+# All NOAA/USGS refresh workers share one slot. The shipped server has two Julia threads;
+# serializing potentially blocking DNS/TLS/HTTP work guarantees that at least one remains
+# available for request handlers. Cache locks stay independent and are never held here.
+const _UPSTREAM_REFRESH_LOCK = ReentrantLock()
+_with_upstream_refresh_slot(work::Function) = lock(work, _UPSTREAM_REFRESH_LOCK)
+# Solar-wind inputs older than this no longer represent current upstream conditions. RTSW
+# products update about once per minute, so a gap longer than 15 minutes is treated as stale.
 const SW_INPUT_MAX_AGE_MIN = 15.0
 const SWPC_FUTURE_TOL_MIN = 2.0
 const KP_MAX_AGE_MIN = 240.0                  # Kp is a 3-hour product
@@ -184,8 +188,8 @@ function swpc_solar_wind()
     return sw
 end
 
-# Age [min] of the OLDER of the mag/plasma feeds (both must be current for a valid driver
-# forecast). Returns nothing when neither timestamp is parseable.
+# Age [min] of the older mag/plasma feed. Both must be current before the pair can describe
+# one contemporaneous upstream state. Returns nothing unless both timestamps are parseable.
 function solar_wind_input_age_min(sw)
     f = solar_wind_input_freshness(sw)
     return f.age_min
@@ -281,7 +285,7 @@ function _run_swpc_refresh(; build_fn=_build_swpc_snapshot)
     val = nothing
     try
         val = try
-            out = build_fn()
+            out = _with_upstream_refresh_slot(build_fn)
             if get(out, :available, false)
                 cache_result = true
                 out

@@ -2,6 +2,81 @@ using Test
 using SolarSINDy
 
 include(joinpath(@__DIR__, "..", "validation", "canonical_provenance.jl"))
+
+function _plotly_pdf_fixture(title::AbstractString, timestamp::AbstractString)
+    objects = [
+        "<</Title ($title)\n/Creator (Chromium)\n/Producer (Skia/PDF m140)\n" *
+            "/CreationDate ($timestamp)\n/ModDate ($timestamp)>>",
+        "<</Type /Catalog /Pages 3 0 R>>",
+        "<</Type /Pages /Kids [4 0 R] /Count 1>>",
+        "<</Type /Page /Parent 3 0 R /MediaBox [0 0 10 10] /Resources <<>> " *
+            "/Contents 5 0 R>>",
+        "<</Length 0>>\nstream\n\nendstream",
+    ]
+    io = IOBuffer()
+    write(io, "%PDF-1.4\n")
+    offsets = Int[]
+    for (index, object) in enumerate(objects)
+        push!(offsets, position(io))
+        write(io, "$index 0 obj\n$object\nendobj\n")
+    end
+    xref_offset = position(io)
+    write(io, "xref\n0 $(length(objects) + 1)\n0000000000 65535 f \n")
+    for offset in offsets
+        write(io, lpad(string(offset), 10, '0') * " 00000 n \n")
+    end
+    write(io, "trailer\n<</Size $(length(objects) + 1) /Root 2 0 R /Info 1 0 R>>\n" *
+              "startxref\n$xref_offset\n%%EOF\n")
+    return take!(io)
+end
+
+function _test_pdf_xref_is_consistent(bytes::Vector{UInt8})
+    text = String(bytes)
+    marker = findfirst("xref\n", text)
+    start = match(r"startxref\n([0-9]+)\n", text)
+    marker === nothing && return false
+    start === nothing && return false
+    parse(Int, start.captures[1]) == first(marker) - 1 || return false
+    for object in 1:5
+        object_marker = findfirst("$object 0 obj\n", text)
+        object_marker === nothing && return false
+        entry = lpad(string(first(object_marker) - 1), 10, '0') * " 00000 n"
+        occursin(entry, text) || return false
+    end
+    return true
+end
+
+@testset "PlotlySupply PDF metadata normalization is byte-stable" begin
+    mktempdir() do dir
+        first_pdf = joinpath(dir, "first.pdf")
+        second_pdf = joinpath(dir, "second.pdf")
+        write(first_pdf, _plotly_pdf_fixture(
+            "jl_ABCDEFGHIJ.html", "D:20260716110000+00'00'",
+        ))
+        write(second_pdf, _plotly_pdf_fixture(
+            "jl_KLMNOPQRST.html", "D:20260716115959+00'00'",
+        ))
+
+        first_size = filesize(first_pdf)
+        @test plotlysupply_pdf_has_volatile_metadata(first_pdf)
+        @test _test_pdf_xref_is_consistent(read(first_pdf))
+        normalize_plotlysupply_pdf!(first_pdf)
+        normalize_plotlysupply_pdf!(second_pdf)
+        @test filesize(first_pdf) == first_size
+        @test read(first_pdf) == read(second_pdf)
+        @test _test_pdf_xref_is_consistent(read(first_pdf))
+        normalized = String(read(first_pdf))
+        @test occursin("/Title (jl_0000000000.html)", normalized)
+        @test count(PLOTLY_PDF_FIXED_DATE, normalized) == 2
+        @test !plotlysupply_pdf_has_volatile_metadata(first_pdf)
+        @test !plotlysupply_pdf_has_volatile_metadata(second_pdf)
+
+        @test_throws ArgumentError normalize_plotlysupply_pdf!(joinpath(dir, "figure.png"))
+        malformed = joinpath(dir, "malformed.pdf")
+        write(malformed, "%PDF-1.4\n%%EOF\n")
+        @test_throws ErrorException normalize_plotlysupply_pdf!(malformed)
+    end
+end
 include(joinpath(@__DIR__, "..", "validation", "artifact_closure.jl"))
 
 @testset "Canonical provenance fails closed" begin
@@ -199,13 +274,18 @@ end
         rm(extra_csv * ".manifest.json")
 
         figure = joinpath(figs_dir, "figure.pdf")
-        write_manifested_figure(figure, path -> write(path, "%PDF-1.4\nfixture\n");
+        write_manifested_figure(figure, path -> write(path, _plotly_pdf_fixture(
+                "jl_INTEGRATE0.html", "D:20260716121212+00'00'",
+            ));
             producer_script=producer, input_paths=(source=first_csv,),
             selection_record=(kind="fixture_figure",),
             backend="PlotlySupply.jl", deterministic=true,
             package_root=root, mode=:test)
         record = verify_output_manifest(figure; package_root=root)
         @test record["metadata"]["figure_backend"] == "PlotlySupply.jl"
+        @test _test_pdf_xref_is_consistent(read(figure))
+        @test occursin("/Title (jl_0000000000.html)", read(figure, String))
+        @test count(PLOTLY_PDF_FIXED_DATE, read(figure, String)) == 2
         @test verify_artifact_closure(figs_dir;
             extensions=(".pdf",),
             expected_artifacts=Dict("figure.pdf" => producer),
@@ -224,6 +304,13 @@ end
             producer_script=joinpath(root, "missing-producer.jl"),
             input_paths=(source=first_csv,),
             selection_record=(kind="rollback",), backend="PlotlySupply.jl",
+            deterministic=true, package_root=root, mode=:test)
+        @test read(figure) == prior_figure
+        @test read(figure * ".manifest.json") == prior_manifest
+        @test_throws ErrorException write_manifested_figure(
+            figure, path -> write(path, "%PDF-1.4\nmalformed Plotly output\n");
+            producer_script=producer, input_paths=(source=first_csv,),
+            selection_record=(kind="normalization_rollback",), backend="PlotlySupply.jl",
             deterministic=true, package_root=root, mode=:test)
         @test read(figure) == prior_figure
         @test read(figure * ".manifest.json") == prior_manifest

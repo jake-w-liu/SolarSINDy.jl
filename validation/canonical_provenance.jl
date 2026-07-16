@@ -6,6 +6,8 @@ using DataFrames
 
 isdefined(@__MODULE__, :validation_run_mode) ||
     include(joinpath(@__DIR__, "output_paths.jl"))
+isdefined(@__MODULE__, :normalize_plotlysupply_pdf!) ||
+    include(joinpath(@__DIR__, "plot_pdf_normalization.jl"))
 
 const CANONICAL_OMNI_SHA256 =
     "5b9f068431fe3d5f4406360cd8176f6631d03d28417c99e0117e1058400fdb97"
@@ -404,6 +406,19 @@ function write_manifested_figure(output_path::AbstractString, render!::Function;
     backend in ("PlotlySupply.jl", "Diff3D.jl") || throw(ArgumentError(
         "canonical figures require PlotlySupply.jl or Diff3D.jl",
     ))
+    isfile(producer_script) || throw(ArgumentError(
+        "producing script not found: $producer_script",
+    ))
+    selection_record === nothing && throw(ArgumentError(
+        "selection_record must be explicit",
+    ))
+    (seed === nothing) == deterministic || throw(ArgumentError(
+        "provide exactly one of seed or deterministic=true",
+    ))
+    seed isa Bool && throw(ArgumentError("seed must be an integer, not Bool"))
+    seed !== nothing && !(0 <= seed <= typemax(Int)) && throw(ArgumentError(
+        "seed must be representable as a nonnegative Int",
+    ))
     lowercase(splitext(output_path)[2]) in (".pdf", ".png", ".svg") ||
         throw(ArgumentError("figure output must be PDF, PNG, or SVG"))
     pairs_list = collect(pairs(input_paths))
@@ -441,6 +456,8 @@ function write_manifested_figure(output_path::AbstractString, render!::Function;
         render!(staged_output)
         isfile(staged_output) && !islink(staged_output) && filesize(staged_output) > 0 ||
             error("figure renderer did not create a nonempty regular file")
+        backend == "PlotlySupply.jl" && lowercase(splitext(staged_output)[2]) == ".pdf" &&
+            normalize_plotlysupply_pdf!(staged_output)
         _provenance_atomic_replace(staged_output, output_path)
         write_output_manifest(output_path;
             producer_script,

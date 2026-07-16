@@ -1,13 +1,15 @@
-# forecaster.jl — live calibrated dB/dt FORECAST using the exported paper3 conformal model.
+# forecaster.jl — offline dB/dt replay using the exported ridge model and historical
+# normalized-residual sample.
 #
-# Turns the live dB/dt history (USGS) + live solar wind (SWPC) into a calibrated forecast of
-# the next-30-min MAX dB/dt: a point forecast, a 90% conformal upper bound, and exceedance
-# probabilities P(max dB/dt > threshold) at the Pulkkinen levels. Uses the artifact exported by
-# paper_dbdt_alerts/scripts/export_forecaster.jl (ridge point model + empirical conformal residual CDF).
+# Replays a next-30-minute maximum from a fixed historical residual sample: a point estimate,
+# an empirical 0.90 residual-quantile upper estimate, and empirical exceedance scores at four
+# threshold magnitudes. The artifact was trained with bow-shock-shifted OMNI drivers; the
+# available live feed is unshifted L1, so callers must explicitly request offline replay.
 #
-# This is the paper3 method applied live — a FORECAST, distinct from the observed dB/dt nowcast.
+# The residual distribution is fixed from the historical calibration sample; it is not updated
+# online, is not a per-issue coverage guarantee, and is not served by the package API.
 
-using JSON3, Statistics
+using JSON3, Statistics, Dates
 
 const _FORECASTER = Dict{String,Any}()
 const _FORECASTER_LOCK = ReentrantLock()
@@ -26,9 +28,28 @@ function _valid_forecaster_threshold(x::Real)
 end
 
 function _valid_forecaster_artifact(a, station::AbstractString)
-    required = (:station, :features, :mu, :sigma, :beta, :rn_calib, :thresholds)
+    required = (:artifact_schema_version, :station, :features, :mu, :sigma, :beta,
+                :rn_calib, :thresholds, :training_ground_data_product,
+                :live_ground_data_product, :training_driver_product,
+                :training_driver_propagation, :available_live_driver_product,
+                :driver_time_reference_aligned, :serving_enabled, :serving_blocker,
+                :forecast_horizon_minutes, :issue_cadence_minutes,
+                :overlapping_targets)
     all(key -> haskey(a, key), required) || return false
+    a.artifact_schema_version == 3 || return false
     string(a.station) == station || return false
+    string(a.training_ground_data_product) == "quasi-definitive" || return false
+    string(a.live_ground_data_product) == "adjusted (provisional)" || return false
+    string(a.training_driver_product) == "OMNI_HRO_1MIN" || return false
+    string(a.training_driver_propagation) == "bow-shock-nose time shifted" || return false
+    string(a.available_live_driver_product) ==
+        "NOAA SWPC real-time solar wind at L1" || return false
+    a.driver_time_reference_aligned === false || return false
+    a.serving_enabled === false || return false
+    !isempty(strip(string(a.serving_blocker))) || return false
+    a.forecast_horizon_minutes == 30 || return false
+    a.issue_cadence_minutes == 1 || return false
+    a.overlapping_targets === true || return false
     features = string.(a.features)
     features == ["dbdt_now", "dbdt_mean30", "dbdt_max30", "dbdt_std30",
                  "V", "Bz", "Bs", "VBs"] || return false
@@ -73,19 +94,20 @@ function load_forecaster(; station::AbstractString = "FRD")
 end
 
 # Features (must match export): dbdt_now, dbdt_mean30, dbdt_max30, dbdt_std30, V, Bz, Bs, VBs.
-function forecast_dbdt(dbdt_recent::AbstractVector, V, Bz; station::AbstractString = "FRD")
+function forecast_dbdt(dbdt_recent::AbstractVector, V, Bz;
+                       station::AbstractString = "FRD", offline_replay::Bool=false)
+    offline_replay || return nothing
     station = uppercase(strip(String(station)))
     a = load_forecaster(; station=station)
     (a === nothing || V === nothing || Bz === nothing) && return nothing
-    vals = Float64[]
-    sizehint!(vals, length(dbdt_recent))
-    for x in dbdt_recent
-        value = jnum(x)
-        value === nothing || push!(vals, value)
+    length(dbdt_recent) >= 30 || return nothing
+    w = Vector{Float64}(undef, 30)
+    source_start = length(dbdt_recent) - 29
+    for (destination, source) in enumerate(source_start:length(dbdt_recent))
+        value = jnum(dbdt_recent[source])
+        (value === nothing || value < 0) && return nothing
+        w[destination] = value
     end
-    length(vals) < 5 && return nothing
-    all(>=(0.0), vals) || return nothing
-    w = vals[max(1, end-29):end]                 # trailing 30 min
     dnow = w[end]; dmean = mean(w); dmax = maximum(w); dstd = length(w) > 1 ? std(w) : 0.0
     Vf = jnum(V); Bzf = jnum(Bz)
     (Vf === nothing || Bzf === nothing || Vf <= 0 || Vf > 5_000 || abs(Bzf) > 1_000) && return nothing
@@ -105,23 +127,49 @@ function forecast_dbdt(dbdt_recent::AbstractVector, V, Bz; station::AbstractStri
     fpos = 0.90 * (n - 1) + 1
     ilo = clamp(floor(Int, fpos), 1, n); ihi = clamp(ilo + 1, 1, n)
     q90 = rn[ilo] + (fpos - ilo) * (rn[ihi] - rn[ilo])
-    zcap = log(2001.0)                            # physical cap ~2000 nT/min: ridge extrapolation in
-    point = expm1(min(ẑ, zcap))                   # log space + expm1 can blow up on out-of-range input
+    zcap = log(2001.0)                            # numerical safety cap: ridge extrapolation in log
+    point = expm1(min(ẑ, zcap))                   # space + expm1 can blow up out of support
     ub90 = expm1(min(ẑ + q90 * s, zcap))
     exc = [(threshold = Int(thr),
-            prob = round(count(>( (log1p(thr) - ẑ) / s ), rn) / n; digits=3))
+            empirical_score = round(count(>( (log1p(thr) - ẑ) / s ), rn) / n; digits=3))
            for thr in a.thresholds]
-    # Reliability guard: the log-space ridge extrapolates catastrophically when the live
+    # Reliability guard: the log-space ridge extrapolates catastrophically when replay
     # features sit far outside the calibration support, and the expm1 then saturates at the
     # ~2000 nT/min cap with ~1.0 exceedance. Flag (do not hide) such forecasts so the
-    # dashboard can render "out of validated range" instead of a confident Extreme number.
+    # diagnostics can mark the estimate out of range instead of treating the cap as evidence.
     Z_SUPPORT = 6.0                                # |standardized feature| beyond ~6σ ⇒ extrapolation
     out_of_range = any(>(Z_SUPPORT), abs.(zf))
     saturated = (ẑ >= zcap) || (ẑ + q90 * s >= zcap)
     return (point_dbdt = round(max(point, 0.0); digits=2),
-            ub90_dbdt = round(ub90; digits=2),
+            ub90_dbdt = round(max(ub90, 0.0); digits=2),
             exceedance = exc, station = station,
-            horizon_min = 30, source = "paper3 online conformal",
+            horizon_min = 30, source = "offline ridge + historical residual sample",
+            training_ground_data_product = string(a.training_ground_data_product),
+            live_ground_data_product = string(a.live_ground_data_product),
+            training_driver_product = string(a.training_driver_product),
+            training_driver_propagation = string(a.training_driver_propagation),
+            driver_time_reference_aligned = false, serving_enabled = false,
             reliable = !(out_of_range || saturated),
             out_of_validated_range = out_of_range, saturated = saturated)
+end
+
+"""Forecast from timestamped dB/dt observations only when the last 30 samples are consecutive."""
+function forecast_dbdt_observations(series::AbstractVector, V, Bz;
+                                    station::AbstractString = "FRD",
+                                    offline_replay::Bool=false)
+    offline_replay || return nothing
+    length(series) >= 30 || return nothing
+    rows = series[(end - 29):end]
+    times = Vector{DateTime}(undef, 30)
+    values = Vector{Float64}(undef, 30)
+    for index in eachindex(rows)
+        timestamp = parse_dt(get(rows[index], :t, nothing))
+        value = jnum(get(rows[index], :dbdt, nothing))
+        (timestamp === missing || value === nothing || value < 0) && return nothing
+        times[index] = timestamp
+        values[index] = value
+    end
+    all(index -> times[index] - times[index - 1] == Minute(1), 2:30) ||
+        return nothing
+    return forecast_dbdt(values, V, Bz; station=station, offline_replay=true)
 end
