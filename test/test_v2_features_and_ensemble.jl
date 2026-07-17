@@ -274,12 +274,19 @@ end
         st = init_forecast(coefficients_csv = coef, ensemble_csv = ens, draws_csv = draws,
                            t0 = DateTime(2024, 1, 1), dst0 = -20.0)
         μ1 = mean(a1_draws); μ2 = mean(a2_draws)
-        set1 = Set(round.(st.ξ_primary[i1] .+ (a1_draws .- μ1); digits = 12))
-        set2 = Set(round.(st.ξ_primary[i2] .+ (a2_draws .- μ2); digits = 12))
+        centered1 = round.(st.ξ_primary[i1] .+ (a1_draws .- μ1); digits = 12)
+        centered2 = round.(st.ξ_primary[i2] .+ (a2_draws .- μ2); digits = 12)
+        set1 = Set(centered1)
+        set2 = Set(centered2)
+        joint_set = Set(zip(centered1, centered2))
         @test all(round(v; digits = 12) in set1 for v in st.ξ_ensemble[:, i1])
         @test all(round(v; digits = 12) in set2 for v in st.ξ_ensemble[:, i2])
+        @test all((round(st.ξ_ensemble[k, i1]; digits = 12),
+                   round(st.ξ_ensemble[k, i2]; digits = 12)) in joint_set
+                  for k in axes(st.ξ_ensemble, 1))
         @test length(unique(st.ξ_ensemble[:, i1])) > 1                 # genuine spread
-        @test isapprox(mean(st.ξ_ensemble[:, i1]), st.ξ_primary[i1]; atol = 0.1)  # centered on deployed
+        @test isapprox(mean(st.ξ_ensemble[:, i1]), st.ξ_primary[i1]; atol = 0.02)
+        @test isapprox(mean(st.ξ_ensemble[:, i2]), st.ξ_primary[i2]; atol = 0.002)
         for j in eachindex(tn)                                          # inactive terms carry no spread
             (j == i1 || j == i2) && continue
             @test all(st.ξ_ensemble[:, j] .== 0.0)
