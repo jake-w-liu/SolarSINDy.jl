@@ -1,0 +1,52 @@
+# Supervised two-process deployment for a Linux/container host.
+#
+# The forecast DAEMON (writes the locked-live log) and the read-only DASHBOARD/alerting server share
+# a named volume. Both restart on failure and expose HEALTHCHECKs (defined in their Dockerfiles), so
+# a non-macOS node — or any node without a persistent login session — can run the actual forecaster
+# supervised, not just replay a log produced elsewhere.
+#
+# Run from the package root:
+#   docker compose -f deploy/docker-compose.yml up -d --build
+#   docker compose -f deploy/docker-compose.yml ps        # HEALTHCHECK state
+#   docker compose -f deploy/docker-compose.yml logs -f
+services:
+  monitor:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.monitor
+    image: swmonitor-daemon
+    restart: always
+    volumes:
+      - monitor-state:/data
+    environment:
+      - SOLARSINDY_MONITOR_DIR=/data
+      - JULIA_NUM_THREADS=2
+
+  dashboard:
+    build:
+      context: ..
+      dockerfile: app/Dockerfile
+    image: swmonitor
+    restart: always
+    depends_on:
+      - monitor
+    # Bind to loopback by default; put a TLS-terminating reverse proxy in front for LAN/WAN access.
+    ports:
+      - "127.0.0.1:8723:8723"
+    volumes:
+      - monitor-state:/data:ro
+    environment:
+      - SWM_HOST=0.0.0.0
+      - SWM_PORT=8723
+      - SOLARSINDY_LOG=/data/live_forecast_log.csv
+      # Webhook-dedup state must live on a writable path. The shared monitor-state volume
+      # is mounted read-only here, so the default sibling of the log (/data/...) is not
+      # writable and every alert transition would fail to persist and re-baseline on
+      # restart. /app is owned by the non-root runtime user (uid 10001) and survives
+      # `restart: always`, so alert-transition state persists across restarts.
+      - SWM_ALERT_STATE=/app/alert_notify_state.json
+      # Enable push alerts (Slack/Discord/generic) by setting the webhook here:
+      # - SWM_WEBHOOK_URL=https://hooks.example.com/...
+
+volumes:
+  monitor-state:

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd template for the SolarSINDy dashboard + alerting server (macOS).
+
+  This supervises the read-only dashboard AND the outbound webhook notify loop (which lives in the
+  server process), so alerting availability no longer equals interactive-session availability. Fill
+  the placeholders (deploy/install_launchd.sh does this) and bootstrap with:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.solarsindy.dashboard.plist
+
+    __JULIA_BIN__     stable juliaup shim (~/.juliaup/bin/julia), not a version-pinned directory
+    __CLONE_DIR__     absolute path to the SolarSINDy.jl clone
+    __APP_DIR__       __CLONE_DIR__/app  (the dashboard --project environment)
+    __MONITOR_DIR__   monitor state directory (default __CLONE_DIR__/var/monitor)
+
+  Set SWM_WEBHOOK_URL to enable Slack/Discord/generic push alerts. Bind stays on 127.0.0.1 by
+  default; set SWM_HOST=0.0.0.0 only behind a trusted reverse proxy.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.solarsindy.dashboard</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__JULIA_BIN__</string>
+    <string>--project=__APP_DIR__</string>
+    <string>__APP_DIR__/src/server.jl</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__APP_DIR__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SWM_HOST</key>
+    <string>127.0.0.1</string>
+    <key>SWM_PORT</key>
+    <string>8723</string>
+    <key>SOLARSINDY_LOG</key>
+    <string>__MONITOR_DIR__/live_forecast_log.csv</string>
+    <key>JULIA_NUM_THREADS</key>
+    <string>2</string>
+    <!-- Uncomment and set to enable push alerts:
+    <key>SWM_WEBHOOK_URL</key>
+    <string>https://hooks.example.com/...</string>
+    -->
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+
+  <key>StandardOutPath</key>
+  <string>__MONITOR_DIR__/logs/dashboard.out</string>
+
+  <key>StandardErrorPath</key>
+  <string>__MONITOR_DIR__/logs/dashboard.err</string>
+</dict>
+</plist>

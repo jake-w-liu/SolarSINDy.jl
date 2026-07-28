@@ -1,0 +1,32 @@
+# systemd unit for the SolarSINDy live Dst forecast daemon (bare-metal Linux).
+#
+# Install (system service):
+#   sudo cp deploy/solarsindy-live-monitor.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now solarsindy-live-monitor
+# Edit the placeholders first: __USER__, __CLONE_DIR__, __JULIA_BIN__ (a stable julia, e.g. the
+# juliaup shim ~/.juliaup/bin/julia or /usr/local/bin/julia — not a version-pinned directory).
+#
+# The daemon owns its bounded diagnostics under __CLONE_DIR__/var/monitor/logs; journald also
+# captures stdout/stderr with its own rotation.
+[Unit]
+Description=SolarSINDy live Dst forecast monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__CLONE_DIR__
+Environment=SOLARSINDY_MONITOR_DIR=__CLONE_DIR__/var/monitor
+Environment=JULIA_NUM_THREADS=2
+ExecStart=__JULIA_BIN__ --project=__CLONE_DIR__ __CLONE_DIR__/examples/live_monitor.jl
+Restart=always
+RestartSec=60
+# Hardening (relax only if a path below is genuinely needed):
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

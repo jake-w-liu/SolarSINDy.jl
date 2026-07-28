@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd template for the SolarSINDy external liveness watchdog (macOS).
+
+  A periodic one-shot (StartInterval) independent of the monitor and dashboard processes. Detects a
+  dead/unloaded forecast daemon or a down dashboard, writes the OUTAGE.md sentinel, and fires the
+  webhook — so an outage is caught even when neither supervised process can report it. Fill the
+  placeholders (deploy/install_launchd.sh does this) and bootstrap with:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.solarsindy.watchdog.plist
+
+    __CLONE_DIR__     absolute path to the SolarSINDy.jl clone
+    __MONITOR_DIR__   monitor state directory (default __CLONE_DIR__/var/monitor)
+
+  Set SWM_WEBHOOK_URL here to enable push alerts. The watchdog is intentionally NOT KeepAlive; it
+  runs once every StartInterval seconds and exits.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.solarsindy.watchdog</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__CLONE_DIR__/deploy/watchdog.sh</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__CLONE_DIR__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>SOLARSINDY_MONITOR_DIR</key>
+    <string>__MONITOR_DIR__</string>
+    <key>SOLARSINDY_WATCHDOG_DASH_URL</key>
+    <string>http://127.0.0.1:8723/api/health</string>
+    <key>SOLARSINDY_WATCHDOG_STALE_SEC</key>
+    <string>7200</string>
+    <!-- Uncomment to enable push alerts:
+    <key>SWM_WEBHOOK_URL</key>
+    <string>https://hooks.example.com/...</string>
+    -->
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StartInterval</key>
+  <integer>900</integer>
+
+  <key>StandardOutPath</key>
+  <string>__MONITOR_DIR__/logs/watchdog.launchd.out</string>
+
+  <key>StandardErrorPath</key>
+  <string>__MONITOR_DIR__/logs/watchdog.launchd.err</string>
+</dict>
+</plist>

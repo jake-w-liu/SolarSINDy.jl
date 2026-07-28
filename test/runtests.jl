@@ -376,6 +376,61 @@ using DataFrames
         )
     end
 
+    @testset "Newell/clock exponent numeric pins" begin
+        # The existing coupling tests assert only positivity, exact-zero cases,
+        # and domain/overflow errors, so an exponent mutation that keeps every
+        # output positive and monotone (V^(4/3) <-> B_T^(2/3) swap, or
+        # sin^(8/3) -> sin^2) passes them. The literals below are hand-computed
+        # from the canonical form dΦ/dt = V^(4/3) B_T^(2/3) sin^(8/3)(θ_c/2) and
+        # change under exactly those mutations.
+        #
+        # θ_c = π  =>  sin(θ_c/2) = sin(π/2) = 1, so the coupling reduces to
+        #   400^(4/3) · 5^(2/3) = 8617.738760127531.
+        # The V<->B_T swap would give 400^(2/3)·5^(4/3) = 464.159..., far away.
+        @test newell_coupling([400.0], [5.0], [float(π)])[1] ≈ 8617.738760127531
+        # θ_c = π/2 (mid clock angle) => sin(π/4)^(8/3) = 0.3968502629920498, so
+        #   400^(4/3)·5^(2/3)·sin(π/4)^(8/3) = 3419.951893353392.
+        # A sin^(8/3) -> sin^2 mutation would give 8617.738.../2 = 4308.869...,
+        # so this literal fails that mutation while θ_c = π (sin=1) cannot.
+        @test newell_coupling([400.0], [5.0], [float(π) / 2])[1] ≈ 3419.951893353392
+
+        # Per-term library column pins on a non-degenerate, self-consistent
+        # fixture. θ_c = π/3 => sin(θ_c/2) = sin(π/6) = 0.5; V = 500;
+        # By = √3, Bz = 1 => B_T = hypot(√3, 1) = 2 and atan(|By|, Bz) =
+        # atan(√3, 1) = π/3, so the clock angle and (By, Bz) agree.
+        clock_fixture = Dict{String,Vector{Float64}}(
+            "V" => [500.0], "Bs" => [4.0], "n" => [6.0], "Pdyn" => [2.5],
+            "Dst_star" => [-40.0], "Bz" => [1.0], "By" => [sqrt(3.0)],
+            "theta_c" => [float(π) / 3], "BT" => [2.0],
+        )
+        clock_lib = build_solar_wind_library()
+        clock_names = get_term_names(clock_lib)
+        Θclock = evaluate_library(clock_lib, clock_fixture)
+        clock_col(term) = Θclock[1, only(findall(==(term), clock_names))]
+        @test clock_col("sin(θ_c/2)") ≈ 0.5                    # sin(π/6)
+        @test clock_col("sin²(θ_c/2)") ≈ 0.25                  # 0.5^2
+        @test clock_col("sin⁴(θ_c/2)") ≈ 0.0625                # 0.5^4
+        @test clock_col("sin^(8/3)(θ_c/2)") ≈ 0.15749013123685915  # 0.5^(8/3)
+        @test clock_col("V*sin²(θ_c/2)") ≈ 125.0               # 500 · 0.25
+        # 500^(4/3) · 2^(2/3) · 0.5^(8/3) = 992.125657480124
+        @test clock_col("Newell_d_Φ") ≈ 992.125657480124
+
+        # The coded fast-path evaluator (TERM_SIN_* / TERM_NEWELL) must compute
+        # the identical mathematics term-for-term; together with the literals
+        # above this pins the coded path to the same hand-computed values.
+        coded_terms = ["sin(θ_c/2)", "sin²(θ_c/2)", "sin⁴(θ_c/2)",
+                       "sin^(8/3)(θ_c/2)", "V*sin²(θ_c/2)", "Newell_d_Φ"]
+        coded_funcs = Function[
+            clock_lib.funcs[only(findall(==(term), clock_names))]
+            for term in coded_terms
+        ]
+        coded_lib = SolarSINDy._fast_candidate_library(coded_terms, coded_funcs)
+        Θcoded = evaluate_library(coded_lib, clock_fixture)
+        for (j, term) in enumerate(coded_terms)
+            @test Θcoded[1, j] ≈ clock_col(term)
+        end
+    end
+
     @testset "Synthetic Data" begin
         swd, event = generate_synthetic_storm(seed=42)
         @test length(swd.t) > 100

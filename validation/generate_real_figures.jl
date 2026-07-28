@@ -108,7 +108,9 @@ println("  Saved: fig_results_real_coefficients.pdf")
 println("--- Figure: May 2024 Superstorm ---")
 may = CSV.read(joinpath(DATA_DIR, "may2024_reconstruction.csv"), DataFrame)
 
-sf = subplots(2, 1; sync=false, show=false)
+# title="" suppresses PlotlySupply's default package-name title, which its
+# subplot constructor otherwise applies as a visible figure title.
+sf = subplots(2, 1; sync=false, show=false, title="")
 
 # Panel 1: Solar wind drivers
 subplot!(sf, 1, 1)

@@ -27,6 +27,56 @@ const DST_SENTINEL_ABS = 9000.0
 # hours (a live sample showed ≥13 samples in every real hour).
 const MIN_HOURLY_DRIVER_SAMPLES = 10
 
+# L1 standoff and speed bounds for ballistic L1 -> Earth propagation. A solar-wind
+# parcel measured at L1 at time t with bulk speed V arrives at Earth (magnetosphere
+# nose) at t + L1_DIST_KM/V. The SINDy coefficients are fit on NASA OMNI2 hourly
+# data, whose L1 measurements are already time-shifted to expected magnetosphere
+# arrival before hourly averaging, and the deployed issuance path applies the same
+# lag (L1_DIST_KM/V). The speed bounds cap the lag so a spurious near-zero or
+# absurd speed sample cannot shift a measurement by an unphysical interval.
+# L1_DIST_KM matches the deployed issuance convention (1.5e6 km).
+const L1_DIST_KM = 1.5e6
+const L1_MIN_SPEED_KMS = 100.0
+const L1_MAX_SPEED_KMS = 5.0e3
+
+# Transit lag (milliseconds) for a bulk speed, clamped to physical speed bounds.
+_l1_transit_ms(V::Real) =
+    round(Int, (L1_DIST_KM / clamp(Float64(V), L1_MIN_SPEED_KMS, L1_MAX_SPEED_KMS) / 3600.0) * 3_600_000)
+
+# Earth-arrival timestamps for the plasma and mag samples. Each plasma parcel is
+# shifted by its own-speed transit lag (a non-finite speed falls back to 400 km/s,
+# matching the mag branch, so a NaN speed row degrades to the nominal lag instead of
+# throwing InexactError in round(Int, NaN)); each mag sample (the feed carries no
+# speed) is shifted by the lag of the nearest-in-time finite plasma speed, so a
+# parcel's field and plasma get the same lag and remain in one hour bin. Hourly
+# binning is order-independent, so no re-sort is required afterward.
+function _l1_earth_arrival_times(plasma::DataFrame, mag::DataFrame)
+    ptimes = plasma.time_tag
+    pspeed = plasma.speed
+    p_earth = DateTime[ptimes[j] +
+                       Millisecond(_l1_transit_ms(isfinite(pspeed[j]) ? pspeed[j] : 400.0))
+                       for j in eachindex(ptimes)]
+    m_earth = Vector{DateTime}(undef, nrow(mag))
+    mtimes = mag.time_tag
+    if isempty(ptimes)
+        # No plasma speeds to propagate the field; leave mag times unshifted.
+        copyto!(m_earth, mtimes)
+        return p_earth, m_earth
+    end
+    k = 1
+    np = length(ptimes)
+    for j in eachindex(mtimes)
+        t = mtimes[j]
+        # Advance to the plasma sample nearest in time (both feeds ascending).
+        while k < np && abs(ptimes[k + 1] - t) <= abs(ptimes[k] - t)
+            k += 1
+        end
+        V = pspeed[k]
+        m_earth[j] = t + Millisecond(_l1_transit_ms(isfinite(V) ? V : 400.0))
+    end
+    return p_earth, m_earth
+end
+
 function _fetch_swpc_json(url::String;
                           max_retries::Int=DEFAULT_SWPC_MAX_RETRIES,
                           retry_delay_sec::Real=DEFAULT_SWPC_RETRY_DELAY_SEC,
@@ -68,13 +118,27 @@ end
 # physically-valid rows so a secondary/sentinel record cannot masquerade as the primary reading.
 
 # `active` flag: true when the key is absent (schema surprise -> keep, so a change never silently
-# drops every row) or explicitly boolean-true; any other encoding is treated as active.
+# drops every row). Parse the common serializations explicitly so a schema change that serializes
+# the flag as a string ("true"/"false") or integer (1/0) still honors an explicit NOT-active row
+# instead of admitting a secondary/sentinel spacecraft record into the hourly driver means.
+# Only a value that is present but in an UNRECOGNIZED encoding falls back to active (with a warning).
 function _rtsw_active(obj)::Bool
     (obj isa AbstractDict || obj isa JSON3.Object) || return true
     haskey(obj, :active) || return true
     a = obj[:active]
     a === nothing && return true
-    return a isa Bool ? a : true
+    a isa Bool && return a
+    if a isa Integer
+        return a != 0                       # 1 -> active, 0 -> inactive
+    elseif a isa AbstractString || a isa Symbol
+        s = lowercase(strip(String(string(a))))
+        (s == "true"  || s == "1" || s == "t" || s == "yes") && return true
+        (s == "false" || s == "0" || s == "f" || s == "no")  && return false
+    elseif a isa Real
+        isfinite(a) && return a != 0        # numeric truthiness for a finite flag
+    end
+    @warn "RTSW 'active' flag has an unrecognized encoding; treating the row as active" value=a maxlog=1
+    return true
 end
 
 # Named-key numeric field parsed to Float64, or NaN when the key is missing/null/unparseable or
@@ -370,12 +434,20 @@ measured hourly average only when it holds at least `min_hourly_samples` finite
 feed-brownout hour is interpolated or refused rather than served as a one-minute
 "average". Pass `min_hourly_samples=1` to reproduce the pre-gate averaging (used
 by fixtures that inject coarse synthetic series).
+
+Set `propagate_l1_to_earth=true` to ballistically shift each L1 measurement to its
+expected Earth-arrival time (`t + L1_DIST_KM/V`) before hourly binning, so the
+driver bins share the time base of the OMNI2 hourly data the model was fit on and
+of the Earth-UT Kyoto Dst anchor. The operational monitor uses this; it defaults
+to `false` so callers that inject their own coarse time base (fixtures) keep raw
+L1-time binning.
 """
 function fetch_realtime_solar_wind(; hours::Int=168,
                                     plasma::Union{Nothing,DataFrame}=nothing,
                                     mag::Union{Nothing,DataFrame}=nothing,
                                     dst::Union{Nothing,Tuple}=nothing,
                                     min_hourly_samples::Int=MIN_HOURLY_DRIVER_SAMPLES,
+                                    propagate_l1_to_earth::Bool=false,
                                     max_retries::Int=DEFAULT_SWPC_MAX_RETRIES,
                                     retry_delay_sec::Real=DEFAULT_SWPC_RETRY_DELAY_SEC,
                                     http_get::Function=HTTP.get)
@@ -408,9 +480,17 @@ function fetch_realtime_solar_wind(; hours::Int=168,
     dst_lookup = dst === nothing ? Dict{DateTime,Float64}() :
         _hourly_dst_lookup(dst[1], dst[2])
 
+    # Timestamps used for the hourly binning grid. When requested, they are the
+    # ballistically propagated Earth-arrival times (matching the OMNI training
+    # convention and the Earth-UT Dst anchor); otherwise the raw L1 measurement
+    # times. Values (speed/density, Bz/By) are unchanged — only the time base moves.
+    plasma_times, mag_times = propagate_l1_to_earth ?
+        _l1_earth_arrival_times(plasma_data, mag_data) :
+        (plasma_data.time_tag, mag_data.time_tag)
+
     # Determine common time range
-    t_start = max(minimum(plasma_data.time_tag), minimum(mag_data.time_tag))
-    t_end = min(maximum(plasma_data.time_tag), maximum(mag_data.time_tag))
+    t_start = max(minimum(plasma_times), minimum(mag_times))
+    t_end = min(maximum(plasma_times), maximum(mag_times))
 
     # Truncate to requested hours
     t_start = max(t_start, t_end - Hour(hours))
@@ -438,12 +518,13 @@ function fetch_realtime_solar_wind(; hours::Int=168,
     # Aggregate each feed once. The former per-bin Boolean masks scanned and
     # copied the complete minute-cadence feed for every hour (quadratic work and
     # allocation as the requested window grew).
-    _hourly_means!(V_hr, n_hr, plasma_data.time_tag, plasma_data.speed,
+    _hourly_means!(V_hr, n_hr, plasma_times, plasma_data.speed,
                    plasma_data.density, t_start, min_hourly_samples)
-    _hourly_means!(Bz_hr, By_hr, mag_data.time_tag, mag_data.bz_gsm,
+    _hourly_means!(Bz_hr, By_hr, mag_times, mag_data.bz_gsm,
                    mag_data.by_gsm, t_start, min_hourly_samples)
     t_fresh = _latest_covered_common_time(
-        plasma_data, mag_data, t_start, t_end, min_hourly_samples,
+        plasma_times, plasma_data.speed, mag_times, mag_data.bz_gsm,
+        t_start, t_end, min_hourly_samples,
     )
 
     for i in 1:n_bins

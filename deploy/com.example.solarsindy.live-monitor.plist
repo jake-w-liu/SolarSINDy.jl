@@ -4,18 +4,23 @@
 <!--
   launchd template for the SolarSINDy live Dst forecast monitor (macOS).
 
-  Instantiate: replace every __PLACEHOLDER__ with an absolute path, then copy to
-  ~/Library/LaunchAgents/ and load with:
-    launchctl load ~/Library/LaunchAgents/com.example.solarsindy.live-monitor.plist
+  Prefer the install script, which fills these placeholders and creates the log directory:
+    deploy/install_launchd.sh <CLONE_DIR>
+  Manual install: replace every __PLACEHOLDER__ with an absolute path, create
+  __MONITOR_DIR__/logs, copy to ~/Library/LaunchAgents/, then bootstrap with:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.solarsindy.live-monitor.plist
 
-    __JULIA_BIN__     absolute path to the julia executable (e.g. output of `which julia`)
+    __JULIA_BIN__     absolute path to the julia launcher. Use the STABLE juliaup shim
+                      (~/.juliaup/bin/julia), NOT a version-pinned juliaup directory such as
+                      ~/.julia/juliaup/julia-1.12.6+0.../bin/julia — `juliaup gc`/`juliaup update`
+                      deletes version directories and would leave a silent 60 s crash loop.
     __CLONE_DIR__     absolute path to the SolarSINDy.jl clone (the --project environment)
+    __MONITOR_DIR__   output/state directory (default __CLONE_DIR__/var/monitor)
 
-  The monitor writes its bounded forecast log, comparison report, state, outage sentinel,
-  and external Dst snapshots under SOLARSINDY_MONITOR_DIR (default
-  __CLONE_DIR__/var/monitor). Console output is discarded because launchd does not rotate
-  StandardOutPath/StandardErrorPath files; persistent status belongs in those bounded
-  operational artifacts.
+  Console streams go to bounded, self-rotating files under __MONITOR_DIR__/logs (launchd does not
+  rotate them, so the daemon rotates launchd.out/launchd.err once per (re)start and mirrors its full
+  diagnostic history into the size-capped monitor.log ring). This keeps forensic output for a crash
+  or unload instead of discarding it to /dev/null.
 -->
 <plist version="1.0">
 <dict>
@@ -32,15 +37,13 @@
   <key>WorkingDirectory</key>
   <string>__CLONE_DIR__</string>
 
-  <!-- Optional overrides; uncomment and edit as needed.
   <key>EnvironmentVariables</key>
   <dict>
     <key>SOLARSINDY_MONITOR_DIR</key>
-    <string>__CLONE_DIR__/var/monitor</string>
-    <key>LIVE_MONITOR_INTERVAL_SEC</key>
-    <string>3600</string>
+    <string>__MONITOR_DIR__</string>
+    <key>JULIA_NUM_THREADS</key>
+    <string>2</string>
   </dict>
-  -->
 
   <key>RunAtLoad</key>
   <true/>
@@ -52,9 +55,9 @@
   <integer>60</integer>
 
   <key>StandardOutPath</key>
-  <string>/dev/null</string>
+  <string>__MONITOR_DIR__/logs/launchd.out</string>
 
   <key>StandardErrorPath</key>
-  <string>/dev/null</string>
+  <string>__MONITOR_DIR__/logs/launchd.err</string>
 </dict>
 </plist>

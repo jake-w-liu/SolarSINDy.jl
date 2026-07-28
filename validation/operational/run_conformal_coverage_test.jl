@@ -51,19 +51,36 @@ function main()
     cc = read_conformal_calibration(_conformal_path(CALIB))
 
     # Online ACI is run over the full chronologically-ordered v2-prediction stream
-    # (per horizon), so by the time it reaches the holdout window its miscoverage
-    # rate has adapted from the fit+validation rows that precede it in time. This
-    # is the fair online comparison against the static split-conformal holdout.
+    # (per horizon) with MATURITY-DELAYED residual feedback: the interval served for
+    # the forecast issued at t is scored against its eventual observation, but that
+    # residual updates the ACI state only once its target time (t + h) has passed,
+    # exactly as the deployed verified-log path advances ACI only over rows whose
+    # observation is published (verify-then-update). Feeding each residual back at the
+    # next hourly issue would grant the 2/3/6 h streams up to h-1 hours of look-ahead
+    # relative to any deployable path. The served interval uses the identical deployed
+    # gap-step call adaptive_conformal_step!(ac, center, NaN), which forms the band
+    # from the current state without mutating it. This is the fair online comparison
+    # against the static split-conformal holdout.
     sort!(scored, :issue_time_utc)
     hor_all = _scored_horizons(scored)
+    issue_dt = _parse_dt.(scored.issue_time_utc)
     aci_covered = falses(nrow(scored))
     for h in unique(hor_all)
         idx = findall(==(h), hor_all)          # already time-ordered (scored is sorted)
         ac = init_adaptive_conformal(; target_coverage=COVERAGE, gamma=0.03, warmup=30)
+        pend = Tuple{DateTime,Float64,Float64}[]   # (target_time, point, observed)
+        qi = 1
         for i in idx
-            s = adaptive_conformal_step!(ac, Float64(scored.v2_pred_dst_nt[i]),
-                                         Float64(scored.observation_dst_nt[i]))
-            aci_covered[i] = s.covered
+            t = issue_dt[i]
+            while qi <= length(pend) && pend[qi][1] <= t
+                _, pp, po = pend[qi]; qi += 1
+                adaptive_conformal_step!(ac, pp, po)
+            end
+            point = Float64(scored.v2_pred_dst_nt[i])
+            observed = Float64(scored.observation_dst_nt[i])
+            s = adaptive_conformal_step!(ac, point, NaN)   # gap step: serve, no mutation
+            aci_covered[i] = min(s.lo, s.hi) <= observed <= max(s.lo, s.hi)
+            push!(pend, (t + Hour(Int(round(h))), point, observed))
         end
     end
 

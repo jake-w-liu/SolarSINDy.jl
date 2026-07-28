@@ -186,6 +186,22 @@ struct OperationalV2Calibration
         all(isfinite, weights) && sum(weights) > 0 || throw(ArgumentError(
             "normalized selector weights must be finite with positive sum",
         ))
+        # Fail closed on a served component the live issuance path cannot supply.
+        # A directly-selected non-servable baseline (e.g. :storm_guard) or an
+        # ensemble member with positive weight on one would raise ArgumentError on
+        # every live cycle; reject it at construction so a hand-built or legacy
+        # calibration file cannot silently reach serving. Non-baseline symbols
+        # (:v2, :sindy_v1, abstract test components) are unaffected.
+        selected_component in OPERATIONAL_V2_NONSERVABLE_BASELINES && throw(ArgumentError(
+            "selected_component $selected_component is not servable by the live issuance path",
+        ))
+        if selected_component == :ensemble
+            for (nm, w) in zip(selector_names, weights)
+                (w > 0 && nm in OPERATIONAL_V2_NONSERVABLE_BASELINES) && throw(ArgumentError(
+                    "ensemble member $nm has positive weight but is not servable by the live issuance path",
+                ))
+            end
+        end
         isfinite(Float64(guard_margin_nt)) && Float64(guard_margin_nt) >= 0 ||
             throw(ArgumentError("guard_margin_nt must be finite and nonnegative"))
         return new(feature_names, feature_mean, feature_scale, coefficients,
@@ -247,6 +263,26 @@ const OPERATIONAL_V2_BASELINE_COLUMNS = Pair{Symbol,Symbol}[
     :obrien => :obrien_dst_nt,
     :storm_guard => :storm_guard_dst_nt,
 ]
+
+# Baseline components the live issuance path can actually serve. The live issuer
+# builds the issue-time `baselines` NamedTuple from these four Dst baselines, and
+# :v2/:sindy_v1 are always reconstructable from the point forecast. `:storm_guard`
+# is deliberately excluded: its floor `latest - horizon·coupling·√Pdyn` depends on
+# the forecast horizon and the horizon-coupling pressure, and the generic
+# issue-time serving API (`operational_v2_predict`, which receives only the point
+# forecast and the calibration feature tuple) does not carry the horizon, so it
+# cannot be reconstructed at live issuance. `storm_guard_dst_nt` therefore exists
+# only as a replay/scoring diagnostic column and must never be selected or
+# ensemble-weighted as a served component, or every live cycle would raise
+# `ArgumentError("missing v2 selector baseline: storm_guard")`.
+const OPERATIONAL_V2_LIVE_SERVABLE_BASELINES =
+    Set{Symbol}([:persistence, :burton, :burton_full, :obrien])
+
+# Baseline component keys that are NOT servable by the live issuance path.
+const OPERATIONAL_V2_NONSERVABLE_BASELINES = Set{Symbol}(
+    first(spec) for spec in OPERATIONAL_V2_BASELINE_COLUMNS
+    if !(first(spec) in OPERATIONAL_V2_LIVE_SERVABLE_BASELINES)
+)
 
 """
     default_operational_v2_calibration(; feature_names, interval_scale, label)
@@ -313,20 +349,37 @@ end
 # propagates harmlessly through scoring rather than throwing `MethodError(Float64, missing)`.
 _cell_float_or_nan(x) = ismissing(x) ? NaN : Float64(x)
 
+# Parse a cell to DateTime, or `nothing` when it is `missing` or an unparseable
+# string. Used so a partially-corrupt time column can be detected and rejected
+# rather than crashing mid-parse or being silently skipped.
+function _as_datetime_or_nothing(x)
+    ismissing(x) && return nothing
+    x isa DateTime && return x
+    return tryparse(DateTime, String(x))
+end
+
 function _chronological_order(df::DataFrame)
+    present = false
     for col in (:issue_time_utc, :latest_dst_time_utc, :target_time_utc)
         String(col) in names(df) || continue
-        values = DateTime[]
+        present = true
+        values = Vector{DateTime}(undef, nrow(df))
         ok = true
-        for x in df[!, col]
-            if ismissing(x)
+        for (i, x) in enumerate(df[!, col])
+            t = _as_datetime_or_nothing(x)
+            if t === nothing
                 ok = false
                 break
             end
-            push!(values, x isa DateTime ? x : DateTime(String(x)))
+            values[i] = t
         end
         ok && return sortperm(values)
     end
+    # A time column was present but partially missing/unparseable: fail closed
+    # rather than silently ordering by natural row order.
+    present && throw(ArgumentError(
+        "a time column is present but has a missing or unparseable cell; cannot order chronologically",
+    ))
     return collect(1:nrow(df))
 end
 
@@ -354,19 +407,31 @@ end
 # Per-row anchor DateTime from the issue/latest time column, or `nothing` when no
 # usable time axis exists (e.g. the single-row serving feature frame).
 function _anchor_times(df::DataFrame)
+    present = false
     for col in (:issue_time_utc, :latest_dst_time_utc)
         String(col) in names(df) || continue
+        present = true
         times = Vector{DateTime}(undef, nrow(df))
         ok = true
         for (i, x) in enumerate(df[!, col])
-            if ismissing(x)
+            t = _as_datetime_or_nothing(x)
+            if t === nothing
                 ok = false
                 break
             end
-            times[i] = x isa DateTime ? x : DateTime(String(x))
+            times[i] = t
         end
         ok && return times
     end
+    # A time column existed but was partially missing/unparseable: fail closed
+    # rather than silently degrading timestamp-keyed hourly memory lags to
+    # row-offset lags (which, with target-time ordering, would turn a "1 h" delta
+    # into a cross-horizon row delta). Only the genuine no-time-axis serving frame
+    # (no issue/latest anchor column at all) uses the neutral row-offset fallback.
+    present && throw(ArgumentError(
+        "issue_time_utc/latest_dst_time_utc present but has a missing or unparseable cell; " *
+        "cannot key memory features by timestamp",
+    ))
     return nothing
 end
 
@@ -535,12 +600,20 @@ function add_operational_v2_features!(df::DataFrame)
     horizon = max.(horizon, 1.0)
     main_phase_pressure = max.(-dst_delta_1h, 0.0) .* sqrt_pdyn
     main_phase_pressure_6h = max.(-dst_delta_6h, 0.0) .* sqrt_pdyn
+    # Storm main-phase gate. VBsouth_mvm = 1e-3·V·max(-Bz,0) is nonnegative by
+    # construction, so the earlier `(vb>0 || dst_delta<0) ? max(vb,0) : 0` reduced
+    # identically to `vb` and never disengaged: coupling_active_mvm duplicated
+    # VBsouth_mvm and the storm-guard drop stayed engaged through recovery. Bind the
+    # gate as intended — coupling is "active" only when the wind is driving (vb>0)
+    # AND the ring current is deepening (Dst falling) — so the phase feature carries
+    # distinct information and the storm-guard floor no longer over-deepens recovery
+    # forecasts. NaN drivers stay 0 (neutral).
     coupling_active = [
-        (vb[i] > 0.0 || dst_delta_1h[i] < 0.0) ? max(vb[i], 0.0) : 0.0
+        (isfinite(vb[i]) && vb[i] > 0.0 && dst_delta_1h[i] < 0.0) ? vb[i] : 0.0
         for i in 1:nrow(df)
     ]
     coupling_active_6h = [
-        (vb6[i] > 0.0 || dst_delta_6h[i] < 0.0) ? max(vb6[i], 0.0) : 0.0
+        (isfinite(vb6[i]) && vb6[i] > 0.0 && dst_delta_6h[i] < 0.0) ? vb6[i] : 0.0
         for i in 1:nrow(df)
     ]
     recovery_pressure = max.(dst_delta_3h, 0.0) .* sqrt_pdyn
@@ -614,6 +687,10 @@ end
 function _selector_metric_columns(df::DataFrame)
     out = Pair{Symbol,Symbol}[]
     for spec in OPERATIONAL_V2_BASELINE_COLUMNS
+        # Only offer baseline components the live issuance path can serve as
+        # selector candidates, so a fit can never deploy a component that would
+        # crash every live cycle (see OPERATIONAL_V2_LIVE_SERVABLE_BASELINES).
+        first(spec) in OPERATIONAL_V2_LIVE_SERVABLE_BASELINES || continue
         String(last(spec)) in names(df) && push!(out, spec)
     end
     return out
@@ -623,11 +700,20 @@ function _candidate_selector_stats(clean::DataFrame, corrected::Vector{Float64},
                                    interval_coverage::Real,
                                    guard_margin_nt::Real)
     obs = Float64.(clean.observation_dst_nt)
+    # `corrected` is the in-sample ridge fit (pred + X·β on the same rows β was fit
+    # from), so the :v2 rmse/mae below are optimistically biased relative to the
+    # parameter-free baselines. This is intentional (see fit_operational_v2_calibration
+    # docstring): the operational path re-validates the deployed component out of
+    # sample, and the guard-margin rule prefers :v2 unless a baseline clearly wins.
     names_out = Symbol[:v2, :sindy_v1]
     preds = [corrected, Float64.(clean.pred_dst_nt)]
 
     for (component, col) in _selector_metric_columns(clean)
-        values = Float64.(clean[!, col])
+        # Map a `missing` cell to NaN instead of crashing `Float64.(...)` with a
+        # MethodError; the all-finite guard on the next line then skips a baseline
+        # column that has any missing/non-finite cell, matching the skip-on-unusable
+        # intent used everywhere else in this file.
+        values = _column_float_or_nan(clean, col)
         all(isfinite, values) || continue
         push!(names_out, component)
         push!(preds, values)
@@ -737,6 +823,18 @@ Fit a causal residual-correction and interval-inflation layer from prior replay
 or locked-live rows. Required columns are `pred_dst_nt`,
 `observation_dst_nt`, `pred_dst_ci05_nt`, `pred_dst_ci95_nt`, and the selected
 issue-time features.
+
+Selector-metric caveat: the stored `selector_rmse`/`selector_mae` for `:v2` are
+**in-sample** — the ridge coefficients are fit on the same rows the metric scores,
+whereas the baseline components (`:persistence`, `:burton`, `:obrien`, …) are
+parameter-free and thus already out-of-sample on those rows. The metrics are not
+directly comparable one-to-one, and the guard-margin rule (a baseline must beat the
+in-sample `:v2` MAE by more than `guard_margin_nt` to be selected) is deliberately
+biased toward retaining `:v2`. This matches the operational design: the deployed
+component is chosen by out-of-sample validation on a held-out chronological split,
+and `:v2` is preferred on small samples for robustness. Callers that consume the
+returned selector metadata without a separate out-of-sample check must treat the
+`:v2` figures as an optimistic (training-set) bound, not a deployable estimate.
 """
 function fit_operational_v2_calibration(df::DataFrame;
         feature_names::Vector{Symbol}=copy(DEFAULT_OPERATIONAL_V2_FEATURES),

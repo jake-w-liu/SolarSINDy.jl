@@ -123,7 +123,16 @@ function get_log(path::AbstractString)
             wanted = _canonical_missing_log_path(path)
             return c === nothing || c[1][1] != wanted ? DataFrame() : c[2]
         end
-        key = _log_file_identity(path)
+        # Resolve the file identity defensively: the file can be unlinked (log rotation/rewrite)
+        # between the isfile check above and here, in which case realpath/stat throw. Degrade to
+        # the absent-file branch instead of surfacing a 500 (and leaking the log path).
+        key = try
+            _log_file_identity(path)
+        catch e
+            e isa InterruptException && rethrow()
+            wanted = _canonical_missing_log_path(path)
+            return c === nothing || c[1][1] != wanted ? DataFrame() : c[2]
+        end
         if c === nothing || c[1] != key
             try
                 loaded = _load_log(path)
@@ -133,6 +142,11 @@ function get_log(path::AbstractString)
                 _LOG_CACHE[] = (key, loaded)
             catch e
                 e isa InterruptException && rethrow()
+                # If the file vanished mid-load, degrade like the absent branch rather than 500.
+                if !isfile(path)
+                    wanted = _canonical_missing_log_path(path)
+                    return c === nothing || c[1][1] != wanted ? DataFrame() : c[2]
+                end
                 (c === nothing || c[1][1] != key[1]) && rethrow(e)
                 @warn "log reload failed; serving cached copy" exception=(e, catch_backtrace())
                 return c[2]

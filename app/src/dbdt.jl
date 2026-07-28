@@ -115,8 +115,6 @@ function _fetch_usgs(station::AbstractString, minutes::Int)
     end
 end
 
-using Statistics: mean
-
 # Linear-interpolate `nothing` gaps in a numeric vector -> Float64 vector (edge gaps held flat).
 function _interp_gaps(v::Vector)
     n = length(v); out = Vector{Float64}(undef, n)
@@ -134,12 +132,6 @@ function _interp_gaps(v::Vector)
         i = j
     end
     return out
-end
-
-_detrend(y::Vector{Float64}) = begin                          # remove best-fit line (reduce leakage)
-    n = length(y); t = collect(0.0:n-1); tm = mean(t); ym = mean(y)
-    b = sum((t .- tm) .* (y .- ym)) / max(sum((t .- tm).^2), eps())
-    y .- ((ym - b*tm) .+ b .* t)
 end
 
 # Geoelectric-field nowcast (plane-wave, 1-D half-space) on the recent window; nothing if too gappy.
@@ -160,19 +152,29 @@ function _geoe_nowcast(xv, yv, dt_s; rho=1000.0, window_minutes=120.0,
     samples_per_window = max(1, floor(Int, window_minutes * 60 / dt_s) + 1)
     n = length(xv); s = max(1, n - samples_per_window + 1)
     xs = [_num(xv[i]) for i in s:n]; ys = [_num(yv[i]) for i in s:n]
-    count(i -> xs[i] !== nothing && ys[i] !== nothing, eachindex(xs)) < 0.9 * length(xs) && return nothing
+    # Same validity criterion _interp_gaps uses, so `last_real` never lands on a value the
+    # interpolator would treat as a gap (keeps the served sample and its timestamp honest).
+    _real(v) = v !== nothing && (v isa Real) && isfinite(v)
+    valid = [_real(xs[i]) && _real(ys[i]) for i in eachindex(xs)]
+    count(valid) < 0.9 * length(xs) && return nothing
+    last_real = findlast(valid)
+    last_real === nothing && return nothing
     xf = _interp_gaps(xs); yf = _interp_gaps(ys)
     (xf === nothing || yf === nothing || length(xf) < 16) && return nothing
-    ex, ey = geoelectric_field(_detrend(xf), _detrend(yf), dt_s; rho_ohm_m=rho)
+    # Causal time-domain half-space response: retains the sustained-ramp (storm main-phase)
+    # component that a detrended circular DFT would remove. emag[i] is the physical |E| at
+    # sample i, integrating the observed dB/dt up to that sample — no wraparound, no edge trim.
+    ex, ey = causal_halfspace_efield(xf, yf, dt_s; rho_ohm_m=rho)
     emag = sqrt.(ex.^2 .+ ey.^2); m = length(emag)
-    # The circular DFT/IDFT concentrates wraparound ringing at the window edges, so the raw
-    # endpoint emag[end] is edge-contaminated (biased low on a rising ramp). Serve the last
-    # edge-trimmed sample as "current", and take the reported max over the trailing ~30 interior
-    # samples (the "30-min max" the dashboard shows), excluding the 3 edge-ringing samples.
-    hi = max(1, m - 3)
+    # Serve "current" from the most recent REAL sample: trailing edge-filled gaps carry ~zero
+    # dB/dt and would bias the nowcast low if their flat tail were served as current. Sample 1 is
+    # identically zero (no causal history), so never serve it.
+    hi = clamp(last_real, 2, m)
     max_samples = max(1, floor(Int, max_minutes * 60 / dt_s) + 1)
-    inner = emag[max(min(4, m), hi - max_samples + 1):hi]
-    return (current = emag[hi], max = isempty(inner) ? maximum(emag) : maximum(inner), rho = rho)
+    lo = max(2, hi - max_samples + 1)
+    inner = @view emag[lo:hi]
+    return (current = emag[hi], max = maximum(inner), rho = rho,
+            trailing_gap = m - last_real)
 end
 
 function _compute_dbdt(station::AbstractString, minutes::Int;
@@ -221,7 +223,7 @@ function _compute_dbdt(station::AbstractString, minutes::Int;
     # Preserve full precision for the downstream forecast; the browser formats display values.
     series = [(t = jdt_str(times[i]), dbdt = dbdt[i]) for i in keep]
 
-    # Frequency-domain impedance assumes uniform sampling. Preserve the dB/dt
+    # The plane-wave impedance assumes uniform sampling. Preserve the dB/dt
     # nowcast for an irregular but ordered feed, but do not publish a physically
     # mis-timed geoelectric estimate.
     step_seconds = [(dts[i] - dts[i - 1]) / Millisecond(1000) for i in 2:n]
@@ -236,6 +238,24 @@ function _compute_dbdt(station::AbstractString, minutes::Int;
         e isa InterruptException && rethrow()
         @warn "geoE nowcast failed" exception=e
     end
+    # The served geoelectric "current" is taken at the most recent real sample, whose global
+    # index is n - trailing_gap. Publish that observation time and drop the estimate if it is not
+    # sufficiently recent, so a trailing edge-filled tail cannot masquerade as a live value.
+    geoe_block = nothing
+    if geoe !== nothing
+        geoe_idx = n - geoe.trailing_gap
+        if 1 <= geoe_idx <= n
+            gfresh = _source_freshness(dts[geoe_idx], DBDT_MAX_AGE_MIN; reference=reference)
+            if !gfresh.stale
+                geoe_block = (current_vkm = round(geoe.current; digits=3),
+                              max_vkm = round(geoe.max; digits=3),
+                              rho_ohm_m = geoe.rho,
+                              current_time_utc = jdt_str(times[geoe_idx]),
+                              age_minutes = gfresh.age_min,
+                              note = "1-D uniform half-space estimate")
+            end
+        end
+    end
 
     ct = dbdt_tier(current); mt = dbdt_tier(max30)
     return (station = station, data_type = USGS_LIVE_DATA_TYPE, available = true,
@@ -244,10 +264,7 @@ function _compute_dbdt(station::AbstractString, minutes::Int;
             current_time_utc = jdt_str(times[cur_i]),
             max30_dbdt = round(max30; digits=2), max30_tier = mt,
             thresholds = collect(PULK), exceedances = exceed,
-            geoelectric = geoe === nothing ? nothing :
-                (current_vkm = round(geoe.current; digits=3), max_vkm = round(geoe.max; digits=3),
-                 rho_ohm_m = geoe.rho,
-                 note = "1-D uniform half-space estimate"),
+            geoelectric = geoe_block,
             n_minutes = length(keep), series = series)
 end
 

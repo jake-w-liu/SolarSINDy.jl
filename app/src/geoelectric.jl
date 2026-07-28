@@ -128,6 +128,62 @@ function geoelectric_field(Bx_nt::AbstractVector{<:Real}, By_nt::AbstractVector{
     return ex, ey
 end
 
+"""
+    causal_halfspace_efield(Bx_nt, By_nt, dt_s; rho_ohm_m=1000) -> (Ex, Ey)  [V/km]
+
+Time-domain causal geoelectric field for a uniform half-space — the exact time-domain
+equivalent of the plane-wave surface impedance ``Z(\\omega)=\\sqrt{i\\,\\omega\\,\\mu_0\\,\\rho}``:
+
+    E_x(t) =  sqrt(rho/(pi*mu0)) ∫_{t0}^{t} (dB_y/dt') (t - t')^{-1/2} dt'
+    E_y(t) = -sqrt(rho/(pi*mu0)) ∫_{t0}^{t} (dB_x/dt') (t - t')^{-1/2} dt'
+
+Unlike a windowed circular DFT of a finite record, this retains the sustained-ramp
+(low-frequency) response: a constant `dB/dt` produces a growing ``\\sqrt{t-t_0}`` field instead of
+being discarded as a trend. `dB/dt` is taken piecewise-constant on each sample interval and the
+``(t-t')^{-1/2}`` kernel is integrated analytically per interval, so a constant ramp is reproduced
+exactly. The convolution is truncated at the first sample (`t0`), so the earliest samples are
+under-resolved; the value at the most recent sample integrates the full record and is the
+physically meaningful causal nowcast. Uniform sampling `dt_s` [s] is required. The returned pair
+uses the same component pairing and sign convention as [`geoelectric_field`](@ref).
+
+For a purely periodic input this agrees with the frequency-domain [`geoelectric_field`] method in
+its steady-state region; it is preferred for a real-time nowcast because it is causal, leakage-free,
+and keeps the storm-time ramp response that a detrended DFT window removes.
+"""
+function causal_halfspace_efield(Bx_nt::AbstractVector{<:Real}, By_nt::AbstractVector{<:Real},
+                                 dt_s::Real; rho_ohm_m::Real = 1000.0)
+    isfinite(dt_s) && dt_s > 0 ||
+        throw(ArgumentError("causal_halfspace_efield: dt_s must be finite and positive"))
+    isfinite(rho_ohm_m) && rho_ohm_m > 0 ||
+        throw(ArgumentError("causal_halfspace_efield: rho_ohm_m must be finite and positive"))
+    length(Bx_nt) == length(By_nt) ||
+        throw(ArgumentError("causal_halfspace_efield: Bx and By must have equal length"))
+    N = length(Bx_nt)
+    N >= 1 || throw(ArgumentError("causal_halfspace_efield: input series must not be empty"))
+    bx = Float64.(Bx_nt); by = Float64.(By_nt)
+    all(isfinite, bx) && all(isfinite, by) ||
+        throw(ArgumentError("causal_halfspace_efield: magnetic inputs must be finite"))
+    # C folds nT->T (1e-9), V/m->V/km (1e3), the 2*sqrt(dt_s) from the analytic ∫(t-t')^{-1/2}dt'
+    # over one interval, and the 1/dt_s from a piecewise-constant dB/dt: 2*sqrt(dt_s)/dt_s = 2/sqrt(dt_s).
+    C = sqrt(rho_ohm_m / (pi * MU0)) * 1e-6 * 2.0 / sqrt(dt_s)
+    a = Vector{Float64}(undef, N)                    # kernel a_L = sqrt(L) - sqrt(L-1), decreasing in L
+    @inbounds for L in 1:N
+        a[L] = sqrt(float(L)) - sqrt(float(L - 1))
+    end
+    ex = zeros(N); ey = zeros(N)
+    @inbounds for i in 2:N
+        sx = 0.0; sy = 0.0
+        for m in 1:(i - 1)
+            L = i - m
+            sx += (by[m + 1] - by[m]) * a[L]         # E_x from ∂B_y
+            sy += (bx[m + 1] - bx[m]) * a[L]         # E_y from ∂B_x
+        end
+        ex[i] = C * sx
+        ey[i] = -C * sy
+    end
+    return ex, ey
+end
+
 # Illustrative 1-D earth models (resistivity Ω·m, thickness m; bottom entry = half-space).
 # Real GIC requires a site-specific ground model; these are coarse end-members for demonstration.
 const EARTH_RESISTIVE   = [(2.0e4, 1.5e4), (5.0e2, 0.0)]   # resistive shield over a deep conductor

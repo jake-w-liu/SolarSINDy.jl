@@ -498,6 +498,50 @@ end
         @test calls[] == 2
         @test seen[fr.t] == MODERATE
     end
+
+    @testset "D: present-time cooldown is bypassed by a strict severity escalation" begin
+        # Regression for the missed-escalation bug: after a MODERATE alarm arms the 6 h cooldown,
+        # a present-time deepening to a more severe tier inside that window must still fire (a
+        # storm crossing -50 nT then -200 nT two hours later cannot wait for the cooldown).
+        fired = Alarm[]
+        config = AlarmConfig(
+            Dict(MODERATE => -50.0, INTENSE => -100.0, SUPERINTENSE => -200.0),
+            false, a -> push!(fired, a), 6,
+        )
+
+        # 03:00 MODERATE fires and arms the cooldown at MODERATE.
+        r_mod = ForecastResult(DateTime(2026, 1, 1, 3), -60.0, -60.0, -70.0, -50.0, NaN)
+        a1, st1 = check_alarm(config, r_mod, DateTime(1970))
+        @test a1 !== nothing && a1.severity == MODERATE
+        @test st1.severity == MODERATE
+
+        # 05:00 SUPERINTENSE, elapsed 2 h < 6 h cooldown: the old shared-clock cooldown suppressed
+        # this; the escalation bypass fires it and re-arms at SUPERINTENSE.
+        r_super = ForecastResult(DateTime(2026, 1, 1, 5), -220.0, -220.0, -240.0, -200.0, NaN)
+        a2, st2 = check_alarm(config, r_super, st1)
+        @test a2 !== nothing && a2.severity == SUPERINTENSE
+        @test st2.severity == SUPERINTENSE
+
+        # 06:00 SUPERINTENSE again, still within cooldown, no escalation: suppressed (no spam).
+        r_super2 = ForecastResult(DateTime(2026, 1, 1, 6), -230.0, -230.0, -250.0, -210.0, NaN)
+        a3, st3 = check_alarm(config, r_super2, st2)
+        @test a3 === nothing
+        @test st3.severity == SUPERINTENSE           # armed state unchanged
+
+        # 07:00 de-escalation to INTENSE within cooldown: NOT an escalation, suppressed.
+        r_int = ForecastResult(DateTime(2026, 1, 1, 7), -120.0, -120.0, -140.0, -100.0, NaN)
+        a4, _ = check_alarm(config, r_int, st3)
+        @test a4 === nothing
+
+        @test length(fired) == 2                      # MODERATE onset + SUPERINTENSE escalation only
+
+        # The bare-DateTime legacy entry point arms at the maximum severity, so it preserves the
+        # old suppress-every-repeat-within-cooldown behavior (no escalation bypass).
+        b1, _ = check_alarm(config, r_mod, DateTime(1970))
+        @test b1 !== nothing
+        b2, _ = check_alarm(config, r_super, DateTime(2026, 1, 1, 3))  # elapsed 2 h, legacy clock
+        @test b2 === nothing                          # legacy path: escalation does NOT bypass
+    end
 end
 
 @testset "Baselines — Full Models" begin

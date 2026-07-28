@@ -82,10 +82,13 @@ end
     clean_omni_data!(df::DataFrame; causal::Bool=false)
 
 In-place cleaning of raw OMNI2 DataFrame:
-1. Remove rows with missing critical variables (V, Bz, Dst)
+1. Flag (never delete) rows with any missing critical variable
+   (V, Bz, Dst, n, Pdyn) by setting their `quality` column to 0; complete rows
+   keep `quality` = 1. Every raw row is retained so the strict hourly
+   contiguity that `build_storm_catalog` and the derivative/smoothing stencils
+   require is preserved.
 2. Fill short gaps (≤3 hours) in the measured columns
 3. Compute derived quantities: Bs, θ_c, proton-only Pdyn, Dst*
-4. Add quality flag column
 
 Short-gap filling depends on `causal`:
 - `causal=false` (default, offline/training preprocessing): centered linear

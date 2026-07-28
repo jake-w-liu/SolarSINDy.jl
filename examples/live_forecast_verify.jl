@@ -1899,12 +1899,48 @@ function _forecast_one_replay(anchor_time::DateTime, target_time::DateTime,
     )
 end
 
+"""
+    _replay_min_hourly_samples(plasma) -> Int
+
+Cadence-aware minimum finite samples per hourly driver window for
+[`replay_recent_table`](@ref)'s gap gate. The live gate assumes 1-min RTSW cadence
+(~60 samples/hour) and demands `LIVE_MIN_HOURLY_DRIVER_SAMPLES` (~17% coverage) to
+reject feed-brownout hours. Archived OMNI is hourly (1 sample/hour), where that floor
+is unreachable and every anchor would be rejected. The cadence-aware floor is the
+number of samples the observed cadence can supply in one hour, capped at the live
+floor: a 1-min (or any sub-6-min) feed still resolves to the full live floor, so the
+live-feed gate is never weakened, while hourly archival replay resolves to 1. Cadence
+is the median positive inter-sample spacing, robust to the larger gaps between hourly
+blocks in sub-hourly fixtures.
+"""
+function _replay_min_hourly_samples(plasma::DataFrame)
+    t = plasma.time_tag
+    length(t) < 2 && return 1
+    gaps_ms = Int64[]
+    for i in 2:length(t)
+        d = t[i] - t[i - 1]
+        d > Millisecond(0) && push!(gaps_ms, Dates.value(Millisecond(d)))
+    end
+    isempty(gaps_ms) && return 1
+    cadence_min = median(gaps_ms) / 60_000.0
+    cadence_min <= 0 && return LIVE_MIN_HOURLY_DRIVER_SAMPLES
+    expected = round(Int, 60.0 / cadence_min)
+    return clamp(expected, 1, LIVE_MIN_HOURLY_DRIVER_SAMPLES)
+end
+
 function replay_recent_table(plasma::DataFrame, mag::DataFrame,
                              dst_times, dst_vals; replay_hours::Int=48,
                              horizons::Vector{Int}=[1],
-                             model::Symbol=:v1, calibration=nothing)
+                             model::Symbol=:v1, calibration=nothing,
+                             min_samples::Union{Nothing,Int}=nothing)
     isempty(horizons) && throw(ArgumentError("horizons must not be empty"))
     any(<=(0), horizons) && throw(ArgumentError("horizons must be positive"))
+    min_samples !== nothing && min_samples < 1 &&
+        throw(ArgumentError("min_samples must be at least 1"))
+    # Cadence-aware driver-gap floor: keep the live 1-min gate at
+    # LIVE_MIN_HOURLY_DRIVER_SAMPLES; admit hourly archival replay (1 sample/hour).
+    # An explicit min_samples overrides the inference.
+    gate_min = min_samples === nothing ? _replay_min_hourly_samples(plasma) : min_samples
     dst_map = _dst_lookup(dst_times, dst_vals)
     anchors = _replay_anchor_hours(plasma, mag, dst_times, replay_hours)
     rows = NamedTuple[]
@@ -1927,7 +1963,8 @@ function replay_recent_table(plasma::DataFrame, mag::DataFrame,
                 _window_finite_count(plasma, :speed, source_start, source_end),
                 _window_finite_count(mag, :bz_gsm, source_start, source_end),
                 _window_finite_count(plasma, :density, source_start, source_end),
-                _window_finite_count(mag, :by_gsm, source_start, source_end),
+                _window_finite_count(mag, :by_gsm, source_start, source_end);
+                min_samples=gate_min,
             ) != :ok
             continue
         end

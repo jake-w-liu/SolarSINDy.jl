@@ -816,4 +816,230 @@ using Dates
         end
     end
 
+    @testset "RTSW active flag honors explicit non-Bool encodings" begin
+        act = SolarSINDy._rtsw_active
+        @test act(Dict(:active => true)) == true
+        @test act(Dict(:active => false)) == false
+        @test act(Dict(:active => "true")) == true
+        @test act(Dict(:active => "false")) == false      # explicit NOT active
+        @test act(Dict(:active => "FALSE")) == false       # case-insensitive
+        @test act(Dict(:active => 1)) == true
+        @test act(Dict(:active => 0)) == false             # integer 0 -> inactive
+        @test act(Dict(:source => "ACE")) == true          # key absent -> keep (schema safety)
+        @test act(Dict(:active => nothing)) == true        # null -> keep
+        @test act("not-a-dict") == true                    # non-object -> keep
+    end
+
+    @testset "Ballistic L1->Earth propagation shifts driver bins by transit lag" begin
+        # Raw L1-time binning pairs a driver bin with the Earth-UT Dst hour of the
+        # SAME clock label; the OMNI training convention (and the deployed issuance
+        # path) instead pairs Earth hour H with the L1 wind measured ~one transit
+        # lag earlier. With V=400 km/s the lag is a full hour, so the Earth 01:00
+        # bin must carry the L1 wind measured near 00:00 (strong Bz here), not the
+        # 01:00 L1 wind (weak Bz).
+        function feed(bz_by_hour)
+            ptime = DateTime[]; bz = Float64[]
+            for (h, b) in bz_by_hour, m in (10, 30, 50)
+                push!(ptime, DateTime(2026, 1, 1, h, m, 0)); push!(bz, b)
+            end
+            n = length(ptime)
+            plasma = DataFrame(time_tag = ptime, density = fill(5.0, n),
+                               speed = fill(400.0, n), temperature = fill(1e5, n))
+            mag = DataFrame(time_tag = ptime, bx_gsm = fill(1.0, n),
+                            by_gsm = fill(2.0, n), bz_gsm = bz, bt = fill(6.0, n))
+            return plasma, mag
+        end
+        plasma, mag = feed([0 => -10.0, 1 => -2.0, 2 => -8.0, 3 => -1.0])
+        raw, raw_tags, raw_fresh = fetch_realtime_solar_wind(
+            hours = 8; plasma = plasma, mag = mag, min_hourly_samples = 1)
+        prop, prop_tags, prop_fresh = fetch_realtime_solar_wind(
+            hours = 8; plasma = plasma, mag = mag, min_hourly_samples = 1,
+            propagate_l1_to_earth = true)
+
+        raw_at1 = findfirst(==(DateTime(2026, 1, 1, 1, 0, 0)), raw_tags)
+        prop_at1 = findfirst(==(DateTime(2026, 1, 1, 1, 0, 0)), prop_tags)
+        @test raw_at1 !== nothing && prop_at1 !== nothing
+        @test raw.Bz[raw_at1] ≈ -2.0 atol = 1e-12          # raw: 01:00 L1 wind
+        @test prop.Bz[prop_at1] ≈ -10.0 atol = 1e-12       # propagated: ~00:00 L1 wind
+        # Uniform speed -> every sample shifts by exactly the transit lag.
+        @test prop_fresh - raw_fresh == Millisecond(SolarSINDy._l1_transit_ms(400.0))
+        @test prop_fresh - raw_fresh == Millisecond(round(Int, (1.5e6 / 400 / 3600) * 3_600_000))
+    end
+
+    @testset "M5: monitor poll-cycle glue is testable in isolation" begin
+        # --- staleness computation ---
+        stale = SolarSINDy._monitor_data_stale
+        @test stale(Minute(179), 3.0) == false
+        @test stale(Minute(180), 3.0) == true
+        @test stale(Minute(200), 3.0) == true
+        @test stale(-Minute(200), 3.0) == true             # future-dated -> |age|
+        # 2.5 h threshold is 150 min (not the 2 h that Hour(round(Int,2.5)) would give).
+        @test stale(Minute(149), 2.5) == false
+        @test stale(Minute(150), 2.5) == true
+
+        # --- horizon_seen pruning: keep the current hour, drop the past ---
+        t = DateTime(2026, 1, 1, 12)
+        seen = Dict(t - Hour(1) => MODERATE, t => INTENSE, t + Hour(1) => MODERATE)
+        SolarSINDy._prune_horizon_seen!(seen, t)
+        @test !haskey(seen, t - Hour(1))
+        @test haskey(seen, t) && haskey(seen, t + Hour(1))
+
+        # --- anti-compounding new-bin gate + one-step advance ---
+        lib = build_minimal_library() # [1, Dst_star, V*Bs]
+        ξ = [0.0, -0.1, 0.0]
+        times = [DateTime(2026, 1, 1) + Hour(h) for h in 0:3]
+        swd = SolarWindData(collect(0.0:3.0), fill(400.0, 4), fill(-5.0, 4),
+                            zeros(4), fill(5.0, 4), fill(2.0, 4),
+                            fill(NaN, 4), fill(NaN, 4))
+        cfg = default_alarm_config()
+        prior = ForecastResult(times[4], -50.0, -50.0, -55.0, -45.0, NaN)
+        seen2 = Dict{DateTime,SolarSINDy.StormSeverity}()
+
+        # Same bin (t_new[latest] == state.t_current): NO advance, forecast reused.
+        state_same = ForecastState(times[4], -50.0, lib, ξ, repeat(ξ', 5), 1.0,
+                                   ForecastResult[])
+        out_same = SolarSINDy._monitor_cycle!(
+            state_same, swd, times, 4, 400.0, -5.0, 0.0, 5.0, 2.0;
+            forecast_horizon_hr = 3, alarm_config = cfg, history_cap = 2000,
+            last_result = prior, last_forecast = ForecastResult[prior],
+            last_alarm = nothing, last_alarm_time = DateTime(1970),
+            last_horizon_alarm = nothing, last_obs_time = times[4],
+            horizon_seen = seen2)
+        @test out_same.new_bin == false
+        @test state_same.t_current == times[4]             # model time unchanged
+        @test out_same.result === prior
+
+        # New bin: exactly one replay step from the preceding driver bin.
+        state_new = ForecastState(times[3], -50.0, lib, ξ, repeat(ξ', 5), 1.0,
+                                  ForecastResult[])
+        out_new = SolarSINDy._monitor_cycle!(
+            state_new, swd, times, 4, 400.0, -5.0, 0.0, 5.0, 2.0;
+            forecast_horizon_hr = 3, alarm_config = cfg, history_cap = 2000,
+            last_result = prior, last_forecast = ForecastResult[prior],
+            last_alarm = nothing, last_alarm_time = DateTime(1970),
+            last_horizon_alarm = nothing, last_obs_time = times[3],
+            horizon_seen = seen2)
+        @test out_new.new_bin == true
+        @test state_new.t_current == times[4]              # advanced exactly one hour
+        @test length(state_new.history) == 1               # one Euler step, not four
+        @test out_new.result.dst_predicted ≈ -45.0 atol = 1e-12   # -50 + 0.1*50
+        @test length(out_new.forecast) == 3
+
+        # Thread the returned last_alarm_time back into a SECOND new-bin cycle, exactly
+        # as run_monitor's loop does (store cyc.last_alarm_time, pass it back next poll).
+        # check_alarm returns an AlarmCooldownState, so after the first new-bin advance
+        # this field is no longer a bare DateTime; under the old ::DateTime keyword the
+        # second call threw TypeError and run_monitor wedged (adv-pkg-code CRITICAL).
+        @test out_new.last_alarm_time isa SolarSINDy.AlarmCooldownState
+        times5 = [DateTime(2026, 1, 1) + Hour(h) for h in 0:4]
+        swd5 = SolarWindData(collect(0.0:4.0), fill(400.0, 5), fill(-5.0, 5),
+                             zeros(5), fill(5.0, 5), fill(2.0, 5),
+                             fill(NaN, 5), fill(NaN, 5))
+        out_new2 = SolarSINDy._monitor_cycle!(
+            state_new, swd5, times5, 5, 400.0, -5.0, 0.0, 5.0, 2.0;
+            forecast_horizon_hr = 3, alarm_config = cfg, history_cap = 2000,
+            last_result = out_new.result, last_forecast = out_new.forecast,
+            last_alarm = out_new.last_alarm, last_alarm_time = out_new.last_alarm_time,
+            last_horizon_alarm = out_new.last_horizon_alarm,
+            last_obs_time = out_new.last_obs_time, horizon_seen = seen2)
+        @test out_new2.new_bin == true
+        @test state_new.t_current == times5[5]             # advanced a second hour, no wedge
+        @test out_new2.last_alarm_time isa SolarSINDy.AlarmCooldownState
+    end
+
+    @testset "M5r: run_monitor threads the cooldown state across new-bin cycles" begin
+        # Regression for the run_monitor wedge (adv-pkg-code CRITICAL): check_alarm
+        # returns an AlarmCooldownState, which run_monitor stores as last_alarm_time and
+        # threads straight back into the next _monitor_cycle!. Under the old ::DateTime
+        # keyword the second new-bin cycle threw TypeError, so run_monitor's recovery
+        # guard warn/re-warmed forever and never issued another forecast. This drives the
+        # exact store-and-pass-back discipline over several genuinely new bins.
+        lib = build_minimal_library() # [1, Dst_star, V*Bs]
+        ξ = [0.0, -0.1, 0.0]
+        nbin = 6
+        times = [DateTime(2026, 1, 1) + Hour(h) for h in 0:(nbin - 1)]
+        # Deep, sustained southward driving so check_alarm crosses a storm tier and the
+        # fired-alarm AlarmCooldownState (not only the QUIET-path conversion) is exercised.
+        swd = SolarWindData(collect(0.0:(nbin - 1)), fill(600.0, nbin), fill(-20.0, nbin),
+                            zeros(nbin), fill(8.0, nbin), fill(4.0, nbin),
+                            fill(NaN, nbin), fill(NaN, nbin))
+        fired = SolarSINDy.Alarm[]
+        cfg = default_alarm_config(callback = a -> push!(fired, a))
+        state = ForecastState(times[1], -120.0, lib, ξ, repeat(ξ', 5), 1.0, ForecastResult[])
+
+        # Bootstrap value is a bare DateTime, exactly as run_monitor initialises it.
+        last_alarm_time = DateTime(1970)
+        last_result = ForecastResult(times[1], -120.0, -120.0, -125.0, -115.0, -120.0)
+        last_forecast = ForecastResult[]
+        last_alarm = nothing
+        last_horizon_alarm = nothing
+        last_obs_time = times[1]
+        horizon_seen = Dict{DateTime,SolarSINDy.StormSeverity}()
+
+        saw_cooldown_state = false
+        for k in 2:nbin
+            cyc = SolarSINDy._monitor_cycle!(
+                state, swd, times, k, 600.0, -20.0, 0.0, 8.0, 4.0;
+                forecast_horizon_hr = 3, alarm_config = cfg, history_cap = 2000,
+                last_result = last_result, last_forecast = last_forecast,
+                last_alarm = last_alarm, last_alarm_time = last_alarm_time,
+                last_horizon_alarm = last_horizon_alarm, last_obs_time = last_obs_time,
+                horizon_seen = horizon_seen)
+            @test cyc.new_bin == true
+            # run_monitor's store step: thread every returned field back into the loop.
+            last_result = cyc.result
+            last_forecast = cyc.forecast
+            last_alarm = cyc.last_alarm
+            last_alarm_time = cyc.last_alarm_time
+            last_horizon_alarm = cyc.last_horizon_alarm
+            last_obs_time = cyc.last_obs_time
+            cyc.last_alarm_time isa SolarSINDy.AlarmCooldownState && (saw_cooldown_state = true)
+        end
+        @test saw_cooldown_state                       # the threaded value is the cooldown state
+        @test last_alarm_time isa SolarSINDy.AlarmCooldownState
+        @test state.t_current == times[nbin]           # advanced through every bin, never wedged
+        @test !isempty(fired)                          # deep driving armed a real alarm
+    end
+
+    @testset "M6: unguarded replay bridge is reachable and recoverable" begin
+        # The daemon-killing exception (realtime-monitor-01): a state older than the
+        # fetch window with no Dst anchor makes the replay bridge raise ArgumentError.
+        # _monitor_cycle! propagates it (so run_monitor's guard must catch it), and
+        # re-warming rebuilds a valid state from the same window.
+        lib = build_minimal_library()
+        ξ = [0.0, -0.1, 0.0]
+        times = [DateTime(2026, 1, 1) + Hour(h) for h in 0:3]
+        # Dst feed outage (all-NaN anchor) + a state that has fallen behind the
+        # window => the bridge cannot anchor and raises.
+        swd_gap = SolarWindData(collect(0.0:3.0), fill(400.0, 4), fill(-5.0, 4),
+                                zeros(4), fill(5.0, 4), fill(2.0, 4),
+                                fill(NaN, 4), fill(NaN, 4))
+        stranded = ForecastState(times[1] - Hour(1), -20.0, lib, ξ,
+                                 repeat(ξ', 5), 1.0, ForecastResult[])
+        cfg = default_alarm_config()
+        @test_throws ArgumentError SolarSINDy._monitor_cycle!(
+            stranded, swd_gap, times, 2, 400.0, -5.0, 0.0, 5.0, 2.0;
+            forecast_horizon_hr = 6, alarm_config = cfg, history_cap = 2000,
+            last_result = ForecastResult(times[1], -20.0, -20.0, -25.0, -15.0, NaN),
+            last_forecast = ForecastResult[], last_alarm = nothing,
+            last_alarm_time = DateTime(1970), last_horizon_alarm = nothing,
+            last_obs_time = nothing, horizon_seen = Dict{DateTime,SolarSINDy.StormSeverity}())
+
+        # Recovery re-warms from a window that carries an observed Dst* anchor.
+        swd_good = SolarWindData(collect(0.0:3.0), fill(400.0, 4), fill(-5.0, 4),
+                                 zeros(4), fill(5.0, 4), fill(2.0, 4),
+                                 [-30.0, NaN, NaN, NaN], [-30.0, NaN, NaN, NaN])
+        mktempdir() do tmp
+            coef = joinpath(tmp, "c.csv"); ens = joinpath(tmp, "e.csv")
+            CSV.write(coef, DataFrame(term = ["Bs", "Dst_star"], coefficient = [-2.0, -0.05]))
+            CSV.write(ens, DataFrame(term = ["Bs", "Dst_star"], inclusion_prob = [0.95, 0.99],
+                                     ci_025 = [-2.2, -0.06], ci_975 = [-1.8, -0.04]))
+            state, last_result, last_obs_time = SolarSINDy._warmup_and_init_monitor(
+                swd_good, times; coefficients_csv = coef, ensemble_csv = ens, history_cap = 2000)
+            @test state.t_current == times[4]               # recovered to newest bin
+            @test last_obs_time == times[1]                 # anchored on observed Dst*
+            @test last_result !== nothing
+        end
+    end
+
 end

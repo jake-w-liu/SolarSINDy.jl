@@ -199,6 +199,39 @@ end
         @test_throws InterruptException _swpc_dt(_InterruptingSWPCText())
     end
 
+    @testset "SWPC alert parsing is UTF-8 safe and isolates malformed records" begin
+        # Byte-safe summary extraction: multibyte messages must not throw (StringIndexError) or
+        # truncate mid-character. A raw byte index (nl-1) or a character-count slice (length) does.
+        @test _alert_summary("WARNING: T² index high") == "WARNING: T² index high"   # no newline, multibyte tail
+        @test _alert_summary("WARNING: 7°\nkp elevated") == "WARNING: 7°"            # multibyte before newline
+        @test _alert_summary("ALERT: flux 10²² pfu") == "ALERT: flux 10²² pfu"       # multibyte tail preserved
+        @test _alert_summary("WARNING: G3 storm\r\nmore") == "WARNING: G3 storm"     # CRLF handled
+        @test _alert_summary("WARNING: K-index of 5\nvalid") == "WARNING: K-index of 5"
+        @test _alert_summary("Space weather nominal.\nsecond") == "Space weather nominal. second"  # no keyword
+
+        # Null message / product_id (JSON null -> nothing) must not throw MethodError.
+        nullrec = JSON3.read("{\"product_id\":null,\"issue_datetime\":null,\"message\":null}")
+        parsed = _parse_alert(nullrec)
+        @test parsed.summary == "" && parsed.product_id == "" && parsed.issue_utc === nothing
+
+        good = Dict(:product_id => "K05", :issue_datetime => "2026-06-20 10:00:00.000",
+                    :message => "WARNING: Geomagnetic K-index of 5\nmore text")
+        gp = _parse_alert(good)
+        @test gp.product_id == "K05" && gp.summary == "WARNING: Geomagnetic K-index of 5"
+
+        # Per-alert isolation: one pathological record cannot take down the whole snapshot.
+        # An InterruptException inside a record must propagate (never swallowed).
+        @test_throws InterruptException _alerts_from(Any[Dict(:message => _InterruptingSWPCText())], 6)
+        # A non-Interrupt failure is skipped; surrounding good records survive.
+        bad_record = Dict(:message => Dict("unexpected" => "object"))   # String(::Dict) throws MethodError
+        kept = _alerts_from(Any[good, bad_record, Dict(:message => "ALERT: C")], 6)
+        @test length(kept) == 2
+        @test kept[1].summary == "WARNING: Geomagnetic K-index of 5"
+        @test kept[2].summary == "ALERT: C"
+        @test _alerts_from(nothing, 6) == NamedTuple[]
+        @test _alerts_from(Any[], 6) == NamedTuple[]
+    end
+
     @testset "forecast API exposes upgraded V2 as the product forecast" begin
         issue = now(UTC) - Minute(10)
         df = live_cycle_fixture(
@@ -296,6 +329,43 @@ end
         @test_throws ArgumentError geoelectric_field([0.0], [0.0], Inf)
         @test_throws ArgumentError geoelectric_field([0.0, NaN], [0.0, 1.0], 60.0)
         @test_throws ArgumentError geoelectric_field([0.0, 1.0], [0.0, Inf], 60.0)
+    end
+
+    @testset "causal half-space E-field: exact ramp response and sinusoid amplitude" begin
+        mu0 = 4e-7 * pi
+        dt = 60.0; nwin = 121; rho = 1000.0
+        tt = collect(0:nwin-1)
+        # --- pure ramp: constant dB/dt must produce the exact 2*b*sqrt(t)/sqrt(pi*mu0*sigma) field.
+        # This is precisely the sustained-storm component a detrended DFT window deletes. Independent
+        # oracle: E_y(t) = -sqrt(rho/mu0) * D^{1/2}[B_x] with D^{1/2}[b*t] = 2*b*sqrt(t/pi).
+        b_ps = 5.0                                  # nT per sample
+        bx = Float64.(b_ps .* tt); by = zeros(nwin)
+        exr, eyr = causal_halfspace_efield(bx, by, dt; rho_ohm_m=rho)
+        b_SI = b_ps / dt * 1e-9                      # T/s
+        t_cur = (nwin - 1) * dt
+        ramp_analytic = 2 * b_SI * sqrt(t_cur) * sqrt(rho / (pi * mu0)) * 1000.0   # V/km
+        ramp_got = sqrt(exr[end]^2 + eyr[end]^2)
+        @test isapprox(ramp_got, ramp_analytic; rtol=1e-9)     # exact for piecewise-constant dB/dt
+        @test exr[end] == 0.0                                   # By flat -> Ex zero
+        # A detrended DFT window would return ~0 here; the causal field must be O(0.2 V/km).
+        @test ramp_got > 0.2
+        # --- pure sinusoid: amplitude must match the analytic |Z|/mu0 response A*sqrt(w*rho/mu0).
+        A = 30.0; per = 10.0                         # 30 nT, 10-min period
+        w = 2pi / (per * dt)
+        xs = A .* sin.(2pi .* tt ./ per); ys = zeros(nwin)
+        exs, eys = causal_halfspace_efield(xs, ys, dt; rho_ohm_m=rho)
+        sin_got = maximum(sqrt.(exs[end-40:end].^2 .+ eys[end-40:end].^2))
+        sin_analytic = A * 1e-9 * sqrt(w * rho / mu0) * 1000.0
+        @test isapprox(sin_got, sin_analytic; rtol=0.03)        # piecewise-constant, 10 samples/period
+        # --- sign/pairing: Ex from By, Ey from Bx (matches geoelectric_field convention).
+        exb, eyb = causal_halfspace_efield(zeros(nwin), Float64.(b_ps .* tt), dt; rho_ohm_m=rho)
+        @test eyb[end] == 0.0 && exb[end] > 0.2                 # ramp on By drives Ex, not Ey
+        # --- error handling
+        @test_throws ArgumentError causal_halfspace_efield([0.0], [0.0], 0.0)
+        @test_throws ArgumentError causal_halfspace_efield([0.0], [0.0], -1.0)
+        @test_throws ArgumentError causal_halfspace_efield(Float64[], Float64[], 60.0)
+        @test_throws ArgumentError causal_halfspace_efield([0.0, NaN], [0.0, 1.0], 60.0)
+        @test_throws ArgumentError causal_halfspace_efield([0.0, 1.0], [0.0], 60.0)
     end
 
     @testset "dB/dt bands preserve published numeric thresholds without risk labels" begin
@@ -530,6 +600,7 @@ end
         @test build_alerts(df).active == false       # no forecast/watch alerts from an expired cycle
         cs = compute_alert_state(st, (available=false,), nothing)
         @test cs.level == 0
+        @test cs.stale == true         # a blind/expired forecast is stale, not "quiet"
         # a fresh cycle is neither stale nor expired
         fresh = now(UTC) - Minute(20)
         df2 = live_cycle_fixture(fresh)
@@ -635,19 +706,54 @@ end
         @test length(_subhour_traj(logf)) == 2                     # no cycle context -> back-compat
     end
 
-    @testset "geoelectric current is edge-trimmed; max spans the trailing 30 min" begin
+    @testset "geoelectric nowcast keeps the storm ramp and serves the real endpoint" begin
         tt = collect(1:120)
-        xv = Vector{Any}(20.0 .* tt .+ 3.0 .* sin.(tt ./ 3.0))     # rising ramp + wiggle (storm onset)
+        xv = Vector{Any}(20.0 .* tt .+ 3.0 .* sin.(tt ./ 3.0))     # rising ramp + wiggle (storm main phase)
         yv = Vector{Any}(fill(5.0, 120))
         g = _geoe_nowcast(xv, yv, 60.0)
         @test g !== nothing
-        # recompute the pipeline independently and pin the two behavioral changes
-        xs = [_num(xv[i]) for i in 1:120]; ys = [_num(yv[i]) for i in 1:120]
-        xf = _interp_gaps(xs); yf = _interp_gaps(ys)
-        ex, ey = geoelectric_field(_detrend(xf), _detrend(yf), 60.0; rho_ohm_m=1000.0)
+        # Wiring: the served value is the causal field at the real endpoint (no detrend, no edge trim).
+        # The causal_halfspace_efield primitive itself is validated against analytic oracles above.
+        xf = _interp_gaps([_num(xv[i]) for i in 1:120]); yf = _interp_gaps([_num(yv[i]) for i in 1:120])
+        ex, ey = causal_halfspace_efield(xf, yf, 60.0; rho_ohm_m=1000.0)
         emag = sqrt.(ex.^2 .+ ey.^2); m = length(emag)
-        @test isapprox(g.current, emag[max(1, m - 3)]; atol=1e-9)                       # trimmed, not emag[end]
-        @test isapprox(g.max, maximum(emag[max(min(4, m), m - 32):max(1, m - 3)]); atol=1e-9)  # last ~30 min
+        @test g.trailing_gap == 0
+        @test isapprox(g.current, emag[m]; atol=1e-9)                          # real endpoint, not emag[m-3]
+        @test isapprox(g.max, maximum(emag[max(2, m - 30):m]); atol=1e-9)      # trailing ~30 min
+        # A sustained 20 nT/min ramp yields a physically substantial field; the previous detrended
+        # circular DFT collapsed it ~4x toward the fluctuation-only amplitude.
+        @test g.current > 0.5
+    end
+
+    @testset "geoelectric current comes from the last real sample, not a flat-filled tail" begin
+        tt = collect(1:120)
+        ngap = 4
+        xv = Vector{Any}(20.0 .* tt)                               # pure ramp -> monotone rise then decay
+        for i in (120 - ngap + 1):120; xv[i] = nothing; end        # trailing nulls (USGS real-time latency)
+        yv = Vector{Any}(fill(5.0, 120))
+        g = _geoe_nowcast(xv, yv, 60.0)
+        @test g !== nothing
+        @test g.trailing_gap == ngap
+        xf = _interp_gaps([_num(xv[i]) for i in 1:120]); yf = _interp_gaps([_num(yv[i]) for i in 1:120])
+        ex, ey = causal_halfspace_efield(xf, yf, 60.0; rho_ohm_m=1000.0)
+        emag = sqrt.(ex.^2 .+ ey.^2); m = length(emag); last_real = m - ngap
+        @test isapprox(g.current, emag[last_real]; atol=1e-9)                  # served at last real sample
+        @test g.current > emag[m] + 1e-6                                       # flat-filled tail is biased low
+    end
+
+    @testset "geoelectric payload exposes an honest observation time under trailing gaps" begin
+        reference = DateTime(2026, 7, 14, 12); n = 40; ngap = 3
+        times = [reference - Minute(n - 1) + Minute(i) for i in 0:n-1]         # 1-min cadence ending at reference
+        xvals = Vector{Any}(10.0 .* collect(0:n-1))
+        for i in (n - ngap + 1):n; xvals[i] = nothing; end                     # last 3 min null-filled
+        payloadd = (times=jdt.(times),
+                    values=[(metadata=(element="X",), values=xvals),
+                            (metadata=(element="Y",), values=zeros(n))])
+        nc = _compute_dbdt("TST", 120; fetch_fn=(s, m) -> payloadd, reference=reference)
+        @test nc.available && nc.geoelectric !== nothing
+        @test nc.geoelectric.current_time_utc == jdt_str(payloadd.times[n - ngap])  # real sample, not "now"
+        @test nc.geoelectric.age_minutes ≈ 3.0
+        @test nc.geoelectric.current_vkm > 0.0
     end
 
     @testset "forecast log cache is schema- and path-safe" begin
@@ -1565,6 +1671,143 @@ end
         @test !occursin("supersecret", JSON3.write(r)) && !occursin("hunter2", JSON3.write(r))
         @test _LAST_ALERT_LEVEL[] == 0               # failed transition remains retryable
         reset_notify!()
+    end
+
+    @testset "webhook fires once per level transition and never on a repeat" begin
+        reset_notify!()
+        calls = Any[]
+        ok_post = (u, h, b) -> (push!(calls, JSON3.read(b)); nothing)
+        url = "https://hooks.example/test"
+
+        r = maybe_notify!((level=0, reasons=String[]); url=url, post_fn=ok_post)
+        @test r.fired == false && r.reason == "baseline set"   # first call baselines, no fire
+        @test isempty(calls) && _LAST_ALERT_LEVEL[] == 0
+
+        r = maybe_notify!((level=1, reasons=["Dst forecast Minor storm"]); url=url, post_fn=ok_post)
+        @test r.fired == true && r.level == 1                  # quiet -> L1 fires exactly once
+        @test length(calls) == 1 && calls[end].level == 1 && calls[end].kind == "elevated"
+        @test _LAST_ALERT_LEVEL[] == 1
+
+        r = maybe_notify!((level=1, reasons=["Dst forecast Minor storm"]); url=url, post_fn=ok_post)
+        @test r.fired == false && r.changed == false          # repeated level: no fire, no POST
+        @test length(calls) == 1
+
+        r = maybe_notify!((level=0, reasons=String[]); url=url, post_fn=ok_post)
+        @test r.fired == true && r.level == 0                  # L1 -> quiet fires the all-clear
+        @test length(calls) == 2 && calls[end].kind == "allclear"
+        @test occursin("all clear", lowercase(calls[end].text))
+        @test _LAST_ALERT_LEVEL[] == 0
+        reset_notify!()
+    end
+
+    @testset "webhook commits the delivered level only on successful delivery" begin
+        reset_notify!()
+        maybe_notify!((level=0, reasons=String[]); url="https://h", post_fn=(u,h,b)->nothing)
+        @test _LAST_ALERT_LEVEL[] == 0
+        r = maybe_notify!((level=2, reasons=["storm"]); url="https://h",
+                          post_fn=(u,h,b)->error("transient POST failure"))
+        @test r.fired == false && r.error == "webhook delivery failed"
+        @test _LAST_ALERT_LEVEL[] == 0                        # NOT committed -> transition retryable
+        n = Ref(0)
+        r = maybe_notify!((level=2, reasons=["storm"]); url="https://h",
+                          post_fn=(u,h,b)->(n[] += 1; nothing))
+        @test r.fired == true && n[] == 1 && _LAST_ALERT_LEVEL[] == 2   # retry delivers and commits
+        reset_notify!()
+    end
+
+    @testset "stale forecast raises an outage alert, never a false all-clear" begin
+        reset_notify!()
+        calls = Any[]
+        post = (u, h, b) -> (push!(calls, JSON3.read(b)); nothing)
+        url = "https://h"
+
+        maybe_notify!((level=2, reasons=["Dst forecast Moderate storm"], stale=false);
+                      url=url, post_fn=post)                  # baseline: mid-storm at L2
+        @test _LAST_ALERT_LEVEL[] == 2 && _LAST_ALERT_STALE[] == false
+
+        # Daemon dies; 3 h later the forecast status is stale and the numeric level collapses to 0.
+        r = maybe_notify!((level=0, reasons=String[], stale=true); url=url, post_fn=post)
+        @test r.fired == true && r.stale == true && r.kind == "stale_onset"
+        @test length(calls) == 1
+        @test !occursin("all clear", lowercase(calls[end].text))   # the exact bug: no false all-clear
+        @test occursin("stale", lowercase(calls[end].text))
+        @test _LAST_ALERT_STALE[] == true
+
+        r = maybe_notify!((level=0, reasons=String[], stale=true); url=url, post_fn=post)
+        @test r.fired == false && length(calls) == 1          # still stale: no repeat, no all-clear
+
+        r = maybe_notify!((level=0, reasons=String[], stale=false); url=url, post_fn=post)
+        @test r.fired == true && r.kind == "restored"         # fresh quiet cycle -> restored notice
+        @test length(calls) == 2 && occursin("restored", lowercase(calls[end].text))
+        @test _LAST_ALERT_STALE[] == false && _LAST_ALERT_LEVEL[] == 0
+        reset_notify!()
+    end
+
+    @testset "live-layer escalation fires even while the forecast feed is stale" begin
+        reset_notify!()
+        calls = Any[]
+        post = (u, h, b) -> (push!(calls, JSON3.read(b)); nothing)
+        url = "https://h"
+        maybe_notify!((level=0, reasons=String[], stale=false); url=url, post_fn=post)   # baseline
+        r = maybe_notify!((level=0, reasons=String[], stale=true); url=url, post_fn=post)
+        @test r.fired == true && r.kind == "stale_onset"
+        r = maybe_notify!((level=1, reasons=["SWPC upstream elevated"], stale=true);
+                          url=url, post_fn=post)
+        @test r.fired == true && r.kind == "stale_escalation" && r.level == 1
+        r = maybe_notify!((level=1, reasons=["SWPC upstream elevated"], stale=true);
+                          url=url, post_fn=post)
+        @test r.fired == false                                # same stale level: no repeat
+        reset_notify!()
+    end
+
+    @testset "webhook dedup baseline persists across a restart" begin
+        reset_notify!()
+        dir = mktempdir()
+        sp = joinpath(dir, "alert_notify_state.json")
+        n = Ref(0)
+        post = (u, h, b) -> (n[] += 1; nothing)
+        url = "https://h"
+        maybe_notify!((level=0, reasons=String[]); url=url, state_path=sp, post_fn=post)  # baseline
+        maybe_notify!((level=1, reasons=["storm"]); url=url, state_path=sp, post_fn=post)  # fires L1
+        @test isfile(sp) && n[] == 1
+
+        reset_notify!()                                       # simulate a process restart
+        @test _LAST_ALERT_LEVEL[] == -1
+        # Escalation to L2 happened during the downtime: the first poll after restart must deliver
+        # it against the persisted baseline (1), not silently re-baseline at 2.
+        r = maybe_notify!((level=2, reasons=["storm"]); url=url, state_path=sp, post_fn=post)
+        @test r.fired == true && r.level == 2 && r.previous_level == 1 && n[] == 2
+        reset_notify!()
+        rm(dir; recursive=true, force=true)
+    end
+
+    @testset "static serving whitelists known asset extensions" begin
+        @test serve_static("/index.html").status == 200
+        @test serve_static("/style.css").status == 200
+        stray = joinpath(PUBLIC_DIR, "stray_secret.txt")
+        write(stray, "credentials must not leak through the static server")
+        try
+            # A real file that exists under public/ but whose extension is not whitelisted must be
+            # treated as not found, not served as application/octet-stream.
+            @test serve_static("/stray_secret.txt").status == 404
+        finally
+            rm(stray; force=true)
+        end
+    end
+
+    @testset "get_log degrades to no-500 when the log is rotated away" begin
+        dir = mktempdir()
+        p = joinpath(dir, "live_forecast_log.csv")
+        write(p, "issue_time_utc,target_time_utc\n2026-01-01T00:00:00,2026-01-01T01:00:00\n")
+        _LOG_CACHE[] = nothing
+        g1 = get_log(p)
+        @test g1 isa DataFrame && nrow(g1) == 1
+        rm(p; force=true)                                     # log rotation unlinks the file
+        g2 = get_log(p)
+        @test g2 isa DataFrame                                # cached frame served, no exception
+        @test make_handler(p)(HTTP.Request("GET", "/api/forecast")).status == 200   # never a 500
+        _LOG_CACHE[] = nothing
+        rm(dir; recursive=true, force=true)
     end
 
     @testset "non-finite Dst threat is unknown" begin

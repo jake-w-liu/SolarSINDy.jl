@@ -40,11 +40,20 @@ function _canonical_plotly_pdf_fixture(label::AbstractString)
     return take!(io)
 end
 
-@testset "Legacy multi-panel generator does not start desktop synchronization" begin
+@testset "Legacy multi-panel generator builds a headless, untitled canvas" begin
+    # Pin the intended behavior of the legacy hero-figure canvas, not the exact
+    # call syntax: no desktop synchronization (sync=false), no display window
+    # (show=false), and no stray PlotlySupply default title (title=""). Under
+    # the Manifest-pinned PlotlySupply v1.8.0 the sync=false branch applies the
+    # package-name default title unless title="" is passed, so pinning only the
+    # first two keywords would let the stray-title defect reappear.
     source = read(joinpath(
         _FIGURE_TEST_PACKAGE_ROOT, "validation", "generate_real_figures.jl",
     ), String)
-    @test occursin("subplots(2, 1; sync=false, show=false)", source)
+    @test occursin("subplots(", source)
+    @test occursin("sync=false", source)
+    @test occursin("show=false", source)
+    @test occursin("title=\"\"", source)
 end
 
 function _figure_fixture_write(paths, filename, frame;
@@ -334,6 +343,7 @@ end
         @test inclusion_layout[:legend][:xanchor] == "right"
         @test inclusion_layout[:legend][:yanchor] == "top"
         may_layout = figures.may2024_reconstruction.fig.layout.fields
+        @test !haskey(may_layout, :title)
         @test figures.may2024_reconstruction.fig.data[1].fields[:y] ==
               prepared.discovery.velocity
         @test figures.may2024_reconstruction.fig.data[1].fields[:xaxis] == "x"

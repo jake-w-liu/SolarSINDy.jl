@@ -659,7 +659,9 @@ function _build_inclusion_frequency_figure(data)
 end
 
 function _build_may2024_reconstruction_figure(data)
-    figure = subplots(2, 1; sync=false, show=false)
+    # PlotlySupply's subplot constructor otherwise supplies its package name as
+    # a visible default title.  The submitted reference figure has no title.
+    figure = subplots(2, 1; sync=false, show=false, title="")
     subplot!(figure, 1, 1)
     plot_scatter!(figure, data.time, data.velocity;
         mode="lines", color=_YELLOW, linewidth=1.5,

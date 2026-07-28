@@ -246,31 +246,49 @@ function swpc_scales()
     end
 end
 
-# array of {product_id, issue_datetime, message}; extract a readable summary line
-function swpc_alerts(n::Int = 6)
-    al = _swpc_get("/products/alerts.json")
+# Readable summary line from an alert message. Byte-safe: it splits on the first CR/LF rather than
+# slicing with a character count (`length`) or a raw byte index (`nl-1`), either of which corrupts
+# or throws on a multibyte (non-ASCII) message.
+function _alert_summary(msg::AbstractString)
+    for kw in ("WARNING:", "ALERT:", "WATCH:", "SUMMARY:", "EXTENDED WARNING:")
+        r = findfirst(kw, msg)
+        if r !== nothing
+            rest = SubString(msg, first(r))
+            return String(strip(first(split(rest, r"[\r\n]"; limit=2))))
+        end
+    end
+    return String(strip(replace(first(msg, 80), r"[\r\n]+" => " ")))
+end
+
+# Parse one alert record {product_id, issue_datetime, message}. Null message/product_id are handled
+# without throwing (a JSON null returns `nothing`, and `String(nothing)` would otherwise error).
+function _parse_alert(m)
+    mv = get(m, :message, nothing)
+    msg = mv === nothing ? "" : String(mv)
+    pv = get(m, :product_id, nothing)
+    return (product_id = pv === nothing ? "" : String(pv),
+            issue_utc = jdt(_swpc_dt(get(m, :issue_datetime, nothing))),
+            summary = _alert_summary(msg))
+end
+
+# Parse up to `n` alert records in isolation: a malformed record is skipped and logged, never fatal,
+# so one bad alert cannot take down the whole SWPC snapshot (the file's fail-soft contract).
+function _alerts_from(al, n::Int)
     (al === nothing || isempty(al)) && return NamedTuple[]
     out = NamedTuple[]
     for i in 1:min(n, length(al))
-        m = al[i]
-        msg = String(get(m, :message, ""))
-        summary = ""
-        for kw in ("WARNING:", "ALERT:", "WATCH:", "SUMMARY:", "EXTENDED WARNING:")
-            r = findfirst(kw, msg)
-            if r !== nothing
-                rest = msg[first(r):end]
-                nl = findfirst(c -> c == '\n' || c == '\r', rest)
-                summary = strip(rest[1:(nl === nothing ? length(rest) : nl - 1)])
-                break
-            end
+        try
+            push!(out, _parse_alert(al[i]))
+        catch e
+            e isa InterruptException && rethrow()
+            @warn "SWPC alert parse skipped" index=i exception=e
         end
-        isempty(summary) && (summary = strip(replace(first(msg, 80), r"[\r\n]+" => " ")))
-        push!(out, (product_id = String(get(m, :product_id, "")),
-                    issue_utc = jdt(_swpc_dt(get(m, :issue_datetime, nothing))),
-                    summary = summary))
     end
     return out
 end
+
+# array of {product_id, issue_datetime, message}; extract a readable summary line per alert
+swpc_alerts(n::Int = 6) = _alerts_from(_swpc_get("/products/alerts.json"), n)
 
 # --- combined snapshot (cached) --------------------------------------------------------
 function _build_swpc_snapshot()

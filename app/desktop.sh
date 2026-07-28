@@ -18,19 +18,22 @@ fi
 
 echo "Instantiating + starting backend…"
 "$JULIA" --project=. -e 'using Pkg; Pkg.instantiate()' >/dev/null
-nohup "$JULIA" --threads="$JULIA_THREADS" --project=. src/server.jl > /tmp/swm_desktop.out 2>&1 &
+# Per-invocation private log file (0600, unpredictable name) so a shared host cannot pre-plant
+# /tmp/swm_desktop.out to hijack the redirect or make the launcher follow a symlink.
+OUT="$(mktemp "${TMPDIR:-/tmp}/swm_desktop.XXXXXX")"
+nohup "$JULIA" --threads="$JULIA_THREADS" --project=. src/server.jl > "$OUT" 2>&1 &
 SRV=$!
-cleanup() { kill "$SRV" 2>/dev/null || true; }
+cleanup() { kill "$SRV" 2>/dev/null || true; rm -f "$OUT" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
 # Wait for readiness (bounded: 60 s), exit fast if the server dies.
 ready=0
 for _ in $(seq 1 60); do
   if curl -fs "${URL}/api/health" >/dev/null 2>&1; then ready=1; break; fi
-  kill -0 "$SRV" 2>/dev/null || { echo "backend exited during startup:"; cat /tmp/swm_desktop.out; exit 1; }
+  kill -0 "$SRV" 2>/dev/null || { echo "backend exited during startup:"; cat "$OUT"; exit 1; }
   sleep 1
 done
-[ "$ready" = 1 ] || { echo "backend did not become ready in 60 s."; cat /tmp/swm_desktop.out; exit 1; }
+[ "$ready" = 1 ] || { echo "backend did not become ready in 60 s."; cat "$OUT"; exit 1; }
 
 open_window() {
   local c

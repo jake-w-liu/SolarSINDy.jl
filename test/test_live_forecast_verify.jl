@@ -1211,6 +1211,48 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         end
     end
 
+    @testset "A/D: replay gap gate is cadence-aware (hourly archival replay)" begin
+        # Regression for the archival-replay blocker (adv-paper-v2monitor MINOR): the
+        # driver-gap gate demanded >=10 finite samples per hourly window, which hourly
+        # OMNI (1 sample/hour) can never meet, so replay_recent_table dropped every
+        # anchor and run_conformal_coverage_test.jl could not run end-to-end. The gate is
+        # now cadence-aware: a 1-min feed still resolves to the live floor (never
+        # weakened), while hourly replay resolves to 1.
+        t0 = DateTime(2026, 6, 6, 0)
+
+        # 1-min cadence fixture: median inter-sample spacing 1 min -> live floor retained.
+        hours5 = collect(t0:Hour(1):t0 + Hour(4))
+        minute_times = [t + Minute(m) for t in hours5 for m in 0:9]
+        plasma_1m = DataFrame(time_tag=minute_times,
+                              density=fill(4.0, length(minute_times)),
+                              speed=fill(410.0, length(minute_times)),
+                              temperature=fill(1.0e5, length(minute_times)))
+        @test _replay_min_hourly_samples(plasma_1m) == LIVE_MIN_HOURLY_DRIVER_SAMPLES
+
+        # Hourly (archival OMNI) cadence: 1 sample/hour -> cadence-aware floor 1.
+        hours = collect(t0:Hour(1):t0 + Hour(6))
+        plasma_h = DataFrame(time_tag=hours, density=fill(4.0, 7),
+                             speed=fill(410.0, 7), temperature=fill(1.0e5, 7))
+        mag_h = DataFrame(time_tag=hours, bx_gsm=zeros(7), by_gsm=fill(1.0, 7),
+                          bz_gsm=fill(-2.0, 7), bt=fill(2.2, 7))
+        dst_vals = collect(-20.0:-1.0:-26.0)
+        @test _replay_min_hourly_samples(plasma_h) == 1
+
+        df = replay_recent_table(plasma_h, mag_h, hours, dst_vals;
+                                 replay_hours=24, horizons=[1])
+        @test nrow(df) >= 1                       # archival hourly replay now produces rows
+
+        # Explicit live floor (parameterized override) still rejects every hourly anchor,
+        # so no row is scored and the function raises the same "no replay rows" error that
+        # blocked run_conformal_coverage_test.jl before the cadence-aware default — proof
+        # the gate binds when configured for 1-min cadence.
+        @test_throws ErrorException replay_recent_table(
+            plasma_h, mag_h, hours, dst_vals;
+            replay_hours=24, horizons=[1], min_samples=LIVE_MIN_HOURLY_DRIVER_SAMPLES)
+        @test_throws ArgumentError replay_recent_table(plasma_h, mag_h, hours, dst_vals;
+                                                       replay_hours=24, min_samples=0)
+    end
+
     @testset "A/D: fit_v2_calibration! writes calibration and scored replay rows" begin
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")

@@ -1,0 +1,32 @@
+# Space-Weather forecast DAEMON container image (the process that issues + locks forecasts).
+# Build from the package root:
+#   docker build -t swmonitor-daemon -f deploy/Dockerfile.monitor .
+# Prefer deploy/docker-compose.yml, which runs this daemon and the dashboard as a supervised pair.
+FROM julia:1.12.6-bookworm
+
+# Shared non-root uid with the dashboard image so the daemon-written log (mode 600) is readable by
+# the dashboard over the shared volume.
+RUN useradd --create-home --uid 10001 swm
+WORKDIR /pkg
+
+# Package environment first so dependency resolution caches across source edits.
+COPY Project.toml Manifest.toml ./
+RUN julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+
+# Everything the daemon includes at runtime: the package source, the live-verification engine and
+# snapshot collector (examples/), the bundled calibration (deploy/), and the shared forecast API that
+# live_monitor.jl includes from app/src.
+COPY src ./src
+COPY examples ./examples
+COPY deploy ./deploy
+COPY app/src ./app/src
+
+RUN mkdir -p /data && chown -R swm:swm /pkg /data
+VOLUME ["/data"]
+ENV SOLARSINDY_MONITOR_DIR=/data JULIA_NUM_THREADS=2
+USER swm
+# Liveness = the daemon is still issuing: fail if the locked-live log has not been rewritten within
+# two hourly cadences, so a stuck/dead daemon is restarted by the orchestrator.
+HEALTHCHECK --interval=120s --timeout=10s --start-period=300s --retries=3 \
+  CMD test "$(( $(date -u +%s) - $(stat -c %Y /data/live_forecast_log.csv 2>/dev/null || echo 0) ))" -lt 7200 || exit 1
+CMD ["julia", "--project=.", "examples/live_monitor.jl"]

@@ -252,6 +252,85 @@ keeping the sparse equation structure fixed. It is a verified library primitive
 used for research comparison against the static v1/v2 paths; it is not yet wired
 into the live CLI issuance loop.
 
+## Operational Deployment
+
+The long-running monitor, the dashboard/alerting server, and an out-of-process
+liveness watchdog are deployed as supervised services. On macOS they are launchd
+agents rendered from the tracked templates in `SolarSINDy.jl/deploy/`; on a
+Linux host they run from the systemd unit templates in the same directory, and on
+a container host as a supervised pair from
+`SolarSINDy.jl/deploy/docker-compose.yml`.
+
+### macOS launchd services
+
+Render and install all three services from the templates:
+
+```bash
+SolarSINDy.jl/deploy/install_launchd.sh SolarSINDy.jl monitor dashboard watchdog
+```
+
+The script resolves the stable juliaup shim (`~/.juliaup/bin/julia`), never a
+version-pinned juliaup directory that `juliaup gc`/`update` could delete, creates
+the state and log directories, substitutes the template placeholders, lints the
+result, and bootstraps each agent into the GUI domain. Because the installed
+plists are generated from the templates, the deployed artifacts are reproducible
+rather than hand-edited. The monitor and dashboard use `KeepAlive` so a crash is
+restarted; the watchdog runs on a fixed `StartInterval`.
+
+### Diagnostics and log rotation
+
+launchd does not rotate console files, so the monitor owns bounded diagnostics.
+Every status line is mirrored into a size-capped rotating ring
+(`var/monitor/logs/monitor.log` plus numbered archives), and the launchd
+`StandardOutPath`/`StandardErrorPath` capture files are rotated once per restart,
+so an incident leaves a retrievable record instead of being discarded. Total
+diagnostic disk use is bounded.
+
+### Outage surfacing
+
+Issuance loss is surfaced in-band. The monitor writes an outage sentinel beside
+the forecast log when its issuance dead-man trips, and the watchdog writes the
+same sentinel when it observes a dead or unloaded process. The dashboard reads
+the sentinel and the forecast-log staleness: `/api/health` reports an `outage`
+object and an `outage` status, and `/api/alerts` raises the stale/unknown flag
+with an explicit reason. A stalled or unloaded monitor is therefore visible on
+the dashboard even when the monitor process is not running — the case that
+outage detection exists to cover.
+
+### External liveness watchdog
+
+`deploy/watchdog.sh` is a dependency-light periodic probe, independent of both
+supervised processes. It checks forecast-log freshness (daemon liveness) and the
+dashboard health endpoint (server liveness); on a state change it writes the
+sentinel and posts the configured webhook. Because it does not run inside either
+process, push alerting no longer depends on an interactive session or on the
+dashboard being alive.
+
+### Forecast-log durability
+
+The locked-live log is the scientific record, so bounded retention never discards
+rows outright. Before the hot log is trimmed to its row cap, the rows about to be
+dropped are appended to an append-only cold archive under `var/monitor/archive/`,
+guarded by a sidecar manifest that tracks the cumulative row count, the archive
+size, and a per-segment hash. A short or corrupted append aborts the trim, so the
+rows stay in the hot log rather than being lost.
+
+### Container deployment
+
+For a non-macOS node, `deploy/docker-compose.yml` runs the forecast daemon and
+the read-only dashboard as a supervised pair over a shared volume, each with a
+restart policy and a `HEALTHCHECK` (log freshness for the daemon, the health
+endpoint for the dashboard), both as a non-root user, with Plotly vendored at
+build time so the image never depends on an external CDN at runtime.
+
+### Pinned-release deployment
+
+`deploy/deploy_release.sh` snapshots the package at a committed revision into a
+versioned run directory (a clean `git archive` export, never the working tree)
+and can repoint the services at it, so a restart cannot silently deploy
+uncommitted state. State is kept outside the release so the locked-live log
+persists across deploys.
+
 ## Interpretation
 
 One verified live row proves that the live ingestion, forecast, and observation

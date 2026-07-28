@@ -103,6 +103,10 @@ function serve_static(path::AbstractString)
     confined = !isabspath(relative) && relative != ".." &&
                !startswith(relative, ".." * separator)
     (confined && isfile(resolved)) || return HTTP.Response(403, "forbidden")
+    # Extension whitelist: only the known dashboard asset types are served. A stray file dropped
+    # into public/ (editor backup, .DS_Store, a mis-copied config) is treated as "not found"
+    # rather than leaked as application/octet-stream — this is the guard the endpoint documents.
+    haskey(_CT, lowercase(splitext(resolved)[2])) || return HTTP.Response(404, "not found")
     return HTTP.Response(200, ["Content-Type" => content_type(resolved),
                               "Cache-Control" => "no-store"], read(resolved))
 end
@@ -183,11 +187,53 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
             status, upstream_assessment(snap),
             dashboard_dbdt_nowcast(; wait_timeout=0.0),
         )
+        # An active outage sentinel forces the stale/unknown flag and adds an explicit reason, so a
+        # dead or unloaded daemon (which the live layers cannot report) is not read as "quiet".
+        outage = outage_state(log_path)
+        reasons = String[combined.reasons...]
+        getproperty(outage, :active) && push!(reasons,
+            "forecast monitor outage: " *
+            something(getproperty(outage, :summary), "issuance stopped (sentinel present)"))
+        overall_stale = combined.stale || getproperty(outage, :active)
         return json_response(merge(build_alerts(df, status),
-                                   (overall_level = combined.level, overall_reasons = combined.reasons)))
+                                   (overall_level = combined.level, overall_reasons = reasons,
+                                    overall_stale = overall_stale, overall_outage = outage)))
     else
         return json_response((error="unknown endpoint", path=path); status=404)
     end
+end
+
+# The issuance dead-man (in the daemon) and the external liveness watchdog both write an OUTAGE.md
+# sentinel beside the forecast log when issuance stops or a process dies/unloads. Reading it here is
+# what makes an outage visible on the dashboard even when the daemon is not running — the exact case
+# the sentinel exists to cover, which nothing previously surfaced. `active` is the sentinel presence;
+# the labeled Source/Detected UTC/Summary lines (emitted by both writers) are parsed best-effort.
+function _outage_sentinel_path(log_path::AbstractString)
+    joinpath(dirname(log_path), "OUTAGE.md")
+end
+
+function outage_state(log_path::AbstractString)
+    sentinel = _outage_sentinel_path(log_path)
+    isfile(sentinel) || return (active = false,)
+    body = try
+        read(sentinel, String)
+    catch e
+        e isa InterruptException && rethrow()
+        return (active = true, source = nothing, detected_utc = nothing,
+                summary = nothing, sentinel_age_min = nothing)
+    end
+    field(label) = begin
+        m = match(Regex("(?m)^" * label * ":[ \t]*(.+?)[ \t]*\$"), body)
+        m === nothing ? nothing : String(m.captures[1])
+    end
+    age_min = try
+        round((time() - mtime(sentinel)) / 60; digits = 1)
+    catch e
+        e isa InterruptException && rethrow()
+        nothing
+    end
+    return (active = true, source = field("Source"), detected_utc = field("Detected UTC"),
+            summary = field("Summary"), sentinel_age_min = age_min)
 end
 
 function make_handler(log_path::AbstractString)
@@ -209,17 +255,22 @@ function make_handler(log_path::AbstractString)
                 cycle_stale = cycle_state !== nothing && (
                     cycle_state.stale || cycle_state.expired || cycle_state.invalid_future
                 )
+                outage = outage_state(log_path)
                 # The daemon rewrites the log every cycle, so a file mtime older than the
                 # staleness window means it has stopped issuing — report "stale" (dashboard dot
                 # turns red). A recent file is still unhealthy when its latest issue hour lacks
-                # the complete, internally consistent 1/2/3/6 h product cycle.
-                status = !ok ? "no_log" :
+                # the complete, internally consistent 1/2/3/6 h product cycle. An active outage
+                # sentinel (dead-man trip, or the watchdog detecting a dead/unloaded process)
+                # dominates: it reports "outage" even when the log file mtime still looks fresh.
+                status = getproperty(outage, :active) ? "outage" :
+                         !ok ? "no_log" :
                          ((age !== nothing && age > STALE_CYCLE_HOURS * 60) || cycle_stale) ?
                              "stale" :
                          !cycle_complete ? "incomplete" : "ok"
                 return json_response((status = status,
                                       log_age_min=age,
                                       cycle_complete=cycle_complete,
+                                      outage=outage,
                                       server_time_utc=string(now(UTC)) * "Z"))
             elseif startswith(path, "/api/")
                 return api_handler(path, uri.query === nothing ? "" : uri.query, log_path)

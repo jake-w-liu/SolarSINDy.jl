@@ -202,8 +202,11 @@ variance; a continuity correction of 0.5 is applied. Returns a NamedTuple
 `(p, z, w, n)` where `w = min(W⁺, W⁻)` and `n` is the count of nonzero
 differences. Returns `p = NaN` when no nonzero differences remain.
 
-This makes the significance statistics reported in the manuscript reproducible
-from the per-storm RMSE artifacts.
+This is a self-contained standardized test. It does not reproduce the
+operational monitor study's tabulated signed-rank p-values, which a separate
+generator computes from the `W⁺` statistic without a continuity correction and,
+for the small severe-storm cohorts, from the exact signed-rank distribution
+rather than this normal approximation.
 """
 function wilcoxon_signed_rank_p(differences::AbstractVector{<:Real})
     all(value -> !(value isa Bool) && isfinite(value), differences) ||

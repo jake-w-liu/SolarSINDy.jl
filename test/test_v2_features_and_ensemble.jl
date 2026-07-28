@@ -316,6 +316,140 @@ end
     end
 end
 
+@testset "V2 selector cannot deploy a non-live-servable component (storm_guard)" begin
+    # storm_guard's floor needs the forecast horizon, which the live issuance API
+    # does not carry, so it is not reconstructable at issue time. The selector must
+    # never choose it — even when a (pre-supplied) storm_guard_dst_nt column is a
+    # PERFECT match for the observation — or every live cycle would ArgumentError.
+    n = 16
+    v1_pred = fill(-40.0, n)
+    observed = collect(-48.0:-1.0:-63.0)
+    df = DataFrame(
+        pred_dst_nt=v1_pred,
+        pred_dst_ci05_nt=v1_pred .- 3.0,
+        pred_dst_ci95_nt=v1_pred .+ 3.0,
+        observation_dst_nt=observed,
+        latest_dst_nt=fill(-42.0, n),
+        V_kms=fill(420.0, n),
+        Bz_nt=collect(-8.0:1.0:7.0),
+        By_nt=fill(1.0, n),
+        n_cm3=fill(5.0, n),
+        Pdyn_npa=fill(1.5, n),
+        persistence_dst_nt=fill(-42.0, n),
+        obrien_dst_nt=observed .+ 2.0,            # decent but not perfect (MAE 2)
+        storm_guard_dst_nt=copy(observed),        # PERFECT (MAE 0) — must be ignored
+    )
+    cal = fit_operational_v2_calibration(df; ridge=1_000.0, guard_margin_nt=0.5)
+    @test !(:storm_guard in cal.selector_names)   # never a selector candidate
+    @test cal.selected_component != :storm_guard
+    @test cal.selected_component in
+          (:v2, :sindy_v1, :persistence, :burton, :burton_full, :obrien)
+    # obrien (servable, MAE 2) wins over the imperfect v2 fit here; the perfect
+    # storm_guard column is filtered out of the candidate set entirely.
+    @test cal.selected_component == :obrien
+
+    # Fail closed if a calibration selecting a non-servable component is built or
+    # loaded directly (defense in depth for a hand-edited/legacy artifact).
+    @test_throws ArgumentError OperationalV2Calibration(
+        [:Bz_nt], [0.0], [1.0], [0.0, 1.0], 1.0, "nonservable";
+        selector_names=[:v2, :storm_guard], selector_rmse=zeros(2),
+        selector_mae=zeros(2), selector_half_width=zeros(2),
+        selected_component=:storm_guard,
+    )
+    @test_throws ArgumentError OperationalV2Calibration(
+        [:Bz_nt], [0.0], [1.0], [0.0, 1.0], 1.0, "nonservable_ens";
+        selector_names=[:v2, :storm_guard], selector_rmse=zeros(2),
+        selector_mae=zeros(2), selector_half_width=zeros(2),
+        selector_weights=[0.5, 0.5], selected_component=:ensemble,
+    )
+end
+
+@testset "V2 selector skips a baseline column with a missing cell (no crash)" begin
+    # A Union{Missing,Float64} optional baseline column (mixed-generation replay)
+    # must map missing -> NaN and skip the component, not throw MethodError.
+    n = 16
+    v1_pred = fill(-40.0, n)
+    observed = collect(-48.0:-1.0:-63.0)
+    obrien = Vector{Union{Missing,Float64}}(observed .+ 0.2)
+    obrien[3] = missing                            # one unparseable/missing baseline cell
+    df = DataFrame(
+        pred_dst_nt=v1_pred,
+        pred_dst_ci05_nt=v1_pred .- 3.0,
+        pred_dst_ci95_nt=v1_pred .+ 3.0,
+        observation_dst_nt=observed,
+        latest_dst_nt=fill(-42.0, n),
+        V_kms=fill(420.0, n),
+        Bz_nt=collect(-8.0:1.0:7.0),
+        By_nt=fill(1.0, n),
+        n_cm3=fill(5.0, n),
+        Pdyn_npa=fill(1.5, n),
+        persistence_dst_nt=fill(-42.0, n),
+        obrien_dst_nt=obrien,
+    )
+    cal = fit_operational_v2_calibration(df; ridge=1_000.0)  # must not throw
+    @test !(:obrien in cal.selector_names)         # dropped: it had a missing cell
+    @test :v2 in cal.selector_names && :sindy_v1 in cal.selector_names
+    @test :persistence in cal.selector_names       # fully-finite baseline retained
+end
+
+@testset "Storm-phase coupling gate binds (driving AND deepening only)" begin
+    # coupling_active must be VBsouth during the storm main phase (driving and
+    # deepening) and exactly 0 during recovery (driving but Dst rising) — not the
+    # earlier no-op where it equaled VBsouth in every phase.
+    t0 = DateTime(2024, 1, 1, 0)
+    hours = 0:6
+    latest = Dict(0 => 0.0, 1 => -20.0, 2 => -40.0, 3 => -60.0,   # deepening
+                  4 => -40.0, 5 => -20.0, 6 => -10.0)             # recovery
+    rows = NamedTuple[]
+    for h in hours
+        t = t0 + Hour(h)
+        push!(rows, (issue_time_utc=string(t), latest_dst_time_utc=string(t),
+                     model_step_hours=1, latest_dst_nt=latest[h],
+                     V_kms=400.0, Bz_nt=-5.0, By_nt=1.0, n_cm3=5.0, Pdyn_npa=2.0))
+    end
+    df = DataFrame(rows)
+    SolarSINDy.add_operational_v2_features!(df)
+    vbs = 1e-3 * 400.0 * 5.0                        # VBsouth_mvm = 2.0
+    row(h) = df[df.issue_time_utc .== string(t0 + Hour(h)), :]
+    r3 = row(3); r5 = row(5)
+    @test r3.VBsouth_mvm[1] ≈ vbs atol=1e-12
+    @test r5.VBsouth_mvm[1] ≈ vbs atol=1e-12
+    @test r3.dst_delta_1h_nt[1] ≈ -20.0 atol=1e-12   # deepening
+    @test r5.dst_delta_1h_nt[1] ≈ 20.0 atol=1e-12    # recovering
+    @test r3.coupling_active_mvm[1] ≈ vbs atol=1e-12  # main phase -> = VBsouth
+    @test r5.coupling_active_mvm[1] == 0.0            # recovery -> gated off
+    # The named feature is genuinely distinct from VBsouth (no longer collinear).
+    @test r5.coupling_active_mvm[1] != r5.VBsouth_mvm[1]
+    # And the storm-guard drop no longer engages during recovery.
+    @test r5.horizon_coupling_pressure[1] == 0.0
+    @test r3.horizon_coupling_pressure[1] > 0.0
+end
+
+@testset "Memory features fail closed on a partially-missing time column" begin
+    # A time column present but with a missing/unparseable cell must raise, not
+    # silently degrade timestamp-keyed hourly lags to row-offset lags.
+    base(t2) = DataFrame(
+        issue_time_utc=["2024-01-01T00:00:00", t2],
+        latest_dst_nt=[-10.0, -30.0],
+        V_kms=[400.0, 400.0], Bz_nt=[-5.0, -5.0], By_nt=[1.0, 1.0],
+        n_cm3=[5.0, 5.0], Pdyn_npa=[2.0, 2.0],
+    )
+    missing_cell = DataFrame(
+        issue_time_utc=Vector{Union{Missing,String}}(["2024-01-01T00:00:00", missing]),
+        latest_dst_nt=[-10.0, -30.0],
+        V_kms=[400.0, 400.0], Bz_nt=[-5.0, -5.0], By_nt=[1.0, 1.0],
+        n_cm3=[5.0, 5.0], Pdyn_npa=[2.0, 2.0],
+    )
+    @test_throws ArgumentError SolarSINDy.add_operational_v2_features!(missing_cell)
+    @test_throws ArgumentError SolarSINDy.add_operational_v2_features!(base("not-a-date"))
+    # A genuine no-time-axis serving frame (single row, no anchor column) is still
+    # handled with neutral memory (no throw).
+    serving = DataFrame(latest_dst_nt=[-100.0], V_kms=[400.0], Bz_nt=[-5.0],
+                        By_nt=[1.0], n_cm3=[5.0], Pdyn_npa=[2.0])
+    SolarSINDy.add_operational_v2_features!(serving)
+    @test serving.dst_delta_1h_nt[1] == 0.0
+end
+
 
 @testset "init_forecast rejects corrupt coefficient artifacts" begin
     mktempdir() do dir

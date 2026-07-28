@@ -42,7 +42,78 @@ const MONITOR_DIR = get(ENV, "SOLARSINDY_MONITOR_DIR",
                         joinpath(PACKAGE_ROOT, "var", "monitor"))
 const LOG = joinpath(MONITOR_DIR, "live_forecast_log.csv")
 const REPORT = joinpath(MONITOR_DIR, "live_comparison_report.md")
-const OUTAGE_SENTINEL = joinpath(MONITOR_DIR, "OUTAGE.md")   # persistent alert artifact the dashboard can serve
+# Persistent outage artifact. Written by the daemon when its issuance dead-man trips AND by the
+# out-of-process watchdog when the log goes stale (process death or unload), and served in-band by
+# the dashboard API (/api/health, /api/alerts) so an outage is visible without the daemon alive.
+const OUTAGE_SENTINEL = joinpath(MONITOR_DIR, "OUTAGE.md")
+
+# ---- bounded, self-rotating operational diagnostics --------------------------------------
+# launchd does not rotate StandardOutPath/StandardErrorPath, so the daemon owns its own bounded
+# diagnostic record. Every logln line is mirrored into monitor.log, which rotates by size into a
+# fixed ring (monitor.log, monitor.log.1, …), capping total diagnostic disk use. The launchd
+# console streams point at launchd.out/launchd.err (see the plist) and are rotated once per
+# (re)start by _rotate_launchd_stream! so out-of-band crash output (precompile errors, backtraces)
+# is retained but bounded.
+const LOG_DIR = joinpath(MONITOR_DIR, "logs")
+const DIAG_LOG = joinpath(LOG_DIR, "monitor.log")
+const DIAG_LOG_MAX_BYTES = parse(Int, get(ENV, "LIVE_MONITOR_LOG_MAX_BYTES", string(5 * 1024 * 1024)))
+const DIAG_LOG_MAX_FILES = parse(Int, get(ENV, "LIVE_MONITOR_LOG_MAX_FILES", "5"))
+const LAUNCHD_OUT = joinpath(LOG_DIR, "launchd.out")
+const LAUNCHD_ERR = joinpath(LOG_DIR, "launchd.err")
+
+DIAG_LOG_MAX_BYTES >= 4096 || error("LIVE_MONITOR_LOG_MAX_BYTES must be at least 4096")
+DIAG_LOG_MAX_FILES >= 1 || error("LIVE_MONITOR_LOG_MAX_FILES must be at least 1")
+
+# Size-bounded rotating file. Keeps `path` plus up to (max_files-1) archives `path.1 … path.N-1`;
+# the oldest is discarded, so total disk use is bounded by ~max_bytes * max_files. Called before an
+# append that could cross the cap.
+function _rotate_ring!(path::AbstractString, max_bytes::Integer, max_files::Integer)
+    (isfile(path) && filesize(path) >= max_bytes) || return nothing
+    max_files <= 1 && (rm(path; force=true); return nothing)
+    for i in (max_files - 1):-1:2
+        src = string(path, '.', i - 1)
+        isfile(src) && mv(src, string(path, '.', i); force=true)
+    end
+    mv(path, string(path, ".1"); force=true)
+    return nothing
+end
+
+# Append one already-formatted line to the bounded diagnostic ring. Never throws: a diagnostics
+# failure must not take down the daemon (the console stream still carries the same line).
+function _diag_append(line::AbstractString)
+    try
+        isdir(LOG_DIR) || mkpath(LOG_DIR)
+        _rotate_ring!(DIAG_LOG, DIAG_LOG_MAX_BYTES, DIAG_LOG_MAX_FILES)
+        open(DIAG_LOG, "a") do io
+            println(io, line)
+        end
+    catch e
+        e isa InterruptException && rethrow()
+    end
+    return nothing
+end
+
+# Rotate a launchd stdout/stderr capture file once at startup. launchd opens these with O_APPEND,
+# so truncating the inode in place is safe (the next append lands at offset 0, never a sparse hole).
+# The just-ended generation's output is preserved in a single `.1` copy before truncation, so both
+# files stay bounded across the KeepAlive restart cycle.
+function _rotate_launchd_stream!(path::AbstractString)
+    (isfile(path) && filesize(path) > 0) || return nothing
+    try
+        cp(path, string(path, ".1"); force=true)
+        open(io -> truncate(io, 0), path, "r+")
+    catch e
+        e isa InterruptException && rethrow()
+    end
+    return nothing
+end
+
+# Cold archive of locked-live rows that FIFO retention is about to discard. Append-only CSV with a
+# sidecar manifest tracking cumulative archived rows, archive byte size, and per-segment sha256, so
+# the scientific record survives the hot-log row cap and integrity is checkable in O(segment).
+const ARCHIVE_DIR = joinpath(MONITOR_DIR, "archive")
+const FORECAST_ARCHIVE = joinpath(ARCHIVE_DIR, "live_forecast_log_archive.csv")
+const FORECAST_ARCHIVE_MANIFEST = string(FORECAST_ARCHIVE, ".manifest.json")
 
 # Package-bundled locked calibration + conformal sidecar (small model metadata), used as the
 # graceful fallback when the output directory has no operational calibration (fresh clone).
@@ -90,7 +161,72 @@ const EXTERNAL_DST_CFG = ExternalDstCollectorConfig(;
 )
 
 stamp() = Dates.format(now(UTC), dateformat"yyyy-mm-ddTHH:MM:SS") * "Z"
-logln(args...) = (println("MONITOR ", stamp(), "  ", args...); flush(stdout))
+function logln(args...)
+    line = string("MONITOR ", stamp(), "  ", args...)
+    println(stdout, line)
+    flush(stdout)
+    _diag_append(line)
+    return nothing
+end
+
+# Append rows about to be dropped by FIFO retention to the cold archive BEFORE they leave the hot
+# log, so the locked-live record is never destroyed by the row cap. Runs inside the same forecast-log
+# lock as retention, so the archive and the hot-log truncation commit together. Returns the count of
+# rows archived; throws on an integrity mismatch so the caller aborts the truncation and the rows
+# stay safely in the hot log for the next attempt.
+function _archive_pruned_rows!(pruned::DataFrame;
+                               archive_path::AbstractString=FORECAST_ARCHIVE,
+                               manifest_path::AbstractString=FORECAST_ARCHIVE_MANIFEST)
+    nrow(pruned) == 0 && return 0
+    mkpath(dirname(archive_path))
+    existed = isfile(archive_path)
+
+    prev_rows = 0
+    prev_bytes = 0
+    if isfile(manifest_path)
+        m = try
+            JSON3.read(read(manifest_path, String))
+        catch e
+            e isa InterruptException && rethrow()
+            nothing
+        end
+        if m !== nothing
+            prev_rows = Int(get(m, :archived_rows, 0))
+            prev_bytes = Int(get(m, :archive_bytes, 0))
+        end
+    end
+    # Detect external truncation/corruption since the last append before we extend the archive.
+    existed && prev_bytes != 0 && filesize(archive_path) != prev_bytes && error(
+        "cold archive size changed outside retention: expected $prev_bytes bytes, " *
+        "found $(filesize(archive_path)) at $archive_path")
+
+    # Serialize the segment once (header only when creating), hash it, append, flush.
+    buf = IOBuffer()
+    CSV.write(buf, pruned; append=existed, writeheader=!existed)
+    seg = take!(buf)
+    seg_sha = bytes2hex(sha256(seg))
+    open(archive_path, "a") do io
+        write(io, seg)
+        flush(io)
+    end
+    base_bytes = existed ? prev_bytes : 0
+    new_bytes = filesize(archive_path)
+    new_bytes == base_bytes + length(seg) || error(
+        "cold archive append incomplete: expected $(base_bytes + length(seg)) bytes, " *
+        "found $new_bytes at $archive_path")
+
+    total_rows = prev_rows + nrow(pruned)
+    tmp = string(manifest_path, ".tmp")
+    open(tmp, "w") do io
+        JSON3.write(io, (archived_rows = total_rows,
+                         archive_bytes = new_bytes,
+                         last_segment_rows = nrow(pruned),
+                         last_segment_sha256 = seg_sha,
+                         updated_utc = stamp()))
+    end
+    mv(tmp, manifest_path; force=true)
+    return nrow(pruned)
+end
 
 # Run one body step, reporting but never propagating failures. The issuance path counts these
 # call results for diagnostics, then validates the completed log cycle independently.
@@ -136,7 +272,10 @@ function write_outage_sentinel(first_fail::AbstractString, consecutive::Int;
     age_txt = age === nothing ? "unknown" : string(round(age; digits=1), " h")
     body = string(
         "# LIVE FORECAST ISSUANCE OUTAGE\n\n",
+        "Source: daemon issuance dead-man\n",
         "Detected UTC: ", stamp(), "\n",
+        "Summary: issuance incomplete for ", consecutive,
+        " consecutive cycle(s); newest forecast age ", age_txt, "\n",
         "First failed cycle UTC: ", first_fail, "\n",
         "Consecutive failed cycles: ", consecutive, "\n",
         "Newest issued forecast age: ", age_txt, "\n\n",
@@ -244,6 +383,10 @@ function _retain_live_forecast_log!(log_path::AbstractString, max_rows::Int)
         n <= max_rows && return 0
         previous_state = _valid_live_state(path)
         retained = df[(n - max_rows + 1):n, :]
+        # Durability: cold-archive the oldest rows about to be dropped BEFORE the hot log is
+        # rewritten, so the locked-live record survives the FIFO cap. A failed/short archive throws
+        # here (retention aborts, rows stay in the hot log) rather than silently destroying evidence.
+        _archive_pruned_rows!(df[1:(n - max_rows), :])
         _atomic_csv(path, retained)
         _persist_live_state_after_table_write!(
             path, previous_state, retained, Int[]; revised=true,
@@ -333,6 +476,12 @@ function cycle!()
 end
 
 function main()
+    # Bounded diagnostics must be ready before the first line: ensure the log directory exists and
+    # rotate the launchd console-capture files for this (re)start so out-of-band crash output from the
+    # previous generation is preserved once and both streams stay bounded.
+    isdir(LOG_DIR) || mkpath(LOG_DIR)
+    _rotate_launchd_stream!(LAUNCHD_OUT)
+    _rotate_launchd_stream!(LAUNCHD_ERR)
     logln("start: dir=", MONITOR_DIR, " calibration=", V2_CALIB,
           " interval=", INTERVAL, "s horizons=", HORIZONS,
           " max_cycles=", MAX_CYCLES, " deadman_cycles=", ISSUE_DEADMAN_THRESHOLD,

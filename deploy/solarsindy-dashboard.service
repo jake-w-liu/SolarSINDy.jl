@@ -1,0 +1,31 @@
+# systemd unit for the SolarSINDy dashboard + alerting server (bare-metal Linux).
+#
+# Install (system service):
+#   sudo cp deploy/solarsindy-dashboard.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now solarsindy-dashboard
+# Edit the placeholders first: __USER__, __CLONE_DIR__, __JULIA_BIN__. Set SWM_WEBHOOK_URL to enable
+# push alerts; the notify loop runs inside this supervised server, so alerting shares its supervision.
+[Unit]
+Description=SolarSINDy dashboard and alerting server
+After=network-online.target solarsindy-live-monitor.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__CLONE_DIR__/app
+Environment=SWM_HOST=127.0.0.1
+Environment=SWM_PORT=8723
+Environment=SOLARSINDY_LOG=__CLONE_DIR__/var/monitor/live_forecast_log.csv
+Environment=JULIA_NUM_THREADS=2
+# Environment=SWM_WEBHOOK_URL=https://hooks.example.com/...
+ExecStart=__JULIA_BIN__ --project=__CLONE_DIR__/app __CLONE_DIR__/app/src/server.jl
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -84,55 +84,13 @@ function run_monitor(; poll_interval_min::Int=5,
     # Initial data fetch with retry
     swd, t_tags = _fetch_with_retry(; hours=48, max_retries=3, dst=dst_feed)
 
-    # Warm only the newest contiguous block of measured primary drivers. Starting
-    # at the newest timestamp and then iterating old rows used to move model time
-    # backwards and let a future Dst anchor initialise earlier dynamics. A gap in
-    # V/Bz likewise cannot be compressed into one later Euler step.
-    warm_start, warm_end, anchor_idx = _monitor_warmup_window(swd, t_tags)
-    anchored = anchor_idx !== nothing
-    if anchored
-        state = init_forecast(;
-            coefficients_csv=coefficients_csv,
-            ensemble_csv=ensemble_csv,
-            t0=t_tags[anchor_idx],
-            dst0=swd.Dst_star[anchor_idx],
-        )
-        observed = swd.Dst_star[anchor_idx]
-        last_result::Union{Nothing,ForecastResult} = ForecastResult(
-            t_tags[anchor_idx], observed, observed, observed, observed, observed)
-        last_obs_time::Union{Nothing,DateTime} = t_tags[anchor_idx]
-        first_step = anchor_idx + 1
-    else
-        println("  [WARN] No observed Dst* in the contiguous driver window; initial Dst*=0 (unanchored free-run).")
-        state = init_forecast(;
-            coefficients_csv=coefficients_csv,
-            ensemble_csv=ensemble_csv,
-            t0=t_tags[warm_start],
-            dst0=0.0,
-        )
-        last_result = nothing
-        last_obs_time = nothing
-        first_step = warm_start + 1
-    end
-
-    println("Initialising from contiguous rows $(first_step):$(warm_end)...")
-    for i in first_step:warm_end
-        # Row k is the average over [t[k], t[k+1]); it advances the state
-        # from timestamp k to timestamp k+1. Never use the target row's driver
-        # average, which belongs to the following (future) interval.
-        driver_idx = i - 1
-        V_safe = _safe_val(swd.V[driver_idx], 400.0)
-        n_safe = _safe_val(swd.n[driver_idx], 5.0)
-        Pdyn_safe = _safe_val(swd.Pdyn[driver_idx],
-                              1.6726e-6 * n_safe * V_safe^2)
-        last_result = step_forecast!(state, t_tags[i],
-                       V_safe, swd.Bz[driver_idx],
-                       _safe_val(swd.By[driver_idx], 0.0),
-                       n_safe, Pdyn_safe;
-                       dst_observed=swd.Dst_star[i])
-        isfinite(swd.Dst_star[i]) && (last_obs_time = t_tags[i])
-    end
-    _cap_history!(state, history_cap)
+    # Warm only the newest contiguous block of measured primary drivers, then
+    # initialise (anchored on the latest observed Dst* when present). This same
+    # routine is reused to recover the daemon if a per-cycle modeling fault leaves
+    # the state stale or outside the fetch window.
+    state, last_result, last_obs_time = _warmup_and_init_monitor(
+        swd, t_tags; coefficients_csv=coefficients_csv,
+        ensemble_csv=ensemble_csv, history_cap=history_cap)
 
     last_alarm_time = DateTime(1970)
     last_forecast = ForecastResult[]
@@ -143,6 +101,7 @@ function run_monitor(; poll_interval_min::Int=5,
     # re-announced only on escalation). Pruned each cycle to bound memory.
     horizon_seen = Dict{DateTime,StormSeverity}()
     consecutive_failures = 0
+    cycle_failures = 0
     println("Monitor started. Polling every $(poll_interval_min) min. Ctrl-C to stop.\n")
 
     try
@@ -153,7 +112,8 @@ function run_monitor(; poll_interval_min::Int=5,
                 # 6 h trailing window: wide enough to contain at least one
                 # published Kyoto Dst hour (the feed lags ~1-3 h) so re-anchoring
                 # has an observation to lock onto.
-                data = fetch_realtime_solar_wind(; hours=6, dst=dst_feed)
+                data = fetch_realtime_solar_wind(; hours=6, dst=dst_feed,
+                                                 propagate_l1_to_earth=true)
                 consecutive_failures = 0
                 data
             catch e
@@ -200,7 +160,7 @@ function run_monitor(; poll_interval_min::Int=5,
             # Use |age|: a future-dated latest timestamp (clock skew or a mislabeled feed) is
             # anomalous too and must not read as "fresh". Threshold in minutes avoids the
             # round-half-to-even surprise of Hour(Int(round(2.5))) == 2 h.
-            stale = abs(data_age) >= Minute(round(Int, staleness_threshold_hr * 60))
+            stale = _monitor_data_stale(data_age, staleness_threshold_hr)
 
             # Safe solar wind values (replace NaN with defaults)
             V = _safe_val(swd_new.V[latest_idx], 400.0)
@@ -209,63 +169,70 @@ function run_monitor(; poll_interval_min::Int=5,
             n_val = _safe_val(swd_new.n[latest_idx], 5.0)
             Pdyn = _safe_val(swd_new.Pdyn[latest_idx], 1.6726e-6 * n_val * V^2)
 
-            # Advance the model only when a genuinely new hourly bin has appeared.
-            # step_forecast! integrates a fixed state.dt (1 h) of ODE dynamics per
-            # call; re-stepping the same hourly bin every poll cycle (default 5 min)
-            # would compound one full model-hour per cycle. When the Dst feed is up
-            # this is masked by re-anchoring, but during a persistent Dst outage the
-            # unanchored forecaster would free-run ~12x faster than wall clock. Gate
-            # on a new bin so model time stays synchronized with wall clock, and reuse
-            # the previous forecast for display/alarms between bins.
-            new_bin = last_result === nothing || t_new[latest_idx] > state.t_current
-            if new_bin
-                # Re-anchor the forecaster to the most recent observed Dst* before
-                # projecting forward, so the displayed state tracks observations
-                # rather than drifting on a free-run.
-                obs_idx = findlast(i -> isfinite(swd_new.Dst_star[i]),
-                                   1:latest_idx)
-                if obs_idx !== nothing
-                    last_obs_time = t_new[obs_idx]
+            # Advance the model (anti-compounding new-bin gate + delayed-anchor
+            # replay + forecast + alarms) in one testable step. Guard it: the replay
+            # bridge raises ArgumentError in reachable feed-gap states (an interior
+            # >3 h driver gap between a lagging Dst anchor and the newest bin, or a
+            # state that has fallen outside the fetch window after a long outage or
+            # host suspension). Without this guard that exception would propagate to
+            # the loop-level catch and terminate the daemon for a transient upstream
+            # condition. On failure, re-warm from the freshest contiguous block so
+            # the monitor recovers instead of wedging, then skip this cycle.
+            cyc = try
+                _monitor_cycle!(state, swd_new, t_new, latest_idx,
+                                V, Bz, By, n_val, Pdyn;
+                                forecast_horizon_hr=forecast_horizon_hr,
+                                alarm_config=alarm_config,
+                                history_cap=history_cap,
+                                last_result=last_result,
+                                last_forecast=last_forecast,
+                                last_alarm=last_alarm,
+                                last_alarm_time=last_alarm_time,
+                                last_horizon_alarm=last_horizon_alarm,
+                                last_obs_time=last_obs_time,
+                                horizon_seen=horizon_seen)
+            catch e
+                e isa InterruptException && rethrow()
+                cycle_failures += 1
+                if display
+                    println("  [WARN] Forecast cycle failed (attempt $cycle_failures): $(sprint(showerror, e))")
                 end
-
-                # A published Dst anchor commonly lags the newest driver bin by
-                # several hours. Replay each intervening bin; taking one step and
-                # labeling it at the newest timestamp would compress multi-hour
-                # dynamics into a single Euler update.
-                result = _replay_monitor_from_anchor!(state, swd_new, t_new,
-                                                      obs_idx, latest_idx)
-                _cap_history!(state, history_cap)
-
-                # Multi-hour forecast (persistence assumption)
-                forecast = forecast_ahead(state, V, Bz, By, n_val, Pdyn,
-                                           forecast_horizon_hr)
-                last_result = result
-                last_forecast = forecast
-
-                # Check alarms on current + forecast. Only the current-observation alarm
-                # advances the cooldown clock; forecast-horizon alarms have future
-                # timestamps, so letting them set last_alarm_time would push the cooldown
-                # into the future and suppress the next genuine present-time alarm.
-                last_alarm, last_alarm_time = check_alarm(alarm_config, result,
-                                                          last_alarm_time)
-
-                # Prune horizon-alarm dedup entries that are now in the past, then
-                # announce each horizon crossing at most once per (target hour,
-                # severity) so a persistent future crossing does not alarm every cycle.
-                for target in collect(keys(horizon_seen))
-                    target < result.t && delete!(horizon_seen, target)
+                # Best-effort recovery: rebuild the forecaster from the freshest
+                # contiguous driver block (Dst re-anchors from the feed). If re-warm
+                # also fails, stay alive and retry on the next poll.
+                try
+                    state, last_result, last_obs_time = _warmup_and_init_monitor(
+                        swd_new, t_new; coefficients_csv=coefficients_csv,
+                        ensemble_csv=ensemble_csv, history_cap=history_cap)
+                    last_forecast = ForecastResult[]
+                    last_alarm = nothing
+                    last_horizon_alarm = nothing
+                    empty!(horizon_seen)
+                catch e2
+                    e2 isa InterruptException && rethrow()
+                    @warn "Monitor re-warm after cycle failure failed; retrying next cycle" exception=(e2, catch_backtrace()) maxlog=1
                 end
-                last_horizon_alarm = nothing
-                for fr in forecast
-                    a = maybe_fire_horizon_alarm!(alarm_config, fr, horizon_seen)
-                    a === nothing && continue
-                    if last_horizon_alarm === nothing || a.severity > last_horizon_alarm.severity
-                        last_horizon_alarm = a
-                    end
-                end
+                sleep(poll_interval_min * 60)
+                continue
+            end
+            # Reset the consecutive-cycle-failure counter only after a clean cycle
+            # (the catch above ends in `continue`, so control reaches here only on
+            # success). Resetting before the attempt would make a persistent fault
+            # report "attempt 1" on every poll instead of escalating.
+            cycle_failures = 0
 
-                # Log only on a new bin so the file is not filled with duplicate
-                # same-timestamp rows. Rotate first so the append-only log is bounded.
+            result = cyc.result
+            forecast = cyc.forecast
+            last_result = cyc.result
+            last_forecast = cyc.forecast
+            last_alarm = cyc.last_alarm
+            last_alarm_time = cyc.last_alarm_time
+            last_horizon_alarm = cyc.last_horizon_alarm
+            last_obs_time = cyc.last_obs_time
+
+            # Log only on a new bin so the file is not filled with duplicate
+            # same-timestamp rows. Rotate first so the append-only log is bounded.
+            if cyc.new_bin
                 try
                     _rotate_log!(log_file, max_log_bytes)
                     open(log_file, "a") do io
@@ -280,10 +247,6 @@ function run_monitor(; poll_interval_min::Int=5,
                     # operational health fault and must remain visible.
                     @warn "Monitor log persistence failed" log_file exception=(e, catch_backtrace()) maxlog=1
                 end
-            else
-                # No new hourly bin: reuse the last forecast rather than re-integrating.
-                result = last_result
-                forecast = last_forecast
             end
 
             # Display. Surface the Dst-anchor age so an unanchored free-run (Dst feed
@@ -307,6 +270,166 @@ function run_monitor(; poll_interval_min::Int=5,
             rethrow(e)
         end
     end
+end
+
+"""
+    _warmup_and_init_monitor(swd, t_tags; coefficients_csv, ensemble_csv, history_cap)
+
+Warm the forecaster over the newest strictly-hourly contiguous driver block and
+return `(state, last_result, last_obs_time)`. When the block contains an observed
+Dst*, the state is anchored on the first such observation; otherwise it starts from
+`Dst*=0` (unanchored free-run). Row `k` (the average over `[t[k], t[k+1])`) advances
+the state from `t[k]` to `t[k+1]`, so the transition into row `i` uses driver row
+`i-1`. Shared by the initial start-up and by the daemon's per-cycle recovery path.
+"""
+function _warmup_and_init_monitor(swd::SolarWindData,
+                                  t_tags::AbstractVector{DateTime};
+                                  coefficients_csv::String, ensemble_csv::String,
+                                  history_cap::Int)
+    warm_start, warm_end, anchor_idx = _monitor_warmup_window(swd, t_tags)
+    if anchor_idx !== nothing
+        state = init_forecast(;
+            coefficients_csv=coefficients_csv,
+            ensemble_csv=ensemble_csv,
+            t0=t_tags[anchor_idx],
+            dst0=swd.Dst_star[anchor_idx],
+        )
+        observed = swd.Dst_star[anchor_idx]
+        last_result::Union{Nothing,ForecastResult} = ForecastResult(
+            t_tags[anchor_idx], observed, observed, observed, observed, observed)
+        last_obs_time::Union{Nothing,DateTime} = t_tags[anchor_idx]
+        first_step = anchor_idx + 1
+    else
+        println("  [WARN] No observed Dst* in the contiguous driver window; initial Dst*=0 (unanchored free-run).")
+        state = init_forecast(;
+            coefficients_csv=coefficients_csv,
+            ensemble_csv=ensemble_csv,
+            t0=t_tags[warm_start],
+            dst0=0.0,
+        )
+        last_result = nothing
+        last_obs_time = nothing
+        first_step = warm_start + 1
+    end
+
+    println("Initialising from contiguous rows $(first_step):$(warm_end)...")
+    for i in first_step:warm_end
+        # Never use the target row's driver average, which belongs to the following
+        # (future) interval.
+        driver_idx = i - 1
+        V_safe = _safe_val(swd.V[driver_idx], 400.0)
+        n_safe = _safe_val(swd.n[driver_idx], 5.0)
+        Pdyn_safe = _safe_val(swd.Pdyn[driver_idx],
+                              1.6726e-6 * n_safe * V_safe^2)
+        last_result = step_forecast!(state, t_tags[i],
+                       V_safe, swd.Bz[driver_idx],
+                       _safe_val(swd.By[driver_idx], 0.0),
+                       n_safe, Pdyn_safe;
+                       dst_observed=swd.Dst_star[i])
+        isfinite(swd.Dst_star[i]) && (last_obs_time = t_tags[i])
+    end
+    _cap_history!(state, history_cap)
+    return state, last_result, last_obs_time
+end
+
+"""
+    _monitor_data_stale(data_age, staleness_threshold_hr) -> Bool
+
+Return `true` when the newest data sample is older than `staleness_threshold_hr`.
+`|data_age|` is used so a future-dated latest timestamp (clock skew or a mislabeled
+feed) is treated as anomalous rather than fresh; the threshold is taken in whole
+minutes to avoid the round-half-to-even surprise of `Hour(Int(round(2.5))) == 2 h`.
+"""
+_monitor_data_stale(data_age::Period, staleness_threshold_hr::Real) =
+    abs(data_age) >= Minute(round(Int, staleness_threshold_hr * 60))
+
+"""
+    _prune_horizon_seen!(horizon_seen, current_t)
+
+Drop horizon-alarm dedup entries whose target hour is now strictly in the past
+relative to `current_t`, bounding the dictionary's memory. Kept-current-hour
+semantics: an entry at exactly `current_t` is retained.
+"""
+function _prune_horizon_seen!(horizon_seen::Dict{DateTime,StormSeverity},
+                              current_t::DateTime)
+    for target in collect(keys(horizon_seen))
+        target < current_t && delete!(horizon_seen, target)
+    end
+    return horizon_seen
+end
+
+"""
+    _monitor_cycle!(state, swd_new, t_new, latest_idx, V, Bz, By, n_val, Pdyn; ...)
+
+One poll cycle of model advancement, extracted from `run_monitor`'s loop so the glue
+is unit-testable (no fetch, sleep, log, or display side effects).
+
+The anti-compounding gate advances the model only when a genuinely new hourly bin has
+appeared: `step_forecast!` integrates a fixed 1 h of dynamics per call, so re-stepping
+the same bin every poll (default 5 min) would compound one model-hour per cycle —
+during a Dst outage the unanchored forecaster would free-run ~12× faster than wall
+clock. On a new bin the forecaster re-anchors on the most recent observed Dst*, replays
+each intervening bin (a delayed anchor must not be compressed into one Euler step),
+projects the multi-hour forecast, checks alarms, prunes and updates the horizon-alarm
+dedup set. On a repeated bin the previous result/forecast/alarms are returned unchanged.
+
+`last_alarm_time` accepts either a bare `DateTime` (the bootstrap value before any alarm
+has been evaluated) or the [`AlarmCooldownState`](@ref) returned by [`check_alarm`](@ref);
+the loop threads the returned `last_alarm_time` straight back into the next cycle, so after
+the first new-bin advance this keyword carries an `AlarmCooldownState`, which is what enables
+the strict-escalation cooldown bypass across cycles.
+
+Returns a named tuple `(new_bin, result, forecast, last_alarm, last_alarm_time,
+last_horizon_alarm, last_obs_time)`.
+"""
+function _monitor_cycle!(state::ForecastState, swd_new::SolarWindData,
+                         t_new::AbstractVector{DateTime}, latest_idx::Int,
+                         V::Float64, Bz::Float64, By::Float64,
+                         n_val::Float64, Pdyn::Float64;
+                         forecast_horizon_hr::Int,
+                         alarm_config::AlarmConfig,
+                         history_cap::Int,
+                         last_result::Union{Nothing,ForecastResult},
+                         last_forecast::Vector{ForecastResult},
+                         last_alarm::Union{Nothing,Alarm},
+                         last_alarm_time::Union{DateTime,AlarmCooldownState},
+                         last_horizon_alarm::Union{Nothing,Alarm},
+                         last_obs_time::Union{Nothing,DateTime},
+                         horizon_seen::Dict{DateTime,StormSeverity})
+    new_bin = last_result === nothing || t_new[latest_idx] > state.t_current
+    if !new_bin
+        # No new hourly bin: reuse the last forecast rather than re-integrating.
+        return (; new_bin=false, result=last_result, forecast=last_forecast,
+                last_alarm=last_alarm, last_alarm_time=last_alarm_time,
+                last_horizon_alarm=last_horizon_alarm, last_obs_time=last_obs_time)
+    end
+
+    obs_idx = findlast(i -> isfinite(swd_new.Dst_star[i]), 1:latest_idx)
+    new_obs_time = obs_idx !== nothing ? t_new[obs_idx] : last_obs_time
+
+    result = _replay_monitor_from_anchor!(state, swd_new, t_new, obs_idx, latest_idx)
+    _cap_history!(state, history_cap)
+
+    forecast = forecast_ahead(state, V, Bz, By, n_val, Pdyn, forecast_horizon_hr)
+
+    # Only the current-observation alarm advances the cooldown clock; forecast-horizon
+    # alarms have future timestamps, so letting them set last_alarm_time would push the
+    # cooldown into the future and suppress the next genuine present-time alarm.
+    alarm, alarm_time = check_alarm(alarm_config, result, last_alarm_time)
+
+    _prune_horizon_seen!(horizon_seen, result.t)
+    horizon_alarm = nothing
+    for fr in forecast
+        a = maybe_fire_horizon_alarm!(alarm_config, fr, horizon_seen)
+        a === nothing && continue
+        if horizon_alarm === nothing || a.severity > horizon_alarm.severity
+            horizon_alarm = a
+        end
+    end
+
+    return (; new_bin=true, result=result, forecast=forecast,
+            last_alarm=alarm, last_alarm_time=alarm_time,
+            last_horizon_alarm=horizon_alarm, last_obs_time=new_obs_time)
 end
 
 """
@@ -464,7 +587,8 @@ function _fetch_with_retry(; hours::Int, max_retries::Int=3, delay_sec::Int=10,
                             dst::Union{Nothing,Tuple}=nothing)
     for attempt in 1:max_retries
         try
-            return fetch_realtime_solar_wind(; hours=hours, dst=dst)
+            return fetch_realtime_solar_wind(; hours=hours, dst=dst,
+                                             propagate_l1_to_earth=true)
         catch e
             e isa InterruptException && rethrow()
             if attempt == max_retries
