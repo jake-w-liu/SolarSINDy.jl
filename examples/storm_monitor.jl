@@ -124,8 +124,10 @@ function run_refit_monitor(; poll_interval_min::Int=5,
                              log_file::String="storm_monitor.log",
                              display::Bool=true,
                              history_cap::Int=2000,
+                             max_log_bytes::Int=5_000_000,
                              max_cycles::Int=typemax(Int))
     max_cycles >= 1 || throw(ArgumentError("max_cycles must be at least 1"))
+    max_log_bytes >= 0 || throw(ArgumentError("max_log_bytes must be nonnegative"))
 
     dst_feed = try
         fetch_swpc_dst()
@@ -144,6 +146,7 @@ function run_refit_monitor(; poll_interval_min::Int=5,
     last_horizon_alarm::Union{Nothing,Alarm} = nothing
     horizon_seen = Dict{DateTime,StormSeverity}()
     consecutive_failures = 0
+    cycle_failures = 0
 
     println("Monitor started. Polling every $(poll_interval_min) min. Ctrl-C to stop.\n")
     cycles = 0
@@ -161,6 +164,8 @@ function run_refit_monitor(; poll_interval_min::Int=5,
                 e isa InterruptException && rethrow()
                 consecutive_failures += 1
                 display && println("  [WARN] Data fetch failed (attempt $consecutive_failures): $(sprint(showerror, e))")
+                consecutive_failures >= 10 &&
+                    println("  [ERROR] 10 consecutive failures. Check internet connection.")
                 cycles >= max_cycles && break
                 sleep(poll_interval_min * 60)
                 continue
@@ -190,13 +195,47 @@ function run_refit_monitor(; poll_interval_min::Int=5,
             Pdyn = SolarSINDy._safe_val(swd_new.Pdyn[latest_idx],
                                         1.6726e-6 * n_val * V^2)
 
-            cyc = SolarSINDy._monitor_cycle!(
-                state, swd_new, t_new, latest_idx, V, Bz, By, n_val, Pdyn;
-                forecast_horizon_hr=forecast_horizon_hr, alarm_config=alarm_config,
-                history_cap=history_cap, last_result=last_result,
-                last_forecast=last_forecast, last_alarm=last_alarm,
-                last_alarm_time=last_alarm_time, last_horizon_alarm=last_horizon_alarm,
-                last_obs_time=last_obs_time, horizon_seen=horizon_seen)
+            # Advance the model in one guarded step. The replay bridge raises
+            # ArgumentError in reachable feed-gap states (an interior >3 h driver
+            # gap between a lagging Dst anchor and the newest bin, or a state that
+            # has fallen outside the fetch window after a long outage or host
+            # suspension). Guard it so a transient upstream condition re-warms the
+            # forecaster instead of propagating to the loop-level catch and
+            # terminating the daemon. This mirrors the operational monitor.
+            cyc = try
+                SolarSINDy._monitor_cycle!(
+                    state, swd_new, t_new, latest_idx, V, Bz, By, n_val, Pdyn;
+                    forecast_horizon_hr=forecast_horizon_hr, alarm_config=alarm_config,
+                    history_cap=history_cap, last_result=last_result,
+                    last_forecast=last_forecast, last_alarm=last_alarm,
+                    last_alarm_time=last_alarm_time, last_horizon_alarm=last_horizon_alarm,
+                    last_obs_time=last_obs_time, horizon_seen=horizon_seen)
+            catch e
+                e isa InterruptException && rethrow()
+                cycle_failures += 1
+                display && println("  [WARN] Forecast cycle failed (attempt $cycle_failures): $(sprint(showerror, e))")
+                # Best-effort recovery: rebuild the refit forecaster from the
+                # freshest contiguous driver block (Dst re-anchors from the feed).
+                # If re-warm also fails, stay alive and retry on the next poll.
+                try
+                    state, last_result, last_obs_time =
+                        build_refit_state(swd_new, t_new; history_cap=history_cap)
+                    last_forecast = ForecastResult[]
+                    last_alarm = nothing
+                    last_horizon_alarm = nothing
+                    empty!(horizon_seen)
+                catch e2
+                    e2 isa InterruptException && rethrow()
+                    @warn "Monitor re-warm after cycle failure failed; retrying next cycle" exception=(e2, catch_backtrace()) maxlog=1
+                end
+                cycles >= max_cycles && break
+                sleep(poll_interval_min * 60)
+                continue
+            end
+            # Reset the cycle-failure counter only after a clean cycle (the catch
+            # above ends in `continue`), so a persistent fault escalates instead of
+            # reporting "attempt 1" every poll.
+            cycle_failures = 0
 
             last_result = cyc.result
             last_forecast = cyc.forecast
@@ -207,6 +246,7 @@ function run_refit_monitor(; poll_interval_min::Int=5,
 
             if cyc.new_bin
                 try
+                    SolarSINDy._rotate_log!(log_file, max_log_bytes)
                     open(log_file, "a") do io
                         println(io, Dates.format(cyc.result.t, "yyyy-mm-dd HH:MM"),
                                 ",", round(cyc.result.dst_predicted, digits=1),
