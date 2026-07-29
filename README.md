@@ -159,9 +159,13 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/storm_monitor.jl
 The monitor:
 
 - fetches near-real-time solar wind from NOAA SWPC (`fetch_realtime_solar_wind`)
-- loads the discovered SINDy coefficients from `data/` (via `get_data_dir()`)
-- runs rolling forecasts with ensemble + conformal uncertainty bands
+- forward-integrates the eleven-term SINDy refit at hourly cadence, loading the
+  refit artifacts from `data/` (`real_sindy_*_refit.csv`, distinct from the frozen
+  operational files)
+- propagates the 500-member coefficient ensemble for prediction intervals
 - emits configurable storm-severity alarms (`QUIET` / `MODERATE` / `INTENSE` / `SUPERINTENSE`)
+
+Set `STORM_MONITOR_MAX_CYCLES=<n>` to exit after `n` poll cycles (verification / CI).
 
 A locked-live verification harness — which issues a forecast, locks it, and scores it only
 after the target hour is observed — is in
@@ -220,6 +224,20 @@ unrotated stdout/stderr files; bounded forecast, state, report, and outage artif
   When absent, `init_forecast` warns and falls back to the marginal per-term ensemble; regenerate
   the joint draws with
   [`validation/generate_ensemble_draws.jl`](validation/generate_ensemble_draws.jl).
+- **Refit prototype artifacts** — `examples/storm_monitor.jl` runs the eleven-term retrospective
+  refit (20-term identifiable library, no redundant `n*V^2`), whose coefficients, inclusion
+  summary, and joint draws are bundled as `data/real_sindy_discovery_coefficients_refit.csv`,
+  `data/real_ensemble_inclusion_refit.csv`, and `data/real_sindy_ensemble_draws_refit.csv`. The
+  first two are committed; the 500-draw file is gitignored on the same policy as the frozen draws.
+  All three come from the canonical discovery pipeline
+  [`validation/real_data_discovery.jl`](validation/real_data_discovery.jl) (run in canonical mode
+  with `SOLARSINDY_OUTPUT_ROOT` set to the revision output root; joint draws finalized by
+  [`validation/generate_ensemble_draws.jl`](validation/generate_ensemble_draws.jl)), fit at
+  `λ ≈ 186.72` (largest λ within one standard error, seed 42, 500 draws) over 477 storms /
+  46,691 hourly points. To rebuild the gitignored refit draws on a fresh clone, rerun that pipeline
+  and copy its `real_sindy_ensemble_draws.csv` output to `data/real_sindy_ensemble_draws_refit.csv`.
+  These files never overwrite the frozen operational artifacts (`data/real_sindy_*` without the
+  `_refit` suffix), which the live V2 monitor and `init_forecast` defaults continue to load.
 - **Conformal interval sidecar** — the primary live interval is the adaptive-conformal band
   derived from the verified log; the stratified sidecar is a cold-start/fallback interval.
   Regenerate it from a verified log with
