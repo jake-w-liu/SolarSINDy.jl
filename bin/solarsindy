@@ -3,8 +3,10 @@
 #
 #   bin/solarsindy setup              one-time: check Julia, instantiate + precompile both environments
 #   bin/solarsindy start              start forecast daemon + dashboard in the background
+#                                     (interactive terminals auto-open the dashboard;
+#                                     SOLARSINDY_NO_OPEN=1 disables)
 #   bin/solarsindy status             process/health/freshness summary
-#   bin/solarsindy open               open the dashboard in a browser
+#   bin/solarsindy open               (re)open the dashboard in a browser
 #   bin/solarsindy stop               stop the background daemons
 #   bin/solarsindy restart            stop, then start
 #   bin/solarsindy once               run a single forecast cycle in the foreground, then exit
@@ -203,6 +205,24 @@ rotate_cli_log() {
 
 health_json() { command -v curl >/dev/null 2>&1 || return 0; curl -fsS -m "${1:-3}" "$URL/api/health" 2>/dev/null || true; }
 
+# Auto-open the dashboard after a successful interactive `start`: only when stdout is a
+# TTY (captured/piped/service/test invocations never pop a browser), a desktop opener
+# exists (with a display, on Linux), and SOLARSINDY_NO_OPEN=1 does not veto it. A closed
+# tab is reopened any time with `bin/solarsindy open`.
+maybe_open_browser() {
+  [ "${SOLARSINDY_NO_OPEN:-0}" = "1" ] && return 0
+  [ -t 1 ] || return 0
+  if command -v open >/dev/null 2>&1; then
+    say "dashboard: opening $URL in your browser (SOLARSINDY_NO_OPEN=1 disables this)"
+    open "$URL" 2>/dev/null || true
+  elif command -v xdg-open >/dev/null 2>&1; then
+    [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || return 0
+    say "dashboard: opening $URL in your browser (SOLARSINDY_NO_OPEN=1 disables this)"
+    xdg-open "$URL" >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
 # Dashboard readiness: health endpoint when curl exists, TCP accept otherwise.
 dash_ready() {
   if command -v curl >/dev/null 2>&1; then
@@ -335,6 +355,7 @@ _start_dashboard_locked() {
     fi
     if dash_ready; then
       say "dashboard: RUNNING (pid $newpid) — $URL"
+      maybe_open_browser
       return 0
     fi
     i=$((i + 1)); sleep 2

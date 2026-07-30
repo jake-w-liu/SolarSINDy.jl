@@ -93,11 +93,15 @@ git clone https://github.com/jake-w-liu/SolarSINDy.jl.git
 cd SolarSINDy.jl
 
 bin/solarsindy setup      # one-time: checks Julia, instantiates + precompiles both environments
-bin/solarsindy start      # forecast daemon + dashboard in the background
+bin/solarsindy start      # forecast daemon + dashboard; auto-opens http://127.0.0.1:8723
 bin/solarsindy status     # process / health / issuance-freshness summary
-bin/solarsindy open       # dashboard at http://127.0.0.1:8723
+bin/solarsindy open       # reopen the dashboard tab any time
 bin/solarsindy stop       # stops both daemons
 ```
+
+`start` opens the dashboard in your browser only from an interactive terminal (never when
+scripted, piped, or headless; `SOLARSINDY_NO_OPEN=1` turns it off) — the server keeps
+running either way, and a closed tab is just `bin/solarsindy open` away.
 
 `bin/solarsindy help` lists everything else: `start`/`stop`/`restart` take `monitor`,
 `dashboard`, or `all`; `once` runs a single forecast cycle in the foreground; `logs

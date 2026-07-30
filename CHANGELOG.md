@@ -19,7 +19,9 @@ User operation and startup:
   gitignored `solarsindy.env` supplies defaults (template in
   `deploy/solarsindy.env.example`); explicitly set environment variables win, malformed
   lines are skipped with a warning instead of aborting (recovery commands keep working
-  with a broken config), and CRLF files are tolerated.
+  with a broken config), and CRLF files are tolerated. An interactive `start` auto-opens
+  the dashboard in the browser (TTY-gated so scripted/headless/service invocations never
+  do; `SOLARSINDY_NO_OPEN=1` disables; `open` reopens a closed tab).
 - dashboard endpoint warm-up: the server compiles and caches the log-backed endpoint paths
   (log parse + forecast/status/history builders + JSON serialization) before opening the
   listener, converting a measured >20 s first-request JIT stall — which held the log-cache
