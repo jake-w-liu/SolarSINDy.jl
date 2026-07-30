@@ -79,7 +79,39 @@ Then:
 using SolarSINDy
 ```
 
-Requires Julia 1.10+. `Manifest.toml` is committed for reproducible research runs.
+Requires Julia 1.10+ for the package API; the operational monitor/dashboard stack targets
+Julia 1.12.6+ (enforced by its launchers). `Manifest.toml` is committed for reproducible
+research runs.
+
+## Quick start — run the live forecast system
+
+A fresh clone runs the full operational system — the hourly forecast daemon plus the web
+dashboard — with one command each:
+
+```bash
+git clone https://github.com/jake-w-liu/SolarSINDy.jl.git
+cd SolarSINDy.jl
+
+bin/solarsindy setup      # one-time: checks Julia, instantiates + precompiles both environments
+bin/solarsindy start      # forecast daemon + dashboard in the background
+bin/solarsindy status     # process / health / issuance-freshness summary
+bin/solarsindy open       # dashboard at http://127.0.0.1:8723
+bin/solarsindy stop       # stops both daemons
+```
+
+`bin/solarsindy help` lists everything else: `start`/`stop`/`restart` take `monitor`,
+`dashboard`, or `all`; `once` runs a single forecast cycle in the foreground; `logs
+[monitor|dashboard] [-f]` tails the daemon logs; `install-service` /
+`uninstall-service` switch to and from the supervised production mode (macOS launchd
+with auto-restart and an out-of-process watchdog; systemd templates for Linux live in
+[`deploy/`](deploy/)). Configuration is by environment variable — `SWM_PORT`,
+`SOLARSINDY_MONITOR_DIR`, `SWM_WEBHOOK_URL` for push alerts — or a gitignored
+`solarsindy.env` file in the clone root (template:
+[`deploy/solarsindy.env.example`](deploy/solarsindy.env.example)). The CLI keeps its
+pidfiles inside the instance state directory, serializes concurrent starts with a lock,
+refuses to start a second copy while the installed service mode is active, and never
+signals a process that is not running this clone's daemon entry point (so a recycled PID
+can never be hit).
 
 ## Architecture: discovery → operational calibration
 
@@ -177,7 +209,9 @@ path depends on external NOAA SWPC availability.
 [`examples/live_monitor.jl`](examples/live_monitor.jl) is the long-running accrual daemon. Each
 cycle it issues immutable V2 forecasts at 1/2/3/6 h leads, refreshes observations from the live
 Dst feed, scores any pending rows whose target hour has arrived, captures a prospective external
-Dst snapshot, and rewrites the comparison report. It runs from a fresh clone:
+Dst snapshot, and rewrites the comparison report. The managed path is
+`bin/solarsindy start monitor` (pidfile, readiness check, then `stop` / `status` /
+`logs monitor -f`); the daemon can also be run directly from a fresh clone:
 
 ```bash
 git clone https://github.com/jake-w-liu/SolarSINDy.jl.git
@@ -209,14 +243,19 @@ Configuration is by environment variable:
 - `LIVE_MONITOR_MAX_LOG_ROWS` — maximum retained hot-log rows (default 50,000). Values below
   four are rejected so retention cannot delete part of the latest product cycle.
 
-### macOS launchd service
+### macOS launchd service (production)
 
-[`deploy/com.example.solarsindy.live-monitor.plist`](deploy/com.example.solarsindy.live-monitor.plist)
-is a launchd template. Replace the Julia-binary and clone-directory placeholders, create
-`var/monitor/`, copy the file to `~/Library/LaunchAgents/`, and `launchctl load` it. The
-template sends supervisor console output to `/dev/null` so an unattended daemon cannot grow
-unrotated stdout/stderr files; bounded forecast, state, report, and outage artifacts remain in
-`var/monitor/`.
+`bin/solarsindy install-service` (equivalently
+[`deploy/install_launchd.sh`](deploy/install_launchd.sh)) renders the tracked launchd
+templates and bootstraps three supervised services — the live monitor, the
+dashboard/alerting server, and the out-of-process watchdog — with auto-restart
+(`KeepAlive`) and the stable juliaup shim, so a `juliaup update` cannot delete the
+interpreter out from under a running service. Supervisor console streams go to bounded,
+self-rotating files under `var/monitor/logs/` (`launchd.out`/`launchd.err` rotate once per
+(re)start, and the daemon mirrors its diagnostic history into the size-capped
+`monitor.log` ring), so crash output is retained instead of discarded. Bounded forecast,
+state, report, and outage artifacts remain in `var/monitor/`. Remove the services with
+`bin/solarsindy uninstall-service`.
 
 ### Artifact regeneration
 
@@ -264,9 +303,12 @@ study's nonoverlapping 20-minute validation protocol or universal grid-risk cate
 conductivity and network topology.
 
 ```bash
-cd SolarSINDy.jl/app
-./run.sh                 # → http://127.0.0.1:8723
+bin/solarsindy start dashboard    # managed background start (or: cd app && ./run.sh for foreground)
 ```
+
+The server compiles and caches its log-backed endpoint paths *before* opening the
+listener, so the first dashboard hit after a (re)start responds in milliseconds instead
+of paying a one-time parse/compile stall.
 
 It reads `<clone>/var/monitor/live_forecast_log.csv` by default (or set
 `SOLARSINDY_LOG=/path/to/live_forecast_log.csv`),

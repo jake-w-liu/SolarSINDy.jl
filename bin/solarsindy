@@ -1,0 +1,535 @@
+#!/usr/bin/env bash
+# solarsindy — one-command control of the SolarSINDy live forecast system.
+#
+#   bin/solarsindy setup              one-time: check Julia, instantiate + precompile both environments
+#   bin/solarsindy start              start forecast daemon + dashboard in the background
+#   bin/solarsindy status             process/health/freshness summary
+#   bin/solarsindy open               open the dashboard in a browser
+#   bin/solarsindy stop               stop the background daemons
+#   bin/solarsindy restart            stop, then start
+#   bin/solarsindy once               run a single forecast cycle in the foreground, then exit
+#   bin/solarsindy logs [t] [-f]      tail (or follow) the monitor/dashboard logs
+#   bin/solarsindy install-service    switch to the supervised production mode (macOS launchd)
+#   bin/solarsindy uninstall-service  remove the installed launchd services
+#   bin/solarsindy help               this text
+#
+# Targets: `start`, `stop`, `restart` accept an optional target — `monitor`, `dashboard`,
+# or `all` (default). `logs` takes `monitor` (default) or `dashboard`, plus `-f` to follow.
+#
+# This CLI manages ad-hoc background processes with pidfiles inside the instance state
+# dir (var/monitor/run/ by default). It is the "downloaded the package, want it running
+# now" path. For an unattended production install
+# use `bin/solarsindy install-service` (macOS launchd; auto-restart + watchdog) or the
+# systemd templates in deploy/ (Linux) — the CLI detects service mode and refuses to fight it.
+#
+# Config: environment variables win; optionally put them in <clone>/solarsindy.env
+# (auto-sourced, gitignored; template in deploy/solarsindy.env.example).
+#   SWM_HOST / SWM_PORT          dashboard bind (default 127.0.0.1:8723)
+#   SOLARSINDY_MONITOR_DIR       monitor state dir (default <clone>/var/monitor)
+#   SWM_WEBHOOK_URL              enable push alerts (Slack/Discord/generic JSON POST)
+#   JULIA                        julia launcher (default: ~/.juliaup/bin/julia, else `julia`)
+#   LIVE_MONITOR_INTERVAL_SEC    forecast cadence (default 3600)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# SOLARSINDY_ENV_FILE overrides the config location (tests point it at /dev/null).
+CONFIG="${SOLARSINDY_ENV_FILE:-$ROOT/solarsindy.env}"
+if [ -f "$CONFIG" ]; then
+  # KEY=VALUE lines only; comments/blanks skipped. Environment variables that are already
+  # set WIN over the file (so `SWM_PORT=9000 bin/solarsindy start` always works) — the
+  # file only supplies defaults. Values may use shell quoting. A malformed line is skipped
+  # with a warning and must NEVER abort the CLI: `stop` has to keep working with a broken
+  # config. CRLF line endings are tolerated (a stray \r would otherwise silently corrupt
+  # ports/paths and defeat the port-busy and readiness checks).
+  while IFS= read -r _line || [ -n "$_line" ]; do
+    _line="${_line%$'\r'}"
+    case "$_line" in
+      ''|\#*) continue ;;
+      [A-Za-z_]*=*) ;;
+      *) printf 'warning: ignoring non-KEY=VALUE line in %s: %.40s\n' "$CONFIG" "$_line" >&2
+         continue ;;
+    esac
+    _name="${_line%%=*}"
+    case "$_name" in
+      *[!A-Za-z0-9_]*)
+        printf 'warning: ignoring invalid variable name in %s: %.40s\n' "$CONFIG" "$_name" >&2
+        continue ;;
+    esac
+    if eval "[ -n \"\${$_name+x}\" ]"; then
+      continue                              # env wins over the file
+    fi
+    # Probe the assignment in a subshell first: a syntax error there (unbalanced quote,
+    # stray backtick) cannot kill this shell, so the CLI keeps working.
+    if ( eval "export $_line" ) 2>/dev/null; then
+      eval "export $_line"
+    else
+      printf 'warning: skipping malformed line in %s: %s=…\n' "$CONFIG" "$_name" >&2
+    fi
+  done < "$CONFIG"
+  unset _line _name
+fi
+
+HOST="${SWM_HOST:-127.0.0.1}"
+PORT="${SWM_PORT:-8723}"
+MONITOR_DIR="${SOLARSINDY_MONITOR_DIR:-$ROOT/var/monitor}"
+# Pidfiles live inside the instance state dir, so two instances with distinct
+# SOLARSINDY_MONITOR_DIR (e.g. production + staging) cannot clobber each other.
+RUN_DIR="$MONITOR_DIR/run"
+LOG_DIR="$MONITOR_DIR/logs"
+URL="http://$HOST:$PORT"
+MIN_JULIA="1.12.6"
+
+if [ -n "${JULIA:-}" ]; then
+  :
+elif [ -x "$HOME/.juliaup/bin/julia" ]; then
+  # Stable juliaup shim: survives `juliaup update`/`gc`, unlike version-pinned paths.
+  JULIA="$HOME/.juliaup/bin/julia"
+else
+  JULIA="julia"
+fi
+
+MON_PID="$RUN_DIR/monitor.pid"
+DASH_PID="$RUN_DIR/dashboard.pid"
+MON_LOG="$LOG_DIR/cli-monitor.log"
+DASH_LOG="$LOG_DIR/cli-dashboard.log"
+# Substrings that must appear in `ps -o command=` before this CLI will signal a PID from a
+# pidfile. Guards against PID reuse: a recycled PID whose command line is not this clone's
+# daemon entry point is treated as a stale pidfile and never signaled. (This is an
+# entry-point identity check, not process provenance — a daemon someone started manually
+# from this clone matches too, which is the desired "adopt it" behavior.)
+MON_MARK="$ROOT/examples/live_monitor.jl"
+DASH_MARK="$ROOT/app/src/server.jl"
+
+# ---------- helpers ---------------------------------------------------------------------
+
+say()  { printf '%s\n' "$*"; }
+err()  { printf 'error: %s\n' "$*" >&2; }
+note() { printf '  %s\n' "$*"; }
+
+need_julia() {
+  command -v "$JULIA" >/dev/null 2>&1 || {
+    err "'$JULIA' not found. Install Julia $MIN_JULIA+ (https://julialang.org/downloads/) or set JULIA=/path/to/julia."
+    exit 1
+  }
+  "$JULIA" --startup-file=no -e "exit(VERSION >= v\"$MIN_JULIA\" ? 0 : 1)" >/dev/null 2>&1 || {
+    err "Julia $MIN_JULIA or newer is required (found: $("$JULIA" --version 2>/dev/null || echo unknown))."
+    exit 1
+  }
+}
+
+# pid_of FILE MARK -> echoes the pid iff the pidfile names a live process whose command
+# line contains MARK; cleans up stale pidfiles. Returns 1 when not running.
+pid_of() {
+  local file="$1" mark="$2" pid cmd
+  [ -f "$file" ] || return 1
+  # Strict: first line must be purely numeric. A garbled pidfile ("1234abc", multi-line)
+  # is stale by definition — never "repaired" into some other PID.
+  pid="$(head -n1 "$file" 2>/dev/null | tr -d '[:space:]')"
+  case "$pid" in
+    ''|*[!0-9]*) rm -f "$file"; return 1 ;;
+  esac
+  cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
+  if [ -z "$cmd" ]; then
+    rm -f "$file"                       # process gone: stale pidfile
+    return 1
+  fi
+  case "$cmd" in
+    *"$mark"*) printf '%s\n' "$pid"; return 0 ;;
+    *) rm -f "$file"; return 1 ;;       # PID reused by an unrelated process: never signal it
+  esac
+}
+
+# Exclusive per-component start lock: closes the check-then-spawn race where two
+# concurrent `start` invocations both pass the pid_of check and spawn two daemons, one of
+# which becomes an unreachable orphan (only the pidfile winner is ever stopped). noclobber
+# `>` is the atomic test-and-set (bash 3.2 has no flock); the lock records its owner PID
+# so a lock left behind by a crashed start is reclaimed instead of wedging future starts.
+START_LOCK=""
+acquire_start_lock() {
+  local label="$1" lock owner attempt=0
+  lock="$RUN_DIR/.$label.start.lock"
+  mkdir -p "$RUN_DIR"
+  while [ $attempt -lt 2 ]; do
+    if ( set -C; printf '%s\n' "$$" > "$lock" ) 2>/dev/null; then
+      START_LOCK="$lock"
+      return 0
+    fi
+    owner="$(head -n1 "$lock" 2>/dev/null | tr -d '[:space:]' || true)"
+    case "$owner" in
+      ''|*[!0-9]*) ;;                                   # unreadable/garbled: treat as stale
+      *) kill -0 "$owner" 2>/dev/null && return 1 ;;    # a live start owns it
+    esac
+    rm -f "$lock" 2>/dev/null || true                   # stale lock: reclaim once
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+release_start_lock() {
+  [ -n "$START_LOCK" ] && rm -f "$START_LOCK" 2>/dev/null
+  START_LOCK=""
+  return 0
+}
+trap release_start_lock EXIT
+
+# Detect the supervised service mode so the CLI does not run a second copy under it.
+service_mode_active() {
+  # $1 = launchd label suffix (live-monitor|dashboard) / systemd stem (solarsindy-<stem>)
+  # SOLARSINDY_IGNORE_SERVICE=1 skips the guard for a deliberate second instance
+  # (separate SWM_PORT + SOLARSINDY_MONITOR_DIR, e.g. staging or tests).
+  [ "${SOLARSINDY_IGNORE_SERVICE:-0}" = "1" ] && return 1
+  local suffix="$1"
+  if command -v launchctl >/dev/null 2>&1; then
+    # No `grep -q` here: with pipefail, -q's early exit can SIGPIPE launchctl and turn a
+    # real match into a non-zero pipeline. grep without -q drains its input.
+    launchctl list 2>/dev/null | grep "solarsindy\.$suffix\$" >/dev/null && return 0
+  fi
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl is-active --quiet "solarsindy-$suffix" 2>/dev/null && return 0
+    systemctl --user is-active --quiet "solarsindy-$suffix" 2>/dev/null && return 0
+  fi
+  return 1
+}
+
+port_busy() {
+  ( exec 3<>"/dev/tcp/$HOST/$PORT" ) 2>/dev/null || return 1
+  return 0
+}
+
+rotate_cli_log() {
+  # Single .old generation: bounded disk, keeps the previous run for forensics.
+  [ -f "$1" ] && mv -f "$1" "$1.old"
+  return 0
+}
+
+health_json() { command -v curl >/dev/null 2>&1 || return 0; curl -fsS -m "${1:-3}" "$URL/api/health" 2>/dev/null || true; }
+
+# Dashboard readiness: health endpoint when curl exists, TCP accept otherwise.
+dash_ready() {
+  if command -v curl >/dev/null 2>&1; then
+    [ -n "$(health_json 2)" ]
+  else
+    port_busy
+  fi
+}
+
+file_age_min() {
+  # Portable mtime age in whole minutes; empty when the file is absent.
+  local f="$1" m now
+  [ -f "$f" ] || return 0
+  m="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || true)"
+  [ -n "$m" ] || return 0
+  now="$(date +%s)"
+  printf '%s\n' $(( (now - m) / 60 ))
+}
+
+usage() {
+  # Print the header comment block (everything between the shebang and the first code line).
+  awk 'NR == 1 { next } !/^#/ { exit } { sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"
+}
+
+# ---------- commands --------------------------------------------------------------------
+
+cmd_setup() {
+  need_julia
+  say "Julia: $("$JULIA" --version)"
+  say "Instantiating package environment (first run downloads dependencies)…"
+  "$JULIA" --startup-file=no --project="$ROOT" -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+  say "Instantiating dashboard environment…"
+  "$JULIA" --startup-file=no --project="$ROOT/app" -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+  mkdir -p "$MONITOR_DIR" "$LOG_DIR" "$RUN_DIR"
+  say "Setup complete. Next: bin/solarsindy start"
+}
+
+start_monitor() {
+  acquire_start_lock monitor || { err "monitor: another start is already in progress."; return 1; }
+  local rc=0
+  _start_monitor_locked || rc=$?
+  release_start_lock
+  return $rc
+}
+
+_start_monitor_locked() {
+  if service_mode_active live-monitor; then
+    say "monitor: managed by the installed service (launchd/systemd) — not starting a second copy."
+    note "Use 'launchctl kickstart' / 'systemctl restart', or uninstall-service first."
+    return 0
+  fi
+  local pid
+  if pid="$(pid_of "$MON_PID" "$MON_MARK")"; then
+    say "monitor: already running (pid $pid)."
+    return 0
+  fi
+  mkdir -p "$MONITOR_DIR" "$LOG_DIR" "$RUN_DIR"
+  rotate_cli_log "$MON_LOG"
+  say "monitor: starting forecast daemon (cadence ${LIVE_MONITOR_INTERVAL_SEC:-3600} s)…"
+  SOLARSINDY_MONITOR_DIR="$MONITOR_DIR" \
+  JULIA_NUM_THREADS="${SOLARSINDY_JULIA_THREADS:-2}" \
+    nohup "$JULIA" --startup-file=no --project="$ROOT" \
+      "$ROOT/examples/live_monitor.jl" >> "$MON_LOG" 2>&1 &
+  local newpid=$!
+  disown 2>/dev/null || true              # suppress job-control "Terminated" noise on stop
+  printf '%s\n' "$newpid" > "$MON_PID"
+  # Bounded readiness wait (60 x 2 s): the daemon prints its startup banner (contains
+  # "interval=") once the package is loaded. Death during startup is reported immediately.
+  local i=0
+  while [ $i -lt 60 ]; do
+    if ! kill -0 "$newpid" 2>/dev/null; then
+      err "monitor exited during startup; last log lines:"
+      tail -n 25 "$MON_LOG" >&2 || true
+      rm -f "$MON_PID"
+      return 1
+    fi
+    if grep -q "interval=" "$MON_LOG" 2>/dev/null; then
+      say "monitor: RUNNING (pid $newpid) — first forecast cycle in progress."
+      return 0
+    fi
+    i=$((i + 1)); sleep 2
+  done
+  say "monitor: process alive (pid $newpid) but still initializing after 120 s (cold precompile can take minutes)."
+  note "Watch it with: bin/solarsindy logs monitor -f"
+  return 0
+}
+
+start_dashboard() {
+  acquire_start_lock dashboard || { err "dashboard: another start is already in progress."; return 1; }
+  local rc=0
+  _start_dashboard_locked || rc=$?
+  release_start_lock
+  return $rc
+}
+
+_start_dashboard_locked() {
+  if service_mode_active dashboard; then
+    say "dashboard: managed by the installed service (launchd/systemd) — not starting a second copy."
+    return 0
+  fi
+  local pid
+  if pid="$(pid_of "$DASH_PID" "$DASH_MARK")"; then
+    say "dashboard: already running (pid $pid) — $URL"
+    return 0
+  fi
+  if port_busy; then
+    err "$HOST:$PORT is already in use (another dashboard or app?). Set SWM_PORT to a free port."
+    return 1
+  fi
+  mkdir -p "$MONITOR_DIR" "$LOG_DIR" "$RUN_DIR"
+  rotate_cli_log "$DASH_LOG"
+  say "dashboard: starting on $URL …"
+  SWM_HOST="$HOST" SWM_PORT="$PORT" \
+  SOLARSINDY_LOG="$MONITOR_DIR/live_forecast_log.csv" \
+  JULIA_NUM_THREADS="${SOLARSINDY_JULIA_THREADS:-4}" \
+    nohup "$JULIA" --startup-file=no --project="$ROOT/app" \
+      "$ROOT/app/src/server.jl" >> "$DASH_LOG" 2>&1 &
+  local newpid=$!
+  disown 2>/dev/null || true              # suppress job-control "Terminated" noise on stop
+  printf '%s\n' "$newpid" > "$DASH_PID"
+  # Bounded readiness wait (90 x 2 s = 180 s): covers package load + the endpoint warm-up
+  # that runs before the listener opens. Death during startup is reported immediately.
+  local i=0
+  while [ $i -lt 90 ]; do
+    if ! kill -0 "$newpid" 2>/dev/null; then
+      err "dashboard exited during startup; last log lines:"
+      tail -n 25 "$DASH_LOG" >&2 || true
+      rm -f "$DASH_PID"
+      return 1
+    fi
+    if dash_ready; then
+      say "dashboard: RUNNING (pid $newpid) — $URL"
+      return 0
+    fi
+    i=$((i + 1)); sleep 2
+  done
+  err "dashboard did not become ready in 180 s; last log lines:"
+  tail -n 25 "$DASH_LOG" >&2 || true
+  note "Process left running (pid $newpid) — inspect 'bin/solarsindy logs dashboard', or stop it."
+  return 1
+}
+
+stop_one() {
+  # $1 label, $2 pidfile, $3 command marker
+  local label="$1" file="$2" mark="$3" pid
+  if ! pid="$(pid_of "$file" "$mark")"; then
+    if service_mode_active "$([ "$label" = monitor ] && echo live-monitor || echo dashboard)"; then
+      say "$label: running under the installed service — this CLI will not stop it."
+      note "macOS: launchctl bootout gui/$(id -u)/com.<org>.solarsindy.…  |  Linux: systemctl stop solarsindy-…"
+    else
+      say "$label: not running."
+    fi
+    return 0
+  fi
+  say "$label: stopping (pid $pid)…"
+  kill -TERM "$pid" 2>/dev/null || true
+  local i=0
+  while [ $i -lt 30 ]; do
+    kill -0 "$pid" 2>/dev/null || { rm -f "$file"; say "$label: stopped."; return 0; }
+    i=$((i + 1)); sleep 1
+  done
+  err "$label did not exit within 30 s; sending SIGKILL."
+  kill -KILL "$pid" 2>/dev/null || true
+  i=0
+  while [ $i -lt 5 ]; do
+    kill -0 "$pid" 2>/dev/null || { rm -f "$file"; say "$label: killed."; return 0; }
+    i=$((i + 1)); sleep 1
+  done
+  err "$label (pid $pid) survived SIGKILL — inspect manually."
+  return 1
+}
+
+cmd_status() {
+  local rc_mon=1 rc_dash=1 pid
+  say "SolarSINDy live forecast system — $ROOT"
+  if pid="$(pid_of "$MON_PID" "$MON_MARK")"; then
+    say "monitor:   RUNNING (pid $pid, up $(ps -o etime= -p "$pid" | tr -d ' '))  [CLI]"
+    rc_mon=0
+  elif service_mode_active live-monitor; then
+    say "monitor:   RUNNING  [installed service]"
+    rc_mon=0
+  else
+    say "monitor:   stopped"
+  fi
+  if pid="$(pid_of "$DASH_PID" "$DASH_MARK")"; then
+    say "dashboard: RUNNING (pid $pid, up $(ps -o etime= -p "$pid" | tr -d ' '))  [CLI] — $URL"
+    rc_dash=0
+  elif service_mode_active dashboard; then
+    say "dashboard: RUNNING  [installed service] — $URL"
+    rc_dash=0
+  else
+    say "dashboard: stopped"
+  fi
+  local h
+  h="$(health_json 3)"
+  if [ -n "$h" ]; then
+    say "health:    $h"
+  elif [ $rc_dash -eq 0 ]; then
+    say "health:    dashboard process is up but $URL/api/health did not answer (starting up?)"
+  fi
+  local log="$MONITOR_DIR/live_forecast_log.csv" age
+  if [ -f "$log" ]; then
+    age="$(file_age_min "$log")"
+    say "forecasts: last issuance ${age:-?} min ago ($log)"
+  else
+    say "forecasts: no log yet at $log (first cycle pending)"
+  fi
+  [ $rc_mon -eq 0 ] && [ $rc_dash -eq 0 ] && return 0
+  [ $rc_mon -ne 0 ] && [ $rc_dash -ne 0 ] && return 2
+  return 1
+}
+
+cmd_once() {
+  need_julia
+  mkdir -p "$MONITOR_DIR" "$LOG_DIR"
+  say "Running one forecast cycle in the foreground (needs network access to NOAA SWPC)…"
+  SOLARSINDY_MONITOR_DIR="$MONITOR_DIR" \
+  JULIA_NUM_THREADS="${SOLARSINDY_JULIA_THREADS:-2}" \
+    "$JULIA" --startup-file=no --project="$ROOT" "$ROOT/examples/live_monitor.jl" --once
+}
+
+cmd_logs() {
+  local target=monitor follow="" file
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      monitor|dashboard) target="$1" ;;
+      -f) follow="-f" ;;
+      *) err "unknown logs argument '$1' (usage: logs [monitor|dashboard] [-f])"; return 1 ;;
+    esac
+    shift
+  done
+  if [ "$target" = monitor ]; then
+    file="$MON_LOG"; [ -f "$file" ] || file="$LOG_DIR/monitor.log"
+  else
+    file="$DASH_LOG"; [ -f "$file" ] || file="$LOG_DIR/dashboard.out"
+  fi
+  [ -f "$file" ] || { err "no log yet at $file"; return 1; }
+  if [ "$follow" = "-f" ]; then
+    exec tail -n 40 -f "$file"
+  fi
+  tail -n 60 "$file"
+}
+
+cmd_open() {
+  if command -v open >/dev/null 2>&1; then open "$URL"
+  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL"
+  else say "Open $URL in your browser."
+  fi
+}
+
+cmd_install_service() {
+  case "$(uname -s)" in
+    Darwin)
+      exec "$ROOT/deploy/install_launchd.sh" "$ROOT" "$@"
+      ;;
+    Linux)
+      say "Linux: install the systemd templates (edit the paths inside first):"
+      note "sudo cp $ROOT/deploy/solarsindy-live-monitor.service $ROOT/deploy/solarsindy-dashboard.service /etc/systemd/system/"
+      note "sudo systemctl daemon-reload && sudo systemctl enable --now solarsindy-live-monitor solarsindy-dashboard"
+      ;;
+    *) err "no service installer for $(uname -s); run 'bin/solarsindy start' instead." ; return 1 ;;
+  esac
+}
+
+cmd_uninstall_service() {
+  case "$(uname -s)" in
+    Darwin)
+      local org="${SOLARSINDY_ORG:-empire}" removed=0 label plist suffix org_try
+      for suffix in live-monitor dashboard watchdog; do
+        for org_try in "$org" example; do
+          label="com.$org_try.solarsindy.$suffix"
+          plist="$HOME/Library/LaunchAgents/$label.plist"
+          if [ -f "$plist" ]; then
+            launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+            rm -f "$plist"
+            say "removed $label"
+            removed=1
+          fi
+        done
+      done
+      [ $removed -eq 1 ] || say "no installed solarsindy launchd services found."
+      ;;
+    Linux)
+      say "Linux: sudo systemctl disable --now solarsindy-live-monitor solarsindy-dashboard; then remove the unit files from /etc/systemd/system/."
+      ;;
+    *) err "no service uninstaller for $(uname -s)."; return 1 ;;
+  esac
+}
+
+# ---------- dispatch --------------------------------------------------------------------
+
+cmd="${1:-help}"
+shift || true
+target="${1:-all}"
+
+case "$cmd" in
+  setup)   cmd_setup ;;
+  start)
+    need_julia
+    case "$target" in
+      monitor)   start_monitor ;;
+      dashboard) start_dashboard ;;
+      all)       start_monitor; start_dashboard ;;
+      *) err "start target must be monitor|dashboard|all"; exit 1 ;;
+    esac
+    ;;
+  stop)
+    case "$target" in
+      monitor)   stop_one monitor "$MON_PID" "$MON_MARK" ;;
+      dashboard) stop_one dashboard "$DASH_PID" "$DASH_MARK" ;;
+      all)       stop_one monitor "$MON_PID" "$MON_MARK"
+                 stop_one dashboard "$DASH_PID" "$DASH_MARK" ;;
+      *) err "stop target must be monitor|dashboard|all"; exit 1 ;;
+    esac
+    ;;
+  restart)
+    # Re-invoke via bash + BASH_SOURCE, not $0: works even when the script was run as
+    # `bash bin/solarsindy` without the exec bit.
+    "${BASH:-bash}" "${BASH_SOURCE[0]}" stop "$target"
+    exec "${BASH:-bash}" "${BASH_SOURCE[0]}" start "$target"
+    ;;
+  status)  cmd_status ;;
+  once)    cmd_once ;;
+  logs)    cmd_logs "$@" ;;
+  open)    cmd_open ;;
+  install-service)   cmd_install_service "$@" ;;
+  uninstall-service) cmd_uninstall_service ;;
+  help|-h|--help) usage ;;
+  *) err "unknown command '$cmd'"; usage >&2; exit 1 ;;
+esac

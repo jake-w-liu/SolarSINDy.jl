@@ -15,6 +15,8 @@ the package's V2 forecaster. A Julia REST backend (no web framework — just
 ## Quick start
 
 ```bash
+bin/solarsindy start dashboard # managed background start from the clone root (stop/status/logs)
+# or, attached to the terminal:
 cd app
 ./run.sh                       # → http://127.0.0.1:8723  (open in your browser)
 ./desktop.sh                   # or: launch as a standalone desktop app window

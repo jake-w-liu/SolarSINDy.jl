@@ -288,6 +288,45 @@ function make_handler(log_path::AbstractString)
 end
 
 """
+    warmup(log_path) -> seconds
+
+Compile and cache the log-backed endpoint paths (the `get_log` CSV parse plus the
+forecast/status/history builders and their JSON serialization) before the listener opens.
+
+On a fresh process, the first `get_log` JIT-compiles the CSV-parse specialization while
+holding `_LOG_LOCK`; without this warm-up, the first log-backed request after a (re)start
+holds the lock for tens of seconds and stalls every request queued behind it — including
+`/api/health`, which also takes the lock (observed live on the production dashboard:
+first `/api/forecast` >20 s with `/api/health` timing out behind it, then 0.14 s once
+compiled). Running the same paths once before `HTTP.serve` binds converts that random
+mid-life stall into a few extra seconds of ordinary startup time, which supervisors and
+the watchdog already tolerate as restart downtime. Steady-state per-cycle log reloads use
+the compiled path and complete quickly.
+
+Deliberately NOT exercised: network-touching endpoints (`/api/alerts` SWPC refresh, the
+dB/dt nowcast) — warm-up must never block startup on external feeds. When the log does not
+exist yet (fresh install, daemon still warming), only the cheap empty-frame paths compile;
+the first real parse then pays the one-time JIT cost when the log appears.
+
+Never throws: a warm-up failure only costs the optimization, never the server.
+"""
+function warmup(log_path::AbstractString)
+    t0 = time()
+    try
+        df = get_log(log_path)
+        json_response(build_forecast(df, log_path))
+        json_response(build_status(df))
+        json_response(build_history(df, 72.0))
+        latest_cycle(df)
+        outage_state(log_path)
+    catch e
+        e isa InterruptException && rethrow()
+        @warn "endpoint warm-up failed; server starts anyway (first request may be slow)" exception=(e, catch_backtrace())
+    end
+    return round(time() - t0; digits=1)
+end
+
+"""
     start_server(; host, port, log_path, blocking=true)
 
 Start the dashboard server. Returns the `HTTP.Server` when `blocking=false`.
@@ -308,6 +347,12 @@ function start_server(; host::AbstractString = get(ENV, "SWM_HOST", "127.0.0.1")
     └────────────────────────────────────────────────────────────────────┘
     """)
     isfile(log_path) || @warn "Forecast log not found; API will report unavailable until the daemon writes it." log_path
+    wsec = warmup(log_path)
+    println("warm-up: log/endpoint paths compiled in $(wsec) s; opening listener")
+    # Explicit flush: when stdout is a file (nohup/launchd), Julia block-buffers it and the
+    # banner + warm-up lines would otherwise stay invisible until the buffer fills — which
+    # blinds crash forensics and readiness checks that read the log.
+    flush(stdout)
     start_notify_loop(log_path)          # no-op unless SWM_WEBHOOK_URL is set
     if blocking
         HTTP.serve(handler, host, port)

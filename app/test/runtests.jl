@@ -693,6 +693,50 @@ end
         _LOG_CACHE[] = nothing
     end
 
+    @testset "warmup compiles and caches endpoint paths without throwing" begin
+        # Present log: warm-up must prime the get_log cache so the first request after
+        # the listener opens does not pay the CSV parse while holding _LOG_LOCK.
+        dir = mktempdir()
+        raw = live_cycle_fixture(now(UTC) - Minute(5))
+        rename!(raw,
+            :issue_time_utc_dt => :issue_time_utc,
+            :latest_solar_wind_utc_dt => :latest_solar_wind_utc,
+            :latest_dst_time_utc_dt => :latest_dst_time_utc,
+            :target_time_utc_dt => :target_time_utc,
+        )
+        p = joinpath(dir, "log.csv"); CSV.write(p, raw)
+        _LOG_CACHE[] = nothing
+        _LATEST_CYCLE_CACHE[] = nothing; _HISTORY_CACHE[] = nothing
+        secs = warmup(p)
+        @test secs isa Real && secs >= 0
+        c = _LOG_CACHE[]
+        @test c !== nothing && c[1] == _log_file_identity(p)    # cache primed by warm-up
+        @test nrow(c[2]) == length(LIVE_CYCLE_HORIZONS)
+        # The payload builders must actually have run (a mutant warmup that only calls
+        # get_log and skips the build_* lines leaves these downstream caches empty).
+        @test _LATEST_CYCLE_CACHE[] !== nothing
+        @test _HISTORY_CACHE[] !== nothing
+        # Absent log (fresh install before the daemon's first write): must not throw and
+        # must not poison the cache with a frame attributed to the missing path.
+        _LOG_CACHE[] = nothing
+        @test warmup(joinpath(dir, "missing.csv")) >= 0
+        @test _LOG_CACHE[] === nothing                           # nothing cached for an absent file
+        # "Never throws": an unreadable log must be absorbed by warmup's catch (get_log
+        # raises when it has no previously cached frame to serve).
+        if Sys.isunix() && ccall(:geteuid, Cint, ()) != 0
+            locked = joinpath(dir, "locked.csv"); CSV.write(locked, raw); chmod(locked, 0o000)
+            _LOG_CACHE[] = nothing
+            @test (@test_logs (:warn, r"warm-up failed") warmup(locked)) >= 0
+            chmod(locked, 0o644)
+        end
+        # Garbage bytes must not crash warm-up either (lenient parse or absorbed error).
+        junk = joinpath(dir, "junk.csv"); write(junk, "\x00\x01not,a,log\n\xff\xfe")
+        _LOG_CACHE[] = nothing
+        @test warmup(junk) >= 0
+        _LOG_CACHE[] = nothing
+        _LATEST_CYCLE_CACHE[] = nothing; _HISTORY_CACHE[] = nothing
+    end
+
     @testset "sub-hour trajectory served only for the matching cycle" begin
         dir = mktempdir(); logf = joinpath(dir, "log.csv")
         iss = DateTime("2026-06-30T23:59:50.122")

@@ -2,9 +2,32 @@
 
 All notable changes to `SolarSINDy.jl` will be documented in this file.
 
-## [Unreleased] - 2026-07-17
+## [Unreleased] - 2026-07-30
 
 Correctness, robustness, and operational-readiness improvements.
+
+User operation and startup:
+
+- `bin/solarsindy` — one-command control of the live forecast system from a fresh clone:
+  `setup` / `start` / `stop` / `restart` (targets `monitor|dashboard|all`), `status`, `once`,
+  `logs [-f]`, `open`, `install-service` / `uninstall-service`. Pidfiles live inside the
+  instance state dir with a PID-reuse guard (a pidfile PID whose command line is not this
+  clone's daemon entry point is stale by definition and never signaled), concurrent starts
+  are serialized by a stale-safe lock so a double `start` cannot strand orphan daemons,
+  readiness waits are bounded, the installed launchd/systemd service mode is detected and
+  never duplicated, and a busy dashboard port is refused with a clear message. Optional
+  gitignored `solarsindy.env` supplies defaults (template in
+  `deploy/solarsindy.env.example`); explicitly set environment variables win, malformed
+  lines are skipped with a warning instead of aborting (recovery commands keep working
+  with a broken config), and CRLF files are tolerated.
+- dashboard endpoint warm-up: the server compiles and caches the log-backed endpoint paths
+  (log parse + forecast/status/history builders + JSON serialization) before opening the
+  listener, converting a measured >20 s first-request JIT stall — which held the log-cache
+  lock and blocked `/api/health` behind it — into ordinary startup time (first hit after
+  warm-up: milliseconds).
+- dashboard startup banner and warm-up lines are explicitly flushed, so nohup/launchd log
+  files capture them immediately instead of losing them to block buffering (crash forensics
+  and readiness checks read these lines).
 
 Causality and leakage:
 

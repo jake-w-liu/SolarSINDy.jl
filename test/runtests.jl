@@ -828,6 +828,7 @@ using DataFrames
     include("test_noaa_kp_forecast_replay.jl")
     include("test_temerin_dst_archive_replay.jl")
     include("test_external_dst_snapshot_collector.jl")
+    include("test_cli_smoke.jl")
 
     # Bundled operational dashboard (app/): golden-vector forecaster<->export contract,
     # traversal guard, physical regimes. Network-free (local models + mocks).

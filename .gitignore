@@ -21,3 +21,6 @@ app/server.log
 # Mutable operational monitor state and validation outputs.
 var/
 validation/output/
+
+# local CLI configuration (may hold webhook URLs; template in deploy/solarsindy.env.example)
+solarsindy.env
