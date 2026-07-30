@@ -22,6 +22,23 @@ User operation and startup:
   with a broken config), and CRLF files are tolerated. An interactive `start` auto-opens
   the dashboard in the browser (TTY-gated so scripted/headless/service invocations never
   do; `SOLARSINDY_NO_OPEN=1` disables; `open` reopens a closed tab).
+- watchdog functional probe: in addition to `/api/health`, the watchdog probes a data
+  route (`/api/forecast`, generous timeout, own `dash_wedged` dedup kind) — an observed
+  wedge state answered health quickly while data routes hung, which a health-only probe
+  cannot see; detection, sentinel, webhook dedup, and recovery verified against a stub
+  server reproducing exactly that state.
+- start-lock identity semantics: a lock is honored only when its recorded owner PID is a
+  live solarsindy CLI process (same `ps` command-line discipline as the pidfile guard), so
+  a `SIGKILL`-ed start whose lock PID is later recycled by an unrelated process can no
+  longer wedge future starts; a genuine concurrent start still refuses.
+- live-monitor per-step cycle timings: every guarded cycle step logs its wall-clock
+  duration (`step issue h=1 ok in … s`), so a slow or stalled cycle names the step that
+  consumed the time instead of leaving an unattributable gap; all cycle network fetches
+  were verified bounded (`connect_timeout=15`, `readtimeout=30` at all three call sites).
+- CLI polish: multi-line pidfiles are stale by definition (never "repaired" into their
+  first line); with `SWM_HOST=0.0.0.0` the probe/browse URL uses loopback instead of the
+  unusable `http://0.0.0.0:…`; config values with unquoted whitespace and parser-reserved
+  variable names each get an explicit warning.
 - dashboard endpoint warm-up: the server compiles and caches the log-backed endpoint paths
   (log parse + forecast/status/history builders + JSON serialization) before opening the
   listener, converting a measured >20 s first-request JIT stall — which held the log-cache

@@ -46,33 +46,45 @@ if [ -f "$CONFIG" ]; then
   # with a warning and must NEVER abort the CLI: `stop` has to keep working with a broken
   # config. CRLF line endings are tolerated (a stray \r would otherwise silently corrupt
   # ports/paths and defeat the port-busy and readiness checks).
-  while IFS= read -r _line || [ -n "$_line" ]; do
-    _line="${_line%$'\r'}"
-    case "$_line" in
+  # Loop variables use a reserved __solarsindy_cfg_ prefix so a config file cannot collide
+  # with them (a KEY named like a parser variable would silently hit the env-wins check).
+  while IFS= read -r __solarsindy_cfg_line || [ -n "$__solarsindy_cfg_line" ]; do
+    __solarsindy_cfg_line="${__solarsindy_cfg_line%$'\r'}"
+    case "$__solarsindy_cfg_line" in
       ''|\#*) continue ;;
       [A-Za-z_]*=*) ;;
-      *) printf 'warning: ignoring non-KEY=VALUE line in %s: %.40s\n' "$CONFIG" "$_line" >&2
+      *) printf 'warning: ignoring non-KEY=VALUE line in %s: %.40s\n' "$CONFIG" "$__solarsindy_cfg_line" >&2
          continue ;;
     esac
-    _name="${_line%%=*}"
-    case "$_name" in
+    __solarsindy_cfg_name="${__solarsindy_cfg_line%%=*}"
+    case "$__solarsindy_cfg_name" in
       *[!A-Za-z0-9_]*)
-        printf 'warning: ignoring invalid variable name in %s: %.40s\n' "$CONFIG" "$_name" >&2
+        printf 'warning: ignoring invalid variable name in %s: %.40s\n' "$CONFIG" "$__solarsindy_cfg_name" >&2
+        continue ;;
+      __solarsindy_cfg_*)
+        printf 'warning: ignoring reserved variable name in %s: %.40s\n' "$CONFIG" "$__solarsindy_cfg_name" >&2
         continue ;;
     esac
-    if eval "[ -n \"\${$_name+x}\" ]"; then
+    if eval "[ -n \"\${$__solarsindy_cfg_name+x}\" ]"; then
       continue                              # env wins over the file
     fi
+    # Unquoted whitespace in a value truncates at the first space (and exports the rest as
+    # stray names) — legal shell, but almost always a mistake in a config file. Warn.
+    case "${__solarsindy_cfg_line#*=}" in
+      [\"\']*) ;;
+      *[[:space:]]*)
+        printf 'warning: unquoted whitespace in %s value of %s — quote the value; only the first word applies\n' "$CONFIG" "$__solarsindy_cfg_name" >&2 ;;
+    esac
     # Probe the assignment for syntax errors only (unbalanced quote, stray backtick) WITHOUT
     # executing it: a syntax check cannot kill this shell, and — unlike a subshell eval — it does
     # not run command substitutions in the value a second time before the real eval below.
-    if "${BASH:-bash}" -nc "export $_line" 2>/dev/null; then
-      eval "export $_line"
+    if "${BASH:-bash}" -nc "export $__solarsindy_cfg_line" 2>/dev/null; then
+      eval "export $__solarsindy_cfg_line"
     else
-      printf 'warning: skipping malformed line in %s: %s=…\n' "$CONFIG" "$_name" >&2
+      printf 'warning: skipping malformed line in %s: %s=…\n' "$CONFIG" "$__solarsindy_cfg_name" >&2
     fi
   done < "$CONFIG"
-  unset _line _name
+  unset __solarsindy_cfg_line __solarsindy_cfg_name
 elif [ -n "${SOLARSINDY_ENV_FILE:-}" ] && [ ! -e "$CONFIG" ]; then
   # An explicit override that does not exist is almost always a typo — warn instead of
   # silently dropping all config. A path that exists but is not a regular file (e.g. the
@@ -87,7 +99,13 @@ MONITOR_DIR="${SOLARSINDY_MONITOR_DIR:-$ROOT/var/monitor}"
 # SOLARSINDY_MONITOR_DIR (e.g. production + staging) cannot clobber each other.
 RUN_DIR="$MONITOR_DIR/run"
 LOG_DIR="$MONITOR_DIR/logs"
-URL="http://$HOST:$PORT"
+# Probe/browse via loopback when binding all interfaces: http://0.0.0.0:port is not a
+# usable browser/curl destination even though it is a valid bind address.
+BROWSE_HOST="$HOST"
+case "$HOST" in
+  0.0.0.0|::|'[::]') BROWSE_HOST="127.0.0.1" ;;
+esac
+URL="http://$BROWSE_HOST:$PORT"
 MIN_JULIA="1.12.6"
 
 if [ -n "${JULIA:-}" ]; then
@@ -131,14 +149,16 @@ need_julia() {
 # pid_of FILE MARK -> echoes the pid iff the pidfile names a live process whose command
 # line contains MARK; cleans up stale pidfiles. Returns 1 when not running.
 pid_of() {
-  local file="$1" mark="$2" pid cmd
+  local file="$1" mark="$2" pid rest cmd
   [ -f "$file" ] || return 1
-  # Strict: first line must be purely numeric. A garbled pidfile ("1234abc", multi-line)
-  # is stale by definition — never "repaired" into some other PID.
+  # Strict: the file must be exactly one purely-numeric line. A garbled pidfile
+  # ("1234abc", multi-line) is stale by definition — never "repaired" into some other PID.
   pid="$(head -n1 "$file" 2>/dev/null | tr -d '[:space:]')"
+  rest="$(sed -n '2,$p' "$file" 2>/dev/null | tr -d '[:space:]')"
   case "$pid" in
     ''|*[!0-9]*) rm -f "$file"; return 1 ;;
   esac
+  [ -n "$rest" ] && { rm -f "$file"; return 1; }
   cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
   if [ -z "$cmd" ]; then
     rm -f "$file"                       # process gone: stale pidfile
@@ -153,11 +173,15 @@ pid_of() {
 # Exclusive per-component start lock: closes the check-then-spawn race where two
 # concurrent `start` invocations both pass the pid_of check and spawn two daemons, one of
 # which becomes an unreachable orphan (only the pidfile winner is ever stopped). noclobber
-# `>` is the atomic test-and-set (bash 3.2 has no flock); the lock records its owner PID
-# so a lock left behind by a crashed start is reclaimed instead of wedging future starts.
+# `>` is the atomic test-and-set (bash 3.2 has no flock); the lock records its owner PID.
+# A lock is honored only when its owner PID is alive AND is actually running this CLI
+# (command line contains "solarsindy") — the same identity discipline pid_of uses. This
+# closes the SIGKILL wedge: a start killed with SIGKILL leaves its lock behind, and if the
+# recorded PID is later recycled by an unrelated live process, an owner-liveness-only check
+# would refuse starts forever; the identity check classifies that as stale and reclaims.
 START_LOCK=""
 acquire_start_lock() {
-  local label="$1" lock owner attempt=0
+  local label="$1" lock owner owner_cmd attempt=0
   lock="$RUN_DIR/.$label.start.lock"
   mkdir -p "$RUN_DIR"
   while [ $attempt -lt 2 ]; do
@@ -168,7 +192,12 @@ acquire_start_lock() {
     owner="$(head -n1 "$lock" 2>/dev/null | tr -d '[:space:]' || true)"
     case "$owner" in
       ''|*[!0-9]*) ;;                                   # unreadable/garbled: treat as stale
-      *) kill -0 "$owner" 2>/dev/null && return 1 ;;    # a live start owns it
+      *)
+        owner_cmd="$(ps -o command= -p "$owner" 2>/dev/null || true)"
+        case "$owner_cmd" in
+          *solarsindy*) return 1 ;;                     # a live CLI invocation owns it
+        esac
+        ;;                                              # dead, or PID recycled by a non-CLI process: stale
     esac
     rm -f "$lock" 2>/dev/null || true                   # stale lock: reclaim once
     attempt=$((attempt + 1))
@@ -202,7 +231,7 @@ service_mode_active() {
 }
 
 port_busy() {
-  ( exec 3<>"/dev/tcp/$HOST/$PORT" ) 2>/dev/null || return 1
+  ( exec 3<>"/dev/tcp/$BROWSE_HOST/$PORT" ) 2>/dev/null || return 1
   return 0
 }
 

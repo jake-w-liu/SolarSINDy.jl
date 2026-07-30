@@ -230,13 +230,20 @@ end
 
 # Run one body step, reporting but never propagating failures. The issuance path counts these
 # call results for diagnostics, then validates the completed log cycle independently.
+# Every step logs its wall-clock duration: a 2026-07-30 audit found a 3.43 h issuance stall
+# whose cause could not be attributed because the log had no per-step timings — with these
+# lines, any future stall names the step that consumed the time. (All network fetches in the
+# cycle are already bounded by connect_timeout=15/readtimeout=30 at their three call sites.)
 function guarded(label, f)
+    t0 = time()
     try
         f()
+        logln("step ", label, " ok in ", round(time() - t0; digits=1), " s")
         return true
     catch e
         e isa InterruptException && rethrow()
-        logln("WARN ", label, " failed: ", sprint(showerror, e))
+        logln("WARN ", label, " failed after ", round(time() - t0; digits=1), " s: ",
+              sprint(showerror, e))
         return false
     end
 end

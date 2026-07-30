@@ -82,8 +82,19 @@ else
 fi
 
 # 2) Dashboard/alerting server liveness via its health endpoint.
+# 2b) Functional probe of a data route. Observed 2026-07-30 (cause unestablished): the
+#     server can answer /api/health quickly while /api/forecast hangs — a wedge a
+#     health-only probe cannot see, leaving users with a dead dashboard and no alert
+#     until forecast-log staleness fires an hour later. Probe /api/forecast with a
+#     generous timeout, but only when health itself answered (otherwise dash_down
+#     already covers it). Distinct problem kind so the webhook dedup treats it as its
+#     own outage class.
+DATA_URL="${SOLARSINDY_WATCHDOG_DATA_URL:-${DASH_URL%/api/health}/api/forecast}"
+DATA_TIMEOUT="${SOLARSINDY_WATCHDOG_DATA_TIMEOUT:-20}"
 if ! curl -fsS -m 8 "$DASH_URL" >/dev/null 2>&1; then
   add_problem "dashboard health endpoint unreachable at $DASH_URL" "dash_down"
+elif ! curl -fsS -m "$DATA_TIMEOUT" "$DATA_URL" >/dev/null 2>&1; then
+  add_problem "dashboard data route unresponsive (health answers) at $DATA_URL (>${DATA_TIMEOUT}s)" "dash_wedged"
 fi
 
 prev_state=""
