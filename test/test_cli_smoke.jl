@@ -72,8 +72,13 @@
         envlock = copy(env); envlock["JULIA"] = shim
         lockfile = joinpath(rundir, ".monitor.start.lock")
         write(lockfile, string(decoy_pid))
-        locked = run(setenv(ignorestatus(`$bash $cli start monitor`), envlock); wait=true)
+        lock_io = IOBuffer()
+        locked = run(pipeline(setenv(ignorestatus(`$bash $cli start monitor`), envlock);
+                              stdout=devnull, stderr=lock_io); wait=true)
         @test locked.exitcode != 0                           # live lock owner -> refuse
+        # Pin the refusal PATH, not just a non-zero exit: deleting the lock entirely still
+        # exits non-zero (the shim dies during startup), so assert the refusal was announced.
+        @test occursin("another start is already in progress", String(take!(lock_io)))
         @test read(lockfile, String) == string(decoy_pid)    # foreign lock left in place
         kill(decoy); wait(decoy)
 
@@ -119,5 +124,9 @@
         @test !isempty(url_lines)
         @test any(l -> occursin("http://127.0.0.1:65201", l), url_lines)
         @test all(l -> !occursin('\r', l), url_lines)
+        # `bash -x` escapes a stray CR to the two literal characters backslash-r (verified via
+        # od -c), so a raw-CR check alone can never fail under the exact bug it pins (dropping
+        # the \r strip). Pin the escaped form too: a non-stripped port shows `...:65201\r` here.
+        @test all(l -> !occursin("\\r", l), url_lines)
     end
 end

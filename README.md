@@ -323,13 +323,19 @@ environment (`app/Project.toml`) and test suite (`app/test/runtests.jl`, also ru
 
 ## Data
 
-Pre-computed SINDy coefficients and validation datasets ship in `data/` (~830 KB), available
+Pre-computed SINDy coefficients and validation datasets ship in `data/` (~1.6 MB), available
 through both `Pkg.add` and cloned repos. Access them programmatically:
 
 ```julia
 data_dir = get_data_dir()
 coef_csv = joinpath(data_dir, "real_sindy_discovery_coefficients.csv")
 ```
+
+The joint SINDy ensemble draws (`data/real_sindy_ensemble_draws.csv`) are intentionally **not**
+committed — they are a regenerable local artifact. A fresh clone therefore falls back to the
+marginal per-term ensemble for the v1 uncertainty intervals, which drops the cross-term
+covariance carried by the joint draws. Regenerate them with
+`validation/generate_ensemble_draws.jl` to reproduce the production intervals exactly.
 
 ### Fetching the OMNI2 dataset
 
@@ -431,7 +437,8 @@ and regression baselines—rather than tautologies. Coverage includes:
 - realtime hourly aggregation and forecast initialization
 - live-log duplicate suppression, filesystem locking, and stale-lock recovery
 
-See [TEST_REPORT.md](../TEST_REPORT.md) for coverage, tolerances, and anti-false-test notes.
+See the package test suites (`test/runtests.jl` and `app/test/runtests.jl`) for coverage,
+tolerances, and anti-false-test checks.
 
 ## Docs
 

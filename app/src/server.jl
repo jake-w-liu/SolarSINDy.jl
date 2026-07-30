@@ -299,9 +299,11 @@ holds the lock for tens of seconds and stalls every request queued behind it —
 `/api/health`, which also takes the lock (observed live on the production dashboard:
 first `/api/forecast` >20 s with `/api/health` timing out behind it, then 0.14 s once
 compiled). Running the same paths once before `HTTP.serve` binds converts that random
-mid-life stall into a few extra seconds of ordinary startup time, which supervisors and
-the watchdog already tolerate as restart downtime. Steady-state per-cycle log reloads use
-the compiled path and complete quickly.
+mid-life stall into up-front startup cost. On a cold process this first-call JIT of the
+CSV/DataFrame/JSON paths can run from seconds to a few minutes; it reads as ordinary restart
+downtime to the supervisors, but a restart that long keeps the listener closed long enough to
+trip the external watchdog's outage/recovery cycle for a probe interval. Steady-state
+per-cycle log reloads use the compiled path and complete quickly.
 
 Deliberately NOT exercised: network-touching endpoints (`/api/alerts` SWPC refresh, the
 dB/dt nowcast) — warm-up must never block startup on external feeds. When the log does not
@@ -349,10 +351,22 @@ function start_server(; host::AbstractString = get(ENV, "SWM_HOST", "127.0.0.1")
     isfile(log_path) || @warn "Forecast log not found; API will report unavailable until the daemon writes it." log_path
     wsec = warmup(log_path)
     println("warm-up: log/endpoint paths compiled in $(wsec) s; opening listener")
-    # Explicit flush: when stdout is a file (nohup/launchd), Julia block-buffers it and the
-    # banner + warm-up lines would otherwise stay invisible until the buffer fills — which
-    # blinds crash forensics and readiness checks that read the log.
+    # Explicit flush: when stdout/stderr are files (nohup/launchd), Julia block-buffers BOTH,
+    # so the banner, warm-up line, and `@warn`/`@error` diagnostics would otherwise stay invisible
+    # until the buffer fills — which blinds crash forensics and readiness checks that read the log.
     flush(stdout)
+    flush(stderr)
+    # Keep the block-buffered file-backed streams draining while the server runs, so request-time
+    # `@error`/`@warn` forensics (and HTTP.jl's readiness line) reach the log within seconds
+    # instead of only at process exit, where a SIGKILL/OOM-kill would otherwise lose them entirely.
+    @async while true
+        sleep(2)
+        try
+            flush(stdout)
+            flush(stderr)
+        catch
+        end
+    end
     start_notify_loop(log_path)          # no-op unless SWM_WEBHOOK_URL is set
     if blocking
         HTTP.serve(handler, host, port)

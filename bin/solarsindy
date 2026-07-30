@@ -6,6 +6,7 @@
 #                                     (interactive terminals auto-open the dashboard;
 #                                     SOLARSINDY_NO_OPEN=1 disables)
 #   bin/solarsindy status             process/health/freshness summary
+#                                     (exit: 0 both up, 1 exactly one up, 2 neither)
 #   bin/solarsindy open               (re)open the dashboard in a browser
 #   bin/solarsindy stop               stop the background daemons
 #   bin/solarsindy restart            stop, then start
@@ -31,6 +32,8 @@
 #   SWM_WEBHOOK_URL              enable push alerts (Slack/Discord/generic JSON POST)
 #   JULIA                        julia launcher (default: ~/.juliaup/bin/julia, else `julia`)
 #   LIVE_MONITOR_INTERVAL_SEC    forecast cadence (default 3600)
+#   SOLARSINDY_ENV_FILE          override the config file path (default <clone>/solarsindy.env);
+#                                a value pointing at a missing file warns and loads no config
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -60,15 +63,21 @@ if [ -f "$CONFIG" ]; then
     if eval "[ -n \"\${$_name+x}\" ]"; then
       continue                              # env wins over the file
     fi
-    # Probe the assignment in a subshell first: a syntax error there (unbalanced quote,
-    # stray backtick) cannot kill this shell, so the CLI keeps working.
-    if ( eval "export $_line" ) 2>/dev/null; then
+    # Probe the assignment for syntax errors only (unbalanced quote, stray backtick) WITHOUT
+    # executing it: a syntax check cannot kill this shell, and — unlike a subshell eval — it does
+    # not run command substitutions in the value a second time before the real eval below.
+    if "${BASH:-bash}" -nc "export $_line" 2>/dev/null; then
       eval "export $_line"
     else
       printf 'warning: skipping malformed line in %s: %s=…\n' "$CONFIG" "$_name" >&2
     fi
   done < "$CONFIG"
   unset _line _name
+elif [ -n "${SOLARSINDY_ENV_FILE:-}" ] && [ ! -e "$CONFIG" ]; then
+  # An explicit override that does not exist is almost always a typo — warn instead of
+  # silently dropping all config. A path that exists but is not a regular file (e.g. the
+  # /dev/null the tests point at to mean "no config") is intentional and stays silent.
+  printf 'warning: SOLARSINDY_ENV_FILE points to a missing file, no config loaded: %s\n' "$CONFIG" >&2
 fi
 
 HOST="${SWM_HOST:-127.0.0.1}"
@@ -261,7 +270,7 @@ cmd_setup() {
 }
 
 start_monitor() {
-  acquire_start_lock monitor || { err "monitor: another start is already in progress."; return 1; }
+  acquire_start_lock monitor || { err "monitor: another start is already in progress (lock: $RUN_DIR/.monitor.start.lock — remove it if no start is running)."; return 1; }
   local rc=0
   _start_monitor_locked || rc=$?
   release_start_lock
@@ -311,7 +320,7 @@ _start_monitor_locked() {
 }
 
 start_dashboard() {
-  acquire_start_lock dashboard || { err "dashboard: another start is already in progress."; return 1; }
+  acquire_start_lock dashboard || { err "dashboard: another start is already in progress (lock: $RUN_DIR/.dashboard.start.lock — remove it if no start is running)."; return 1; }
   local rc=0
   _start_dashboard_locked || rc=$?
   release_start_lock
@@ -468,8 +477,10 @@ cmd_logs() {
 }
 
 cmd_open() {
-  if command -v open >/dev/null 2>&1; then open "$URL"
-  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL"
+  # A failing opener (e.g. `open` over headless SSH) must not abort under set -e with a bare
+  # non-zero exit; fall back to printing the URL, mirroring maybe_open_browser's guard.
+  if command -v open >/dev/null 2>&1; then open "$URL" || say "Open $URL in your browser."
+  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL" || say "Open $URL in your browser."
   else say "Open $URL in your browser."
   fi
 }
@@ -526,7 +537,13 @@ case "$cmd" in
     case "$target" in
       monitor)   start_monitor ;;
       dashboard) start_dashboard ;;
-      all)       start_monitor; start_dashboard ;;
+      all)       # The daemons are independent: a monitor failure must not skip the dashboard
+                 # (which can still serve the existing forecast log). Attempt both, then report
+                 # the worst outcome instead of aborting on the first under set -e.
+                 rc=0
+                 start_monitor || rc=1
+                 start_dashboard || rc=1
+                 [ "$rc" -eq 0 ] || exit "$rc" ;;
       *) err "start target must be monitor|dashboard|all"; exit 1 ;;
     esac
     ;;
@@ -534,8 +551,12 @@ case "$cmd" in
     case "$target" in
       monitor)   stop_one monitor "$MON_PID" "$MON_MARK" ;;
       dashboard) stop_one dashboard "$DASH_PID" "$DASH_MARK" ;;
-      all)       stop_one monitor "$MON_PID" "$MON_MARK"
-                 stop_one dashboard "$DASH_PID" "$DASH_MARK" ;;
+      all)       # Attempt to stop both even if one refuses to die, then report the worst
+                 # outcome instead of aborting on the first under set -e.
+                 rc=0
+                 stop_one monitor "$MON_PID" "$MON_MARK" || rc=1
+                 stop_one dashboard "$DASH_PID" "$DASH_MARK" || rc=1
+                 [ "$rc" -eq 0 ] || exit "$rc" ;;
       *) err "stop target must be monitor|dashboard|all"; exit 1 ;;
     esac
     ;;
