@@ -379,6 +379,12 @@ function swpc_snapshot(; wait_timeout::Real=SWPC_REQUEST_WAIT_S)
     return stale === nothing ? _unavailable_swpc_snapshot() : stale
 end
 
+# Keep first-request compilation outside the bounded request path.  The app is loaded by
+# inclusion rather than as a precompiled package, so without this specialization the first
+# keyword call can spend most of its latency budget compiling `Base.timedwait`.
+precompile(Core.kwcall,
+           (NamedTuple{(:wait_timeout,),Tuple{Float64}}, typeof(swpc_snapshot)))
+
 function swpc_snapshot_cached_or_refresh()
     fresh, stale = lock(_SWPC_LOCK) do
         c = _SWPC_CACHE[]

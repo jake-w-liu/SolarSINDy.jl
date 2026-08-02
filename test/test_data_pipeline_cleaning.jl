@@ -268,6 +268,78 @@ using DataFrames
         infinite_dst = copy(df)
         infinite_dst.Dst_star[5] = Inf
         @test_throws ArgumentError build_storm_catalog(infinite_dst)
+
+        # A sustained excursion must remain one storm even when it lasts beyond
+        # the first recovery-search window and separation gate.
+        sustained = deepcopy(df)
+        sustained.Dst_star .= 0.0
+        sustained.Dst_star[2:end] .= -60.0
+        sustained_catalog = build_storm_catalog(
+            sustained; dst_thresh=-50.0, window_pre=0, window_post=2,
+            min_separation=2,
+        )
+        @test length(sustained_catalog) == 1
+
+        # A later, genuinely new downward crossing remains admissible once the
+        # preceding extracted window has elapsed and its crossing time is
+        # sufficiently separated from the preceding crossing.
+        separated = deepcopy(df)
+        separated.Dst_star .= 0.0
+        separated.Dst_star[2:4] .= -60.0
+        separated.Dst_star[36:38] .= -70.0
+        separated_catalog = build_storm_catalog(
+            separated; dst_thresh=-50.0, window_pre=0, window_post=5,
+            min_separation=2,
+        )
+        @test length(separated_catalog) == 2
+
+        # Separation is measured between crossing times, not from the buffered
+        # extraction-window end. The first event crosses at row 2, recovers at
+        # row 3, and has a 24-hour buffer through row 27. A new crossing at row
+        # 30 is therefore outside that window and 28 hours after the first.
+        crossing_separated = deepcopy(df)
+        crossing_separated.Dst_star .= 0.0
+        crossing_separated.Dst_star[2] = -60.0
+        crossing_separated.Dst_star[30:31] .= -70.0
+        crossing_catalog = build_storm_catalog(
+            crossing_separated; dst_thresh=-50.0, window_pre=0,
+            window_post=2, min_separation=10,
+        )
+        @test length(crossing_catalog) == 2
+
+        # The declared minimum is inclusive: crossings separated by exactly
+        # `min_separation` hours satisfy an "at least" rule.
+        boundary_separated = deepcopy(df)
+        boundary_separated.Dst_star .= 0.0
+        boundary_separated.Dst_star[2] = -60.0
+        boundary_separated.Dst_star[30] = -70.0
+        boundary_catalog = build_storm_catalog(
+            boundary_separated; dst_thresh=-50.0, window_pre=0,
+            window_post=2, min_separation=28,
+        )
+        @test length(boundary_catalog) == 2
+
+        # The same second crossing is rejected when it falls inside the
+        # declared crossing-to-crossing separation interval.
+        close_crossing_catalog = build_storm_catalog(
+            crossing_separated; dst_thresh=-50.0, window_pre=0,
+            window_post=2, min_separation=32,
+        )
+        @test length(close_crossing_catalog) == 1
+
+        # A crossing whose full proposed window overlaps the preceding window
+        # is not duplicated, but it must not hide a later independent crossing.
+        overlapping = deepcopy(df)
+        overlapping.Dst_star .= 0.0
+        overlapping.Dst_star[2] = -60.0
+        overlapping.Dst_star[29] = -65.0  # pre-window begins at row 27
+        overlapping.Dst_star[35] = -75.0  # pre-window begins after row 27
+        overlap_catalog = build_storm_catalog(
+            overlapping; dst_thresh=-50.0, window_pre=2,
+            window_post=2, min_separation=2,
+        )
+        @test length(overlap_catalog) == 2
+        @test overlap_catalog[1].end_idx < overlap_catalog[2].onset_idx
     end
 
     @testset "D/G: extract_storm_data, extract_all_storms, and catalog roundtrip" begin

@@ -276,8 +276,8 @@ state, report, and outage artifacts remain in `var/monitor/`. Remove the service
   [`validation/real_data_discovery.jl`](validation/real_data_discovery.jl) (run in canonical mode
   with `SOLARSINDY_OUTPUT_ROOT` set to the revision output root; joint draws finalized by
   [`validation/generate_ensemble_draws.jl`](validation/generate_ensemble_draws.jl)), fit at
-  `λ ≈ 186.72` (largest λ within one standard error, seed 42, 500 draws) over 477 storms /
-  46,691 hourly points. To rebuild the gitignored refit draws on a fresh clone, rerun that pipeline
+  `λ ≈ 186.72` (largest λ within one standard error, seed 42, 500 draws) over 483 storms /
+  46,935 hourly points. To rebuild the gitignored refit draws on a fresh clone, rerun that pipeline
   and copy its `real_sindy_ensemble_draws.csv` output to `data/real_sindy_ensemble_draws_refit.csv`.
   These files never overwrite the frozen operational artifacts (`data/real_sindy_*` without the
   `_refit` suffix), which the live V2 monitor and `init_forecast` defaults continue to load.

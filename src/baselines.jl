@@ -177,7 +177,7 @@ injection F(Ey) = d·(Ey − 0.5) for Ey > 0.5 mV/m, else 0:
 
 The `−500` offset (= 1000·0.5 mV/m in V·Bs units) makes the injection continuous
 at the threshold; omitting it (the earlier `-α·V·Bs` form) introduced a spurious
-~2.3 nT/h step at Ey = 0.5.
+2.7 nT/h step at Ey = 0.5.
 """
 function burton_model_full(V::AbstractVector, Bs::AbstractVector,
                            Dst_star::AbstractVector;

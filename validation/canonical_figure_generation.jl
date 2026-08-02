@@ -31,6 +31,7 @@ const _AXIS_TITLE_FONT_SIZE = 24
 const _FIGURE_WIDTH = 1008
 const _INCLUSION_FREQUENCY_FIGURE_HEIGHT = 360
 const _MAY2024_RECONSTRUCTION_FIGURE_HEIGHT = 540
+const _MODERATE2022_RECONSTRUCTION_FIGURE_HEIGHT = 540
 const _LAMBDA_FIGURE_HEIGHT = 720
 const _COEFFICIENT_STABILITY_FIGURE_HEIGHT = 360
 const _SYNTHETIC_FIGURE_HEIGHT = 800
@@ -40,21 +41,21 @@ const _LAMBDA_TICK_VALUES = [0.01, 0.1, 1.0, 10.0, 100.0, 1_000.0, 10_000.0]
 const _LAMBDA_TICK_LABELS = ["0.01", "0.1", "1", "10", "100", "1000", "10000"]
 
 const _TERM_DISPLAY = Dict(
-    "Dst_star" => "Dst*",
-    "V^2" => "V²",
-    "Bs^2" => "Bs²",
-    "n^2" => "n²",
-    "V*Bs" => "V Bs",
+    "Dst_star" => "Dst<sup>*</sup>",
+    "V^2" => "V<sup>2</sup>",
+    "Bs^2" => "B<sub>s</sub><sup>2</sup>",
+    "n^2" => "n<sup>2</sup>",
+    "V*Bs" => "V B<sub>s</sub>",
     "n*V" => "n V",
-    "n*Bs" => "n Bs",
-    "Pdyn*Bs" => "Pdyn Bs",
-    "n*V*Bs" => "n V Bs",
-    "sin(θ_c/2)" => "sin(θc/2)",
-    "sin²(θ_c/2)" => "sin²(θc/2)",
-    "sin⁴(θ_c/2)" => "sin⁴(θc/2)",
-    "sin^(8/3)(θ_c/2)" => "sin^(8/3)(θc/2)",
-    "V*sin²(θ_c/2)" => "V sin²(θc/2)",
-    "Newell_d_Φ" => "dΦN/dt",
+    "n*Bs" => "n B<sub>s</sub>",
+    "Pdyn*Bs" => "P<sub>dyn</sub> B<sub>s</sub>",
+    "n*V*Bs" => "n V B<sub>s</sub>",
+    "sin(θ_c/2)" => "sin(θ<sub>c</sub>/2)",
+    "sin²(θ_c/2)" => "sin<sup>2</sup>(θ<sub>c</sub>/2)",
+    "sin⁴(θ_c/2)" => "sin<sup>4</sup>(θ<sub>c</sub>/2)",
+    "sin^(8/3)(θ_c/2)" => "sin<sup>8/3</sup>(θ<sub>c</sub>/2)",
+    "V*sin²(θ_c/2)" => "V sin<sup>2</sup>(θ<sub>c</sub>/2)",
+    "Newell_d_Φ" => "dΦ<sub>N</sub>/dt",
 )
 
 _display_terms(terms) = [get(_TERM_DISPLAY, term, term) for term in terms]
@@ -70,7 +71,16 @@ const _SCHEMAS = Dict(
         "dst_star_observed_nt", "dst_cleaned_nt", "dst_star_cleaned_nt",
         "dst_original_flag", "dst_star_original_target_flag", "dst_star_sindy_nt",
         "dst_star_burton_simplified_nt", "dst_star_burton_published_nt",
-        "dst_star_obrien_nt", "v_kms", "bz_nt", "pdyn_npa",
+        "dst_star_obrien_nt", "dst_sindy_nt", "dst_burton_simplified_nt",
+        "dst_burton_published_nt", "dst_obrien_nt", "v_kms", "bz_nt", "pdyn_npa",
+    ],
+    "moderate2022_reconstruction.csv" => [
+        "storm_id", "catalog_row", "datetime", "time_hr", "dst_observed_nt",
+        "dst_star_observed_nt", "dst_cleaned_nt", "dst_star_cleaned_nt",
+        "dst_original_flag", "dst_star_original_target_flag", "dst_star_sindy_nt",
+        "dst_star_burton_simplified_nt", "dst_star_burton_published_nt",
+        "dst_star_obrien_nt", "dst_sindy_nt", "dst_burton_simplified_nt",
+        "dst_burton_published_nt", "dst_obrien_nt", "v_kms", "bz_nt", "pdyn_npa",
     ],
     "primary_lambda_candidates.csv" => [
         "candidate_index", "lambda", "mean_storm_rmse_nt", "standard_error_nt",
@@ -233,6 +243,37 @@ function _bools(frame, column::Symbol, label)
     return Bool.(frame[!, column])
 end
 
+function _validate_reconstruction_trajectory(trajectory, label)
+    nrow(trajectory) >= 8 || error("$label trajectory has fewer than eight rows")
+    time = _floats(trajectory, :time_hr, "$label trajectory")
+    all(diff(time) .> 0) || error("$label trajectory time must be strictly increasing")
+    observed = _floats(trajectory, :dst_star_observed_nt, "$label trajectory";
+                       allow_nan=true)
+    count(isfinite, observed) >= 8 || error(
+        "$label trajectory has fewer than eight original Dst* targets",
+    )
+    original = _bools(trajectory, :dst_star_original_target_flag, "$label trajectory")
+    original == isfinite.(observed) || error(
+        "$label original-target flags disagree with persisted observations",
+    )
+    velocity = _floats(trajectory, :v_kms, "$label trajectory";
+                       nonnegative=true)
+    models = Dict{String,Vector{Float64}}()
+    for (name, column) in (
+        "SINDy" => :dst_star_sindy_nt,
+        "Simplified Burton" => :dst_star_burton_simplified_nt,
+        "Published Burton" => :dst_star_burton_published_nt,
+        "O'Brien--McPherron" => :dst_star_obrien_nt,
+    )
+        models[name] = _floats(trajectory, column, "$label trajectory")
+    end
+    isfinite(first(observed)) || error("$label trajectory must begin at its observed anchor")
+    all(first(prediction) == first(observed) for prediction in Base.values(models)) || error(
+        "$label comparator trajectories do not share the observed anchor",
+    )
+    return (; trajectory, time, velocity, observed, models)
+end
+
 function _validate_discovery(coefficients, norms, trajectory)
     terms = get_term_names(build_solar_wind_library(clock_basis=:full))
     nrow(coefficients) == 20 || error("discovery coefficients must contain 20 terms")
@@ -263,34 +304,8 @@ function _validate_discovery(coefficients, norms, trajectory)
     )
     count(selected) == 11 || error("canonical discovery support must contain 11 terms")
 
-    nrow(trajectory) >= 8 || error("discovery trajectory has fewer than eight rows")
-    time = _floats(trajectory, :time_hr, "May-2024 trajectory")
-    all(diff(time) .> 0) || error("May-2024 trajectory time must be strictly increasing")
-    observed = _floats(trajectory, :dst_star_observed_nt, "May-2024 trajectory";
-                       allow_nan=true)
-    count(isfinite, observed) >= 8 || error(
-        "May-2024 trajectory has fewer than eight original Dst* targets",
-    )
-    original = _bools(trajectory, :dst_star_original_target_flag, "May-2024 trajectory")
-    original == isfinite.(observed) || error(
-        "May-2024 original-target flags disagree with persisted observations",
-    )
-    velocity = _floats(trajectory, :v_kms, "May-2024 trajectory";
-                       nonnegative=true)
-    models = Dict{String,Vector{Float64}}()
-    for (name, column) in (
-        "SINDy" => :dst_star_sindy_nt,
-        "Simplified Burton" => :dst_star_burton_simplified_nt,
-        "Published Burton" => :dst_star_burton_published_nt,
-        "O'Brien--McPherron" => :dst_star_obrien_nt,
-    )
-        models[name] = _floats(trajectory, column, "May-2024 trajectory")
-    end
-    isfinite(first(observed)) || error("May-2024 trajectory must begin at its observed anchor")
-    all(first(prediction) == first(observed) for prediction in Base.values(models)) || error(
-        "May-2024 comparator trajectories do not share the observed anchor",
-    )
-    return (; terms, selected, trajectory, time, velocity, observed, models)
+    reconstruction = _validate_reconstruction_trajectory(trajectory, "May-2024")
+    return merge((; terms, selected), reconstruction)
 end
 
 function _validate_lambda(candidates, decision)
@@ -502,6 +517,10 @@ function prepare_canonical_figure_inputs(paths=validation_output_paths();
         discovery_coefficients.frame, discovery_norms.frame,
         discovery_trajectory.frame,
     )
+    moderate_trajectory = read_input("moderate2022_reconstruction.csv")
+    moderate = _validate_reconstruction_trajectory(
+        moderate_trajectory.frame, "February-2022 moderate-storm",
+    )
 
     lambda_paths = SolarSINDy._storm_selection_paths(
         normalized_paths.data, "primary_lambda",
@@ -540,6 +559,11 @@ function prepare_canonical_figure_inputs(paths=validation_output_paths();
             "outer_trajectory" => discovery_trajectory.path,
         ), trajectory_input_hashes=Dict(
             "outer_trajectory" => discovery_trajectory.sha256,
+        ),)),
+        moderate=merge(moderate, (trajectory_inputs=Dict(
+            "outer_trajectory" => moderate_trajectory.path,
+        ), trajectory_input_hashes=Dict(
+            "outer_trajectory" => moderate_trajectory.sha256,
         ),)),
         lambda=merge(lambda, (inputs=Dict(
             "candidate_grid" => lambda_candidates.path,
@@ -634,31 +658,34 @@ function _build_inclusion_frequency_figure(data)
     core_indices = findall(core)
     peripheral_indices = findall(.!core)
     figure = plot_bar(positions[core_indices], inclusion[core_indices];
-        xlabel="Library Term", ylabel="Inclusion Probability",
-        color=_BLUE, legend="Core (pi >= 0.9)")
+        xlabel="Library Term", ylabel="Inclusion Frequency",
+        color=_BLUE, legend="Core (π ≥ 0.9)")
     if !isempty(peripheral_indices)
         plot_bar!(figure, positions[peripheral_indices], inclusion[peripheral_indices];
-            color=_PINK, legend="Peripheral (pi < 0.9)")
+            color=_PINK, legend="Peripheral (π < 0.9)")
     end
     plot_scatter!(figure, [0.5, length(terms) + 0.5], [0.9, 0.9];
         mode="lines", color=_ORANGE, dash="dash", linewidth=1.5,
-        legend="pi = 0.9 threshold")
+        legend="π = 0.9 threshold")
     figure.layout.fields[:xaxis] = merge(
         get(figure.layout.fields, :xaxis, Dict{Symbol,Any}()),
         Dict{Symbol,Any}(
             :tickmode => "array",
             :tickvals => positions,
-            :ticktext => collect(String, terms),
+            :ticktext => _display_terms(terms),
             :tickangle => -45,
         ),
     )
-    # Top-right is the least obstructive inside position: the occupied bars and threshold line
-    # leave the most clear space above the low-inclusion terms at the right edge.
-    set_legend!(figure; position=:topright)
+    # Eight-position PDF audit: bottom-right has zero bar or threshold overlap.
+    set_legend!(figure; position=:bottomright)
     return figure
 end
 
-function _build_may2024_reconstruction_figure(data)
+function _build_may2024_reconstruction_figure(data;
+                                              lower_legend_position::Symbol=:bottomright)
+    lower_legend_position in (:bottomright, :bottomleft) || throw(ArgumentError(
+        "lower_legend_position must be :bottomright or :bottomleft",
+    ))
     # PlotlySupply's subplot constructor otherwise supplies its package name as
     # a visible default title.  The submitted reference figure has no title.
     figure = subplots(2, 1; sync=false, show=false, title="")
@@ -688,7 +715,14 @@ function _build_may2024_reconstruction_figure(data)
     legend2 = figure.fig.layout.fields[:legend2]
     legend2[:y] = figure.fig.layout.fields[:yaxis2][:domain][1] + 0.02
     legend2[:yanchor] = "bottom"
-    legend2[:xanchor] = "right"
+    xdomain = figure.fig.layout.fields[:xaxis2][:domain]
+    if lower_legend_position == :bottomright
+        legend2[:x] = xdomain[2] - 0.02
+        legend2[:xanchor] = "right"
+    else
+        legend2[:x] = xdomain[1] + 0.02
+        legend2[:xanchor] = "left"
+    end
     return figure
 end
 
@@ -847,8 +881,13 @@ end
 function build_canonical_figures(prepared)
     return (
         inclusion_frequency=_build_inclusion_frequency_figure(prepared.stability),
+        # Eight-position PDF audit: bottom-right has zero trace overlap for May 2024.
         may2024_reconstruction=_build_may2024_reconstruction_figure(
-            prepared.discovery,
+            prepared.discovery; lower_legend_position=:bottomright,
+        ),
+        # Eight-position PDF audit: bottom-left has zero trace overlap for February 2022.
+        moderate2022_reconstruction=_build_may2024_reconstruction_figure(
+            prepared.moderate; lower_legend_position=:bottomleft,
         ),
         lambda_selection=_build_lambda_figure(prepared.lambda),
         coefficient_stability=_build_stability_figure(prepared.stability),
@@ -921,6 +960,12 @@ function run_canonical_figure_generation(paths=validation_output_paths();
          input_hashes=prepared.discovery.trajectory_input_hashes,
          height=_MAY2024_RECONSTRUCTION_FIGURE_HEIGHT,
          role="full_width_untouched_may2024_validation"),
+        (name="fig_moderate2022_reconstruction.pdf",
+         figure=figures.moderate2022_reconstruction,
+         inputs=prepared.moderate.trajectory_inputs,
+         input_hashes=prepared.moderate.trajectory_input_hashes,
+         height=_MODERATE2022_RECONSTRUCTION_FIGURE_HEIGHT,
+         role="full_width_predeclared_february2022_moderate_validation"),
         (name="fig_lambda_selection.pdf", figure=figures.lambda_selection,
          inputs=prepared.lambda.inputs, input_hashes=prepared.lambda.input_hashes,
          height=_LAMBDA_FIGURE_HEIGHT,

@@ -715,6 +715,20 @@ function _subhour_trajectory(template::ForecastState,
     return pts
 end
 
+function _forecast_pidfile_has_local_live_owner(lock_path::AbstractString)
+    isfile(lock_path) && !islink(lock_path) || return false
+    try
+        pid, hostname, _ = Pidfile.parse_pidfile(String(lock_path))
+        local_owner = isempty(hostname) || hostname == gethostname()
+        return local_owner && Pidfile.isvalidpid(hostname, pid)
+    catch error
+        # A concurrent release can make the read fail. The subsequent exclusive
+        # open remains the authority, so a transient read failure is not ownership.
+        error isa IOError || error isa EOFError || rethrow()
+        return false
+    end
+end
+
 function _with_forecast_log_lock(f, log_path::String; timeout_sec::Float64=30.0,
                                  stale_after_sec::Float64=900.0, poll_sec::Float64=0.05)
     timeout_sec >= 0 || throw(ArgumentError("timeout_sec must be nonnegative"))
@@ -726,7 +740,8 @@ function _with_forecast_log_lock(f, log_path::String; timeout_sec::Float64=30.0,
     deadline = time() + timeout_sec
     owner = false
     while owner === false
-        if !isdir(lock_path) && !islink(lock_path)
+        if !isdir(lock_path) && !islink(lock_path) &&
+           !_forecast_pidfile_has_local_live_owner(lock_path)
             owner = Pidfile.trymkpidlock(
                 lock_path; stale_age=stale_after_sec,
                 refresh=stale_after_sec == 0 ? 0.0 : stale_after_sec / 2,

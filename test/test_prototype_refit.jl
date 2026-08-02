@@ -39,22 +39,22 @@ using Statistics
         expected = [
             0.0,                       # 1
             0.0,                       # V
-            -0.7337959514479122,       # Bs
+            -0.7311252640766392,       # Bs
             0.0,                       # n
-            -0.9043017530213097,       # Pdyn
-            -0.052578571243634,        # Dst_star
+            -0.896469523144789,        # Pdyn
+            -0.05254736645358795,      # Dst_star
             0.0,                       # V^2
             0.0,                       # Bs^2
             0.0,                       # n^2
             0.0,                       # V*Bs
-            0.0005482022641857301,     # n*V
-            0.05985743483393076,       # n*Bs
-            0.09078464029962613,       # Pdyn*Bs
-            -0.0002390242520929514,    # n*V*Bs
-            7.103501515251172,         # sin(θ_c/2)
-            -39.70128618780684,        # sin²(θ_c/2)
-            -9.57812395662637,         # sin⁴(θ_c/2)
-            43.09044824093929,         # sin^(8/3)(θ_c/2)
+            0.0005443391551555351,     # n*V
+            0.058657050490999035,      # n*Bs
+            0.08762670100061405,       # Pdyn*Bs
+            -0.00023440681152932838,   # n*V*Bs
+            6.928450443175584,         # sin(θ_c/2)
+            -38.7203669622234,         # sin²(θ_c/2)
+            -9.306535662532706,        # sin⁴(θ_c/2)
+            42.01021693483194,         # sin^(8/3)(θ_c/2)
             0.0,                       # V*sin²(θ_c/2)
             0.0,                       # Newell_d_Φ
         ]
@@ -121,7 +121,7 @@ using Statistics
             # Magnitude gate separating the refit ensemble from a silent fallback
             # to the frozen draws. Both draws files carry a Pdyn column, so plain
             # std>0 cannot tell them apart; the discriminator is the spread.
-            # Measured Pdyn ensemble std: refit draws ~0.104, frozen draws ~0.020.
+            # Measured Pdyn ensemble std: refit draws ~0.112, frozen draws ~0.020.
             # A 0.05 threshold sits ~2x below the refit spread and ~2.5x above the
             # frozen spread, separating them with margin. (Pdyn*Bs cannot be used:
             # its refit std ~0.023 is below the frozen ~0.030, so only Pdyn

@@ -748,6 +748,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             end
             @test take!(entered) == :first
             sleep(0.08)
+            @test _forecast_pidfile_has_local_live_owner(log_path * ".lock")
             second_owner = @async _with_forecast_log_lock(
                 log_path; timeout_sec=1.0, stale_after_sec=0.04, poll_sec=0.005,
             ) do

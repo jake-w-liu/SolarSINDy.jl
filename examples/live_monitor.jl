@@ -202,7 +202,7 @@ function _archive_pruned_rows!(pruned::DataFrame;
 
     # Serialize the segment once (header only when creating), hash it, append, flush.
     buf = IOBuffer()
-    CSV.write(buf, pruned; append=existed, writeheader=!existed)
+    CSV.write(buf, pruned; append=existed, header=!existed)
     seg = take!(buf)
     seg_sha = bytes2hex(sha256(seg))
     open(archive_path, "a") do io

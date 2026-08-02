@@ -483,15 +483,19 @@ function _real_print_metric_summary(rows)
     end
 end
 
-function _real_may2024_frame(df, storm, score)
+function _real_event_frame(df, storm, score)
     start = storm.observation_record.scoring_start_idx + score.anchor_index - 1
     stop = start + length(score.swd.t) - 1
     rows = start:stop
     length(rows) == length(score.observations) ||
-        error("May-2024 source-row alignment failed")
+        error("event source-row alignment failed for storm $(storm.storm_id)")
     dst_observed = [Bool(df.Dst_observed[row]) ? Float64(df.Dst[row]) : NaN
                     for row in rows]
     dst_star_observed = Float64.(score.observations)
+    dst_sindy = dst_star_to_dst.(score.predictions.SINDy, score.swd.Pdyn)
+    dst_burton = dst_star_to_dst.(score.predictions.Burton, score.swd.Pdyn)
+    dst_burton_full = dst_star_to_dst.(score.predictions.BurtonFull, score.swd.Pdyn)
+    dst_obrien = dst_star_to_dst.(score.predictions.OBrienMcP, score.swd.Pdyn)
     return DataFrame(
         storm_id=fill(storm.storm_id, length(rows)),
         catalog_row=collect(rows),
@@ -507,10 +511,351 @@ function _real_may2024_frame(df, storm, score)
         dst_star_burton_simplified_nt=score.predictions.Burton,
         dst_star_burton_published_nt=score.predictions.BurtonFull,
         dst_star_obrien_nt=score.predictions.OBrienMcP,
+        dst_sindy_nt=dst_sindy,
+        dst_burton_simplified_nt=dst_burton,
+        dst_burton_published_nt=dst_burton_full,
+        dst_obrien_nt=dst_obrien,
         v_kms=score.swd.V,
         bz_nt=score.swd.Bz,
         pdyn_npa=score.swd.Pdyn,
     )
+end
+
+_real_may2024_frame(df, storm, score) = _real_event_frame(df, storm, score)
+
+function _real_event_metric_records(event, storm, frame, score)
+    rows = NamedTuple[]
+    model_columns = (
+        ("SINDy", :dst_star_sindy_nt, :dst_sindy_nt),
+        ("Burton", :dst_star_burton_simplified_nt, :dst_burton_simplified_nt),
+        ("BurtonFull", :dst_star_burton_published_nt, :dst_burton_published_nt),
+        ("OBrienMcP", :dst_star_obrien_nt, :dst_obrien_nt),
+    )
+    for (model, dst_star_column, dst_column) in model_columns
+        for (target_space, observed_column, predicted_column) in (
+            ("Dst_star", :dst_star_observed_nt, dst_star_column),
+            ("Dst", :dst_observed_nt, dst_column),
+        )
+            scored = filter(score.scored_indices) do index
+                isfinite(frame[index, observed_column])
+            end
+            isempty(scored) && error(
+                "$event $target_space has no original post-anchor targets",
+            )
+            summary = metrics_summary(
+                Float64.(frame[scored, predicted_column]),
+                Float64.(frame[scored, observed_column]); name=model,
+            )
+            push!(rows, (
+                event=String(event),
+                storm_id=storm.storm_id,
+                onset_time=string(storm.onset_time),
+                minimum_catalog_dst_star_nt=storm.entry.min_dst_star,
+                model,
+                target_space,
+                rmse_nt=summary.rmse,
+                mae_nt=summary.mae,
+                correlation=summary.corr,
+                pe=summary.pe,
+                n_points=length(scored),
+                shared_anchor_excluded=true,
+                scoring_policy="original_post_anchor_targets_only",
+            ))
+        end
+    end
+    return rows
+end
+
+function _real_affine_exact_trajectory(a::AbstractVector, q::AbstractVector,
+                                       dst0::Real; dt::Real=1.0)
+    length(a) == length(q) || throw(DimensionMismatch(
+        "affine decay and forcing vectors must have equal length",
+    ))
+    isfinite(dst0) || throw(ArgumentError("affine initial state must be finite"))
+    isfinite(dt) && dt > 0 || throw(ArgumentError("affine dt must be finite and positive"))
+    all(isfinite, a) && all(isfinite, q) ||
+        throw(ArgumentError("affine coefficients must be finite"))
+    trajectory = zeros(length(a) + 1)
+    trajectory[1] = Float64(dst0)
+    derivative_clamp_count = 0
+    state_clamp_count = 0
+    dt64 = Float64(dt)
+    for k in eachindex(a)
+        derivative = a[k] * trajectory[k] + q[k]
+        abs(derivative) > 200.0 && (derivative_clamp_count += 1)
+        z = a[k] * dt64
+        forcing_factor = abs(z) <= sqrt(eps(Float64)) ? dt64 : expm1(z) / a[k]
+        next_state = exp(z) * trajectory[k] + forcing_factor * q[k]
+        bounded = clamp(next_state, -2000.0, 50.0)
+        bounded != next_state && (state_clamp_count += 1)
+        trajectory[k + 1] = bounded
+    end
+    return (; trajectory, derivative_clamp_count, state_clamp_count)
+end
+
+function _real_affine_euler_trajectory(a::AbstractVector, q::AbstractVector,
+                                       dst0::Real; dt::Real=1.0)
+    length(a) == length(q) || throw(DimensionMismatch(
+        "affine decay and forcing vectors must have equal length",
+    ))
+    isfinite(dst0) || throw(ArgumentError("affine initial state must be finite"))
+    isfinite(dt) && dt > 0 || throw(ArgumentError("affine dt must be finite and positive"))
+    all(isfinite, a) && all(isfinite, q) ||
+        throw(ArgumentError("affine coefficients must be finite"))
+    trajectory = zeros(length(a) + 1)
+    trajectory[1] = Float64(dst0)
+    derivative_clamp_count = 0
+    state_clamp_count = 0
+    dt64 = Float64(dt)
+    for k in eachindex(a)
+        raw_derivative = a[k] * trajectory[k] + q[k]
+        derivative = clamp(raw_derivative, -200.0, 200.0)
+        derivative != raw_derivative && (derivative_clamp_count += 1)
+        next_state = trajectory[k] + dt64 * derivative
+        bounded = clamp(next_state, -2000.0, 50.0)
+        bounded != next_state && (state_clamp_count += 1)
+        trajectory[k + 1] = bounded
+    end
+    return (; trajectory, derivative_clamp_count, state_clamp_count)
+end
+
+function _real_exact_sindy(coefficients, library, swd; dst0)
+    n_steps = length(swd.t) - 1
+    n_steps >= 1 || throw(ArgumentError("exact SINDy comparison needs two samples"))
+    a = zeros(n_steps)
+    q = zeros(n_steps)
+    theta0 = Vector{Float64}(undef, length(library))
+    theta1 = similar(theta0)
+    theta2 = similar(theta0)
+    for k in 1:n_steps
+        drivers = (Float64(swd.V[k]), Float64(swd.Bz[k]), Float64(swd.By[k]),
+                   Float64(swd.n[k]), Float64(swd.Pdyn[k]))
+        SolarSINDy._evaluate_point_vector_unchecked!(theta0, library, 0.0, drivers...)
+        SolarSINDy._evaluate_point_vector_unchecked!(theta1, library, 1.0, drivers...)
+        SolarSINDy._evaluate_point_vector_unchecked!(theta2, library, 2.0, drivers...)
+        f0 = dot(theta0, coefficients)
+        f1 = dot(theta1, coefficients)
+        f2 = dot(theta2, coefficients)
+        slope = f1 - f0
+        isapprox(f2, f0 + 2slope; rtol=1e-11, atol=1e-11 * max(1.0, abs(f2))) ||
+            error("canonical SINDy equation is not affine in Dst_star")
+        a[k] = slope
+        q[k] = f0
+    end
+    result = _real_affine_exact_trajectory(a, q, dst0; dt=1.0)
+    return (; result..., a, q)
+end
+
+function _real_exact_baseline(model::AbstractString, swd; dst0)
+    bs = max.(-swd.Bz, 0.0)
+    n_steps = length(swd.t) - 1
+    a = zeros(n_steps)
+    q = zeros(n_steps)
+    for k in 1:n_steps
+        speed = Float64(swd.V[k])
+        southward = Float64(bs[k])
+        if model == "Burton"
+            a[k] = -1 / 7.7
+            q[k] = -5.4e-3 * speed * southward
+        elseif model == "BurtonFull"
+            a[k] = -1 / 7.7
+            vbs = speed * southward
+            q[k] = vbs > 500.0 ? -5.4e-3 * (vbs - 500.0) : 0.0
+        elseif model == "OBrienMcP"
+            ec = speed * southward / 1000.0
+            tau = 2.40 * exp(9.74 / (4.69 + ec))
+            a[k] = -1 / tau
+            q[k] = ec > 0.49 ? -4.4 * (ec - 0.49) : 0.0
+        else
+            throw(ArgumentError("unknown affine baseline: $model"))
+        end
+    end
+    result = _real_affine_exact_trajectory(a, q, dst0; dt=1.0)
+    return (; result..., a, q)
+end
+
+function _real_integration_sensitivity_records(event, storm, score,
+                                                coefficients, library)
+    exact = Dict(
+        "SINDy" => _real_exact_sindy(
+            coefficients, library, score.swd; dst0=first(score.observations),
+        ),
+        "Burton" => _real_exact_baseline(
+            "Burton", score.swd; dst0=first(score.observations),
+        ),
+        "BurtonFull" => _real_exact_baseline(
+            "BurtonFull", score.swd; dst0=first(score.observations),
+        ),
+        "OBrienMcP" => _real_exact_baseline(
+            "OBrienMcP", score.swd; dst0=first(score.observations),
+        ),
+    )
+    rows = NamedTuple[]
+    observed = score.observations[score.scored_indices]
+    for model in ("SINDy", "Burton", "BurtonFull", "OBrienMcP")
+        euler = getproperty(score.predictions, Symbol(model))
+        exact_result = exact[model]
+        euler_result = _real_affine_euler_trajectory(
+            exact_result.a, exact_result.q, first(score.observations); dt=1.0,
+        )
+        isapprox(euler_result.trajectory, euler; rtol=1e-12, atol=1e-12) ||
+            error("affine Euler diagnostic does not reproduce $model simulation")
+        for (integrator, result) in (
+            "forward_Euler" => euler_result,
+            "exact_piecewise_constant_affine" => exact_result,
+        )
+            prediction = result.trajectory
+            summary = metrics_summary(
+                prediction[score.scored_indices], observed; name=model,
+            )
+            push!(rows, (
+                event=String(event),
+                storm_id=storm.storm_id,
+                onset_time=string(storm.onset_time),
+                model,
+                integrator,
+                driver_interpolation="zero_order_hold_at_hourly_sample",
+                rmse_nt=summary.rmse,
+                mae_nt=summary.mae,
+                correlation=summary.corr,
+                pe=summary.pe,
+                n_points=length(score.scored_indices),
+                shared_anchor_excluded=true,
+                max_abs_difference_from_euler_nt=maximum(abs.(prediction .- euler)),
+                derivative_clamp_would_activate_count=result.derivative_clamp_count,
+                state_clamp_activation_count=result.state_clamp_count,
+            ))
+        end
+    end
+    return rows
+end
+
+function _real_sindy_contribution_frames(event, storm, frame, score,
+                                         coefficients, library,
+                                         ensemble_records)
+    term_names = get_term_names(library)
+    active = findall(!iszero, coefficients)
+    n_steps = length(score.swd.t) - 1
+    theta = Matrix{Float64}(undef, n_steps, length(library))
+    work = Vector{Float64}(undef, length(library))
+    for k in 1:n_steps
+        SolarSINDy._evaluate_point_vector_unchecked!(
+            work, library, score.predictions.SINDy[k], Float64(score.swd.V[k]),
+            Float64(score.swd.Bz[k]), Float64(score.swd.By[k]),
+            Float64(score.swd.n[k]), Float64(score.swd.Pdyn[k]),
+        )
+        theta[k, :] = work
+    end
+    contributions = theta .* reshape(Float64.(coefficients), 1, :)
+    total = vec(sum(contributions, dims=2))
+    total_gross = vec(sum(abs.(contributions[:, active]), dims=2))
+    time_rows = NamedTuple[]
+    for k in 1:n_steps, index in active
+        push!(time_rows, (
+            event=String(event),
+            storm_id=storm.storm_id,
+            datetime=string(frame.datetime[k]),
+            time_hr=Float64(frame.time_hr[k]),
+            term=term_names[index],
+            coefficient=Float64(coefficients[index]),
+            contribution_nt_per_hour=contributions[k, index],
+            total_derivative_nt_per_hour=total[k],
+            clamped_derivative_nt_per_hour=clamp(total[k], -200.0, 200.0),
+        ))
+    end
+
+    ensemble = Dict(String(row.term) => row for row in ensemble_records)
+    summary_rows = NamedTuple[]
+    total_gross_integral = sum(total_gross)
+    function add_summary(record_kind, name, indices)
+        net = vec(sum(contributions[:, indices], dims=2))
+        gross = vec(sum(abs.(contributions[:, indices]), dims=2))
+        term_row = length(indices) == 1 ? ensemble[term_names[only(indices)]] : nothing
+        push!(summary_rows, (
+            event=String(event),
+            storm_id=storm.storm_id,
+            record_kind=String(record_kind),
+            name=String(name),
+            terms=join(term_names[indices], ";"),
+            n_terms=length(indices),
+            coefficient=length(indices) == 1 ? Float64(coefficients[only(indices)]) : NaN,
+            inclusion_probability=term_row === nothing ? NaN :
+                Float64(term_row.inclusion_probability),
+            conditional_nonzero_empirical_q025=term_row === nothing ? NaN :
+                Float64(term_row.conditional_nonzero_empirical_q025),
+            conditional_nonzero_empirical_q975=term_row === nothing ? NaN :
+                Float64(term_row.conditional_nonzero_empirical_q975),
+            interval_kind=term_row === nothing ? "not_applicable_to_group" :
+                String(term_row.interval_kind),
+            confidence_interval=false,
+            contribution_min_nt_per_hour=minimum(net),
+            contribution_max_nt_per_hour=maximum(net),
+            contribution_mean_nt_per_hour=mean(net),
+            contribution_mean_abs_nt_per_hour=mean(abs, net),
+            contribution_absmax_nt_per_hour=maximum(abs, net),
+            signed_integral_nt=sum(net),
+            gross_integral_nt=sum(gross),
+            gross_fraction_of_active_contributions=
+                total_gross_integral == 0.0 ? 0.0 : sum(gross) / total_gross_integral,
+            cancellation_ratio=_real_integrated_cancellation_ratio(net, gross),
+            state_path="free_running_SINDy_prediction",
+            driver_interpolation="zero_order_hold_at_hourly_sample",
+        ))
+    end
+    for index in active
+        add_summary("term", term_names[index], [index])
+    end
+    clock = intersect(active, findall(in(_REAL_CLOCK_RESPONSE_TERMS), term_names))
+    nonclock = filter(index -> !(term_names[index] in _REAL_CLOCK_RESPONSE_TERMS), active)
+    add_summary("group_net", "selected_active_net", active)
+    isempty(clock) || add_summary("group_net", "selected_clock_response_net", clock)
+    isempty(nonclock) || add_summary("group_net", "selected_nonclock_net", nonclock)
+    return (; timeseries=time_rows, summary=summary_rows)
+end
+
+function _real_integrated_cancellation_ratio(net::AbstractVector,
+                                              gross::AbstractVector)
+    length(net) == length(gross) || throw(DimensionMismatch(
+        "net and gross contribution vectors must have equal length",
+    ))
+    all(>=(0.0), gross) || throw(ArgumentError(
+        "gross contributions must be nonnegative",
+    ))
+    return sum(gross) / max(sum(abs, net), eps(Float64))
+end
+
+function _real_intensity_stratified_records(rows;
+                                            thresholds=(-50.0, -100.0, -150.0, -200.0))
+    frame = DataFrame(rows)
+    :experiment in propertynames(frame) ||
+        throw(ArgumentError("intensity analysis requires experiment labels"))
+    frame = frame[frame.experiment .== "C20-23->C25", :]
+    isempty(frame) && error("C20-23->C25 outer metrics are absent")
+    records = NamedTuple[]
+    for threshold in thresholds
+        subset = frame[frame.min_dst_star_observed_nt .<= threshold, :]
+        storms = unique(subset.storm_id)
+        isempty(storms) && error("no Cycle-25 storms satisfy Dst* <= $threshold nT")
+        for model in ("SINDy", "Burton", "BurtonFull", "OBrienMcP")
+            model_rows = subset[subset.model .== model, :]
+            nrow(model_rows) == length(storms) || error(
+                "$model intensity subset does not contain one row per storm",
+            )
+            push!(records, (
+                experiment="C20-23->C25",
+                intensity_threshold_dst_star_nt=threshold,
+                threshold_rule="selected_segment_minimum_Dst_star_at_or_below_threshold",
+                model,
+                n_storms=length(storms),
+                mean_rmse_nt=mean(model_rows.rmse_nt),
+                sd_rmse_nt=length(storms) > 1 ? std(model_rows.rmse_nt) : NaN,
+                mean_mae_nt=mean(model_rows.mae_nt),
+                mean_correlation=mean(model_rows.correlation),
+                mean_pe=mean(model_rows.pe),
+            ))
+        end
+    end
+    return records
 end
 
 function run_real_data_discovery(context)
@@ -722,7 +1067,7 @@ function run_real_data_discovery(context)
         subsample_fraction=0.8,
     )
     ensemble_inputs = merge(draw_inputs, Dict("raw_joint_draws" => draw_path))
-    _real_manifested_csv(
+    ensemble_summary_path = _real_manifested_csv(
         context, "real_ensemble_inclusion.csv", ensemble_records;
         selection_record=merge(full_record, (
             interval_kind="conditional_nonzero_empirical_row_subsample_interval",
@@ -813,7 +1158,7 @@ function run_real_data_discovery(context)
     may_frame = _real_may2024_frame(df, may_storm, may_score)
     println("May 2024 original Dst minimum: $(minimum(may_frame.dst_observed_nt[isfinite.(may_frame.dst_observed_nt)])) nT")
     println("May 2024 original-target Dst* minimum: $(minimum(may_frame.dst_star_observed_nt[isfinite.(may_frame.dst_star_observed_nt)])) nT")
-    _real_manifested_csv(context, "may2024_reconstruction.csv", may_frame;
+    may_path = _real_manifested_csv(context, "may2024_reconstruction.csv", may_frame;
         selection_record=merge(full_record, (
             event="May_2024",
             selected_storm_id=may_storm.storm_id,
@@ -827,6 +1172,115 @@ function run_real_data_discovery(context)
         extra_inputs=merge(full_primary_inputs, Dict(
             "point_coefficients" => full_coefficient_path,
             "storm_observation_audit" => storm_audit_path,
+        )),
+    )
+
+    moderate_storms = filter(full_storms) do storm
+        Date(storm.onset_time) == Date(2022, 2, 3)
+    end
+    length(moderate_storms) == 1 || error(
+        "expected exactly one eligible storm beginning on 2022-02-03, found " *
+        string(length(moderate_storms)),
+    )
+    moderate_storm = only(moderate_storms)
+    moderate_score = _score_discovery_storm(
+        moderate_storm, full_coefficients, full_library,
+    )
+    moderate_frame = _real_event_frame(df, moderate_storm, moderate_score)
+    moderate_path = _real_manifested_csv(
+        context, "moderate2022_reconstruction.csv", moderate_frame;
+        selection_record=merge(full_record, (
+            event="February_2022_moderate",
+            selected_storm_id=moderate_storm.storm_id,
+            selected_storm_onset=string(moderate_storm.onset_time),
+            catalog_window_start=moderate_storm.entry.onset_idx,
+            catalog_window_end=moderate_storm.entry.end_idx,
+            scoring_start_catalog_row=first(moderate_frame.catalog_row),
+            scoring_end_catalog_row=last(moderate_frame.catalog_row),
+            event_selection="reviewer_named_2022_02_03_moderate_event_selected_by_date_not_performance",
+        )),
+        extra_inputs=merge(full_primary_inputs, Dict(
+            "point_coefficients" => full_coefficient_path,
+            "storm_observation_audit" => storm_audit_path,
+        )),
+    )
+
+    event_metric_rows = vcat(
+        _real_event_metric_records("May_2024", may_storm, may_frame, may_score),
+        _real_event_metric_records(
+            "February_2022_moderate", moderate_storm, moderate_frame, moderate_score,
+        ),
+    )
+    _real_manifested_csv(
+        context, "event_reconstruction_metrics.csv", event_metric_rows;
+        selection_record=merge(full_record, (
+            kind="predeclared_event_reconstruction_metrics",
+            targets=("Dst_star", "Dst"),
+            shared_anchor_excluded=true,
+        )),
+        extra_inputs=merge(full_primary_inputs, Dict(
+            "point_coefficients" => full_coefficient_path,
+            "may2024_trajectory" => may_path,
+            "moderate2022_trajectory" => moderate_path,
+        )),
+    )
+
+    may_contributions = _real_sindy_contribution_frames(
+        "May_2024", may_storm, may_frame, may_score, full_coefficients,
+        full_library, ensemble_records,
+    )
+    _real_manifested_csv(
+        context, "may2024_term_contribution_timeseries.csv",
+        may_contributions.timeseries;
+        selection_record=merge(full_record, (
+            kind="free_running_event_term_contribution_timeseries",
+            event="May_2024",
+        )),
+        extra_inputs=merge(full_primary_inputs, Dict(
+            "point_coefficients" => full_coefficient_path,
+            "ensemble_stability" => ensemble_summary_path,
+            "may2024_trajectory" => may_path,
+        )),
+    )
+    _real_manifested_csv(
+        context, "may2024_term_contribution_summary.csv",
+        may_contributions.summary;
+        selection_record=merge(full_record, (
+            kind="physical_unit_event_term_and_group_contributions",
+            event="May_2024",
+            individual_clock_terms_basis_dependent=true,
+        )),
+        extra_inputs=merge(full_primary_inputs, Dict(
+            "point_coefficients" => full_coefficient_path,
+            "ensemble_stability" => ensemble_summary_path,
+            "may2024_trajectory" => may_path,
+        )),
+        metadata=(
+            interval_interpretation="empirical_subsampling_stability_not_confidence_intervals",
+            clock_block_interpretation="grouped_net_preferred_under_collinearity",
+        ),
+    )
+
+    integration_rows = vcat(
+        _real_integration_sensitivity_records(
+            "May_2024", may_storm, may_score, full_coefficients, full_library,
+        ),
+        _real_integration_sensitivity_records(
+            "February_2022_moderate", moderate_storm, moderate_score,
+            full_coefficients, full_library,
+        ),
+    )
+    _real_manifested_csv(
+        context, "integration_sensitivity.csv", integration_rows;
+        selection_record=merge(full_record, (
+            kind="forward_Euler_vs_exact_piecewise_constant_affine_integration",
+            events=("May_2024", "February_2022_moderate"),
+            shared_anchor_excluded=true,
+        )),
+        extra_inputs=merge(full_primary_inputs, Dict(
+            "point_coefficients" => full_coefficient_path,
+            "may2024_trajectory" => may_path,
+            "moderate2022_trajectory" => moderate_path,
         )),
     )
 
@@ -918,7 +1372,8 @@ function run_real_data_discovery(context)
     end
     _real_assert_exact_metric_cohorts(full_cross_rows)
     _real_assert_exact_metric_cohorts(collapsed_cross_rows)
-    _real_manifested_csv(context, "cross_cycle_metrics.csv", full_cross_rows;
+    cross_metrics_path = _real_manifested_csv(
+        context, "cross_cycle_metrics.csv", full_cross_rows;
         selection_record=(kind="independently_selected_cross_cycle_outer_metrics",
                           basis="full", experiments=full_cross_records),
         extra_inputs=merge(full_cross_inputs, Dict(
@@ -930,6 +1385,20 @@ function run_real_data_discovery(context)
         selection_record=(kind="independently_selected_cross_cycle_outer_metrics",
                           basis="collapsed", experiments=collapsed_cross_records),
         extra_inputs=merge(collapsed_cross_inputs, Dict(
+            "storm_observation_audit" => storm_audit_path,
+        )),
+    )
+    intensity_rows = _real_intensity_stratified_records(full_cross_rows)
+    _real_manifested_csv(
+        context, "intensity_stratified_metrics.csv", intensity_rows;
+        selection_record=(
+            kind="heldout_cycle25_event_minimum_intensity_stratification",
+            source_experiment="C20-23->C25",
+            thresholds_dst_star_nt=(-50.0, -100.0, -150.0, -200.0),
+            refit_scope="C20_to_C23_training_only",
+        ),
+        extra_inputs=merge(full_cross_inputs, Dict(
+            "cross_cycle_metrics" => cross_metrics_path,
             "storm_observation_audit" => storm_audit_path,
         )),
     )

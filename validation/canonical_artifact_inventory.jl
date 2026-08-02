@@ -35,6 +35,10 @@ const CANONICAL_DATA_ARTIFACT_INVENTORY = let inventory = Dict{String,String}()
             "real_sindy_collapsed_coefficients.csv",
             "real_sindy_discovery_provenance.csv", "real_holdout_metrics.csv",
             "real_holdout_collapsed_metrics.csv", "may2024_reconstruction.csv",
+            "moderate2022_reconstruction.csv", "event_reconstruction_metrics.csv",
+            "may2024_term_contribution_timeseries.csv",
+            "may2024_term_contribution_summary.csv",
+            "integration_sensitivity.csv", "intensity_stratified_metrics.csv",
             "cross_cycle_metrics.csv", "cross_cycle_collapsed_metrics.csv",
         ],
     ))
@@ -122,6 +126,7 @@ const CANONICAL_FIGURE_ARTIFACT_INVENTORY = let
     Dict(name => producer for name in (
         "fig_discovery_validation.pdf",
         "fig_may2024_reconstruction.pdf",
+        "fig_moderate2022_reconstruction.pdf",
         "fig_lambda_selection.pdf",
         "fig_coefficient_stability.pdf",
         "fig_synthetic_recovery.pdf",

@@ -466,6 +466,8 @@ end
         @test record["metadata"]["catalog"]["n_storms"] == 2
         @test record["metadata"]["catalog"]["split_counts"][3]["count"] == 1
         @test record["metadata"]["catalog"]["cycle_counts"][2]["solar_cycle"] == 25
+        @test record["selection_record"]["parameters"]["entry_policy"] ==
+              "downward_crossing_with_nonoverlapping_candidate_window_and_crossing_time_separation"
 
         prior_catalog = read(catalog_path)
         prior_manifest = read(catalog_path * ".manifest.json")

@@ -320,9 +320,16 @@ end
 
 Identify geomagnetic storms in cleaned OMNI DataFrame and build a catalog.
 
-A storm is defined by Dst* crossing below `dst_thresh`.
-Windows: `window_pre` hours before onset, `window_post` hours after onset.
-Storms must be separated by at least `min_separation` hours.
+A storm is defined by a downward Dst* crossing below `dst_thresh`.
+Windows: `window_pre` hours before onset; `window_post` bounds the search for
+the storm minimum and recovery, after which a 24-hour post-recovery buffer is
+added.
+Candidate crossings must be separated by at least `min_separation` hours.
+The proposed extraction window must not overlap the preceding qualifying window.
+A crossing whose proposed window overlaps is not catalogued separately, which
+prevents duplicated hourly rows; scanning continues so that a later independent
+crossing can still enter. The separation interval is measured between qualifying
+crossing times, not from the buffered extraction-window end.
 
 Returns Vector{StormCatalogEntry}.
 """
@@ -355,25 +362,38 @@ function build_storm_catalog(df::DataFrame;
     # For storm detection, only need Dst_star (Dst + Pdyn).
     # Full quality (V, Bz) checked separately for SINDy usability.
     valid_mask = isfinite.(df.Dst_star)
-    # Precompute SINDy-usable mask (V, Bz, Dst_star all valid)
+    # Precompute the catalog-level coverage mask. `quality` requires finite V,
+    # Bz, Dst, n, and recomputed proton-only Pdyn; `valid_mask` additionally
+    # requires the resulting Dst_star. By is enforced later when a contiguous
+    # discovery/scoring segment is selected.
     sindy_mask = (df.quality .== 1) .& valid_mask
 
     storm_id = 0
+    last_crossing_idx = 0
     last_storm_end = 0
 
     i = 1
     while i <= n
-        # Skip if not valid or above threshold
-        if !valid_mask[i] || df.Dst_star[i] >= dst_thresh
+        # Admit only a genuine downward threshold entry (or a below-threshold
+        # first finite sample after a gap). Without this check, a single long
+        # excursion can be counted again after the window/separation gate.
+        crossed_below = valid_mask[i] && df.Dst_star[i] < dst_thresh &&
+            (i == 1 || !valid_mask[i - 1] || df.Dst_star[i - 1] >= dst_thresh)
+        if !crossed_below
             i += 1
             continue
         end
 
-        # Enforce minimum separation from last storm
-        if i <= last_storm_end + min_separation
+        # Enforce the minimum interval between threshold entries. Measuring
+        # this from the previous buffered window end would double-count the
+        # recovery/post-event exclusion and can suppress a genuinely new storm
+        # that begins shortly after that buffer (for example, November 2001).
+        if last_crossing_idx > 0 && i < last_crossing_idx + min_separation
             i += 1
             continue
         end
+
+        crossing_idx = i
 
         # Found a storm crossing — find onset (first point below threshold)
         onset_idx = i
@@ -412,7 +432,18 @@ function build_storm_catalog(df::DataFrame;
         win_start = max(1, onset_idx - window_pre)
         win_end = min(n, recovery_idx + 24)  # 24hr buffer after recovery
 
-        # Check sufficient SINDy-usable data in window (>60% with V, Bz, Dst_star)
+        # Never duplicate hourly rows across catalog entries. Do not catalogue
+        # an overlapping proposed window separately. Advance only past this
+        # crossing (rather than its candidate window) so a later independent
+        # crossing can still be considered.
+        if last_storm_end > 0 && win_start <= last_storm_end
+            i += 1
+            continue
+        end
+
+        last_crossing_idx = crossing_idx
+
+        # Check sufficient catalog-level coverage in the proposed window.
         n_valid_in_window = count(@view sindy_mask[win_start:win_end])
         n_window = win_end - win_start + 1
         if n_valid_in_window / n_window < 0.60
@@ -462,13 +493,16 @@ end
     extract_storm_data(df, entry::StormCatalogEntry)
 
 Extract a single storm's data from the cleaned OMNI DataFrame as SolarWindData.
-Replaces remaining NaN values with linear interpolation for ODE integration.
+Replaces remaining NaN values by forward filling, followed by backward filling
+for any leading gaps. A field containing no finite value remains NaN; simulation
+entry points perform their own finiteness checks.
 """
 function extract_storm_data(df::DataFrame, entry::StormCatalogEntry)
     rows = entry.onset_idx:entry.end_idx
     n_pts = length(rows)
 
-    # Extract and fill any remaining NaN with nearest-neighbor for simulation
+    # Extract and fill any remaining NaN by carrying the previous finite value;
+    # only leading gaps require the subsequent backward pass.
     V    = _fillnan(df.V[rows])
     Bz   = _fillnan(df.Bz[rows])
     By   = _fillnan(df.By[rows])
@@ -501,7 +535,9 @@ end
 """
     _fillnan(x)
 
-Fill NaN values by nearest-neighbor interpolation (forward then backward fill).
+Fill NaN values by carrying the previous finite value forward, then carrying the
+next finite value backward only through any leading gap. An all-NaN vector is
+returned unchanged.
 """
 function _fillnan(x::AbstractVector)
     out = collect(Float64, x)

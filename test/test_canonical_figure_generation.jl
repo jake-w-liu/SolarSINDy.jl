@@ -154,9 +154,15 @@ function _canonical_figure_fixture(root)
         dst_original_flag=fill(true, n), dst_star_original_target_flag=fill(true, n),
         dst_star_sindy_nt=sindy, dst_star_burton_simplified_nt=burton,
         dst_star_burton_published_nt=published, dst_star_obrien_nt=obrien,
+        dst_sindy_nt=sindy, dst_burton_simplified_nt=burton,
+        dst_burton_published_nt=published, dst_obrien_nt=obrien,
         v_kms=fill(500.0, n), bz_nt=fill(-5.0, n), pdyn_npa=fill(2.0, n),
     )
     _figure_fixture_write(paths, "may2024_reconstruction.csv", may)
+    moderate = copy(may)
+    moderate.storm_id .= 2
+    moderate.datetime = [DateTime(2022, 2, 3) + Hour(i - 1) for i in 1:n]
+    _figure_fixture_write(paths, "moderate2022_reconstruction.csv", moderate)
 
     lambdas = storm_lambda_grid()
     means = 10.0 .+ abs.(collect(1:60) .- 20)
@@ -289,6 +295,7 @@ end
         prepared = CFG.prepare_canonical_figure_inputs(paths;
             package_root=_FIGURE_TEST_PACKAGE_ROOT)
         @test nrow(prepared.discovery.trajectory) == 24
+        @test nrow(prepared.moderate.trajectory) == 24
         @test length(prepared.lambda.lambdas) == 60
         @test length(prepared.stability.terms) == 20
         @test nrow(prepared.synthetic.groups["minimal_identifiable"]) == 241
@@ -300,12 +307,13 @@ end
         @test length(figures.inclusion_frequency.data) == 3
         @test !(figures.may2024_reconstruction.fig isa CFG.SyncPlot)
         @test length(figures.may2024_reconstruction.fig.data) == 5
+        @test length(figures.moderate2022_reconstruction.fig.data) == 5
         @test length(figures.lambda_selection.fig.data) == 5
         @test length(figures.coefficient_stability.data) == 3
         @test length(figures.synthetic_recovery.fig.data) == 5
         @test length(figures.paired_performance.data) == 4
         @test CFG._display_terms(["Dst_star", "n*V", "Newell_d_Φ"]) ==
-              ["Dst*", "n V", "dΦN/dt"]
+              ["Dst<sup>*</sup>", "n V", "dΦ<sub>N</sub>/dt"]
 
         stability_medians = Float64.(
             figures.coefficient_stability.data[2].fields[:y],
@@ -332,16 +340,16 @@ end
         @test figures.inclusion_frequency.data[3].fields[:y] == [0.9, 0.9]
         @test [trace.fields[:name] for trace in
                figures.inclusion_frequency.data] == [
-            "Core (pi >= 0.9)", "Peripheral (pi < 0.9)",
-            "pi = 0.9 threshold",
+            "Core (π ≥ 0.9)", "Peripheral (π < 0.9)",
+            "π = 0.9 threshold",
         ]
         @test inclusion_layout[:xaxis][:tickmode] == "array"
         @test inclusion_layout[:xaxis][:tickvals] == inclusion_positions
         @test inclusion_layout[:xaxis][:ticktext] ==
-              prepared.stability.terms[inclusion_order]
+              CFG._display_terms(prepared.stability.terms[inclusion_order])
         @test inclusion_layout[:xaxis][:tickangle] == -45
         @test inclusion_layout[:legend][:xanchor] == "right"
-        @test inclusion_layout[:legend][:yanchor] == "top"
+        @test inclusion_layout[:legend][:yanchor] == "bottom"
         may_layout = figures.may2024_reconstruction.fig.layout.fields
         @test !haskey(may_layout, :title)
         @test figures.may2024_reconstruction.fig.data[1].fields[:y] ==
@@ -361,6 +369,11 @@ end
               "dash"
         @test figures.may2024_reconstruction.fig.data[5].fields[:line][:dash] ==
               "dashdot"
+        @test may_layout[:legend2][:xanchor] == "right"
+        @test may_layout[:legend2][:yanchor] == "bottom"
+        moderate_layout = figures.moderate2022_reconstruction.fig.layout.fields
+        @test moderate_layout[:legend2][:xanchor] == "left"
+        @test moderate_layout[:legend2][:yanchor] == "bottom"
         @test figures.lambda_selection.fig.layout.fields[:legend][:yanchor] == "middle"
         @test figures.lambda_selection.fig.layout.fields[:legend2][:yanchor] == "middle"
         stability_layout = figures.coefficient_stability.layout.fields
@@ -437,6 +450,7 @@ end
         @test figures.paired_performance.layout.fields[:showlegend] == false
         @test CFG._INCLUSION_FREQUENCY_FIGURE_HEIGHT == 360
         @test CFG._MAY2024_RECONSTRUCTION_FIGURE_HEIGHT == 540
+        @test CFG._MODERATE2022_RECONSTRUCTION_FIGURE_HEIGHT == 540
         @test CFG._COEFFICIENT_STABILITY_FIGURE_HEIGHT == 360
         @test CFG._SYNTHETIC_FIGURE_HEIGHT == 800
         @test synthetic_layout[:margin][:t] == 70
@@ -514,6 +528,8 @@ end
             "fig_discovery_validation.pdf" => prepared.stability.inputs,
             "fig_may2024_reconstruction.pdf" =>
                 prepared.discovery.trajectory_inputs,
+            "fig_moderate2022_reconstruction.pdf" =>
+                prepared.moderate.trajectory_inputs,
             "fig_lambda_selection.pdf" => prepared.lambda.inputs,
             "fig_coefficient_stability.pdf" => prepared.stability.inputs,
             "fig_synthetic_recovery.pdf" => prepared.synthetic.inputs,
@@ -565,7 +581,7 @@ end
                 end
             end,
         )
-        @test hook_calls[] == 4
+        @test hook_calls[] == 5
         @test changed_before_failure[]
         @test all(read(path) == prior_bytes[path] for path in transaction_paths)
         @test all(output -> CFG.verify_output_manifest(

@@ -223,6 +223,16 @@ include(joinpath(@__DIR__, "..", "validation", "real_data_discovery.jl"))
     @test all(isnan, reconstruction.dst_star_observed_nt[8:9])
     @test all(.!reconstruction.dst_star_original_target_flag[8:9])
     @test reconstruction.dst_cleaned_nt != reconstruction.dst_star_cleaned_nt
+    @test reconstruction.dst_sindy_nt == dst_star_to_dst.(
+        reconstruction.dst_star_sindy_nt, reconstruction.pdyn_npa,
+    )
+    event_metrics = _real_event_metric_records(
+        "fixture", prepared, reconstruction, scored_real,
+    )
+    @test length(event_metrics) == 8
+    @test Set(getproperty.(event_metrics, :target_space)) == Set(("Dst", "Dst_star"))
+    @test all(row -> row.shared_anchor_excluded, event_metrics)
+    @test all(row -> row.n_points == n - 3, event_metrics)
     invalid_observations = copy(prepared.scoring_observations)
     invalid_observations[2] = Inf
     @test_throws ArgumentError _score_discovery_storm(
@@ -289,6 +299,98 @@ include(joinpath(@__DIR__, "..", "validation", "real_data_discovery.jl"))
         prediction = getproperty(scored.predictions, Symbol(row.model))
         @test row.rmse_nt ≈ rmse(@view(prediction[2:end]),
                                  @view(scored.swd.Dst_star[2:end]))
+    end
+
+    @testset "Exact affine integration and event diagnostics" begin
+        affine = _real_affine_exact_trajectory([-0.5], [2.0], 1.0)
+        expected = exp(-0.5) + 2.0 * expm1(-0.5) / -0.5
+        @test affine.trajectory ≈ [1.0, expected]
+        @test _real_affine_exact_trajectory([0.0], [2.0], 1.0).trajectory == [1.0, 3.0]
+        @test_throws DimensionMismatch _real_affine_exact_trajectory(
+            [-0.5], [1.0, 2.0], 0.0,
+        )
+        euler_affine = _real_affine_euler_trajectory([-0.5], [2.0], 1.0)
+        @test euler_affine.trajectory == [1.0, 2.5]
+        @test euler_affine.derivative_clamp_count == 0
+        @test euler_affine.state_clamp_count == 0
+        euler_clamped = _real_affine_euler_trajectory([0.0], [500.0], 0.0)
+        @test euler_clamped.trajectory == [0.0, 50.0]
+        @test euler_clamped.derivative_clamp_count == 1
+        @test euler_clamped.state_clamp_count == 1
+        @test_throws DimensionMismatch _real_affine_euler_trajectory(
+            [-0.5], [1.0, 2.0], 0.0,
+        )
+
+        sensitivity = _real_integration_sensitivity_records(
+            "fixture", synthetic[end], scored, selection.model, selection_lib,
+        )
+        @test length(sensitivity) == 8
+        @test Set(getproperty.(sensitivity, :integrator)) == Set((
+            "forward_Euler", "exact_piecewise_constant_affine",
+        ))
+        @test all(row -> row.shared_anchor_excluded, sensitivity)
+        @test all(row -> row.n_points == length(scored.scored_indices), sensitivity)
+        @test all(row -> row.derivative_clamp_would_activate_count == 0,
+                  sensitivity)
+        @test all(row -> row.state_clamp_activation_count == 0, sensitivity)
+
+        terms = get_term_names(selection_lib)
+        draws = repeat(reshape(selection.model, :, 1), 1, 4)
+        inclusion = vec(mean(draws .!= 0.0; dims=2))
+        ensemble_records = _real_empirical_subsample_records(
+            terms, draws, inclusion;
+            lambda=selection.selected_lambda, seed=42, subsample_fraction=0.8,
+        )
+        contribution_frame = DataFrame(
+            datetime=collect(DateTime(2000):Hour(1):
+                             DateTime(2000) + Hour(length(scored.swd.t) - 1)),
+            time_hr=scored.swd.t,
+        )
+        contributions = _real_sindy_contribution_frames(
+            "fixture", synthetic[end], contribution_frame, scored,
+            selection.model, selection_lib, ensemble_records,
+        )
+        @test length(contributions.timeseries) ==
+              (length(scored.swd.t) - 1) * count(!iszero, selection.model)
+        term_summaries = filter(
+            row -> row.record_kind == "term", contributions.summary,
+        )
+        @test length(term_summaries) == count(!iszero, selection.model)
+        @test all(row -> !row.confidence_interval, term_summaries)
+        selected_net = only(filter(
+            row -> row.name == "selected_active_net", contributions.summary,
+        ))
+        @test selected_net.n_terms == count(!iszero, selection.model)
+        @test _real_integrated_cancellation_ratio([1.0, -1.0], [3.0, 4.0]) == 3.5
+        @test_throws DimensionMismatch _real_integrated_cancellation_ratio(
+            [1.0], [1.0, 2.0],
+        )
+        @test_throws ArgumentError _real_integrated_cancellation_ratio(
+            [1.0], [-1.0],
+        )
+    end
+
+    @testset "Intensity stratification keeps exact comparator cohorts" begin
+        fixture_rows = NamedTuple[]
+        for (storm_id, minimum) in enumerate((-60.0, -120.0, -180.0, -220.0))
+            for (model_index, model) in enumerate(
+                ("SINDy", "Burton", "BurtonFull", "OBrienMcP"),
+            )
+                push!(fixture_rows, (
+                    experiment="C20-23->C25", storm_id, model,
+                    min_dst_star_observed_nt=minimum,
+                    rmse_nt=10.0 + model_index, mae_nt=8.0 + model_index,
+                    correlation=0.9 - 0.01model_index, pe=0.5 + 0.01model_index,
+                ))
+            end
+        end
+        intensity = _real_intensity_stratified_records(fixture_rows)
+        @test length(intensity) == 16
+        sindy = filter(row -> row.model == "SINDy", intensity)
+        @test getproperty.(sindy, :n_storms) == [4, 3, 2, 1]
+        @test isnan(last(sindy).sd_rmse_nt)
+        @test all(row -> row.threshold_rule ==
+                  "selected_segment_minimum_Dst_star_at_or_below_threshold", intensity)
     end
 
     mktempdir() do root
