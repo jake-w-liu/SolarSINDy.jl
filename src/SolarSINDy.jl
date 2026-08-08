@@ -25,6 +25,7 @@ include("data_cleaning.jl")
 include("metrics.jl")
 include("performance_statistics.jl")
 include("forecast.jl")
+include("operational_artifacts.jl")
 include("conformal.jl")
 include("assimilation.jl")
 include("alarm.jl")
@@ -71,6 +72,13 @@ export # Utils
        fit_operational_v2_calibration, operational_v2_predict,
        score_operational_v2, write_operational_v2_calibration,
        read_operational_v2_calibration,
+       # Versioned operational core
+       OPERATIONAL_V2_1_MODEL_VERSION, OPERATIONAL_V2_0_MODEL_VERSION,
+       OperationalCoreArtifacts, OperationalCalibrationArtifacts,
+       OperationalCore, canonical_operational_version,
+       operational_core_artifacts, operational_calibration_artifacts,
+       validate_operational_core_artifacts, load_operational_core,
+       init_operational_forecast, operational_core_forecast,
        # Conformal UQ
        ConformalCalibration, ConformalStratum, fit_conformal,
        conformal_stratum, conformal_halfwidth, conformal_interval,

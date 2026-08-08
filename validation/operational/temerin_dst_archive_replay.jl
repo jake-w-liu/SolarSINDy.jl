@@ -215,16 +215,22 @@ function score_temerin_dst_archive(broad::DataFrame, temerin::DataFrame;
                                    max_match_gap_min::Real = TEMERIN_MATCH_TOL_MIN)
     isempty(broad) && error("broad replay has no rows")
     isempty(temerin) && error("Temerin-Li archive has no rows")
-    required = [:storm_id, :storm, :storm_min_dst_nt, :issue_utc, :target_utc, :lead,
-                :obs, :audit_baseline, :v2, :persistence]
+    required = [:storm_id, :storm, :issue_utc, :target_utc, :lead,
+                :obs, :v2_1, :v2_0, :persistence]
     missing_cols = [String(c) for c in required if !(String(c) in names(broad))]
     isempty(missing_cols) || error("broad replay missing columns: $(join(missing_cols, ", "))")
+    min_dst_star_col = "storm_min_dst_star_nt" in names(broad) ?
+                       :storm_min_dst_star_nt :
+                       ("storm_min_dst_nt" in names(broad) ? :storm_min_dst_nt : nothing)
+    min_dst_star_col === nothing && error(
+        "broad replay is missing storm_min_dst_star_nt (or the legacy storm_min_dst_nt alias)",
+    )
 
     sort!(temerin, :valid_utc)
     valids = DateTime.(temerin.valid_utc)
-    out = DataFrame(storm_id = Int[], storm = String[], storm_min_dst_nt = Float64[],
+    out = DataFrame(storm_id = Int[], storm = String[], storm_min_dst_star_nt = Float64[],
                     issue_utc = DateTime[], target_utc = DateTime[], lead = Int[],
-                    obs = Float64[], audit_baseline = Float64[], v2 = Float64[],
+                    obs = Float64[], v2_1 = Float64[], v2_0 = Float64[],
                     persistence = Float64[], temerin_li_dst = Float64[],
                     temerin_valid_utc = DateTime[], match_abs_gap_min = Float64[],
                     temerin_source_file = String[], source_epoch = String[])
@@ -238,13 +244,13 @@ function score_temerin_dst_archive(broad::DataFrame, temerin::DataFrame;
         push!(out, (
             Int(r.storm_id),
             _csv_audit_safe_label(r.storm),
-            Float64(r.storm_min_dst_nt),
+            Float64(r[min_dst_star_col]),
             issue,
             target,
             Int(r.lead),
             Float64(r.obs),
-            Float64(r.audit_baseline),
-            Float64(r.v2),
+            Float64(r.v2_1),
+            Float64(r.v2_0),
             Float64(r.persistence),
             Float64(temerin.temerin_li_dst_nt[idx]),
             valids[idx],
@@ -259,13 +265,13 @@ end
 
 function _validate_temerin_rows(rows::DataFrame; max_match_gap_min::Float64 = TEMERIN_MATCH_TOL_MIN)
     isempty(rows) && error("Temerin-Li Dst archive scoring produced no rows")
-    required = [:storm_id, :storm, :storm_min_dst_nt, :issue_utc, :target_utc, :lead,
-                :obs, :audit_baseline, :v2, :persistence, :temerin_li_dst,
+    required = [:storm_id, :storm, :storm_min_dst_star_nt, :issue_utc, :target_utc, :lead,
+                :obs, :v2_1, :v2_0, :persistence, :temerin_li_dst,
                 :temerin_valid_utc, :match_abs_gap_min, :temerin_source_file,
                 :source_epoch]
     missing_cols = [String(c) for c in required if !(String(c) in names(rows))]
     isempty(missing_cols) || error("Temerin-Li scoring missing columns: $(join(missing_cols, ", "))")
-    for col in (:obs, :audit_baseline, :v2, :persistence, :temerin_li_dst,
+    for col in (:obs, :v2_1, :v2_0, :persistence, :temerin_li_dst,
                 :match_abs_gap_min)
         all(isfinite, Float64.(rows[!, col])) || error("non-finite values in $col")
     end
@@ -283,8 +289,8 @@ function _temerin_metric_row(rows::DataFrame, scope::AbstractString, lead::Int)
     sub = rows[Int.(rows.lead) .== lead, :]
     nrow(sub) == 0 && return nothing
     rtem = _dst_rmse(sub.obs .- sub.temerin_li_dst)
-    rv2 = _dst_rmse(sub.obs .- sub.v2)
-    rbase = _dst_rmse(sub.obs .- sub.audit_baseline)
+    rv21 = _dst_rmse(sub.obs .- sub.v2_1)
+    rv20 = _dst_rmse(sub.obs .- sub.v2_0)
     rpers = _dst_rmse(sub.obs .- sub.persistence)
     return (
         scope = String(scope),
@@ -292,10 +298,10 @@ function _temerin_metric_row(rows::DataFrame, scope::AbstractString, lead::Int)
         n_rows = nrow(sub),
         n_storms = length(unique(Int.(sub.storm_id))),
         rmse_temerin_valid_nt = rtem,
-        rmse_v2_nt = rv2,
-        rmse_preupgrade_nt = rbase,
+        rmse_v2_1_nt = rv21,
+        rmse_v2_0_nt = rv20,
         rmse_persistence_nt = rpers,
-        v2_minus_temerin_valid_rmse_nt = rv2 - rtem,
+        v2_1_minus_temerin_valid_rmse_nt = rv21 - rtem,
         median_match_gap_min = median(Float64.(sub.match_abs_gap_min)),
         max_match_gap_min = maximum(Float64.(sub.match_abs_gap_min)),
     )
@@ -303,9 +309,9 @@ end
 
 function temerin_dst_summary(rows::DataFrame)
     out = DataFrame(scope = String[], lead_h = Int[], n_rows = Int[], n_storms = Int[],
-                    rmse_temerin_valid_nt = Float64[], rmse_v2_nt = Float64[],
-                    rmse_preupgrade_nt = Float64[], rmse_persistence_nt = Float64[],
-                    v2_minus_temerin_valid_rmse_nt = Float64[],
+                    rmse_temerin_valid_nt = Float64[], rmse_v2_1_nt = Float64[],
+                    rmse_v2_0_nt = Float64[], rmse_persistence_nt = Float64[],
+                    v2_1_minus_temerin_valid_rmse_nt = Float64[],
                     median_match_gap_min = Float64[], max_match_gap_min = Float64[])
     for (scope, sub) in (
         ("all_operational_input_era", rows),
@@ -330,15 +336,15 @@ function _temerin_summary_consistent(rows::DataFrame, summary::DataFrame)
         nrow(sub) == Int(r.n_rows) || return (ok = false,
             detail = "row-count mismatch for $(r.scope) $(r.lead_h)h")
         rtem = _dst_rmse(sub.obs .- sub.temerin_li_dst)
-        rv2 = _dst_rmse(sub.obs .- sub.v2)
-        rbase = _dst_rmse(sub.obs .- sub.audit_baseline)
+        rv21 = _dst_rmse(sub.obs .- sub.v2_1)
+        rv20 = _dst_rmse(sub.obs .- sub.v2_0)
         rpers = _dst_rmse(sub.obs .- sub.persistence)
         vals = [
             abs(rtem - Float64(r.rmse_temerin_valid_nt)),
-            abs(rv2 - Float64(r.rmse_v2_nt)),
-            abs(rbase - Float64(r.rmse_preupgrade_nt)),
+            abs(rv21 - Float64(r.rmse_v2_1_nt)),
+            abs(rv20 - Float64(r.rmse_v2_0_nt)),
             abs(rpers - Float64(r.rmse_persistence_nt)),
-            abs((rv2 - rtem) - Float64(r.v2_minus_temerin_valid_rmse_nt)),
+            abs((rv21 - rtem) - Float64(r.v2_1_minus_temerin_valid_rmse_nt)),
         ]
         max_error = max(max_error, maximum(vals))
     end
@@ -354,22 +360,22 @@ function _write_temerin_report(path::AbstractString, scored::DataFrame, summary:
         println(io, "Scoring range: ", cfg.start_utc, " to ", cfg.end_utc,
                 "; scored rows=", nrow(scored),
                 "; scored storms=", length(unique(Int.(scored.storm_id))), ".")
-        println(io, "Alignment: each V2 target hour is matched to the nearest archived predicted-Dst valid time within ",
+        println(io, "Alignment: each V2.1 target hour is matched to the nearest archived predicted-Dst valid time within ",
                 cfg.max_match_gap_min, " minutes.")
         println(io, "Interpretation boundary: the archive exposes valid-time Dst predictions, not issue-time/lead rows. This is a same-unit external operational-valid-time context check, not a matched 1--6 h promotion baseline.\n")
-        println(io, "| Scope | Lead [h] | Rows | Storms | Temerin-Li valid-time RMSE [nT] | V2 RMSE [nT] | Pre-upgrade [nT] | Persistence [nT] | V2 minus Temerin [nT] | Max gap [min] |")
+        println(io, "| Scope | Lead [h] | Rows | Storms | Temerin-Li valid-time RMSE [nT] | V2.1 RMSE [nT] | Historical V2.0 [nT] | Persistence [nT] | V2.1 minus Temerin [nT] | Max gap [min] |")
         println(io, "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
         for r in eachrow(summary)
             @printf(io, "| %s | %d | %d | %d | %.2f | %.2f | %.2f | %.2f | %+.2f | %.2f |\n",
                     r.scope, r.lead_h, r.n_rows, r.n_storms,
-                    r.rmse_temerin_valid_nt, r.rmse_v2_nt,
-                    r.rmse_preupgrade_nt, r.rmse_persistence_nt,
-                    r.v2_minus_temerin_valid_rmse_nt, r.max_match_gap_min)
+                    r.rmse_temerin_valid_nt, r.rmse_v2_1_nt,
+                    r.rmse_v2_0_nt, r.rmse_persistence_nt,
+                    r.v2_1_minus_temerin_valid_rmse_nt, r.max_match_gap_min)
         end
         if nrow(all_rows) > 0
-            worst = all_rows[argmax(Float64.(all_rows.v2_minus_temerin_valid_rmse_nt)), :]
-            @printf(io, "\nLargest V2-minus-valid-time-context gap in the operational-input era is %.2f nT at %d h.\n",
-                    worst.v2_minus_temerin_valid_rmse_nt, worst.lead_h)
+            worst = all_rows[argmax(Float64.(all_rows.v2_1_minus_temerin_valid_rmse_nt)), :]
+            @printf(io, "\nLargest V2.1-minus-valid-time-context gap in the operational-input era is %.2f nT at %d h.\n",
+                    worst.v2_1_minus_temerin_valid_rmse_nt, worst.lead_h)
         end
     end
 end
@@ -391,13 +397,13 @@ function _selftest_temerin_dst()
     broad = DataFrame(
         storm_id = [1, 1],
         storm = ["synthetic", "synthetic"],
-        storm_min_dst_nt = [-120.0, -120.0],
+        storm_min_dst_star_nt = [-120.0, -120.0],
         issue_utc = [DateTime(2024, 4, 30, 23), DateTime(2024, 5, 1, 0)],
         target_utc = [DateTime(2024, 5, 1, 0), DateTime(2024, 5, 1, 1)],
         lead = [1, 1],
         obs = [-40.0, -50.0],
-        audit_baseline = [-39.0, -48.0],
-        v2 = [-40.5, -49.0],
+        v2_0 = [-39.0, -48.0],
+        v2_1 = [-40.5, -49.0],
         persistence = [-38.0, -45.0],
     )
     scored = score_temerin_dst_archive(broad, rows; start_utc = DateTime(2024, 5, 1),

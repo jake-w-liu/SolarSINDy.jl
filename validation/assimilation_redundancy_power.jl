@@ -19,28 +19,17 @@
 # Verdict is variance-aware: report B-D mean ± SE, the favours/hurts split, and the flagship May-2024
 # storm explicitly. A clean deploy signal requires mean(B-D) > 2 SE at multi-step with no flagship harm.
 #
-# RESULT (run below, n=31 storms) — RESOLVES the earlier inconclusive verdict; do NOT deploy the
-# unconstrained EKF for the operational (multi-step) forecast:
-#   horizon   A fix   B v2   C ekf   D e+c   B-D (EKF gain on v2)
-#     1 h     9.66    9.14   9.25    9.15    -0.01 ± 0.27 SE   fav 12/31  flagship +1.36
-#     2 h    13.09   13.13  16.09   16.31    -3.17 ± 0.78 SE   fav  3/31  flagship -23.45
-#     3 h    16.59   17.17  24.13   24.64    -7.47 ± 2.12 SE   fav  2/31  flagship -63.78
-#     6 h    26.57   27.97  62.70   63.53   -35.56 ±13.83 SE   fav  0/31  flagship -394.31
-#   * 1-step: REDUNDANT. With the broad calibration the EKF adds ~0 on top of v2 (the earlier n=6 "+1.22"
-#     was a storms-only-calibration artifact). * multi-step: HARMFUL, worse with horizon, unanimous by 6 h.
-#   VERIFIED cause: the online filter drives the decay coefficient across [-0.51, +0.54] (fixed -0.048);
-#   a POSITIVE decay coefficient is a dynamically unstable ODE, so the free-running multi-step rollout
-#   diverges. Filter-optimal (obs-re-anchored) coefficients are NOT simulation-stable. The operational
-#   forecast is multi-step, so the EKF is redundant-or-harmful there. A constrained EKF (decay held < 0)
-#   is the only path that could keep the 1-step gain without the multi-step blow-up — future work.
+# Historical numerical results from the former 21/10 core are intentionally not
+# embedded here. The executable now asserts and evaluates the current V2.1 20/11
+# core. Its fitted correction is a bespoke EKF diagnostic, not the deployed
+# 26-feature V2.1 calibration, so its output is exploratory extension evidence.
 
-using SolarSINDy, CSV, DataFrames, Statistics, LinearAlgebra, Printf, Dates
+using SolarSINDy, DataFrames, Statistics, LinearAlgebra, Printf, Dates
 
 const PKG  = pkgdir(SolarSINDy)
 const PROJ = normpath(joinpath(PKG, ".."))
 const EXTRACTED = joinpath(PROJ, "paper_v2_monitor", "data", "omni_extracted.csv")
 const CATALOG   = joinpath(PKG, "data", "storm_catalog.csv")
-const COEFCSV   = joinpath(PKG, "data", "real_sindy_discovery_coefficients.csv")
 const QEKF = 1e-4
 const HORIZONS = [1, 2, 3, 6]
 const DEPTH = -80.0
@@ -77,9 +66,10 @@ function main()
             length(storms), DEPTH, flagship, string(storms[1].min_dst_time), storms[1].min_dst)
     @printf("calibration hours (non-storm, of %d total): %d\n", N, count(==(0), sid))
 
-    lib = build_solar_wind_library(include_redundant_n_v2=true); tn = get_term_names(lib)
-    coef = CSV.read(COEFCSV, DataFrame); ξ0 = zeros(length(lib))
-    for r in eachrow(coef); i = findfirst(==(r.term), tn); i !== nothing && (ξ0[i] = r.coefficient); end
+    core = load_operational_core(:v2)
+    lib = core.library; tn = get_term_names(lib); ξ0 = copy(core.coefficients)
+    length(tn) == 20 && count(!=(0.0), ξ0) == 11 && !("n*V^2" in tn) ||
+        error("EKF power diagnostic did not load the current 20/11 V2.1 core")
     i_decay = findfirst(==("Dst_star"), tn)
     drivers = [(V=df.V[k], Bz=df.Bz[k], By=df.By[k], n=df.n[k], Pdyn=df.Pdyn[k]) for k in 1:N]
 
@@ -159,8 +149,8 @@ function main()
         println("    coeff range above; positive decay => growing Dst*). Filter-optimal coefficients (re-anchored")
         println("    by each obs) are NOT simulation-stable; free-running rollout exposes the instability.")
         println("  ⇒ Operational forecast is multi-step, so the EKF is redundant-or-harmful there. Keep it available")
-        println("    and correctness-tested; do NOT deploy. A constrained EKF (decay held < 0 for stability) is the")
-        println("    only path that could earn the 1-step gain without the multi-step blow-up — future work.")
+        println("    and correctness-tested; do NOT deploy. The subsequent constrained diagnostic removed the numerical")
+        println("    instability but did not supply deployment evidence; exact served-tail replays also failed promotion.")
     elseif all(abs(summary[Nh]) < 0.1 for Nh in HORIZONS)
         println("REDUNDANT at all horizons: v2 already captures the EKF gain. Keep available, not deployed.")
     else
@@ -169,4 +159,6 @@ function main()
     return nothing
 end
 
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end

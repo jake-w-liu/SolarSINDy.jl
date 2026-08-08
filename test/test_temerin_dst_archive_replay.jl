@@ -18,15 +18,15 @@ include(TEMERIN_DST_REPLAY_SCRIPT)
         broad = DataFrame(
             storm_id = [1, 1, 1],
             storm = ["synthetic", "synthetic", "synthetic"],
-            storm_min_dst_nt = [-120.0, -120.0, -120.0],
+            storm_min_dst_star_nt = [-120.0, -120.0, -120.0],
             issue_utc = [DateTime(2024, 4, 30, 23), DateTime(2024, 5, 1, 0),
                          DateTime(2024, 5, 1, 4)],
             target_utc = [DateTime(2024, 5, 1, 0), DateTime(2024, 5, 1, 1),
                           DateTime(2024, 5, 1, 5)],
             lead = [1, 1, 1],
             obs = [-40.0, -50.0, -60.0],
-            audit_baseline = [-39.0, -48.0, -61.0],
-            v2 = [-40.5, -49.0, -59.0],
+            v2_0 = [-39.0, -48.0, -61.0],
+            v2_1 = [-40.5, -49.0, -59.0],
             persistence = [-38.0, -45.0, -55.0],
         )
         scored = score_temerin_dst_archive(broad, rows;
@@ -37,6 +37,19 @@ include(TEMERIN_DST_REPLAY_SCRIPT)
         @test all(scored.target_utc .== scored.issue_utc .+ Hour.(scored.lead))
         @test maximum(scored.match_abs_gap_min) < 3.0
         @test _validate_temerin_rows(scored; max_match_gap_min = 5.0)
+        @test scored.storm_min_dst_star_nt == [-120.0, -120.0]
+        @test :storm_min_dst_nt ∉ propertynames(scored)
+
+        legacy_broad = rename(copy(broad), :storm_min_dst_star_nt => :storm_min_dst_nt)
+        legacy_scored = score_temerin_dst_archive(
+            legacy_broad,
+            rows;
+            start_utc=DateTime(2024, 5, 1),
+            end_utc=DateTime(2024, 5, 2),
+            max_match_gap_min=5.0,
+        )
+        @test names(legacy_scored) == names(scored)
+        @test legacy_scored.storm_min_dst_star_nt == scored.storm_min_dst_star_nt
 
         summary = temerin_dst_summary(scored)
         @test nrow(summary) == 2

@@ -398,10 +398,10 @@ lib_no_cross = build_solar_wind_library(max_poly_order=2, include_trig=true,
 lib_minimal = build_minimal_library()
 
 lib_variants = [
-    ("Full (21)", lib_full),
-    ("No trig (15)", lib_no_trig),
-    ("No cross (14)", lib_no_cross),
-    ("Minimal (3)", lib_minimal)
+    ("Full ($(length(lib_full)))", lib_full),
+    ("No trig ($(length(lib_no_trig)))", lib_no_trig),
+    ("No cross ($(length(lib_no_cross)))", lib_no_cross),
+    ("Minimal ($(length(lib_minimal)))", lib_minimal)
 ]
 
 ablation_names = String[]

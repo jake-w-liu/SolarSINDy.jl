@@ -6,6 +6,7 @@ using Dates
 using HTTP
 using JSON3
 using Printf
+using SHA
 using Statistics
 
 include(joinpath(@__DIR__, "paths.jl"))
@@ -18,13 +19,56 @@ const LIVE_LOG_PATH = _operational_path(
     joinpath(OPERATIONAL_PACKAGE_ROOT, "var", "monitor", "live_forecast_log.csv"),
     joinpath(LIVE_DIR, "live_forecast_log.csv"),
 )
+const EXTERNAL_DST_LOG_PATH = _operational_path(
+    "SOLARSINDY_EXTERNAL_DST_LOG",
+    joinpath(OPERATIONAL_PACKAGE_ROOT, "var", "monitor", "external_dst_forecast_log.csv"),
+    joinpath(OPERATIONAL_PACKAGE_ROOT, "var", "monitor", "external_dst_forecast_log.csv"),
+    joinpath(LIVE_DIR, "external_dst_forecast_log.csv"),
+)
+const EXTERNAL_DST_REPORT_PATH = _operational_path(
+    "SOLARSINDY_EXTERNAL_DST_REPORT",
+    joinpath(OPERATIONAL_PACKAGE_ROOT, "var", "monitor", "external_dst_forecast_report.md"),
+    joinpath(OPERATIONAL_PACKAGE_ROOT, "var", "monitor", "external_dst_forecast_report.md"),
+    joinpath(LIVE_DIR, "external_dst_forecast_report.md"),
+)
+const HISTORICAL_V2_0_LIVE_LOG_PATH = joinpath(
+    OPERATIONAL_PACKAGE_ROOT, "data", "historical", "v2_0", "live_forecast_log.csv",
+)
+const HISTORICAL_V2_0_LIVE_MANIFEST_PATH = joinpath(
+    OPERATIONAL_PACKAGE_ROOT, "data", "historical", "v2_0",
+    "live_forecast_log_manifest.csv",
+)
+const V2_1_CALIBRATION_POINT_PATH = joinpath(
+    OPERATIONAL_PACKAGE_ROOT, "deploy", "operational_v2_calibration.csv",
+)
+const V2_1_CALIBRATION_CONFORMAL_PATH = joinpath(
+    OPERATIONAL_PACKAGE_ROOT, "deploy", "operational_v2_calibration_conformal.csv",
+)
+const V2_1_CALIBRATION_SPLIT_PATH = joinpath(
+    OPERATIONAL_PACKAGE_ROOT, "deploy", "operational_v2_calibration_split.csv",
+)
+const V2_1_SERVED_HOLDOUT_DIR = operational_evidence_dir(
+    "v2_1_served_holdout_summary.csv", "v2_1_served_holdout_audit.csv",
+)
+const V2_1_SERVED_HOLDOUT_SUMMARY_PATH = joinpath(
+    V2_1_SERVED_HOLDOUT_DIR, "v2_1_served_holdout_summary.csv",
+)
+const V2_1_SERVED_HOLDOUT_AUDIT_PATH = joinpath(
+    V2_1_SERVED_HOLDOUT_DIR, "v2_1_served_holdout_audit.csv",
+)
+const V2_1_CALIBRATION_COVERAGE_FLOOR = 0.85
+const V2_1_NOMINAL_COVERAGE = 0.90
 const DEFAULT_REPORT = joinpath(OPERATIONAL_OUTPUT_DIR, "V2_READINESS.md")
 const DEFAULT_API_URL = "http://127.0.0.1:8723/api/status"
 const DEFAULT_MAX_ISSUE_AGE_HOURS = 3.0
 const DEFAULT_MAX_API_GENERATED_AGE_MIN = 10.0
 const REGIME_MIN_ROWS = 40
 const MATERIAL_PERSISTENCE_DELTA_NT = 2.0
-const REQUIRED_REPLAY_COLS = [:storm, :issue_utc, :lead, :obs, :audit_baseline, :v2, :v2_frozen, :persistence, :rate]
+const REQUIRED_REPLAY_COLS = [:storm, :issue_utc, :lead, :obs, :v2_1,
+                              :v2_1_pre_rate_guard, :v2_1_pre_one_hour_inertia,
+                              :v2_1_pre_state_inertia,
+                              :v2_0, :v2_1_frozen,
+                              :persistence, :rate]
 const REQUIRED_LIVE_COLS = [
     :issue_time_utc,
     :latest_solar_wind_utc,
@@ -41,9 +85,10 @@ const REQUIRED_LIVE_COLS = [
     :persistence_dst_nt,
     :sub_hourly_model_version,
 ]
+const EXPECTED_MODEL_VERSION = "v2.1"
 const EXPECTED_LEADS = [1, 2, 3, 6]
-const EXPECTED_SUBHOURLY = "v2+L1A+Bregime+Pinertia"
-const EXPECTED_BROAD_STORMS = 204
+const EXPECTED_SUBHOURLY = "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+const EXPECTED_BROAD_STORMS = 193
 const MIN_BROAD_REPLAY_ROWS = 70_000
 const EXPECTED_GSCALE_EVENTS = 311
 const MIN_GSCALE_SCORED_EVENTS = 200
@@ -57,20 +102,26 @@ const TEMERIN_DST_DEFAULT_START = DateTime(2013, 5, 1)
 const TEMERIN_DST_DSCOVR_START = DateTime(2016, 12, 1)
 const DST_REGIME_ORDER = ["quiet", "minor", "moderate", "intense", "extreme"]
 const RATE_REGIME_ORDER = ["recovering", "steady", "deepening", "rapid_deepening"]
-const REQUIRED_BROAD_COLS = [:storm_id, :storm, :storm_split, :storm_min_dst_nt,
+const REQUIRED_BROAD_COLS = [:storm_id, :storm, :storm_split, :storm_min_dst_star_nt,
                              :issue_utc, :target_utc, :lead, :obs,
-                             :audit_baseline, :v2, :v2_frozen, :persistence, :rate]
+                             :v2_1, :v2_1_pre_rate_guard,
+                             :v2_1_pre_one_hour_inertia, :v2_1_pre_state_inertia,
+                             :v2_0, :v2_1_frozen,
+                             :persistence, :rate]
 const REQUIRED_GSCALE_COLS = [:g_event_id, :storm, :g_level, :peak_kp,
                               :event_start_utc, :event_end_utc,
                               :replay_start_utc, :replay_end_utc,
                               :issue_utc, :target_utc, :lead, :obs,
-                              :audit_baseline, :v2, :v2_frozen, :persistence, :rate]
+                              :v2_1, :v2_1_pre_rate_guard,
+                              :v2_1_pre_one_hour_inertia, :v2_1_pre_state_inertia,
+                              :v2_0, :v2_1_frozen,
+                              :persistence, :rate]
 const REQUIRED_NOAA_KP_COLS = [:issue_utc, :target_bin_start_utc, :target_bin_end_utc,
                                :lead_h, :forecast_day, :forecast_kp, :forecast_g_level,
                                :observed_kp, :observed_g_level, :kp_error, :lead_band]
-const REQUIRED_TEMERIN_DST_COLS = [:storm_id, :storm, :storm_min_dst_nt,
+const REQUIRED_TEMERIN_DST_COLS = [:storm_id, :storm, :storm_min_dst_star_nt,
                                    :issue_utc, :target_utc, :lead,
-                                   :obs, :audit_baseline, :v2, :persistence,
+                                   :obs, :v2_1, :v2_0, :persistence,
                                    :temerin_li_dst, :temerin_valid_utc,
                                    :match_abs_gap_min, :temerin_source_file,
                                    :source_epoch]
@@ -103,29 +154,31 @@ end
 
 AuditState() = AuditState(
     NamedTuple[],
-    DataFrame(lead = Int[], n = Int[], rmse_baseline = Float64[], rmse_v2 = Float64[],
-              rmse_persistence = Float64[], improvement_vs_best = Float64[], fair = Float64[]),
-    DataFrame(lead = Int[], n = Int[], n_storms = Int[], rmse_baseline = Float64[],
-              rmse_v2 = Float64[], rmse_persistence = Float64[],
-              improvement_vs_best = Float64[], fair = Float64[]),
-    DataFrame(cohort = String[], lead = Int[], n = Int[], n_events = Int[],
-              rmse_baseline = Float64[], rmse_v2 = Float64[],
+    DataFrame(lead = Int[], n = Int[], rmse_v2_0 = Float64[], rmse_v2_1 = Float64[],
               rmse_persistence = Float64[], improvement_vs_best = Float64[],
-              fair = Float64[]),
+              max_tail_effect = Float64[], max_core_change = Float64[]),
+    DataFrame(lead = Int[], n = Int[], n_storms = Int[], rmse_v2_0 = Float64[],
+              rmse_v2_1 = Float64[], rmse_persistence = Float64[],
+              improvement_vs_best = Float64[], max_tail_effect = Float64[],
+              max_core_change = Float64[]),
+    DataFrame(cohort = String[], lead = Int[], n = Int[], n_events = Int[],
+              rmse_v2_0 = Float64[], rmse_v2_1 = Float64[],
+              rmse_persistence = Float64[], improvement_vs_best = Float64[],
+              max_tail_effect = Float64[], max_core_change = Float64[]),
     DataFrame(scope = String[], lead_band = String[], threshold_g = Int[],
               n_rows = Int[], hits = Int[], misses = Int[], false_alarms = Int[],
               pod = Float64[], far = Float64[], csi = Float64[],
               rmse_kp = Float64[]),
     DataFrame(scope = String[], lead = Int[], n = Int[], n_storms = Int[],
-              rmse_temerin_valid = Float64[], rmse_v2 = Float64[],
-              rmse_baseline = Float64[], rmse_persistence = Float64[],
-              v2_minus_temerin = Float64[], max_gap_min = Float64[]),
+              rmse_temerin_valid = Float64[], rmse_v2_1 = Float64[],
+              rmse_v2_0 = Float64[], rmse_persistence = Float64[],
+              v2_1_minus_temerin = Float64[], max_gap_min = Float64[]),
     DataFrame(source = String[], n_rows = Int[], n_scored = Int[],
               n_issues = Int[], max_lead_h = Float64[],
               rmse_nt = Union{Missing, Float64}[], mae_nt = Union{Missing, Float64}[]),
     DataFrame(axis = String[], lead = Int[], regime = String[], n = Int[],
-              rmse_baseline = Float64[], rmse_v2 = Float64[], rmse_persistence = Float64[],
-              delta_vs_baseline = Float64[], delta_vs_best = Float64[]),
+              rmse_v2_0 = Float64[], rmse_v2_1 = Float64[], rmse_persistence = Float64[],
+              delta_vs_v2_0 = Float64[], delta_vs_best = Float64[]),
     Dict{Symbol, Any}(),
     String[],
 )
@@ -256,7 +309,8 @@ end
 age_hours(dt::DateTime, now_utc::DateTime) = Dates.value(now_utc - dt) / 3_600_000.0
 age_minutes(dt::DateTime, now_utc::DateTime) = Dates.value(now_utc - dt) / 60_000.0
 
-function read_csv_checked!(state::AuditState, path::AbstractString, label::AbstractString)
+function read_csv_checked!(state::AuditState, path::AbstractString, label::AbstractString;
+                           allow_zero::Bool=false)
     if !isfile(path)
         fail!(state, "$label exists", "$(relpath(path, REPO_ROOT)) is missing")
         return nothing
@@ -267,7 +321,7 @@ function read_csv_checked!(state::AuditState, path::AbstractString, label::Abstr
     end
     try
         df = CSV.read(path, DataFrame)
-        if nrow(df) == 0
+        if nrow(df) == 0 && !allow_zero
             fail!(state, "$label rows", "$(relpath(path, REPO_ROOT)) has zero data rows")
             return nothing
         end
@@ -290,6 +344,276 @@ function require_columns!(state::AuditState, df::DataFrame, cols::Vector{Symbol}
     end
 end
 
+function _v2_1_split_contract(df::DataFrame, deployed_point_sha256::AbstractString;
+                              coverage_floor::Real=V2_1_CALIBRATION_COVERAGE_FLOOR)
+    required = [
+        :split, :rows, :anchors, :minimum_issue_utc, :maximum_issue_utc,
+        :minimum_target_utc, :maximum_target_utc,
+        :point_calibration_sha256, :source_table_sha256,
+        :conformal_holdout_coverage,
+    ]
+    all(c -> has_col(df, c), required) || return (
+        schema=false, partitions=false, causal=false, point_hash=false,
+        source_hash=false, frozen_tail_coverage=false,
+    )
+    expected = ["fit", "validation", "holdout"]
+    split_names = String.(df.split)
+    partitions = nrow(df) == 3 && sort(split_names) == sort(expected) &&
+                 all(Int.(df.rows) .> 0) && all(Int.(df.anchors) .> 0)
+    partitions || return (
+        schema=true, partitions=false, causal=false, point_hash=false,
+        source_hash=false, frozen_tail_coverage=false,
+    )
+    ordered = [df[findfirst(==(name), split_names), :] for name in expected]
+    min_issue = parse_utc_datetime.([r.minimum_issue_utc for r in ordered])
+    max_target = parse_utc_datetime.([r.maximum_target_utc for r in ordered])
+    causal = all(.!ismissing.(min_issue)) && all(.!ismissing.(max_target)) &&
+             max_target[1] < min_issue[2] && max_target[2] < min_issue[3]
+
+    point_hashes = String.(df.point_calibration_sha256)
+    point_hash = length(unique(point_hashes)) == 1 &&
+                 length(first(point_hashes)) == 64 &&
+                 first(point_hashes) == String(deployed_point_sha256)
+    source_hashes = String.(df.source_table_sha256)
+    source_hash = length(unique(source_hashes)) == 1 &&
+                  length(first(source_hashes)) == 64 &&
+                  all(isxdigit, first(source_hashes))
+    coverages = Float64.(df.conformal_holdout_coverage)
+    frozen_tail_coverage = all(isfinite, coverages) &&
+                           length(unique(coverages)) == 1 &&
+                           first(coverages) >= Float64(coverage_floor)
+    return (
+        schema=true, partitions=partitions, causal=causal,
+        point_hash=point_hash, source_hash=source_hash,
+        frozen_tail_coverage=frozen_tail_coverage,
+    )
+end
+
+function audit_v2_1_calibration_split!(state::AuditState)
+    split = read_csv_checked!(
+        state, V2_1_CALIBRATION_SPLIT_PATH, "V2.1 calibration split audit",
+    )
+    split === nothing && return
+    if !isfile(V2_1_CALIBRATION_POINT_PATH)
+        fail!(state, "V2.1 deployed point calibration", "deployed point calibration is missing")
+        return
+    end
+    point_sha = bytes2hex(sha256(read(V2_1_CALIBRATION_POINT_PATH)))
+    contract = _v2_1_split_contract(split, point_sha)
+    contract.schema ? pass!(state, "V2.1 calibration split schema", "required fields present") :
+                      fail!(state, "V2.1 calibration split schema", "required fields are missing")
+    contract.partitions ? pass!(state, "V2.1 calibration split partitions", "fit/validation/holdout are unique and nonempty") :
+                          fail!(state, "V2.1 calibration split partitions", "expected exactly three nonempty fit/validation/holdout rows")
+    contract.causal ? pass!(state, "V2.1 calibration forecast-origin causality", "fit max target < validation min issue and validation max target < holdout min issue") :
+                      fail!(state, "V2.1 calibration forecast-origin causality", "a later split begins before all preceding targets are observable")
+    contract.point_hash ? pass!(state, "V2.1 calibration split point hash", "split audit matches deployed point calibration SHA-256") :
+                          fail!(state, "V2.1 calibration split point hash", "split point hash does not match the deployed calibration")
+    contract.source_hash ? pass!(state, "V2.1 calibration source hash", "one nonempty SHA-256 identifies the calibration source table") :
+                           fail!(state, "V2.1 calibration source hash", "source-table SHA-256 is missing or inconsistent")
+    contract.frozen_tail_coverage ?
+        pass!(state, "V2.1 frozen-tail calibration holdout coverage",
+              "frozen-tail conformal coverage meets the $(V2_1_CALIBRATION_COVERAGE_FLOOR) calibration floor") :
+        fail!(state, "V2.1 frozen-tail calibration holdout coverage",
+              "frozen-tail conformal coverage is inconsistent or below the calibration floor")
+    return
+end
+
+function _sha256_if_file(path::AbstractString)
+    isfile(path) || return ""
+    return bytes2hex(sha256(read(path)))
+end
+
+function _v2_1_served_holdout_contract(summary::DataFrame, audit::DataFrame;
+                                        point_sha256::AbstractString,
+                                        conformal_sha256::AbstractString,
+                                        split_sha256::AbstractString,
+                                        omni_sha256::AbstractString)
+    summary_required = [
+        :cohort, :lead_h, :activity_regime, :n_rows, :served_hits,
+        :served_coverage, :served_rmse_nt, :frozen_tail_hits,
+        :frozen_tail_coverage, :frozen_tail_rmse_nt, :nominal_coverage,
+        :promotion_coverage_floor, :pooled_gate_applies, :pooled_gate_pass,
+    ]
+    audit_required = [
+        :model_version, :candidate_count, :active_count, :holdout_rows,
+        :holdout_anchors, :validation_max_target_utc, :holdout_min_issue_utc,
+        :holdout_max_issue_utc, :holdout_max_target_utc,
+        :strict_forecast_origin_separation, :interval_policy,
+        :holdout_residual_updates, :point_calibration_sha256,
+        :conformal_calibration_sha256, :split_audit_sha256,
+        :calibration_scored_sha256, :omni_sha256,
+        :maximum_frozen_tail_continuity_error_nt,
+        :maximum_interval_center_error_nt, :nominal_coverage,
+        :pooled_promotion_floor, :served_pooled_coverage,
+        :served_pooled_gate_pass, :frozen_tail_pooled_coverage,
+        :heldout_promotion_evidence,
+    ]
+    schema = all(c -> has_col(summary, c), summary_required) &&
+             all(c -> has_col(audit, c), audit_required) && nrow(audit) == 1
+    schema || return (
+        schema=false, identity=false, partition=false, causal=false,
+        policy=false, hashes=false, geometry=false, summary_crc=false,
+        pooled_gate=false, diagnostics=false,
+    )
+
+    a = audit[1, :]
+    identity = String(a.model_version) == EXPECTED_MODEL_VERSION &&
+               Int(a.candidate_count) == 20 && Int(a.active_count) == 11
+    validation_max_target = parse_utc_datetime(a.validation_max_target_utc)
+    holdout_min_issue = parse_utc_datetime(a.holdout_min_issue_utc)
+    holdout_max_issue = parse_utc_datetime(a.holdout_max_issue_utc)
+    holdout_max_target = parse_utc_datetime(a.holdout_max_target_utc)
+    partition = Int(a.holdout_rows) > 0 && Int(a.holdout_anchors) > 0 &&
+                !ismissing(holdout_max_issue) && !ismissing(holdout_max_target) &&
+                holdout_max_target > holdout_max_issue
+    causal = Bool(a.strict_forecast_origin_separation) &&
+             !ismissing(validation_max_target) && !ismissing(holdout_min_issue) &&
+             validation_max_target < holdout_min_issue
+    policy = String(a.interval_policy) ==
+                 "static_conformal_shifted_to_complete_hour_served_center" &&
+             Int(a.holdout_residual_updates) == 0 &&
+             Bool(a.heldout_promotion_evidence)
+    calibration_scored_sha = String(a.calibration_scored_sha256)
+    hashes = String(a.point_calibration_sha256) == point_sha256 &&
+             String(a.conformal_calibration_sha256) == conformal_sha256 &&
+             String(a.split_audit_sha256) == split_sha256 &&
+             String(a.omni_sha256) == omni_sha256 &&
+             length(calibration_scored_sha) == 64 &&
+             all(isxdigit, calibration_scored_sha)
+    geometry = abs(Float64(a.maximum_frozen_tail_continuity_error_nt)) <= 1e-12 &&
+               abs(Float64(a.maximum_interval_center_error_nt)) <= 1e-12
+
+    cohorts = String.(summary.cohort)
+    overall_indices = findall(==("overall"), cohorts)
+    lead_rows = summary[(String.(summary.activity_regime) .== "all") .&
+                        (Int.(summary.lead_h) .> 0), :]
+    regime_rows = summary[Int.(summary.lead_h) .== 0, :]
+    summary_crc = false
+    pooled_gate = false
+    diagnostics = false
+    if length(overall_indices) == 1
+        overall = summary[only(overall_indices), :]
+        n = Int(overall.n_rows)
+        hits = Int(overall.served_hits)
+        frozen_hits = Int(overall.frozen_tail_hits)
+        summary_crc = n == Int(a.holdout_rows) && 0 <= hits <= n &&
+                      0 <= frozen_hits <= n &&
+                      Float64(overall.served_coverage) == hits / n &&
+                      Float64(overall.frozen_tail_coverage) == frozen_hits / n &&
+                      sort(Int.(lead_rows.lead_h)) == EXPECTED_LEADS &&
+                      sum(Int.(lead_rows.n_rows)) == n &&
+                      sum(Int.(lead_rows.served_hits)) == hits &&
+                      all(isfinite, Float64.(summary.served_rmse_nt)) &&
+                      all(isfinite, Float64.(summary.frozen_tail_rmse_nt))
+        floor = Float64(overall.promotion_coverage_floor)
+        coverage = Float64(overall.served_coverage)
+        pooled_gate = Bool(overall.pooled_gate_applies) &&
+                      Bool(overall.pooled_gate_pass) &&
+                      Bool(a.served_pooled_gate_pass) &&
+                      floor == V2_1_CALIBRATION_COVERAGE_FLOOR &&
+                      Float64(a.pooled_promotion_floor) == floor &&
+                      Float64(a.served_pooled_coverage) == coverage &&
+                      coverage >= floor &&
+                      Float64(overall.nominal_coverage) == V2_1_NOMINAL_COVERAGE &&
+                      Float64(a.nominal_coverage) == V2_1_NOMINAL_COVERAGE
+
+        quiet = summary[cohorts .== "quiet", :]
+        storm = summary[cohorts .== "storm", :]
+        diagnostics = nrow(quiet) == 1 && nrow(storm) == 1 &&
+                      Int(quiet.n_rows[1]) + Int(storm.n_rows[1]) == n &&
+                      Int(quiet.served_hits[1]) + Int(storm.served_hits[1]) == hits &&
+                      sort(Int.(lead_rows.lead_h)) == EXPECTED_LEADS &&
+                      nrow(regime_rows) == 3
+    end
+    return (
+        schema=schema, identity=identity, partition=partition, causal=causal,
+        policy=policy, hashes=hashes, geometry=geometry,
+        summary_crc=summary_crc, pooled_gate=pooled_gate,
+        diagnostics=diagnostics,
+    )
+end
+
+function audit_v2_1_served_holdout!(state::AuditState)
+    summary = read_csv_checked!(
+        state, V2_1_SERVED_HOLDOUT_SUMMARY_PATH,
+        "complete-hour served-stack V2.1 holdout summary",
+    )
+    audit = read_csv_checked!(
+        state, V2_1_SERVED_HOLDOUT_AUDIT_PATH,
+        "complete-hour served-stack V2.1 holdout audit",
+    )
+    (summary === nothing || audit === nothing) && return
+
+    contract = _v2_1_served_holdout_contract(
+        summary, audit;
+        point_sha256=_sha256_if_file(V2_1_CALIBRATION_POINT_PATH),
+        conformal_sha256=_sha256_if_file(V2_1_CALIBRATION_CONFORMAL_PATH),
+        split_sha256=_sha256_if_file(V2_1_CALIBRATION_SPLIT_PATH),
+        omni_sha256=_sha256_if_file(OPERATIONAL_OMNI),
+    )
+    checks = (
+        (:schema, "complete-hour served-stack V2.1 holdout schema",
+         "summary and audit fields are complete",
+         "summary or audit fields are missing"),
+        (:identity, "complete-hour served-stack V2.1 model identity",
+         "v2.1 uses 20 candidates and 11 active terms",
+         "holdout identity is not the deployed 20/11 V2.1 core"),
+        (:partition, "complete-hour served-stack V2.1 holdout partition",
+         "row/anchor counts and terminal issue/target bounds are valid",
+         "holdout counts or terminal bounds are invalid"),
+        (:causal, "complete-hour served-stack V2.1 forecast-origin causality",
+         "every holdout issue follows the last validation target",
+         "holdout issues overlap unmatured validation targets"),
+        (:policy, "complete-hour served-stack V2.1 interval policy",
+         "static conformal offsets are shifted to the served center with zero holdout updates",
+         "interval policy, evidence role, or holdout-update count is inconsistent"),
+        (:hashes, "complete-hour served-stack V2.1 artifact identity",
+         "point, conformal, split, calibration-source, and OMNI hashes are valid",
+         "a holdout hash differs from the deployed/source artifact"),
+        (:geometry, "complete-hour served-stack V2.1 interval geometry",
+         "frozen-tail continuity and served-center errors are <= 1e-12 nT",
+         "continuity or interval-center error exceeds 1e-12 nT"),
+        (:summary_crc, "complete-hour served-stack V2.1 summary recomputation",
+         "pooled, lead, and hit-count identities are internally consistent",
+         "summary row, hit, coverage, lead, or finite-value identity failed"),
+        (:pooled_gate, "complete-hour served-stack V2.1 pooled holdout coverage gate",
+         "pooled static coverage meets the declared 0.85 promotion floor",
+         "pooled static coverage is inconsistent or below the 0.85 promotion floor"),
+        (:diagnostics, "complete-hour served-stack V2.1 diagnostic strata",
+         "lead and quiet/storm strata partition the pooled holdout",
+         "lead or quiet/storm diagnostic strata are incomplete"),
+    )
+    for (field, name, pass_detail, fail_detail) in checks
+        getproperty(contract, field) ? pass!(state, name, pass_detail) :
+                                       fail!(state, name, fail_detail)
+    end
+    contract.schema || return
+
+    state.live_metrics[:served_holdout_summary] = summary
+    overall = summary[String.(summary.cohort) .== "overall", :][1, :]
+    lead6 = summary[String.(summary.cohort) .== "lead_6", :][1, :]
+    storm = summary[String.(summary.cohort) .== "storm", :][1, :]
+    if Float64(lead6.served_coverage) < V2_1_CALIBRATION_COVERAGE_FLOOR
+        warn!(state, "complete-hour served-stack V2.1 6 h coverage boundary",
+              @sprintf("coverage %.3f is below the pooled %.2f floor; the declared gate is pooled",
+                       Float64(lead6.served_coverage), V2_1_CALIBRATION_COVERAGE_FLOOR))
+    else
+        pass!(state, "complete-hour served-stack V2.1 6 h coverage boundary",
+              @sprintf("coverage %.3f", Float64(lead6.served_coverage)))
+    end
+    if Float64(storm.served_coverage) < V2_1_CALIBRATION_COVERAGE_FLOOR
+        warn!(state, "complete-hour served-stack V2.1 storm coverage boundary",
+              @sprintf("Dst < -50 nT coverage %.3f over %d rows; pooled gate coverage %.3f",
+                       Float64(storm.served_coverage), Int(storm.n_rows),
+                       Float64(overall.served_coverage)))
+    else
+        pass!(state, "complete-hour served-stack V2.1 storm coverage boundary",
+              @sprintf("Dst < -50 nT coverage %.3f over %d rows",
+                       Float64(storm.served_coverage), Int(storm.n_rows)))
+    end
+    return
+end
+
 function _regime_detail(rows::DataFrame, limit::Int = 4)
     nrow(rows) == 0 && return ""
     sort!(rows, :delta_vs_best, rev = true)
@@ -304,24 +628,24 @@ end
 function _append_regime_metrics!(out::DataFrame, df::DataFrame, axis::AbstractString,
                                  regimes::Vector{String}, labels::Vector{String};
                                  min_n::Int = REGIME_MIN_ROWS)
-    work = select(df, :lead, :obs, :audit_baseline, :v2, :persistence)
+    work = select(df, :lead, :obs, :v2_0, :v2_1, :persistence)
     work[!, :regime] = labels
     for lead in EXPECTED_LEADS, regime in regimes
         sub = work[(work.lead .== lead) .& (work.regime .== regime), :]
         nrow(sub) >= min_n || continue
-        rbase = rmse(sub.audit_baseline, sub.obs)
-        rv2 = rmse(sub.v2, sub.obs)
+        rv20 = rmse(sub.v2_0, sub.obs)
+        rv21 = rmse(sub.v2_1, sub.obs)
         rpers = rmse(sub.persistence, sub.obs)
-        push!(out, (String(axis), lead, regime, nrow(sub), rbase, rv2, rpers,
-                    rv2 - rbase, rv2 - min(rbase, rpers)))
+        push!(out, (String(axis), lead, regime, nrow(sub), rv20, rv21, rpers,
+                    rv21 - rv20, rv21 - min(rv20, rpers)))
     end
     return out
 end
 
 function replay_regime_metrics(df::DataFrame; min_n::Int = REGIME_MIN_ROWS)
     out = DataFrame(axis = String[], lead = Int[], regime = String[], n = Int[],
-                    rmse_baseline = Float64[], rmse_v2 = Float64[], rmse_persistence = Float64[],
-                    delta_vs_baseline = Float64[], delta_vs_best = Float64[])
+                    rmse_v2_0 = Float64[], rmse_v2_1 = Float64[], rmse_persistence = Float64[],
+                    delta_vs_v2_0 = Float64[], delta_vs_best = Float64[])
     dst_labels = target_dst_regime.(df.obs)
     rate_labels = issue_rate_regime.(df.rate)
     _append_regime_metrics!(out, df, "target_dst", DST_REGIME_ORDER, dst_labels; min_n = min_n)
@@ -346,15 +670,15 @@ function audit_replay_regimes!(state::AuditState, df::DataFrame;
         warn!(state, "regime scorecard coverage", "partial synthetic/self-test scorecard cells=$(nrow(metrics))")
     end
 
-    v2_bad = metrics[metrics.delta_vs_baseline .> 1e-9, :]
+    v2_bad = metrics[metrics.delta_vs_v2_0 .> 1e-9, :]
     if nrow(v2_bad) == 0
-        pass!(state, "regime pre-upgrade baseline guard", "V2 RMSE <= pre-upgrade baseline in every populated target-Dst/rate cell")
+        pass!(state, "regime historical V2.0 guard", "V2.1 RMSE <= historical V2.0 in every populated target-Dst/rate cell")
     else
-        fail!(state, "regime pre-upgrade baseline guard", "V2 worse than pre-upgrade baseline: $(_regime_detail(v2_bad))")
+        fail!(state, "regime historical V2.0 guard", "V2.1 worse than historical V2.0: $(_regime_detail(v2_bad))")
     end
 
     # Paper regime criterion (Eq. 16): Δ_C = RMSE_C(V2) − min{baseline, persistence} ≤ 2 nT as a HARD
-    # gate. This makes a cell that loses to the stronger baseline (persistence or pre-upgrade) by more
+    # gate. This makes a cell that loses to the stronger comparator (persistence or historical V2.0) by more
     # than the limit FAIL rather than only warn, matching the published promotion criterion. The
     # zero-tolerance baseline guard above remains an additional, stricter check.
     eq16_bad = metrics[metrics.delta_vs_best .> material_delta_nt + 1e-9, :]
@@ -367,8 +691,8 @@ function audit_replay_regimes!(state::AuditState, df::DataFrame;
                        nrow(eq16_bad), material_delta_nt, _regime_detail(eq16_bad)))
     end
 
-    pers_bad = metrics[(metrics.rmse_persistence .< metrics.rmse_v2) .&
-                       (metrics.rmse_v2 .- metrics.rmse_persistence .> material_delta_nt), :]
+    pers_bad = metrics[(metrics.rmse_persistence .< metrics.rmse_v2_1) .&
+                       (metrics.rmse_v2_1 .- metrics.rmse_persistence .> material_delta_nt), :]
     if nrow(pers_bad) == 0
         pass!(state, "regime persistence vulnerability", @sprintf("no populated cell loses to persistence by more than %.1f nT", material_delta_nt))
     else
@@ -398,7 +722,9 @@ function audit_replay!(state::AuditState; strict_regime_persistence::Bool = fals
         fail!(state, "V2 replay leads", "expected $(join(EXPECTED_LEADS, ",")); got $(join(leads, ","))")
     end
 
-    numeric_cols = [:obs, :audit_baseline, :v2, :v2_frozen, :persistence]
+    numeric_cols = [:obs, :v2_1, :v2_1_pre_rate_guard,
+                    :v2_1_pre_one_hour_inertia, :v2_1_pre_state_inertia,
+                    :v2_0, :v2_1_frozen, :persistence]
     finite_rows = finite_mask(df, numeric_cols)
     if all(finite_rows)
         pass!(state, "V2 replay finite values", "all $(nrow(df)) rows finite for $(join(String.(numeric_cols), ", "))")
@@ -412,26 +738,25 @@ function audit_replay!(state::AuditState; strict_regime_persistence::Bool = fals
             fail!(state, "lead $(lead)h replay coverage", "no scored rows")
             continue
         end
-        rbase = rmse(sub.audit_baseline, sub.obs)
-        rv2 = rmse(sub.v2, sub.obs)
+        rv20 = rmse(sub.v2_0, sub.obs)
+        rv21 = rmse(sub.v2_1, sub.obs)
         rpers = rmse(sub.persistence, sub.obs)
-        fair = maximum(abs.(Float64.(sub.v2_frozen) .- Float64.(sub.audit_baseline)))
-        improvement = min(rbase, rpers) - rv2
-        push!(state.replay_metrics, (lead, nrow(sub), rbase, rv2, rpers, improvement, fair))
+        tail_effect = maximum(abs.(Float64.(sub.v2_1) .- Float64.(sub.v2_1_frozen)))
+        core_change = maximum(abs.(Float64.(sub.v2_1_frozen) .- Float64.(sub.v2_0)))
+        improvement = min(rv20, rpers) - rv21
+        push!(state.replay_metrics, (lead, nrow(sub), rv20, rv21, rpers,
+                                     improvement, tail_effect, core_change))
 
-        if rv2 < rbase && rv2 < rpers
+        if rv21 < rv20 && rv21 < rpers
             pass!(state, "lead $(lead)h replay skill",
-                  @sprintf("V2 RMSE %.2f < pre-upgrade baseline %.2f and persistence %.2f", rv2, rbase, rpers))
+                  @sprintf("V2.1 RMSE %.2f < historical V2.0 %.2f and persistence %.2f", rv21, rv20, rpers))
         else
             fail!(state, "lead $(lead)h replay skill",
-                  @sprintf("V2 RMSE %.2f, pre-upgrade baseline %.2f, persistence %.2f", rv2, rbase, rpers))
+                  @sprintf("V2.1 RMSE %.2f, historical V2.0 %.2f, persistence %.2f", rv21, rv20, rpers))
         end
-
-        if fair <= 1e-9
-            pass!(state, "lead $(lead)h frozen-tail continuity", @sprintf("max|v2_frozen-audit_baseline| %.3g", fair))
-        else
-            fail!(state, "lead $(lead)h frozen-tail continuity", @sprintf("max|v2_frozen-audit_baseline| %.6g", fair))
-        end
+        pass!(state, "lead $(lead)h operational-layer decomposition",
+              @sprintf("max|V2.1−frozen-tail V2.1| %.2f nT; max|frozen-tail V2.1−V2.0| %.2f nT",
+                       tail_effect, core_change))
     end
 
     deep = df[(df.lead .== 6) .&
@@ -441,17 +766,17 @@ function audit_replay!(state::AuditState; strict_regime_persistence::Bool = fals
     if nrow(deep) == 0
         fail!(state, "deep-deepening replay subset", "no 6h rows with rate < -15 nT/h and obs < -100 nT")
     else
-        v2_bias = mean(Float64.(deep.obs) .- Float64.(deep.v2))
-        baseline_bias = mean(Float64.(deep.obs) .- Float64.(deep.audit_baseline))
+        v2_bias = mean(Float64.(deep.obs) .- Float64.(deep.v2_1))
+        baseline_bias = mean(Float64.(deep.obs) .- Float64.(deep.v2_0))
         state.live_metrics[:deep_subset_n] = nrow(deep)
         state.live_metrics[:deep_v2_bias] = v2_bias
         state.live_metrics[:deep_baseline_bias] = baseline_bias
         if abs(v2_bias) <= 10.0 && abs(v2_bias) < abs(baseline_bias)
             pass!(state, "deep-deepening bias guard",
-                  @sprintf("n=%d, mean(obs-V2)=%+.1f nT vs mean(obs-pre-upgrade baseline)=%+.1f nT", nrow(deep), v2_bias, baseline_bias))
+                  @sprintf("n=%d, mean(obs−V2.1)=%+.1f nT vs mean(obs−historical V2.0)=%+.1f nT", nrow(deep), v2_bias, baseline_bias))
         else
             fail!(state, "deep-deepening bias guard",
-                  @sprintf("n=%d, mean(obs-V2)=%+.1f nT vs mean(obs-pre-upgrade baseline)=%+.1f nT", nrow(deep), v2_bias, baseline_bias))
+                  @sprintf("n=%d, mean(obs−V2.1)=%+.1f nT vs mean(obs−historical V2.0)=%+.1f nT", nrow(deep), v2_bias, baseline_bias))
         end
     end
 
@@ -477,10 +802,10 @@ function audit_broad_replay!(state::AuditState)
         fail!(state, "broad replay storm coverage", "expected $(EXPECTED_BROAD_STORMS) storms, got $(storm_count)")
     end
 
-    if maximum(Float64.(df.storm_min_dst_nt)) <= -100.0
-        pass!(state, "broad replay Dst-threshold scope", "all scored storms have catalog min Dst <= -100 nT")
+    if maximum(Float64.(df.storm_min_dst_star_nt)) <= -100.0
+        pass!(state, "broad replay Dst*-threshold scope", "all scored storms have catalog min Dst* <= -100 nT")
     else
-        fail!(state, "broad replay Dst-threshold scope", "at least one scored storm has catalog min Dst > -100 nT")
+        fail!(state, "broad replay Dst*-threshold scope", "at least one scored storm has catalog min Dst* > -100 nT")
     end
 
     leads = sort(unique(Int.(df.lead)))
@@ -490,7 +815,9 @@ function audit_broad_replay!(state::AuditState)
         fail!(state, "broad replay leads", "expected $(join(EXPECTED_LEADS, ",")); got $(join(leads, ","))")
     end
 
-    numeric_cols = [:obs, :audit_baseline, :v2, :v2_frozen, :persistence]
+    numeric_cols = [:obs, :v2_1, :v2_1_pre_rate_guard,
+                    :v2_1_pre_one_hour_inertia, :v2_1_pre_state_inertia,
+                    :v2_0, :v2_1_frozen, :persistence]
     finite_rows = finite_mask(df, numeric_cols)
     if all(finite_rows)
         pass!(state, "broad replay finite values", "all $(nrow(df)) rows finite for $(join(String.(numeric_cols), ", "))")
@@ -520,26 +847,24 @@ function audit_broad_replay!(state::AuditState)
             fail!(state, "broad lead $(lead)h coverage", "no scored rows")
             continue
         end
-        rbase = rmse(sub.audit_baseline, sub.obs)
-        rv2 = rmse(sub.v2, sub.obs)
+        rv20 = rmse(sub.v2_0, sub.obs)
+        rv21 = rmse(sub.v2_1, sub.obs)
         rpers = rmse(sub.persistence, sub.obs)
-        fair = maximum(abs.(Float64.(sub.v2_frozen) .- Float64.(sub.audit_baseline)))
-        improvement = min(rbase, rpers) - rv2
+        tail_effect = maximum(abs.(Float64.(sub.v2_1) .- Float64.(sub.v2_1_frozen)))
+        core_change = maximum(abs.(Float64.(sub.v2_1_frozen) .- Float64.(sub.v2_0)))
+        improvement = min(rv20, rpers) - rv21
         push!(state.broad_metrics, (lead, nrow(sub), length(unique(Int.(sub.storm_id))),
-                                    rbase, rv2, rpers, improvement, fair))
-        if rv2 < rbase && rv2 < rpers
+                                    rv20, rv21, rpers, improvement, tail_effect, core_change))
+        if rv21 < rv20 && rv21 < rpers
             pass!(state, "broad lead $(lead)h replay skill",
-                  @sprintf("V2 RMSE %.2f < pre-upgrade baseline %.2f and persistence %.2f", rv2, rbase, rpers))
+                  @sprintf("V2.1 RMSE %.2f < historical V2.0 %.2f and persistence %.2f", rv21, rv20, rpers))
         else
             fail!(state, "broad lead $(lead)h replay skill",
-                  @sprintf("V2 RMSE %.2f, pre-upgrade baseline %.2f, persistence %.2f", rv2, rbase, rpers))
+                  @sprintf("V2.1 RMSE %.2f, historical V2.0 %.2f, persistence %.2f", rv21, rv20, rpers))
         end
-
-        if fair <= 1e-9
-            pass!(state, "broad lead $(lead)h frozen-tail continuity", @sprintf("max|v2_frozen-audit_baseline| %.3g", fair))
-        else
-            fail!(state, "broad lead $(lead)h frozen-tail continuity", @sprintf("max|v2_frozen-audit_baseline| %.6g", fair))
-        end
+        pass!(state, "broad lead $(lead)h operational-layer decomposition",
+              @sprintf("max|V2.1−frozen-tail V2.1| %.2f nT; max|frozen-tail V2.1−V2.0| %.2f nT",
+                       tail_effect, core_change))
     end
 
     deep = df[(df.lead .== 6) .&
@@ -549,18 +874,18 @@ function audit_broad_replay!(state::AuditState)
     if nrow(deep) == 0
         fail!(state, "broad deep-deepening replay subset", "no 6h rows with rate < -15 nT/h and obs < -100 nT")
     else
-        v2_bias = mean(Float64.(deep.obs) .- Float64.(deep.v2))
-        baseline_bias = mean(Float64.(deep.obs) .- Float64.(deep.audit_baseline))
+        v2_bias = mean(Float64.(deep.obs) .- Float64.(deep.v2_1))
+        baseline_bias = mean(Float64.(deep.obs) .- Float64.(deep.v2_0))
         state.live_metrics[:broad_deep_subset_n] = nrow(deep)
         state.live_metrics[:broad_deep_v2_bias] = v2_bias
         state.live_metrics[:broad_deep_baseline_bias] = baseline_bias
         if abs(v2_bias) <= 10.0 && abs(v2_bias) < abs(baseline_bias)
             pass!(state, "broad deep-deepening bias guard",
-                  @sprintf("n=%d, mean(obs-V2)=%+.1f nT vs mean(obs-pre-upgrade baseline)=%+.1f nT",
+                  @sprintf("n=%d, mean(obs−V2.1)=%+.1f nT vs mean(obs−historical V2.0)=%+.1f nT",
                             nrow(deep), v2_bias, baseline_bias))
         else
             fail!(state, "broad deep-deepening bias guard",
-                  @sprintf("n=%d, mean(obs-V2)=%+.1f nT vs mean(obs-pre-upgrade baseline)=%+.1f nT",
+                  @sprintf("n=%d, mean(obs−V2.1)=%+.1f nT vs mean(obs−historical V2.0)=%+.1f nT",
                             nrow(deep), v2_bias, baseline_bias))
         end
     end
@@ -574,16 +899,18 @@ function _gscale_summary_consistent(df::DataFrame, summary::DataFrame)
               df[Int.(df.g_level) .== parse(Int, replace(cohort, "G" => "")), :]
         sub = sub[Int.(sub.lead) .== Int(r.lead_h), :]
         nrow(sub) == Int(r.n_rows) || return (ok = false, detail = "row-count mismatch for $cohort $(r.lead_h)h")
-        rbase = rmse(sub.audit_baseline, sub.obs)
-        rv2 = rmse(sub.v2, sub.obs)
+        rv20 = rmse(sub.v2_0, sub.obs)
+        rv21 = rmse(sub.v2_1, sub.obs)
         rpers = rmse(sub.persistence, sub.obs)
-        fair = maximum(abs.(Float64.(sub.v2_frozen) .- Float64.(sub.audit_baseline)))
+        tail_effect = maximum(abs.(Float64.(sub.v2_1) .- Float64.(sub.v2_1_frozen)))
+        core_change = maximum(abs.(Float64.(sub.v2_1_frozen) .- Float64.(sub.v2_0)))
         vals = [
-            abs(rbase - Float64(r.rmse_preupgrade_nt)),
-            abs(rv2 - Float64(r.rmse_v2_nt)),
+            abs(rv20 - Float64(r.rmse_v2_0_nt)),
+            abs(rv21 - Float64(r.rmse_v2_1_nt)),
             abs(rpers - Float64(r.rmse_persistence_nt)),
-            abs(fair - Float64(r.fair_max_abs_nt)),
-            abs((min(rbase, rpers) - rv2) - Float64(r.improvement_vs_best_nt)),
+            abs(tail_effect - Float64(r.max_tail_effect_nt)),
+            abs(core_change - Float64(r.max_core_change_nt)),
+            abs((min(rv20, rpers) - rv21) - Float64(r.improvement_vs_best_nt)),
         ]
         max_error = max(max_error, maximum(vals))
     end
@@ -653,7 +980,10 @@ function audit_gscale_replay!(state::AuditState)
         fail!(state, "exact Kp/G-scale replay leads", "expected $(join(EXPECTED_LEADS, ",")); got $(join(leads, ","))")
     end
 
-    numeric_cols = [:obs, :audit_baseline, :v2, :v2_frozen, :persistence, :peak_kp]
+    numeric_cols = [:obs, :v2_1, :v2_1_pre_rate_guard,
+                    :v2_1_pre_one_hour_inertia, :v2_1_pre_state_inertia,
+                    :v2_0, :v2_1_frozen,
+                    :persistence, :peak_kp]
     finite_rows = finite_mask(df, numeric_cols)
     if all(finite_rows)
         pass!(state, "exact Kp/G-scale finite values", "all $(nrow(df)) rows finite for $(join(String.(numeric_cols), ", "))")
@@ -687,25 +1017,24 @@ function audit_gscale_replay!(state::AuditState)
             fail!(state, "exact G3+ lead $(lead)h coverage", "no scored rows")
             continue
         end
-        rbase = rmse(sub.audit_baseline, sub.obs)
-        rv2 = rmse(sub.v2, sub.obs)
+        rv20 = rmse(sub.v2_0, sub.obs)
+        rv21 = rmse(sub.v2_1, sub.obs)
         rpers = rmse(sub.persistence, sub.obs)
-        fair = maximum(abs.(Float64.(sub.v2_frozen) .- Float64.(sub.audit_baseline)))
-        improvement = min(rbase, rpers) - rv2
+        tail_effect = maximum(abs.(Float64.(sub.v2_1) .- Float64.(sub.v2_1_frozen)))
+        core_change = maximum(abs.(Float64.(sub.v2_1_frozen) .- Float64.(sub.v2_0)))
+        improvement = min(rv20, rpers) - rv21
         push!(state.gscale_metrics, ("all_G3plus", lead, nrow(sub), length(unique(Int.(sub.g_event_id))),
-                                     rbase, rv2, rpers, improvement, fair))
-        if rv2 < rbase && rv2 < rpers
+                                     rv20, rv21, rpers, improvement, tail_effect, core_change))
+        if rv21 < rv20 && rv21 < rpers
             pass!(state, "exact G3+ lead $(lead)h replay skill",
-                  @sprintf("V2 RMSE %.2f < pre-upgrade baseline %.2f and persistence %.2f", rv2, rbase, rpers))
+                  @sprintf("V2.1 RMSE %.2f < historical V2.0 %.2f and persistence %.2f", rv21, rv20, rpers))
         else
             fail!(state, "exact G3+ lead $(lead)h replay skill",
-                  @sprintf("V2 RMSE %.2f, pre-upgrade baseline %.2f, persistence %.2f", rv2, rbase, rpers))
+                  @sprintf("V2.1 RMSE %.2f, historical V2.0 %.2f, persistence %.2f", rv21, rv20, rpers))
         end
-        if fair <= 1e-9
-            pass!(state, "exact G3+ lead $(lead)h frozen-tail continuity", @sprintf("max|v2_frozen-audit_baseline| %.3g", fair))
-        else
-            fail!(state, "exact G3+ lead $(lead)h frozen-tail continuity", @sprintf("max|v2_frozen-audit_baseline| %.6g", fair))
-        end
+        pass!(state, "exact G3+ lead $(lead)h operational-layer decomposition",
+              @sprintf("max|V2.1−frozen-tail V2.1| %.2f nT; max|frozen-tail V2.1−V2.0| %.2f nT",
+                       tail_effect, core_change))
     end
 
     for g in sort(unique(Int.(df.g_level)))
@@ -713,13 +1042,14 @@ function audit_gscale_replay!(state::AuditState)
         for lead in EXPECTED_LEADS
             sub = subg[subg.lead .== lead, :]
             nrow(sub) == 0 && continue
-            rbase = rmse(sub.audit_baseline, sub.obs)
-            rv2 = rmse(sub.v2, sub.obs)
+            rv20 = rmse(sub.v2_0, sub.obs)
+            rv21 = rmse(sub.v2_1, sub.obs)
             rpers = rmse(sub.persistence, sub.obs)
-            fair = maximum(abs.(Float64.(sub.v2_frozen) .- Float64.(sub.audit_baseline)))
-            improvement = min(rbase, rpers) - rv2
+            tail_effect = maximum(abs.(Float64.(sub.v2_1) .- Float64.(sub.v2_1_frozen)))
+            core_change = maximum(abs.(Float64.(sub.v2_1_frozen) .- Float64.(sub.v2_0)))
+            improvement = min(rv20, rpers) - rv21
             push!(state.gscale_metrics, ("G$(g)", lead, nrow(sub), length(unique(Int.(sub.g_event_id))),
-                                         rbase, rv2, rpers, improvement, fair))
+                                         rv20, rv21, rpers, improvement, tail_effect, core_change))
         end
     end
 
@@ -840,15 +1170,15 @@ function _temerin_dst_summary_consistent(df::DataFrame, summary::DataFrame)
         nrow(sub) == Int(r.n_rows) || return (ok = false,
             detail = "row-count mismatch for $scope $(r.lead_h)h")
         rtem = rmse(sub.temerin_li_dst, sub.obs)
-        rv2 = rmse(sub.v2, sub.obs)
-        rbase = rmse(sub.audit_baseline, sub.obs)
+        rv21 = rmse(sub.v2_1, sub.obs)
+        rv20 = rmse(sub.v2_0, sub.obs)
         rpers = rmse(sub.persistence, sub.obs)
         vals = [
             abs(rtem - Float64(r.rmse_temerin_valid_nt)),
-            abs(rv2 - Float64(r.rmse_v2_nt)),
-            abs(rbase - Float64(r.rmse_preupgrade_nt)),
+            abs(rv21 - Float64(r.rmse_v2_1_nt)),
+            abs(rv20 - Float64(r.rmse_v2_0_nt)),
             abs(rpers - Float64(r.rmse_persistence_nt)),
-            abs((rv2 - rtem) - Float64(r.v2_minus_temerin_valid_rmse_nt)),
+            abs((rv21 - rtem) - Float64(r.v2_1_minus_temerin_valid_rmse_nt)),
         ]
         max_error = max(max_error, maximum(vals))
     end
@@ -876,7 +1206,7 @@ function audit_temerin_dst_archive!(state::AuditState)
               "expected at least $(MIN_TEMERIN_DST_STORMS) storms, got $(storm_count)")
     end
 
-    numeric_cols = [:obs, :audit_baseline, :v2, :persistence, :temerin_li_dst,
+    numeric_cols = [:obs, :v2_1, :v2_0, :persistence, :temerin_li_dst,
                     :match_abs_gap_min]
     finite_rows = finite_mask(df, numeric_cols)
     all(finite_rows) ? pass!(state, "Temerin-Li Dst archive finite values", "all rows finite for score columns") :
@@ -893,8 +1223,8 @@ function audit_temerin_dst_archive!(state::AuditState)
             break
         end
     end
-    time_ok ? pass!(state, "Temerin-Li Dst locked-row timing", "V2 target_utc equals issue_utc + lead for all scored rows") :
-              fail!(state, "Temerin-Li Dst locked-row timing", "at least one V2 target_utc does not equal issue_utc + lead")
+    time_ok ? pass!(state, "Temerin-Li Dst locked-row timing", "V2.1 target_utc equals issue_utc + lead for all scored rows") :
+              fail!(state, "Temerin-Li Dst locked-row timing", "at least one V2.1 target_utc does not equal issue_utc + lead")
 
     if all(.!ismissing.(valid)) && maximum(Float64.(df.match_abs_gap_min)) <= TEMERIN_DST_MATCH_TOL_MIN + 1e-9
         pass!(state, "Temerin-Li Dst valid-time alignment",
@@ -922,16 +1252,16 @@ function audit_temerin_dst_archive!(state::AuditState)
         for r in eachrow(sort(all_scope, :lead_h))
             push!(state.temerin_dst_metrics, (
                 String(r.scope), Int(r.lead_h), Int(r.n_rows), Int(r.n_storms),
-                Float64(r.rmse_temerin_valid_nt), Float64(r.rmse_v2_nt),
-                Float64(r.rmse_preupgrade_nt), Float64(r.rmse_persistence_nt),
-                Float64(r.v2_minus_temerin_valid_rmse_nt),
+                Float64(r.rmse_temerin_valid_nt), Float64(r.rmse_v2_1_nt),
+                Float64(r.rmse_v2_0_nt), Float64(r.rmse_persistence_nt),
+                Float64(r.v2_1_minus_temerin_valid_rmse_nt),
                 Float64(r.max_match_gap_min),
             ))
         end
-        worst = all_scope[argmax(Float64.(all_scope.v2_minus_temerin_valid_rmse_nt)), :]
+        worst = all_scope[argmax(Float64.(all_scope.v2_1_minus_temerin_valid_rmse_nt)), :]
         pass!(state, "Temerin-Li Dst external baseline boundary",
-              @sprintf("same-unit valid-time archive context scored; V2-minus-Temerin worst %.2f nT at %dh; not a matched issue-time baseline",
-                       Float64(worst.v2_minus_temerin_valid_rmse_nt), Int(worst.lead_h)))
+              @sprintf("same-unit valid-time archive context scored; V2.1-minus-Temerin worst %.2f nT at %dh; not a matched issue-time baseline",
+                       Float64(worst.v2_1_minus_temerin_valid_rmse_nt), Int(worst.lead_h)))
     else
         fail!(state, "Temerin-Li Dst external baseline boundary", "missing all_operational_input_era summary rows")
     end
@@ -959,7 +1289,7 @@ function _external_dst_summary_from_log(df::DataFrame)
 end
 
 function audit_external_dst_snapshots!(state::AuditState)
-    path = joinpath(LIVE_DIR, "external_dst_forecast_log.csv")
+    path = EXTERNAL_DST_LOG_PATH
     df = read_csv_checked!(state, path, "prospective external Dst forecast snapshot log")
     df === nothing && return
     require_columns!(state, df, REQUIRED_EXTERNAL_DST_COLS, "prospective external Dst forecast snapshot log") || return
@@ -1052,23 +1382,31 @@ function audit_external_dst_snapshots!(state::AuditState)
 
     summary = _external_dst_summary_from_log(df)
     append!(state.external_dst_metrics, summary; cols = :union)
-    report = joinpath(LIVE_DIR, "external_dst_forecast_report.md")
+    report = EXTERNAL_DST_REPORT_PATH
     isfile(report) ? pass!(state, "external Dst report", "external_dst_forecast_report.md exists") :
                      warn!(state, "external Dst report", "external_dst_forecast_report.md missing")
 end
 
 function audit_live_log!(state::AuditState)
     path = LIVE_LOG_PATH
-    df = read_csv_checked!(state, path, "live forecast log")
+    df = read_csv_checked!(state, path, "live forecast log"; allow_zero=true)
     df === nothing && return
     require_columns!(state, df, REQUIRED_LIVE_COLS, "live forecast log") || return
     state.live_metrics[:live_log_rows] = nrow(df)
     state.live_metrics[:live_log_mtime] = mtime(path)
 
-    if all(skipmissing(df.model_version) .== "v2")
-        pass!(state, "live model version", "all nonmissing model_version rows are v2")
+    if nrow(df) == 0
+        pass!(state, "current V2.1 hot-log boundary",
+              "zero-row schema initialized after byte-identical V2.0 archival")
+        warn!(state, "current V2.1 live sample maturity",
+              "no accumulated V2.1 issue has matured; current skill claims remain replay-only")
+        return
+    end
+
+    if all(skipmissing(df.model_version) .== EXPECTED_MODEL_VERSION)
+        pass!(state, "live model version", "all nonmissing model_version rows are $(EXPECTED_MODEL_VERSION)")
     else
-        fail!(state, "live model version", "non-v2 model_version rows are present")
+        fail!(state, "live model version", "non-$(EXPECTED_MODEL_VERSION) model_version rows are present")
     end
 
     recent = newest_cycle_rows(df)
@@ -1098,9 +1436,10 @@ function audit_live_log!(state::AuditState)
     served = df[finite_mask(df, served_cols), :]
     state.live_metrics[:served_n] = nrow(served)
     if nrow(served) >= 48
-        pass!(state, "verified V2 live rows", "n=$(nrow(served)) rows with finite observations and V2 forecast")
+        pass!(state, "verified V2.1 live rows", "n=$(nrow(served)) rows with finite observations and V2.1 forecast")
     else
-        fail!(state, "verified V2 live rows", "expected at least 48 rows, got $(nrow(served))")
+        warn!(state, "verified V2.1 live rows",
+              "n=$(nrow(served)); V2.1 skill remains replay-only until at least 48 rows mature")
     end
     if nrow(served) < 120
         warn!(state, "live sample maturity", "verified V2 live rows=$(nrow(served)); keep treating live evidence as provisional")
@@ -1139,11 +1478,11 @@ function audit_live_log!(state::AuditState)
         state.live_metrics[:baseline_rmse] = baseline_rmse
         state.live_metrics[:persistence_rmse] = persistence_rmse
         if served_rmse <= baseline_rmse && served_rmse <= persistence_rmse
-            pass!(state, "V2 live RMSE",
-                  @sprintf("V2 %.2f <= pre-upgrade baseline %.2f and persistence %.2f", served_rmse, baseline_rmse, persistence_rmse))
+            pass!(state, "V2.1 live RMSE",
+                  @sprintf("V2.1 %.2f <= V2.1 frozen-tail ablation %.2f and persistence %.2f", served_rmse, baseline_rmse, persistence_rmse))
         else
-            warn!(state, "V2 live RMSE",
-                  @sprintf("V2 %.2f, pre-upgrade baseline %.2f, persistence %.2f on current live sample", served_rmse, baseline_rmse, persistence_rmse))
+            warn!(state, "V2.1 live RMSE",
+                  @sprintf("V2.1 %.2f, V2.1 frozen-tail ablation %.2f, persistence %.2f on current live sample", served_rmse, baseline_rmse, persistence_rmse))
         end
 
         obs = Float64.(served.observation_dst_nt)
@@ -1180,6 +1519,145 @@ function audit_live_log!(state::AuditState)
                   "missing residuals=$(missing_residual), missing interval-hit flags=$(missing_hit); metrics recompute from primary columns")
         end
     end
+end
+
+function audit_historical_v2_0_live_log!(state::AuditState)
+    df = read_csv_checked!(state, HISTORICAL_V2_0_LIVE_LOG_PATH,
+                           "historical V2.0 live forecast log")
+    df === nothing && return
+    require_columns!(state, df, REQUIRED_LIVE_COLS,
+                     "historical V2.0 live forecast log") || return
+
+    versions = sort(unique(String.(collect(skipmissing(df.model_version)))))
+    if versions == ["v2"]
+        pass!(state, "historical live model boundary",
+              "all $(length(collect(skipmissing(df.model_version)))) nonmissing versioned rows are V2.0 (`v2`)")
+    else
+        fail!(state, "historical live model boundary",
+              "unexpected historical model versions: $(join(versions, ", "))")
+    end
+    served_versions = String.(collect(skipmissing(df.sub_hourly_model_version)))
+    if all(!startswith(v, "v2.1") for v in served_versions)
+        pass!(state, "historical live V2.1 exclusion",
+              "no archived row is labeled as a V2.1 served pipeline")
+    else
+        fail!(state, "historical live V2.1 exclusion",
+              "historical archive contains a V2.1 served label")
+    end
+
+    manifest = read_csv_checked!(state, HISTORICAL_V2_0_LIVE_MANIFEST_PATH,
+                                 "historical V2.0 live manifest")
+    if manifest !== nothing && nrow(manifest) == 1 &&
+       all(c -> has_col(manifest, c), [:rows, :verified_rows, :sha256, :operational_version])
+        digest = bytes2hex(sha256(read(HISTORICAL_V2_0_LIVE_LOG_PATH)))
+        verified = count(!ismissing, df.observation_dst_nt)
+        ok = Int(manifest.rows[1]) == nrow(df) &&
+             Int(manifest.verified_rows[1]) == verified &&
+             String(manifest.sha256[1]) == digest &&
+             String(manifest.operational_version[1]) == "v2.0"
+        ok ? pass!(state, "historical V2.0 live manifest CRC",
+                   "rows=$(nrow(df)), verified=$(verified), sha256=$(digest)") :
+             fail!(state, "historical V2.0 live manifest CRC",
+                   "manifest values disagree with the archived CSV")
+    else
+        fail!(state, "historical V2.0 live manifest CRC",
+              "manifest is missing or malformed")
+    end
+
+    served_cols = [:observation_dst_nt, :served_pred_dst_nt,
+                   :served_pred_dst_ci05_nt, :served_pred_dst_ci95_nt,
+                   :v2_pred_dst_nt, :persistence_dst_nt]
+    served = df[finite_mask(df, served_cols), :]
+    nrow(served) >= 1500 ?
+        pass!(state, "historical V2.0 verified live rows", "n=$(nrow(served))") :
+        fail!(state, "historical V2.0 verified live rows",
+              "expected at least 1500 finite served rows, got $(nrow(served))")
+    if nrow(served) > 0
+        pred = Float64.(served.served_pred_dst_nt)
+        obs = Float64.(served.observation_dst_nt)
+        lo = Float64.(served.served_pred_dst_ci05_nt)
+        hi = Float64.(served.served_pred_dst_ci95_nt)
+        state.live_metrics[:historical_v2_0_n] = nrow(served)
+        state.live_metrics[:historical_v2_0_rmse] = rmse(pred, obs)
+        state.live_metrics[:historical_v2_0_persistence_rmse] =
+            rmse(served.persistence_dst_nt, obs)
+        state.live_metrics[:historical_v2_0_coverage] =
+            mean(Float64.((lo .<= obs) .& (obs .<= hi)))
+        all(lo .<= pred) && all(pred .<= hi) ?
+            pass!(state, "historical V2.0 interval geometry",
+                  "served center lies inside every finite archived interval") :
+            fail!(state, "historical V2.0 interval geometry",
+                  "an archived finite interval excludes its served center")
+    end
+end
+
+function audit_v2_1_issue_identity!(state::AuditState)
+    path = joinpath(LIVE_DIR, "v2_1_issue_identity.csv")
+    df = read_csv_checked!(state, path, "V2.1 issue identity")
+    df === nothing && return
+    required = [:model_version, :served_model_version, :candidate_count,
+                :active_count, :redundant_n_v2_present, :pressure_term_active,
+                :pressure_coupling_active, :one_hour_inertia_weight,
+                :state_inertia_h1_quiet_weight,
+                :state_inertia_h1_deepening_weight,
+                :state_inertia_h2_quiet_weight, :state_inertia_h3_quiet_weight,
+                :state_inertia_quiet_dst_nt,
+                :state_inertia_deepening_lo_nt_per_h,
+                :state_inertia_deepening_hi_nt_per_h,
+                :rapid_deepening_activation_rate_nt_per_h,
+                :rapid_deepening_projection_factor,
+                :rapid_deepening_extreme_rate_nt_per_h,
+                :rapid_deepening_max_drop_nt,
+                :rapid_deepening_extreme_max_drop_nt, :calibration_label,
+                :coefficient_sha256, :ensemble_sha256, :draws_sha256,
+                :calibration_sha256, :historical_v2_0_requires_explicit_version]
+    require_columns!(state, df, required, "V2.1 issue identity") || return
+    nrow(df) == 1 || return fail!(state, "V2.1 issue identity cardinality",
+                                  "expected one row, got $(nrow(df))")
+    r = df[1, :]
+    structural = String(r.model_version) == EXPECTED_MODEL_VERSION &&
+                 String(r.served_model_version) == EXPECTED_SUBHOURLY &&
+                 Int(r.candidate_count) == 20 && Int(r.active_count) == 11 &&
+                 !Bool(r.redundant_n_v2_present) && Bool(r.pressure_term_active) &&
+                 Bool(r.pressure_coupling_active) &&
+                 Float64(r.one_hour_inertia_weight) == 0.75 &&
+                 Float64(r.state_inertia_h1_quiet_weight) == 0.75 &&
+                 Float64(r.state_inertia_h1_deepening_weight) == 0.0 &&
+                 Float64(r.state_inertia_h2_quiet_weight) == 0.625 &&
+                 Float64(r.state_inertia_h3_quiet_weight) == 0.875 &&
+                 Float64(r.state_inertia_quiet_dst_nt) == -30.0 &&
+                 Float64(r.state_inertia_deepening_lo_nt_per_h) == -15.0 &&
+                 Float64(r.state_inertia_deepening_hi_nt_per_h) == -5.0 &&
+                 Float64(r.rapid_deepening_activation_rate_nt_per_h) == -15.0 &&
+                 Float64(r.rapid_deepening_projection_factor) == 0.375 &&
+                 Float64(r.rapid_deepening_extreme_rate_nt_per_h) == -60.0 &&
+                 Float64(r.rapid_deepening_max_drop_nt) == 50.0 &&
+                 Float64(r.rapid_deepening_extreme_max_drop_nt) == 120.0 &&
+                 Bool(r.historical_v2_0_requires_explicit_version) &&
+                 startswith(String(r.calibration_label), "operational_v2_1_")
+    structural ? pass!(state, "V2.1 issue identity contract",
+                       "20 candidates, 11 active terms, current calibration and current served-tail label") :
+                 fail!(state, "V2.1 issue identity contract",
+                       "identity row disagrees with the deployed V2.1 contract")
+
+    paths = (
+        coefficient_sha256=joinpath(OPERATIONAL_PACKAGE_ROOT, "data",
+                                    "real_sindy_discovery_coefficients.csv"),
+        ensemble_sha256=joinpath(OPERATIONAL_PACKAGE_ROOT, "data",
+                                 "real_ensemble_inclusion.csv"),
+        draws_sha256=joinpath(OPERATIONAL_PACKAGE_ROOT, "data",
+                              "real_sindy_ensemble_draws.csv"),
+        calibration_sha256=joinpath(OPERATIONAL_PACKAGE_ROOT, "deploy",
+                                    "operational_v2_calibration.csv"),
+    )
+    hash_ok = all(begin
+        p = getproperty(paths, field)
+        isfile(p) && String(getproperty(r, field)) == bytes2hex(sha256(read(p)))
+    end for field in propertynames(paths))
+    hash_ok ? pass!(state, "V2.1 issue artifact hashes",
+                    "identity hashes match all current core/calibration artifacts") :
+              fail!(state, "V2.1 issue artifact hashes",
+                    "identity hash differs from a current core/calibration artifact")
 end
 
 function refresh_live_log_metrics_for_dashboard!(state::AuditState)
@@ -1319,8 +1797,8 @@ function audit_dashboard_payload!(state::AuditState, payload, api_url::AbstractS
     end
 
     model = string(nested_get(payload, ["model_version"], ""))
-    if model == "v2"
-        pass!(state, "dashboard API model", "model_version=v2")
+    if model == EXPECTED_MODEL_VERSION
+        pass!(state, "dashboard API model", "model_version=$(EXPECTED_MODEL_VERSION)")
     else
         fail!(state, "dashboard API model", "model_version=$(model)")
     end
@@ -1328,7 +1806,10 @@ function audit_dashboard_payload!(state::AuditState, payload, api_url::AbstractS
     driver = string(nested_get(payload, ["lead_time", "driver_assumption"], ""))
     if occursin("Ballistically propagated L1 forcing", driver) &&
        occursin("regime-aware relaxation", driver) &&
-       occursin("near-term extreme-Dst inertia guard", driver)
+       occursin("causal rate projection", driver) &&
+       occursin("one-hour", driver) &&
+       occursin("state-conditioned inertia", driver) &&
+       occursin("extreme-Dst inertia guard", driver)
         pass!(state, "dashboard API V2-tail assumption", driver)
     else
         fail!(state, "dashboard API V2-tail assumption", "unexpected driver_assumption=$(driver)")
@@ -1420,12 +1901,12 @@ function selftest_readiness_audit()
 
     good = Dict{String, Any}(
         "available" => true,
-        "model_version" => "v2",
+        "model_version" => EXPECTED_MODEL_VERSION,
         "generated_utc" => "2026-06-26T07:14:30.123456Z",
         "forecast_issue_utc" => "2026-06-26T06:30:00Z",
         "latest_solar_wind_utc" => "2026-06-26T06:28:00Z",
         "lead_time" => Dict{String, Any}(
-            "driver_assumption" => "Ballistically propagated L1 forcing, then regime-aware relaxation beyond the measured L1 window, with a near-term extreme-Dst inertia guard",
+            "driver_assumption" => "Ballistically propagated L1 forcing, then regime-aware relaxation beyond the measured L1 window, followed by a causal rate projection, validation-selected one-hour and state-conditioned inertia blends, and an extreme-Dst inertia guard",
         ),
         "calibration" => Dict{String, Any}(
             "v2_n_verified" => 3,
@@ -1478,9 +1959,8 @@ function selftest_readiness_audit()
     regime_df = DataFrame(
         lead = [1, 1, 1, 1],
         obs = [-210.0, -220.0, -35.0, -40.0],
-        audit_baseline = [-212.0, -222.0, -36.0, -41.0],
-        v2 = [-200.0, -199.0, -34.0, -39.0],
-        v2_frozen = [-212.0, -222.0, -36.0, -41.0],
+        v2_0 = [-212.0, -222.0, -36.0, -41.0],
+        v2_1 = [-200.0, -199.0, -34.0, -39.0],
         persistence = [-209.0, -221.0, -35.0, -40.0],
         rate = [-20.0, -18.0, 0.0, 1.0],
     )
@@ -1490,8 +1970,82 @@ function selftest_readiness_audit()
                           material_delta_nt = 5.0,
                           strict_persistence = true,
                           require_full_coverage = false)
-    @assert any(c -> c.level == :fail && c.name == "regime pre-upgrade baseline guard", regime_state.checks) "regime guard should fail baseline regressions"
+    @assert any(c -> c.level == :fail && c.name == "regime historical V2.0 guard", regime_state.checks) "regime guard should fail historical-comparator regressions"
     @assert any(c -> c.level == :fail && c.name == "regime persistence vulnerability", regime_state.checks) "strict regime guard should fail material persistence losses"
+    passed += 1
+
+    split_sha = repeat("a", 64)
+    split_fixture = DataFrame(
+        split=["fit", "validation", "holdout"],
+        rows=[100, 40, 40],
+        anchors=[25, 10, 10],
+        minimum_issue_utc=[fixed_now - Day(10), fixed_now - Day(6), fixed_now - Day(2)],
+        maximum_issue_utc=[fixed_now - Day(8), fixed_now - Day(4), fixed_now],
+        minimum_target_utc=[fixed_now - Day(10) + Hour(1), fixed_now - Day(6) + Hour(1), fixed_now - Day(2) + Hour(1)],
+        maximum_target_utc=[fixed_now - Day(7), fixed_now - Day(3), fixed_now + Hour(1)],
+        point_calibration_sha256=fill(split_sha, 3),
+        source_table_sha256=fill(repeat("b", 64), 3),
+        conformal_holdout_coverage=fill(0.90, 3),
+    )
+    @assert all(values(_v2_1_split_contract(split_fixture, split_sha))) "causal split fixture should pass"
+    leaky_split = copy(split_fixture)
+    leaky_split.minimum_issue_utc[2] = split_fixture.maximum_target_utc[1] - Hour(1)
+    leaky_contract = _v2_1_split_contract(leaky_split, split_sha)
+    @assert leaky_contract.schema && leaky_contract.partitions && !leaky_contract.causal "forecast-origin overlap mutation should fail only the causal boundary"
+    passed += 1
+
+    holdout_summary = DataFrame(
+        cohort=["overall", "lead_1", "lead_2", "lead_3", "lead_6", "quiet", "storm"],
+        lead_h=[0, 1, 2, 3, 6, 0, 0],
+        activity_regime=["all", "all", "all", "all", "all", "quiet", "storm"],
+        n_rows=[40, 10, 10, 10, 10, 32, 8],
+        served_hits=[36, 9, 9, 9, 9, 30, 6],
+        served_coverage=[0.9, 0.9, 0.9, 0.9, 0.9, 30 / 32, 6 / 8],
+        served_rmse_nt=fill(2.0, 7),
+        frozen_tail_hits=[35, 9, 9, 9, 8, 29, 6],
+        frozen_tail_coverage=[35 / 40, 0.9, 0.9, 0.9, 0.8, 29 / 32, 6 / 8],
+        frozen_tail_rmse_nt=fill(2.1, 7),
+        nominal_coverage=fill(V2_1_NOMINAL_COVERAGE, 7),
+        promotion_coverage_floor=fill(V2_1_CALIBRATION_COVERAGE_FLOOR, 7),
+        pooled_gate_applies=[true, false, false, false, false, false, false],
+        pooled_gate_pass=[true, false, false, false, false, false, false],
+    )
+    holdout_audit = DataFrame(
+        model_version=[EXPECTED_MODEL_VERSION], candidate_count=[20], active_count=[11],
+        holdout_rows=[40], holdout_anchors=[10],
+        validation_max_target_utc=[fixed_now - Hour(2)],
+        holdout_min_issue_utc=[fixed_now - Hour(1)],
+        holdout_max_issue_utc=[fixed_now + Hour(8)],
+        holdout_max_target_utc=[fixed_now + Hour(14)],
+        strict_forecast_origin_separation=[true],
+        interval_policy=["static_conformal_shifted_to_complete_hour_served_center"],
+        holdout_residual_updates=[0],
+        point_calibration_sha256=[repeat("a", 64)],
+        conformal_calibration_sha256=[repeat("b", 64)],
+        split_audit_sha256=[repeat("c", 64)],
+        calibration_scored_sha256=[repeat("e", 64)],
+        omni_sha256=[repeat("d", 64)],
+        maximum_frozen_tail_continuity_error_nt=[0.0],
+        maximum_interval_center_error_nt=[1e-14],
+        nominal_coverage=[V2_1_NOMINAL_COVERAGE],
+        pooled_promotion_floor=[V2_1_CALIBRATION_COVERAGE_FLOOR],
+        served_pooled_coverage=[0.9], served_pooled_gate_pass=[true],
+        frozen_tail_pooled_coverage=[35 / 40], heldout_promotion_evidence=[true],
+    )
+    holdout_contract = _v2_1_served_holdout_contract(
+        holdout_summary, holdout_audit;
+        point_sha256=repeat("a", 64), conformal_sha256=repeat("b", 64),
+        split_sha256=repeat("c", 64), omni_sha256=repeat("d", 64),
+    )
+    @assert all(values(holdout_contract)) "complete-hour served-stack holdout fixture should pass"
+    mutated_summary = copy(holdout_summary)
+    mutated_summary.served_hits[2] -= 1
+    mutated_contract = _v2_1_served_holdout_contract(
+        mutated_summary, holdout_audit;
+        point_sha256=repeat("a", 64), conformal_sha256=repeat("b", 64),
+        split_sha256=repeat("c", 64), omni_sha256=repeat("d", 64),
+    )
+    @assert !mutated_contract.summary_crc "lead-hit mutation should fail summary recomputation"
     passed += 1
 
     mktempdir() do dir
@@ -1613,10 +2167,10 @@ end
 function write_report(state::AuditState, path::AbstractString)
     open(path, "w") do io
         stamp = Dates.format(now(), DateFormat("yyyy-mm-dd HH:MM:SS"))
-        println(io, "# V2 Readiness Audit\n")
+        println(io, "# Operational V2.1 Readiness Audit\n")
         println(io, "**Verdict:** $(verdict(state))")
         println(io, "**Generated:** $(stamp) local time\n")
-        println(io, "This audit recomputes V2 readiness from the locked live log, the retrospective severe-storm replay artifacts, the exact Kp/G-scale replay, the broad Dst-intense archive replay, the external NOAA Kp forecast archive check, the Temerin-Li Dst archive valid-time comparison, and the prospective external Dst issue-time snapshot collector. It is an engineering/research guard, not a venue-submission certificate.\n")
+        println(io, "This audit recomputes Operational V2.1 readiness from complete-hour causal replay of the served stack on the chronological holdout, the locked live log, retrospective severe-storm replay artifacts, exact Kp/G-scale replay, broad Dst-intense archive replay, external NOAA Kp forecast archive check, Temerin--Li Dst archive valid-time comparison, and the prospective external Dst issue-time snapshot collector. V2.1 denotes the revised 20-candidate/11-active-term SINDy core; V2.0 denotes the archived 21-candidate/10-active-term comparator. The holdout does not reconstruct fractional subhourly live windows. This audit is an engineering and research guard, not a venue-submission certificate.\n")
 
         npass = count(c -> c.level == :pass, state.checks)
         nwarn = count(c -> c.level == :warn, state.checks)
@@ -1633,40 +2187,54 @@ function write_report(state::AuditState, path::AbstractString)
             println(io, "| $(uppercase(String(c.level))) | $(markdown_escape(c.name)) | $(markdown_escape(c.detail)) |")
         end
 
+        if haskey(state.live_metrics, :served_holdout_summary)
+            summary = state.live_metrics[:served_holdout_summary]
+            println(io, "\n## Complete-Hour Served-Stack V2.1 Chronological Holdout\n")
+            println(io, "The pooled row is the declared static-interval promotion gate. Lead-specific and quiet/storm rows disclose where coverage departs from the pooled result and the 0.90 nominal target.\n")
+            println(io, "| Cohort | Lead [h] | n | Served RMSE [nT] | Served coverage | Frozen-tail coverage |")
+            println(io, "|---|---:|---:|---:|---:|---:|")
+            for r in eachrow(summary)
+                @printf(io, "| %s | %d | %d | %.3f | %.3f | %.3f |\n",
+                        r.cohort, r.lead_h, r.n_rows, r.served_rmse_nt,
+                        r.served_coverage, r.frozen_tail_coverage)
+            end
+        end
+
         if nrow(state.replay_metrics) > 0
             println(io, "\n## Replay Metrics\n")
-            println(io, "| Lead [h] | n | RMSE pre-upgrade baseline | RMSE V2 | RMSE persistence | Improve vs best baseline | Frozen fairness |")
-            println(io, "|---:|---:|---:|---:|---:|---:|---:|")
+            println(io, "| Lead [h] | n | RMSE historical V2.0 | RMSE V2.1 | RMSE persistence | Improve vs best comparator | Max operational-layer effect | Max 20/11-core effect |")
+            println(io, "|---:|---:|---:|---:|---:|---:|---:|---:|")
             for r in eachrow(state.replay_metrics)
-                @printf(io, "| %d | %d | %.2f | %.2f | %.2f | %+.2f | %.3g |\n",
-                        r.lead, r.n, r.rmse_baseline, r.rmse_v2, r.rmse_persistence,
-                        r.improvement_vs_best, r.fair)
+                @printf(io, "| %d | %d | %.2f | %.2f | %.2f | %+.2f | %.2f | %.2f |\n",
+                        r.lead, r.n, r.rmse_v2_0, r.rmse_v2_1, r.rmse_persistence,
+                        r.improvement_vs_best, r.max_tail_effect, r.max_core_change)
             end
         end
 
         if nrow(state.broad_metrics) > 0
             println(io, "\n## Broad Dst-Intense Replay Metrics\n")
-            println(io, "Broad replay covers catalog storms with minimum Dst <= -100 nT. It is Dst-threshold evidence, not exact NOAA G-scale classification.\n")
-            println(io, "| Lead [h] | n | storms | RMSE pre-upgrade baseline | RMSE V2 | RMSE persistence | Improve vs best baseline | Frozen fairness |")
-            println(io, "|---:|---:|---:|---:|---:|---:|---:|---:|")
+            println(io, "Broad replay covers catalog storms with minimum pressure-corrected Dst* <= -100 nT. It is Dst*-threshold evidence, not exact NOAA G-scale classification.\n")
+            println(io, "| Lead [h] | n | storms | RMSE historical V2.0 | RMSE V2.1 | RMSE persistence | Improve vs best comparator | Max operational-layer effect | Max 20/11-core effect |")
+            println(io, "|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
             for r in eachrow(state.broad_metrics)
-                @printf(io, "| %d | %d | %d | %.2f | %.2f | %.2f | %+.2f | %.3g |\n",
-                        r.lead, r.n, r.n_storms, r.rmse_baseline, r.rmse_v2,
-                        r.rmse_persistence, r.improvement_vs_best, r.fair)
+                @printf(io, "| %d | %d | %d | %.2f | %.2f | %.2f | %+.2f | %.2f | %.2f |\n",
+                        r.lead, r.n, r.n_storms, r.rmse_v2_0, r.rmse_v2_1,
+                        r.rmse_persistence, r.improvement_vs_best,
+                        r.max_tail_effect, r.max_core_change)
             end
         end
 
         if nrow(state.gscale_metrics) > 0
             println(io, "\n## Exact Kp/G-Scale Replay Metrics\n")
-            println(io, "Exact replay selects GFZ three-hour Kp events with Kp >= 7 (NOAA G3+) and scores V2 on the same locked issue/target rows as the baselines. Skipped catalog events are data-coverage skips from unavailable finite OMNI/Dst rows.\n")
-            println(io, "| Cohort | Lead [h] | n | events | RMSE pre-upgrade baseline | RMSE V2 | RMSE persistence | Improve vs best baseline | Frozen fairness |")
-            println(io, "|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+            println(io, "Exact replay selects GFZ three-hour Kp events with Kp >= 7 (NOAA G3+) and scores V2.1 on the same locked issue/target rows as historical V2.0 and persistence. Skipped catalog events are data-coverage skips from unavailable finite OMNI/Dst rows.\n")
+            println(io, "| Cohort | Lead [h] | n | events | RMSE historical V2.0 | RMSE V2.1 | RMSE persistence | Improve vs best comparator | Max operational-layer effect | Max 20/11-core effect |")
+            println(io, "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
             sort!(state.gscale_metrics, [:cohort, :lead])
             for r in eachrow(state.gscale_metrics)
-                @printf(io, "| %s | %d | %d | %d | %.2f | %.2f | %.2f | %+.2f | %.3g |\n",
-                        r.cohort, r.lead, r.n, r.n_events, r.rmse_baseline,
-                        r.rmse_v2, r.rmse_persistence, r.improvement_vs_best,
-                        r.fair)
+                @printf(io, "| %s | %d | %d | %d | %.2f | %.2f | %.2f | %+.2f | %.2f | %.2f |\n",
+                        r.cohort, r.lead, r.n, r.n_events, r.rmse_v2_0,
+                        r.rmse_v2_1, r.rmse_persistence, r.improvement_vs_best,
+                        r.max_tail_effect, r.max_core_change)
             end
         end
 
@@ -1684,14 +2252,14 @@ function write_report(state::AuditState, path::AbstractString)
 
         if nrow(state.temerin_dst_metrics) > 0
             println(io, "\n## External Temerin-Li Dst Archive Metrics\n")
-            println(io, "The Temerin-Li archive check scores same-unit predicted Dst values at archived valid times against the V2 target rows. The monthly archive does not expose issue-time/lead rows, so this is a valid-time operational context comparison, not a matched 1--6 h promotion baseline.\n")
-            println(io, "| Scope | Lead [h] | n | storms | RMSE Temerin-Li valid-time | RMSE V2 | RMSE pre-upgrade baseline | RMSE persistence | V2 minus Temerin-Li | Max gap [min] |")
+            println(io, "The Temerin-Li archive check scores same-unit predicted Dst values at archived valid times against the V2.1 target rows. The monthly archive does not expose issue-time/lead rows, so this is a valid-time operational context comparison, not a matched 1--6 h promotion baseline.\n")
+            println(io, "| Scope | Lead [h] | n | storms | RMSE Temerin-Li valid-time | RMSE V2.1 | RMSE historical V2.0 | RMSE persistence | V2.1 minus Temerin-Li | Max gap [min] |")
             println(io, "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
             for r in eachrow(state.temerin_dst_metrics)
                 @printf(io, "| %s | %d | %d | %d | %.2f | %.2f | %.2f | %.2f | %+.2f | %.2f |\n",
                         r.scope, r.lead, r.n, r.n_storms, r.rmse_temerin_valid,
-                        r.rmse_v2, r.rmse_baseline, r.rmse_persistence,
-                        r.v2_minus_temerin, r.max_gap_min)
+                        r.rmse_v2_1, r.rmse_v2_0, r.rmse_persistence,
+                        r.v2_1_minus_temerin, r.max_gap_min)
             end
         end
 
@@ -1711,35 +2279,35 @@ function write_report(state::AuditState, path::AbstractString)
 
         if nrow(state.regime_metrics) > 0
             println(io, "\n## Regime Scorecard\n")
-            println(io, "Rows are replay cells with at least $(REGIME_MIN_ROWS) examples. `Delta vs best` is positive when V2 is worse than the stronger of the pre-upgrade baseline and persistence.\n")
-            println(io, "| Axis | Lead [h] | Regime | n | RMSE pre-upgrade baseline | RMSE V2 | RMSE persistence | Delta vs baseline | Delta vs best |")
+            println(io, "Rows are replay cells with at least $(REGIME_MIN_ROWS) examples. `Delta vs best` is positive when V2.1 is worse than the stronger of historical V2.0 and persistence.\n")
+            println(io, "| Axis | Lead [h] | Regime | n | RMSE historical V2.0 | RMSE V2.1 | RMSE persistence | Delta vs V2.0 | Delta vs best |")
             println(io, "|---|---:|---|---:|---:|---:|---:|---:|---:|")
             sort!(state.regime_metrics, [:axis, :lead, :regime])
             for r in eachrow(state.regime_metrics)
                 @printf(io, "| %s | %d | %s | %d | %.2f | %.2f | %.2f | %+.2f | %+.2f |\n",
-                        r.axis, r.lead, r.regime, r.n, r.rmse_baseline, r.rmse_v2,
-                        r.rmse_persistence, r.delta_vs_baseline, r.delta_vs_best)
+                        r.axis, r.lead, r.regime, r.n, r.rmse_v2_0, r.rmse_v2_1,
+                        r.rmse_persistence, r.delta_vs_v2_0, r.delta_vs_best)
             end
         end
 
         if haskey(state.live_metrics, :served_n)
-            println(io, "\n## Live Log Metrics\n")
+            println(io, "\n## Current V2.1 Live Log Metrics\n")
             println(io, "| Metric | Value |")
             println(io, "|---|---:|")
-            println(io, "| Verified V2 rows | $(state.live_metrics[:served_n]) |")
+            println(io, "| Verified V2.1 rows | $(state.live_metrics[:served_n]) |")
             labels = Dict(
-                :served_rmse => "V2 RMSE",
-                :baseline_rmse => "pre-upgrade baseline RMSE",
+                :served_rmse => "V2.1 RMSE",
+                :baseline_rmse => "V2.1 frozen-tail ablation RMSE",
                 :persistence_rmse => "persistence RMSE",
                 :served_coverage => "V2 90% coverage",
                 :obs_min => "minimum observed Dst",
                 :obs_max => "maximum observed Dst",
                 :deep_subset_n => "deep-deepening replay rows",
                 :deep_v2_bias => "V2 deep-deepening signed error",
-                :deep_baseline_bias => "pre-upgrade baseline deep-deepening signed error",
+                :deep_baseline_bias => "historical V2.0 deep-deepening signed error",
                 :broad_deep_subset_n => "broad deep-deepening replay rows",
                 :broad_deep_v2_bias => "broad V2 deep-deepening signed error",
-                :broad_deep_baseline_bias => "broad pre-upgrade baseline deep-deepening signed error",
+                :broad_deep_baseline_bias => "broad historical V2.0 deep-deepening signed error",
             )
             for key in (:served_rmse, :baseline_rmse, :persistence_rmse, :served_coverage,
                         :obs_min, :obs_max, :deep_subset_n, :deep_v2_bias, :deep_baseline_bias,
@@ -1753,6 +2321,20 @@ function write_report(state::AuditState, path::AbstractString)
                     @printf(io, "| %s | %.3f |\n", label, Float64(val))
                 end
             end
+        end
+
+        if haskey(state.live_metrics, :historical_v2_0_n)
+            println(io, "\n## Historical V2.0 Live Log Metrics\n")
+            println(io, "These archived rows predate the V2.1 migration and are retained only as historical operational evidence; they do not measure V2.1 skill.\n")
+            println(io, "| Metric | Value |")
+            println(io, "|---|---:|")
+            println(io, "| Verified historical V2.0 rows | $(state.live_metrics[:historical_v2_0_n]) |")
+            @printf(io, "| Historical V2.0 RMSE [nT] | %.3f |\n",
+                    state.live_metrics[:historical_v2_0_rmse])
+            @printf(io, "| Historical persistence RMSE [nT] | %.3f |\n",
+                    state.live_metrics[:historical_v2_0_persistence_rmse])
+            @printf(io, "| Historical V2.0 90%% interval coverage | %.3f |\n",
+                    state.live_metrics[:historical_v2_0_coverage])
         end
 
         if haskey(state.live_metrics, :dashboard_api_url)
@@ -1778,9 +2360,9 @@ function write_report(state::AuditState, path::AbstractString)
         end
 
         println(io, "\n## CRC Interpretation\n")
-        println(io, "- Correct: fail on schema drift, non-finite replay values, lost frozen-tail continuity, replay regression, V2 regression inside populated regimes, duplicate pending live rows, dashboard/API mismatch, stale API generation, and retired-method product leakage.")
+        println(io, "- Correct: fail on schema drift, non-finite replay values, complete-hour served-stack holdout identity or pooled-gate failure, lost frozen-tail continuity, replay regression, V2 regression inside populated regimes, duplicate pending live rows, dashboard/API mismatch, stale API generation, and retired-method product leakage.")
         println(io, "- Robust: preserve warnings for the current quiet-live persistence edge, limited live sample size, missing Dst <= -50 nT live storm coverage, older score-field backfill, and unresolved venue/target-journal state.")
-        println(io, "- Complete: combine retrospective storm replay, broad Dst-intense replay, exact Kp/G-scale replay, external NOAA Kp forecast archive context, Temerin-Li valid-time Dst archive context, prospective issue-time external Dst snapshot collection, target-Dst/rate regime scorecards, locked-live log checks, dashboard/API freshness checks, retired-EKF isolation, and paper-readiness caveats in one repeatable audit.")
+        println(io, "- Complete: combine the complete-hour served-stack chronological holdout, retrospective storm replay, broad Dst-intense replay, exact Kp/G-scale replay, external NOAA Kp forecast archive context, Temerin-Li valid-time Dst archive context, prospective issue-time external Dst snapshot collection, target-Dst/rate regime scorecards, locked-live log checks, dashboard/API freshness checks, retired-EKF isolation, and paper-readiness caveats in one repeatable audit.")
     end
 end
 
@@ -1834,6 +2416,10 @@ function main(args = ARGS)
     audit_noaa_kp_forecast_archive!(state)
     audit_temerin_dst_archive!(state)
     audit_external_dst_snapshots!(state)
+    audit_v2_1_calibration_split!(state)
+    audit_v2_1_served_holdout!(state)
+    audit_v2_1_issue_identity!(state)
+    audit_historical_v2_0_live_log!(state)
     audit_live_log!(state)
     audit_dashboard_api!(state, api_url;
                          require_api = require_api,

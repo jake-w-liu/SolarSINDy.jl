@@ -112,29 +112,30 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --report=SolarSINDy.jl/var/monitor/live_comparison_report.md
 ```
 
-The headline comparison in this report is a same-row table:
-`V2` versus `SINDy v1`, persistence, Burton, BurtonFull, and
-O'Brien--McPherron. `V2` is the upgraded method. Internal v2
-component/selector metadata is reported only in the audit section and is not a
-separate headline model.
+The headline comparison uses the same target rows for served V2.1, the V2.1
+frozen-tail ablation, SINDy v1, persistence, Burton, BurtonFull, and
+O'Brien--McPherron. The served V2.1 column is the product forecast. The
+frozen-tail and selector fields are audit evidence, not additional products.
 
 ## V2 Calibration
 
-The default live model is `--model=v1`, which preserves the paper model path.
-`--model=v2` enables an experimental operational wrapper that applies a causal
-ridge residual correction to the v1 forecast and inflates the prediction
-interval. The correction uses only issue-time fields: latest Dst, solar-wind
+The default live model is V2.1; `--model=v2` is its accepted short alias.
+Use `--model=v1` explicitly to reproduce the uncalibrated discovery-core path.
+V2.1 applies a causal ridge residual correction to the current revised 20/11
+SINDy forecast and supplies a calibrated prediction interval. The correction
+uses only issue-time fields: latest Dst, solar-wind
 speed, IMF components, density, dynamic pressure, and derived causal coupling
 features such as southward IMF, `V Bs`, transverse IMF magnitude, IMF clock-angle
 coupling, and square-root dynamic pressure.
 
-Current v2 calibration uses a leakage-free chronological split. The fit command
+Current V2.1 calibration uses a leakage-free chronological split. The fit command
 sorts replay/live-log rows by issue time into train, validation, and holdout
 sets. The ridge residual correction and the component selector are fit on the
 train rows only; the feature set, ridge penalty, and component are chosen on the
-validation rows, which fit neither. The holdout is scored exactly once for an
-honest out-of-sample number and is never used for any selection or tuning
-decision.
+validation rows, which fit neither. The holdout is scored exactly once and is
+never used for selection or tuning. This calibration-stage score applies to the
+V2.1 frozen-tail center. It must not be reported as performance of the served
+stack after its center-changing tail and safeguards.
 
 Deployment is decided by an acceptance gate evaluated on the validation rows: a
 v2 candidate is deployed only if it beats persistence and O'Brien--McPherron on
@@ -149,11 +150,24 @@ baseline component on noise. The issued V2 output is one upgraded
 forecast; the internal `v2_selected_component` field is audit metadata, not a
 separate headline model.
 
-The logged pre-upgrade baseline remains available for audit and model-comparison
-scores. The V2 product fields add the multi-hour tail: forecast steps with
-sufficient upstream coverage use ballistically propagated L1 forcing, and later
-hours relax Bz/By toward quiet with a longer timescale during rapid Dst deepening.
-The dashboard displays this upgraded V2 as the single forecast.
+The logged V2.1 frozen-tail center remains available for ablation scores. The
+served fields add the validation-selected operational tail: forecast steps with
+sufficient upstream coverage use ballistically propagated L1 forcing; later
+hours use regime-aware Bz/By relaxation; causal rapid-deepening projection,
+one-hour inertia, state-conditioned inertia, and an extreme-Dst guard constrain
+known failure regimes. The dashboard displays this served V2.1 result as the
+single product forecast.
+
+The frozen package also includes a separate complete-hour served-stack holdout
+under `data/operational_validation/v2_1_served_holdout_*`. It applies the
+complete-hour implementation of the served tail and safeguards to the locked
+2020--2022 holdout, shifts the pre-holdout static conformal offsets to the
+served center, and performs zero residual updates from holdout targets. It does
+not reconstruct the fractional subhourly upstream windows available during
+live issuance. Regenerate it with
+`validation/operational/v2_1_served_holdout.jl`. The pooled coverage floor is a
+promotion criterion; lead-specific and activity-specific results are reported
+as diagnostic boundaries rather than silently pooled away.
 
 Fit the calibration from a prior replay or locked live log:
 
@@ -201,28 +215,31 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --table=SolarSINDy.jl/validation/output/operational/live_replay_v2_144h.csv
 ```
 
-The v2 calibration is not evidence of readiness by itself. It must be
+The V2.1 calibration is not evidence of readiness by itself. It must be
 scored chronologically against held-out rows and then accumulated through locked
 live forecasts exactly like v1.
 
 ## Conformal Predictive Intervals
 
 `--fit-v2-calibration` also fits a split-conformal interval calibration from the
-deployed model's validation residuals (out-of-sample for the ridge fit) and
-writes it to a `*_conformal.csv` sidecar next to the v2 calibration. The
-conformal half-width is stratified by forecast horizon and by activity regime
-(quiet versus disturbed, set from the issue-time Dst), with a finite-sample
-correction so the reported coverage is never overstated and a pooled fallback
-when a stratum is sparse. The fit prints the honest holdout coverage under both
-the conformal interval and the legacy interval-scale band.
+fixed-driver frozen-center validation residuals (out-of-sample for the ridge
+fit) and writes it to a `*_conformal.csv` sidecar next to the V2 calibration.
+The conformal half-width is stratified by forecast horizon and by activity
+regime (quiet versus disturbed, set from the issue-time Dst), with the standard
+finite-sample rank correction and a pooled fallback when a stratum is sparse.
+Its marginal finite-sample guarantee requires exchangeability within the
+calibration stratum. The fit reports empirical holdout coverage under both the
+conformal interval and the legacy interval-scale band.
 
 When the sidecar is present, `--model=v2` issuance sources the logged 90%
 interval from the conformal half-width for the row's horizon and activity
 regime, instead of the v1-ensemble-spread interval scale. Each row records an
 `interval_source` column (`conformal` or `interval_scale`) for audit. The point
-forecast is unchanged; only the uncertainty band changes. The V2 product band
-is shifted by the same offset as the V2 product point forecast, preserving the
-calibrated half-width while tracking the upgraded V2 tail.
+forecast is unchanged; only the uncertainty band changes. The static half-width
+is shifted from the frozen center to the served V2.1 center. This preserves the
+width but does not automatically transfer the frozen-center guarantee; the
+complete-hour served-stack holdout supplies the corresponding empirical
+coverage evidence.
 
 To populate the horizon strata, build the conformal calibration table with
 multiple lead times via `--replay-horizons`:
@@ -249,8 +266,10 @@ The package also provides an Extended Kalman Filter (`init_assimilation`,
 a small physically-motivated subset of the discovered ODE coefficients (for
 example the injection scale and decay rate) online from each observed Dst while
 keeping the sparse equation structure fixed. It is a verified library primitive
-used for research comparison against the static v1/v2 paths; it is not yet wired
-into the live CLI issuance loop.
+used for research comparison against fixed-coefficient paths. Causal seven-storm
+replays found no promotion-grade gain from either decay-only or
+injection-adaptive overlays, so assimilation is intentionally absent from the
+live issuance path. See [EKF extension decision](ekf-v3-decision.md).
 
 ## Operational Deployment
 

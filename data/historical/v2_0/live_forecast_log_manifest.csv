@@ -1,0 +1,2 @@
+operational_version,source_role,rows,verified_rows,nonmissing_model_rows,model_versions,sha256,migration_target
+v2.0,historical_accumulated_live_log,2482,2470,2480,v2,43e895c71c11a077f075c62c47caf07ce21fdf9d3f001bd564697762a95db2db,fresh_v2.1_hot_log_schema

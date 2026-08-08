@@ -1,8 +1,9 @@
 # ekf_shadow.jl — retired shadow-EKF implementation retained for reproducibility.
 #
-# The constrained EKF (adapted decay coefficient held <= the discovered -0.048; validated in
-# SolarSINDy.jl/validation/assimilation_redundancy_constrained.jl) improves the 1 h Dst forecast ~1 nT on
-# top of v2 without the multi-step blow-up of the unconstrained filter. The retired module can:
+# The constrained EKF holds the adapted decay coefficient at or below the
+# current V2.1 discovered decay. Earlier V2.0 numerical findings motivated this
+# retired shadow module; they are not treated as V2.1 performance evidence. The
+# retired module can:
 #   * bootstrap a persistent constrained-EKF state from the historical OMNI record (so the adapted decay
 #     reflects long history, not just the short live tail),
 #   * each monitor cycle, advance one constrained update with the latest locked-log anchor Dst*,
@@ -20,8 +21,6 @@ include(joinpath(@__DIR__, "paths.jl"))
 const _SHADOW_DIR   = OPERATIONAL_OUTPUT_DIR
 const SHADOW_STATE  = joinpath(_SHADOW_DIR, "ekf_shadow_state.csv")
 const SHADOW_LOG    = joinpath(_SHADOW_DIR, "ekf_shadow_log.csv")
-const DECAY_CAP     = -0.048                        # ≈ discovered decay (−0.0479), rounded to a clean stable cap to
-                                                    # match the validation; adapted decay may strengthen, never weaken
 const BOOT_YEAR0    = 2009                          # bootstrap window start (cycles 24-25 for current relevance)
 const FALLBACK_NT   = 50.0                          # |shadow - locked| above this => distrust, fall back
 # EKF hyperparameters — defined ONCE so the bootstrap filter and every reloaded filter are identical.
@@ -29,18 +28,23 @@ const FALLBACK_NT   = 50.0                          # |shadow - locked| above th
 # here (e.g. the init default 1e-6) silently slows the live adaptation by 100×.
 const Q_COEFF=1e-4; const Q_DST=1.0; const R_OBS=4.0; const DST_VAR0=25.0; const COEFF_VAR0=1.0e-2
 
+function _shadow_decay_cap(ξ0, i_decay)
+    cap = Float64(ξ0[i_decay])
+    isfinite(cap) && cap < 0.0 || error("current V2.1 decay coefficient is not stable")
+    return cap
+end
+
 _new_filter(lib, ξ0, i_decay, dst0) =
     init_assimilation(lib, ξ0, [i_decay], dst0; q_coeff=Q_COEFF, q_dst=Q_DST, R=R_OBS,
-                      dst_var0=DST_VAR0, coeff_var0=COEFF_VAR0, coeff_bounds=[(-Inf, DECAY_CAP)])
+                      dst_var0=DST_VAR0, coeff_var0=COEFF_VAR0,
+                      coeff_bounds=[(-Inf, _shadow_decay_cap(ξ0, i_decay))])
 
-# --- library + deployed coefficients (mapped by name, like init_forecast) ---
+# --- current V2.1 library + deployed coefficients ---
 function _shadow_library()
-    lib = build_solar_wind_library(include_redundant_n_v2=true); tn = get_term_names(lib)
-    coef = CSV.read(joinpath(get_data_dir(), "real_sindy_discovery_coefficients.csv"), DataFrame)
-    ξ0 = zeros(length(lib))
-    for r in eachrow(coef); i = findfirst(==(r.term), tn); i !== nothing && (ξ0[i] = r.coefficient); end
-    i_decay = findfirst(==("Dst_star"), tn)
-    return lib, ξ0, i_decay
+    core = load_operational_core(OPERATIONAL_V2_1_MODEL_VERSION)
+    i_decay = findfirst(==("Dst_star"), get_term_names(core.library))
+    i_decay === nothing && error("Operational V2.1 core omits Dst_star")
+    return core.library, copy(core.coefficients), i_decay
 end
 
 # --- bootstrap a constrained-EKF state over the historical OMNI record ---
@@ -52,7 +56,8 @@ function _bootstrap_state(lib, ξ0, i_decay)
     fill!(v) = (l=NaN; for i in eachindex(v); isfinite(v[i]) ? (l=v[i]) : (isfinite(l)&&(v[i]=l)); end; v)
     V=fill!(Float64.(coalesce.(df.V,NaN))); Bz=fill!(Float64.(coalesce.(df.Bz,NaN)))
     By=fill!(Float64.(coalesce.(df.By,NaN))); nn=fill!(Float64.(coalesce.(df.n,NaN)))
-    Pd=fill!(Float64.(coalesce.(df.Pdyn,NaN))); dst=Float64.(coalesce.(df.Dst_star,NaN))
+    Pd=[dynamic_pressure(nn[k], V[k]) for k in eachindex(V)]
+    dst=Float64.(coalesce.(df.Dst_star,NaN))
     f = _new_filter(lib, ξ0, i_decay, isfinite(dst[1]) ? dst[1] : 0.0)
     for k in 1:length(dst)-1
         assimilation_predict!(f, (V=V[k], Bz=Bz[k], By=By[k], n=nn[k], Pdyn=Pd[k]))
@@ -76,8 +81,10 @@ end
 function _load_state(lib, ξ0, i_decay)
     isfile(SHADOW_STATE) || return nothing
     r = CSV.read(SHADOW_STATE, DataFrame)[1, :]
+    m2 = Float64(r.m2)
+    isfinite(m2) && m2 <= _shadow_decay_cap(ξ0, i_decay) + 1e-9 || return nothing
     f = _new_filter(lib, ξ0, i_decay, Float64(r.m1))   # SAME hyperparameters as the bootstrap (esp. Q_COEFF)
-    f.mean .= [Float64(r.m1), Float64(r.m2)]
+    f.mean .= [Float64(r.m1), m2]
     f.cov  .= [Float64(r.c11) Float64(r.c12); Float64(r.c21) Float64(r.c22)]
     last = (V=Float64(r.V), Bz=Float64(r.Bz), By=Float64(r.By), n=Float64(r.n), Pdyn=Float64(r.Pdyn))
     # CSV.jl may auto-parse the timestamp as a DateTime or keep it a String; accept either.
@@ -89,7 +96,8 @@ end
 # `nsteps` defaults to 1 (the live 1 h path — byte-identical to the original single predict). nsteps>1
 # free-runs the discovered ODE forward h hours holding the issue-time drivers constant, matching the
 # locked v2 engine's multi-step rollout, so the only EKF-vs-v2 difference at any lead is the adapted decay.
-function _shadow_forecast(lib, ξ0, i_decay, adapted_decay, anchor_dst_star, drv, latest_dst, cal; nsteps::Int=1)
+function _shadow_forecast(lib, ξ0, i_decay, adapted_decay, anchor_dst_star, drv, latest_dst, cal;
+                          nsteps::Int=1, calibration_features=nothing)
     ξ = copy(ξ0); ξ[i_decay] = adapted_decay
     fc = init_assimilation(lib, ξ, Int[], anchor_dst_star)        # no adaptation: pure rollout
     for _ in 1:nsteps
@@ -98,10 +106,18 @@ function _shadow_forecast(lib, ξ0, i_decay, adapted_decay, anchor_dst_star, drv
     end
     pred_dst_star = current_dst(fc)
     pred_dst = pred_dst_star + 7.26 * sqrt(max(drv.Pdyn, 0.0)) - 11.0   # _dst_from_dst_star
-    feat_df = DataFrame(latest_dst_nt=[latest_dst], V_kms=[drv.V], Bz_nt=[drv.Bz],
-                        By_nt=[drv.By], n_cm3=[drv.n], Pdyn_npa=[drv.Pdyn])
-    prep = SolarSINDy.add_operational_v2_features!(feat_df)
-    feats = NamedTuple{Tuple(cal.feature_names)}(Tuple(Float64(prep[1, c]) for c in cal.feature_names))
+    fallback_features = _v2_features(
+        latest_dst, drv; v1_pred_dst=pred_dst, model_steps=nsteps,
+    )
+    feature_source = calibration_features === nothing ? fallback_features : calibration_features
+    available = propertynames(feature_source)
+    missing_features = [c for c in cal.feature_names if !(c in available)]
+    isempty(missing_features) || error(
+        "shadow calibration feature source omits: $(join(String.(missing_features), ", "))",
+    )
+    feats = NamedTuple{Tuple(cal.feature_names)}(
+        Tuple(Float64(getproperty(feature_source, c)) for c in cal.feature_names),
+    )
     corr = SolarSINDy.operational_v2_correction(cal, feats)
     # Apply the SAME physical Dst ceiling the locked v2 engine uses (clamp to [-2000, 50] nT; see
     # forecast.jl operational_v2 corrected-center). Without it the shadow over-predicts positive Dst on
@@ -170,7 +186,8 @@ function issue_ekf_shadow!(locked_log::AbstractString, calibration_csv::Abstract
         fallback = true; reason = "forecast_error:" * sprint(showerror, e)
     end
     # guards: decay must stay in a stable band; shadow must not wildly disagree with locked v2
-    if !fallback && !(DECAY_CAP - 2.0 <= decay <= DECAY_CAP + 1e-9 && isfinite(ekf_v2))
+    decay_cap = _shadow_decay_cap(ξ0, i_decay)
+    if !fallback && !(decay_cap - 2.0 <= decay <= decay_cap + 1e-9 && isfinite(ekf_v2))
         fallback = true; reason = "decay_or_pred_out_of_range(decay=$(round(decay,digits=4)))"
     end
     if !fallback && isfinite(locked_v2) && abs(ekf_v2 - locked_v2) > FALLBACK_NT
@@ -201,7 +218,7 @@ end
 const SHADOW_REPORT = joinpath(_SHADOW_DIR, "ekf_shadow_report.md")
 const STORM_DST = -50.0   # observed Dst below this counts as a storm row (matches the monitor convention)
 
-# Score the accumulated shadow 1 h forecasts against realized observations and compare to the locked v2.
+# Score the accumulated shadow 1 h forecasts against realized observations and compare to served V2.1.
 # The realized observation comes from the locked log's verified h=1 row for the same target time (the
 # shadow never re-fetches Dst). Non-fallback rows only. Writes a compact report and returns a summary.
 function score_ekf_shadow!(locked_log::AbstractString;
@@ -210,11 +227,12 @@ function score_ekf_shadow!(locked_log::AbstractString;
     sh = CSV.read(shadow_log, DataFrame)
     lk = CSV.read(locked_log, DataFrame)
     _norm(t) = replace(first(split(string(t), ".")), "Z" => "")
-    # locked h=1 verified rows: normalized target -> (observation, locked v2 prediction)
+    # Current h=1 verified rows: normalized target -> (observation, served V2.1 prediction).
     obsmap = Dict{String,Tuple{Float64,Float64}}()
     h1 = lk[(lk.model_step_hours .== 1) .& (.!ismissing.(lk.observation_dst_nt)), :]
+    served_col = "served_pred_dst_nt" in names(lk) ? :served_pred_dst_nt : :v2_pred_dst_nt
     for r in eachrow(h1)
-        o = r.observation_dst_nt; v = r.v2_pred_dst_nt
+        o = r.observation_dst_nt; v = r[served_col]
         (ismissing(o) || !isfinite(Float64(o))) && continue
         obsmap[_norm(r.target_time_utc)] = (Float64(o), ismissing(v) ? NaN : Float64(v))
     end
@@ -231,22 +249,24 @@ function score_ekf_shadow!(locked_log::AbstractString;
     re, rl = rmse(ek), rmse(lo)
     si = findall(isstorm); rse, rsl = rmse(ek[si]), rmse(lo[si])
     decay_now = ("adapted_decay" in names(sh)) && nrow(sh) > 0 ? Float64(sh.adapted_decay[end]) : NaN
+    _, ξ0, i_decay = _shadow_library()
+    fixed_decay = _shadow_decay_cap(ξ0, i_decay)
 
     open(report, "w") do io
-        println(io, "# Constrained-EKF Shadow vs Locked v2 — live 1 h comparison\n")
+        println(io, "# Constrained-EKF Shadow vs Served V2.1 — live 1 h comparison\n")
         println(io, "Experimental shadow series (separate log; the locked v1/v2 record is untouched). ",
                     "Lower 1 h RMSE is better; the EKF's validated edge is at storm hours.\n")
         println(io, "- scored (verified, non-fallback) rows: **$n**   (storm rows obs<$(STORM_DST) nT: **$(length(si))**)   fallback rows skipped: $nfb")
-        println(io, "- latest adapted decay: $(isnan(decay_now) ? "n/a" : round(decay_now, digits=4))  (fixed $(round(-0.04790123786283618, digits=4)))\n")
+        println(io, "- latest adapted decay: $(isnan(decay_now) ? "n/a" : round(decay_now, digits=4))  (current fixed $(round(fixed_decay, digits=4)))\n")
         if n == 0
             println(io, "No verified shadow rows yet — wait for shadow targets to be observed. ",
                         "During quiet conditions the EKF ≈ locked, so a meaningful gap needs storm hours.")
         else
-            println(io, "| set | n | EKF 1 h RMSE [nT] | locked v2 1 h RMSE [nT] | EKF − locked |")
+            println(io, "| set | n | EKF 1 h RMSE [nT] | served V2.1 1 h RMSE [nT] | EKF − V2.1 |")
             println(io, "|---|---|---|---|---|")
             println(io, "| all | $n | $(round(re,digits=2)) | $(round(rl,digits=2)) | $(round(re-rl,digits=2)) |")
             length(si) > 0 && println(io, "| storm (obs<$(STORM_DST)) | $(length(si)) | $(round(rse,digits=2)) | $(round(rsl,digits=2)) | $(round(rse-rsl,digits=2)) |")
-            println(io, "\nNegative \"EKF − locked\" means the shadow EKF beats the locked v2 at 1 h. ",
+            println(io, "\nNegative \"EKF − V2.1\" means the shadow EKF beats served V2.1 at 1 h. ",
                         n < 30 ? "n is small — treat as indicative until more rows (especially storm rows) accrue." :
                                  "")
         end

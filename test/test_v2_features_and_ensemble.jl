@@ -66,6 +66,12 @@ end
             @test all(sub.dst_delta_3h_nt .== -30.0)    # true 3 h delta (row-offset would give 0 or 1 h)
         end
         @test all(anchor(df, 6).dst_delta_6h_nt .== -60.0)
+        a6 = anchor(df, 6)
+        @test a6.lead_2h_indicator == [0.0, 1.0, 0.0, 0.0]
+        @test a6.lead_3h_indicator == [0.0, 0.0, 1.0, 0.0]
+        @test a6.lead_6h_indicator == [0.0, 0.0, 0.0, 1.0]
+        @test a6.lead_latest_dst_interaction == [-60.0, -120.0, -180.0, -360.0]
+        @test all(a6.lead_v1_persistence_interaction .== 0.0)
         # No history ⇒ neutral (0), never a spurious value.
         @test all(anchor(df, 0).dst_delta_1h_nt .== 0.0)
         @test all(anchor(df, 0).dst_delta_3h_nt .== 0.0)

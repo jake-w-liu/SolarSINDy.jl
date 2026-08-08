@@ -67,14 +67,21 @@ function setError(msg) {
 }
 
 // ---- renderers -------------------------------------------------------------------------
-// Human-readable capability list for a served-pipeline label (e.g. "v2+L1A+Bregime+Pinertia").
+// Human-readable capability list for a served-pipeline label (e.g. "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia").
 // Unknown tokens fall back to showing the raw label so a reduced/future pipeline is never
 // silently described with capabilities it does not have.
-const PIPELINE_CAPS = { L1A: "L1 look-ahead", Bregime: "regime-aware tail", Pinertia: "inertia guard" };
+const PIPELINE_CAPS = {
+  L1A: "L1 look-ahead",
+  Bregime: "regime-aware tail",
+  Rprojection: "rapid-deepening projection",
+  H1inertia: "one-hour inertia blend",
+  Sinertia: "state-conditioned inertia",
+  Pinertia: "extreme-Dst inertia guard",
+};
 function pipelineCapabilities(label) {
   if (!label) return "";
   const named = String(label).split("+")
-    .filter(p => p && p !== "v2" && p !== "v1")
+    .filter(p => p && p !== "v2" && p !== "v2.1" && p !== "v1")
     .map(p => PIPELINE_CAPS[p]).filter(Boolean);
   return named.length ? named.join(", ") : String(label);
 }
@@ -112,13 +119,13 @@ function renderThreat(st) {
     wf.classList.remove("hidden");
   } else { wf.classList.add("hidden"); }
 
-  const served = st.served_model_version || st.model_version || "v2";
+  const served = st.served_model_version || st.model_version || "v2.1";
   const caps = pipelineCapabilities(served);
   const staleNote = st.stale
     ? ` · STALE: issued ${st.age_hours != null ? fmt(st.age_hours, 1) + " h" : ""} ago`
     : "";
   $("model-line").textContent =
-    `Forecast: V2 (${served}${caps ? " · " + caps : ""}) · `
+    `Forecast: V2.1 (${served}${caps ? " · " + caps : ""}) · `
     + `live interval method: ${(st.calibration||{}).current_interval_source || "—"} · `
     + `status generated ${relTime(st.generated_utc)} · latest solar wind ${relTime(st.latest_solar_wind_utc)}${staleNote}.`;
 }
@@ -157,7 +164,7 @@ function observedSeries(history) {
 }
 
 function forecastTrack(history, cutoffMs) {
-  // Previously issued V2 forecasts for target hours that now have observations,
+  // Previously issued V2.1 forecasts for target hours that now have observations,
   // at the shortest available lead (the most-informed estimate for that hour).
   const best = new Map();
   for (const r of (history.rows || [])) {
@@ -229,14 +236,14 @@ async function renderForecast(forecast, history, status) {
   traces.push({ x: fx, y: hi, mode:"lines", line:{width:0}, hoverinfo:"skip", showlegend:false });
   traces.push({ x: fx, y: lo, mode:"lines", line:{width:0}, fill:"tonexty", fillcolor:WONG.band,
     name:"90% interval", hoverinfo:"skip" });
-  // previously issued V2 for verified hours (dotted), drawn under the observed reality
+  // previously issued V2.1 for verified hours (dotted), drawn under the observed reality
   if (track.x.length) traces.push({ x: track.x, y: track.y, mode:"lines",
-    name:"Verified V2", line:{color:WONG.fcst, width:1.6, dash:"dot"}, opacity:0.9,
-    hovertemplate:"V2 %{y:.0f} nT<extra></extra>" });
+    name:"Verified V2.1", line:{color:WONG.fcst, width:1.6, dash:"dot"}, opacity:0.9,
+    hovertemplate:"V2.1 %{y:.0f} nT<extra></extra>" });
   // observed reality (on top)
   if (ox.length) traces.push({ x: ox, y: oy, mode:"lines+markers", name:"Observed Dst",
     line:{color:WONG.obs, width:2}, marker:{size:5} });
-  // V2 forecast, drawn at 15-min sub-hour resolution when available. The
+  // V2.1 forecast, drawn at 15-min sub-hour resolution when available. The
   // forecast line itself carries the sub-hour resolution, so zooming the
   // forecast region resolves it into 4 points/hour.
   const useTraj = trajX.length && anchorT != null && anchorY != null;   // guard null anchor before prepending
@@ -244,9 +251,9 @@ async function renderForecast(forecast, history, status) {
   const fcy = useTraj ? [anchorY].concat(trajY) : v2y;
   // 15-min markers: medium blue, size 5 (matches the other series); distinguished from the hourly markers by
   // shade (medium vs dark) and size (5 vs 7). Zooming separates them, so no per-zoom resize.
-  traces.push({ x: fcx, y: fcy, mode:"lines+markers", name:"V2 forecast",
+  traces.push({ x: fcx, y: fcy, mode:"lines+markers", name:"V2.1 forecast",
     line:{color:WONG.fcst, width:2.2}, marker:{size:5, color:"#3f8fd0", line:{color:"#0b1020", width:0.5}},
-    hovertemplate:"V2 %{y:.1f} nT<extra></extra>" });
+    hovertemplate:"V2.1 %{y:.1f} nT<extra></extra>" });
   // markers at the issued hourly horizons (the scored targets): darker + larger to flag the scored points.
   traces.push({ x: px, y: v2y, mode:"markers", name:"issued horizons",
     marker:{size:7, color:"#004e7a", line:{color:"#cfe3f5", width:1}},
@@ -255,15 +262,15 @@ async function renderForecast(forecast, history, status) {
   const layout = Object.assign(PLOT_LAYOUT(), { shapes, annotations: anns });
   // Keep the default view fully zoomed out over the plotted Dst window. Plotly
   // autorange spans recent observations, locked past forecasts, and the current
-  // V2 forecast; users can zoom manually without refresh forcing a narrow
+  // V2.1 forecast; users can zoom manually without refresh forcing a narrow
   // forecast-window range.
   await Plotly.react("forecast-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
 
   const src = forecast.interval_source || "—";
-  cap.innerHTML = `Solid blue: V2 issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
+  cap.innerHTML = `Solid blue: V2.1 issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
     + `<span data-reltime="${forecast.latest_solar_wind_utc}">${relTime(forecast.latest_solar_wind_utc)}</span>. L1 look-ahead drives target hours already measured upstream; beyond the L1-known window, Bz/By relax toward quiet with a longer timescale during rapid Dst deepening. `
     + `Shaded: the calibrated 90% interval (${src}); a watch appears when a displayed interval's lower edge enters a stronger Dst range than the point forecast. `
-    + `Dotted blue: previously issued V2 forecasts for hours that now have observed Dst (orange). `
+    + `Dotted blue: previously issued V2.1 forecasts for hours that now have observed Dst (orange). `
     + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Genuine new-disturbance lead is the L1 transit (~30–60 min).`;
 }
 
@@ -298,7 +305,7 @@ async function renderHistory(history) {
   layout.margin.t = 10;
   await Plotly.react("history-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
 
-  cap.innerHTML = `Last ${fmt(history.hours,0)} h of V2 forecasts, scored after observation. `
+  cap.innerHTML = `Last ${fmt(history.hours,0)} h of V2.1 forecasts, scored after observation. `
     + `Green = observation fell inside the 90% interval, red = outside. `
     + `Empirical coverage ${fmt(history.coverage_90,3)} vs nominal 0.90.`;
 }
@@ -312,7 +319,7 @@ function renderCalib(status) {
   const v2Cov = c.v2_coverage_90 != null ? c.v2_coverage_90 : c.coverage_90;
   const v2N = c.v2_n_verified != null && c.v2_n_verified > 0 ? c.v2_n_verified : c.n_verified;
   const rows = [
-    ["V2", v2Rmse, true],
+    ["V2.1", v2Rmse, true],
     ["Persistence", c.rmse_persistence_nt, false],
     ["O'Brien (physics)", c.rmse_obrien_nt, false],
   ];
@@ -321,9 +328,9 @@ function renderCalib(status) {
   const best = vals.length ? Math.min(...vals) : null;
 
   let html = `<div class="big">
-      <div class="stat"><div class="v">${fmt(v2Cov,3)}</div><div class="k">V2 90% coverage</div></div>
-      <div class="stat"><div class="v">${bse(v2Rmse)}</div><div class="k">V2 RMSE nT</div></div>
-      <div class="stat"><div class="v">${v2N}</div><div class="k">V2 verified</div></div>
+      <div class="stat"><div class="v">${fmt(v2Cov,3)}</div><div class="k">V2.1 90% coverage</div></div>
+      <div class="stat"><div class="v">${bse(v2Rmse)}</div><div class="k">V2.1 RMSE nT</div></div>
+      <div class="stat"><div class="v">${v2N}</div><div class="k">V2.1 verified</div></div>
     </div>
     <table><thead><tr><th>point forecast</th><th>RMSE [nT]</th></tr></thead><tbody>`;
   for (const [name, v, isV2] of rows) {
@@ -335,7 +342,7 @@ function renderCalib(status) {
   // honest interval-method note
   const liveSrc = c.current_interval_source || "—";
   const nLive = c.n_verified_current_source != null ? c.n_verified_current_source : 0;
-  let note = `The headline score is V2. Live intervals use <strong>${liveSrc}</strong> (online, distribution-free). `;
+  let note = `The headline score is V2.1. Live intervals use <strong>${liveSrc}</strong> (online, distribution-free). `;
   if (nLive === 0) note += `Its forecasts are still pending verification (0 scored so far); the coverage above is over all `
     + `${c.n_verified} verified forecasts, mostly the prior interval method. `;
   if (c.deepest_obs_dst_nt != null) note += `This live period has been geomagnetically quiet — deepest observed Dst `

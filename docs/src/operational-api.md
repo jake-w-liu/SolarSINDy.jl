@@ -19,6 +19,7 @@ operational_v2_predict
 score_operational_v2
 write_operational_v2_calibration
 read_operational_v2_calibration
+SolarSINDy.AlarmCooldownState
 StormSeverity
 QUIET
 MODERATE
@@ -44,6 +45,23 @@ storm_lambda_grid
 select_storm_lambda
 write_storm_lambda_selection
 read_storm_lambda_selection
+```
+
+## Versioned Operational Core
+
+```@docs
+OPERATIONAL_V2_1_MODEL_VERSION
+OPERATIONAL_V2_0_MODEL_VERSION
+OperationalCoreArtifacts
+OperationalCalibrationArtifacts
+OperationalCore
+canonical_operational_version
+operational_core_artifacts
+operational_calibration_artifacts
+validate_operational_core_artifacts
+load_operational_core
+init_operational_forecast
+operational_core_forecast
 ```
 
 ## Conformal Calibration

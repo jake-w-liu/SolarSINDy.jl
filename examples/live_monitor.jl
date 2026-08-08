@@ -475,14 +475,19 @@ function cycle!()
     )
     guarded("comparison_report_and_summary", () -> begin
         df = CSV.read(LOG, DataFrame)
-        write_live_comparison_report(cfg.log_path, cfg.report_path; df=df)
+        write_live_comparison_report(
+            cfg.log_path,
+            cfg.report_path;
+            df=df,
+            empty_identity=:v2_1,
+        )
         pend = count(ismissing, df.observation_dst_nt)
         logln("log rows=", nrow(df), " pending=", pend)
     end)
     return issuance
 end
 
-function main()
+function main_live_monitor()
     # Bounded diagnostics must be ready before the first line: ensure the log directory exists and
     # rotate the launchd console-capture files for this (re)start so out-of-band crash output from the
     # previous generation is preserved once and both streams stay bounded.
@@ -552,4 +557,4 @@ function main()
     logln("stop after ", cycles, " cycle(s)")
 end
 
-abspath(PROGRAM_FILE) == abspath(@__FILE__) && main()
+abspath(PROGRAM_FILE) == abspath(@__FILE__) && main_live_monitor()

@@ -41,7 +41,7 @@ end
 
 function live_cycle_fixture(issue::DateTime;
                             vintage=issue, anchor_time=issue - Hour(1), latest_dst=-20.0,
-                            model="v2", served_model="v2+L1A+Bregime+Pinertia",
+                            model="v2.1", served_model="v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia",
                             interval="aci", observations=missing,
                             served_pred=-25.0, served_lo=-35.0, served_hi=-15.0,
                             audit_pred=served_pred, audit_lo=served_lo, audit_hi=served_hi)
@@ -254,15 +254,26 @@ end
         @test cal.v2_rmse_nt == expected_v2_rmse
         @test cal.rmse_nt == expected_v2_rmse
         @test cal.audit_baseline_rmse_nt == expected_audit_rmse
+        @test cal.frozen_tail_ablation_rmse_nt == expected_audit_rmse
         @test cal.v2_coverage_90 == 1.0
         hist = build_history(df, 24)
         @test hist.rmse_nt == cal.v2_rmse_nt
         @test hist.rows[1].pred_dst_nt == df.served_pred_dst_nt[1]
         @test hist.rows[1].audit_baseline_dst_nt == df.v2_pred_dst_nt[1]
+        @test hist.rows[1].frozen_tail_ablation_dst_nt == df.v2_pred_dst_nt[1]
         fc = build_forecast(df)
         @test fc.available && length(fc.horizons) == 4
         @test fc.horizons[1].pred_dst_nt == df.served_pred_dst_nt[1]
         @test fc.horizons[1].audit_baseline_dst_nt == df.v2_pred_dst_nt[1]
+        @test fc.horizons[1].frozen_tail_ablation_dst_nt == df.v2_pred_dst_nt[1]
+
+        legacy = copy(df)
+        legacy.model_version .= "v2"
+        legacy.sub_hourly_model_version .= "v2+L1A+Bregime+Pinertia"
+        @test nrow(verified_rows(legacy)) == 0
+        @test calibration_summary(legacy).v2_n_verified == 0
+        @test isempty(build_history(legacy, 24).rows)
+        @test !build_forecast(legacy).available
     end
 
     @testset "static file serving is traversal-guarded" begin
@@ -561,6 +572,10 @@ end
             (wrong_schedule.target_time_utc_dt[3] - issue) / Millisecond(3_600_000)
         sort!(wrong_schedule, :target_time_utc_dt)
         push!(invalid, wrong_schedule)
+        uniformly_historical = copy(valid)
+        uniformly_historical.model_version .= "v2"
+        uniformly_historical.sub_hourly_model_version .= "v2+L1A+Bregime+Pinertia"
+        push!(invalid, uniformly_historical)
         for (field, value) in (
             (:model_version, "v3"),
             (:sub_hourly_model_version, "different-served-model"),
@@ -590,7 +605,7 @@ end
             latest_dst_time_utc_dt = [old - Hour(1)], target_time_utc_dt = [old + Hour(1)],
             horizon_hours = [1.0], latest_dst_nt = [-60.0], observation_dst_nt = [missing],
             served_pred_dst_nt = [-70.0], served_pred_dst_ci05_nt = [-90.0], served_pred_dst_ci95_nt = [-50.0],
-            interval_source = ["aci"], model_version = ["v2"],
+            interval_source = ["aci"], model_version = ["v2.1"],
         )
         st = build_status(df)
         @test st.available == false
@@ -612,10 +627,10 @@ end
         iss = now(UTC) - Minute(20)
         df = live_cycle_fixture(iss)
         fc = build_forecast(df); st = build_status(df)
-        @test fc.served_model_version == "v2+L1A+Bregime+Pinertia"
-        @test fc.model_version == "v2"                              # core-model contract unchanged
-        @test st.served_model_version == "v2+L1A+Bregime+Pinertia"
-        @test st.model_version == "v2"
+        @test fc.served_model_version == "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+        @test fc.model_version == "v2.1"
+        @test st.served_model_version == "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+        @test st.model_version == "v2.1"
         df2 = select(df, Not(:sub_hourly_model_version))
         @test !build_forecast(df2).available                         # served label is required
     end
@@ -644,7 +659,9 @@ end
             horizon_hours = [1.0], latest_dst_nt = [-20.0], observation_dst_nt = [-22.0],
             served_pred_dst_nt = [-21.0], served_pred_dst_ci05_nt = [-31.0], served_pred_dst_ci95_nt = [-11.0],
             v2_pred_dst_nt = [-21.0], v2_pred_dst_ci05_nt = [-31.0], v2_pred_dst_ci95_nt = [-11.0],
-            model_version = ["v2"], interval_source = ["aci"],
+            model_version = ["v2.1"],
+            sub_hourly_model_version = [CURRENT_V2_SERVED_MODEL_VERSION],
+            interval_source = ["aci"],
         )
         logfile = joinpath(mktempdir(), "log.csv"); CSV.write(logfile, vdf)
         _LOG_CACHE[] = nothing
@@ -890,6 +907,8 @@ end
             served_pred_dst_nt=[floatmax(Float64)],
             served_pred_dst_ci05_nt=[-floatmax(Float64)],
             served_pred_dst_ci95_nt=[floatmax(Float64)],
+            model_version=[CURRENT_V2_MODEL_VERSION],
+            sub_hourly_model_version=[CURRENT_V2_SERVED_MODEL_VERSION],
             interval_source=["extreme_fixture"],
         )
         calibration = calibration_summary(extreme)
@@ -908,7 +927,7 @@ end
             latest_dst_time_utc_dt=[future - Hour(1)], target_time_utc_dt=[future + Hour(1)],
             horizon_hours=[1.0], latest_dst_nt=[-20.0], observation_dst_nt=[missing],
             served_pred_dst_nt=[-80.0], served_pred_dst_ci05_nt=[-110.0],
-            served_pred_dst_ci95_nt=[-50.0], interval_source=["aci"], model_version=["v2"],
+            served_pred_dst_ci95_nt=[-50.0], interval_source=["aci"], model_version=["v2.1"],
         )
         st = build_status(df)
         @test st.available == false && st.stale == true && st.invalid_future == true
@@ -1663,6 +1682,7 @@ end
         css = read(joinpath(@__DIR__, "..", "public", "style.css"), String)
         js = read(joinpath(@__DIR__, "..", "public", "app.js"), String)
         html = read(joinpath(@__DIR__, "..", "public", "index.html"), String)
+        readme = read(joinpath(@__DIR__, "..", "README.md"), String)
         served_source = join(
             (read(joinpath(APPSRC, name), String)
              for name in sort(filter(name -> endswith(name, ".jl"), readdir(APPSRC)))),
@@ -1690,6 +1710,20 @@ end
         @test occursin("A displayed calibrated 90% interval extends to", js)
         @test occursin("interval_lower_edge_min_dst_nt", js)
         @test !occursin("? status.threat.level : 0", js)
+        for label in ("Forecast: V2.1 (", "Verified V2.1", "V2.1 90% coverage",
+                      "V2.1 RMSE nT", "V2.1 verified", "headline score is V2.1")
+            @test occursin(label, js)
+        end
+        for retired_label in ("Forecast: V2 (", "name:\"Verified V2\"",
+                              "V2 90% coverage", "V2 RMSE nT", "V2 verified",
+                              "headline score is V2. Live")
+            @test !occursin(retired_label, js)
+        end
+        @test occursin("package's V2.1 forecaster", readme)
+        @test occursin("V2.1 and every baseline", readme)
+        @test occursin("project's **V2.1** nowcaster", readme)
+        @test !occursin("package's V2 forecaster", readme)
+        @test !occursin("V2 and every baseline", readme)
         for unsupported in ("GIC driver", "GIC forecast", "GIC alert thresholds",
                             "Pulkkinen tier", "GIC risk", "storm cannot be excluded",
                             "90% lower bound")

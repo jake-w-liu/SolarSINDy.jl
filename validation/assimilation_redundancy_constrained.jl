@@ -5,45 +5,30 @@
 # online filter drives the decay coefficient across [-0.51, +0.54]; a POSITIVE decay coefficient is a
 # dynamically unstable ODE, so free-running rollout diverges. The fix tested here: an opt-in projected EKF
 # (init_assimilation(...; coeff_bounds)) that holds the adapted decay coefficient <= cap < 0 after every
-# update. We sweep the cap (just-stable -1e-3, mild -0.02, fixed-strength -0.048) and, for each, repeat the
+# update. We sweep a just-stable cap, a mild cap, and the current V2.1 discovered
+# decay coefficient; for each, repeat the
 # powered multi-step comparison (n=31 cycle-25 storms, broad leakage-free v2 calibration, horizons 1/2/3/6 h):
 #   A=fixed raw  B=v2(fixed+corr)  C=ekf raw  D=ekf+corr ; paired B-D = EKF gain on top of v2 (>0 favours EKF).
 # The fixed pass + its calibration are computed once (cap-independent). We also print the CONSTRAINED decay
 # range to confirm the box binds. Verdict (variance-aware): a cap is a WIN only if D <= B at every horizon
 # (no multi-step harm, flagship not blown up) while keeping the 1-step behaviour — i.e. the constraint
-# removes the harm. If even the constrained filter only matches v2, the EKF is (cleanly) redundant; if it
-# still diverges, the decay box was not the whole story.
+# removes the harm in this diagnostic. Passing that screen is necessary but not
+# sufficient for promotion because this script does not reproduce the served tail.
 #
-# RESULT (run below, n=31 storms) — the constraint WORKS; the EKF becomes deployable:
-#   cap = -0.048 (the discovered physical decay; adapted decay free to STRENGTHEN, never weaker):
-#     horizon   A fix   B v2   C ekf   D e+c   B-D (EKF gain on v2)
-#       1 h     9.66    9.14   8.42    8.16    +0.99 ± 0.33   (23/8 storms; flagship +7.25)
-#       2 h    13.09   13.13  12.58   12.69    +0.44 ± 0.34
-#       3 h    16.59   17.17  16.39   16.92    +0.25 ± 0.36
-#       6 h    26.57   27.97  26.22   27.52    +0.46 ± 0.44   (flagship +7.60)
-#   The decay box binds (range [-0.559, -0.048], vs [-0.51,+0.54] unconstrained), so the multi-step
-#   DIVERGENCE is gone: 6 h B-D goes -35.56 (unconstrained) -> +0.46 (constrained); flagship -394 -> +7.6.
-#   1-step gain is SIGNIFICANT (+0.99 ± 0.33, >2.5 SE). At the -0.048 cap multi-step is NEUTRAL (B-D within
-#   ~1 SE of 0). IMPORTANT — this multi-step safety is CAP-DEPENDENT, not general: the looser caps leave
-#   SIGNIFICANT residual multi-step harm (6 h B-D = -2.67 ± 0.42 at cap -0.001, -1.29 ± 0.39 at -0.02 —
-#   several SE below 0), so the constraint STRENGTH matters and only the -0.048 cap removes the harm. That
-#   cap is the principled choice (the discovered physical decay value) AND the one that works; it is not a
-#   free parameter tuned to win. The 1 h gain (~+1.0 nT) is robust across ALL caps. VERDICT: deploy-worthy
-#   AT cap=-0.048 — wiring the constrained EKF (init_assimilation(...; coeff_bounds=[(-Inf,-0.048)])) under
-#   v2 improves the 1 h forecast ~1 nT with no multi-step harm; a weaker cap must NOT be used (it reintroduces
-#   multi-step harm). Operational value concentrated at 1 h.
+# Historical numerical results from the former 21/10 core are intentionally not
+# embedded here. The current script derives the strongest decay cap from the
+# current V2.1 coefficient and asserts the 20/11 identity. Its correction fit is
+# diagnostic rather than the deployed 26-feature V2.1 calibration.
 
-using SolarSINDy, CSV, DataFrames, Statistics, LinearAlgebra, Printf, Dates
+using SolarSINDy, DataFrames, Statistics, LinearAlgebra, Printf, Dates
 
 const PKG  = pkgdir(SolarSINDy)
 const PROJ = normpath(joinpath(PKG, ".."))
 const EXTRACTED = joinpath(PROJ, "paper_v2_monitor", "data", "omni_extracted.csv")
 const CATALOG   = joinpath(PKG, "data", "storm_catalog.csv")
-const COEFCSV   = joinpath(PKG, "data", "real_sindy_discovery_coefficients.csv")
 const QEKF = 1e-4
 const HORIZONS = [1, 2, 3, 6]
 const DEPTH = -80.0
-const CAPS = [-1e-3, -0.02, -0.048]      # decay-coefficient upper bounds to sweep (all < 0 = stable)
 
 function fillnan!(x::Vector{Float64})
     n=length(x); l=NaN; for i in 1:n; isfinite(x[i]) ? (l=x[i]) : (isfinite(l)&&(x[i]=l)); end
@@ -64,9 +49,13 @@ function main()
     sid = zeros(Int,N)
     for s in storms; lo=s.min_dst_time-Hour(36); hi=s.min_dst_time+Hour(72)
         @inbounds for k in 1:N; (df.datetime[k]>=lo && df.datetime[k]<=hi)&&(sid[k]=s.storm_id); end; end
-    lib=build_solar_wind_library(include_redundant_n_v2=true); tn=get_term_names(lib); coef=CSV.read(COEFCSV,DataFrame); ξ0=zeros(length(lib))
-    for r in eachrow(coef); i=findfirst(==(r.term),tn); i!==nothing&&(ξ0[i]=r.coefficient); end
+    core=load_operational_core(:v2); lib=core.library; tn=get_term_names(lib); ξ0=copy(core.coefficients)
+    length(tn)==20 && count(!=(0.0),ξ0)==11 && !("n*V^2" in tn) ||
+        error("constrained-EKF diagnostic did not load the current 20/11 V2.1 core")
     i_decay=findfirst(==("Dst_star"),tn)
+    decay_cap = ξ0[i_decay]
+    decay_cap < 0.0 || error("current V2.1 decay coefficient is not stable")
+    caps = [-1e-3, -0.02, decay_cap]
     drivers=[(V=df.V[k],Bz=df.Bz[k],By=df.By[k],n=df.n[k],Pdyn=df.Pdyn[k]) for k in 1:N]
     @printf("storms n=%d; flagship id=%d (%s, %.0f); fixed decay=%.5f\n",
             length(storms), flagship, string(storms[1].min_dst_time), storms[1].min_dst, ξ0[i_decay])
@@ -103,7 +92,7 @@ function main()
 
     calib_f, storm_f, _ = run(Int[], nothing); cal_f = fit_operational_v2_calibration(calib_f)
 
-    for cap in CAPS
+    for cap in caps
         calib_e, storm_e, cr = run([i_decay], cap); cal_e = fit_operational_v2_calibration(calib_e)
         @printf("\n=== decay cap = %.4f  (constrained adapted-decay range [%.4f, %.4f]; was [-0.51,+0.54] unconstrained) ===\n",
                 cap, cr[1], cr[2])
@@ -123,10 +112,12 @@ function main()
                     Nh,n,mean(A),mean(B),mean(C),mean(D),mean(bd),se,fav,hurt,flag)
         end
     end
-    println("\nRead: a cap WINS if D<=B (B-D>=0) at every horizon (harm removed) — then the constrained EKF is")
-    println("safe to deploy under v2 (and helps where B-D>2SE). If D~B, harm removed but EKF redundant. If C")
-    println("still explodes at 6h, the decay box was not the whole story.")
+    println("\nRead: D<=B at every horizon means the cap passes this diagnostic no-harm screen; it does not authorize")
+    println("deployment because the comparison uses a bespoke correction and omits the served V2.1 tail. D~B means")
+    println("redundancy. The later exact served-tail seven-storm replays failed the promotion gate, so EKF remains research-only.")
     return nothing
 end
 
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end

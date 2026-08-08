@@ -48,7 +48,7 @@ include(joinpath(@__DIR__, "..", "validation", "output_paths.jl"))
     end
 end
 
-@testset "Operational evidence path prefers preserved paper evidence" begin
+@testset "Operational evidence path prefers complete generated evidence" begin
     probe = Module(:OperationalPathProbe)
     withenv("SOLARSINDY_OPERATIONAL_OUTPUT_DIR" => nothing,
             "SOLARSINDY_OPERATIONAL_EVIDENCE_DIR" => nothing) do
@@ -59,9 +59,12 @@ end
     paper_evidence = normpath(joinpath(package_root, "..", "paper_v2_monitor",
                                        "data", "source", "operational"))
     package_evidence = joinpath(package_root, "data", "operational_validation")
-    expected = isdir(paper_evidence) ? abspath(paper_evidence) :
-               isdir(package_evidence) ? abspath(package_evidence) :
-               abspath(joinpath(package_root, "validation", "output", "operational"))
+    output_evidence = joinpath(package_root, "validation", "output", "operational")
+    required = "v2_replay_scored.csv"
+    expected = isfile(joinpath(output_evidence, required)) ? abspath(output_evidence) :
+               isfile(joinpath(paper_evidence, required)) ? abspath(paper_evidence) :
+               isfile(joinpath(package_evidence, required)) ? abspath(package_evidence) :
+               abspath(output_evidence)
     @test probe.OPERATIONAL_EVIDENCE_DIR == expected
 
     empty_override_probe = Module(:OperationalEmptyOutputOverrideProbe)

@@ -2,9 +2,29 @@
 
 All notable changes to `SolarSINDy.jl` will be documented in this file.
 
-## [Unreleased] - 2026-07-30
+## [0.2.1] - 2026-08-08
 
 Correctness, robustness, and operational-readiness improvements.
+
+Operational V2.1 alignment:
+
+- the default operational artifact boundary now serves the revised
+  20-candidate/11-active-term discovery equation; the former 21/10 core and its
+  calibration are available only through an explicit V2.0 historical request
+- the `v2` alias, live verifier, monitor, API, dashboard, examples, and replay
+  scripts resolve to V2.1; explicit `--model=v1` remains available for the
+  uncalibrated discovery-core forecast
+- current and historical 500-member joint coefficient draws are tracked with
+  their matching artifacts, so a fresh clone preserves cross-term covariance
+- development-lineage tail and EKF experiments load the revised core and current
+  calibration feature schema while remaining clearly separated from the served
+  V2.1 composition
+- a verified NASA CDAWeb one-minute OMNI HRO fetcher supports the sub-hourly
+  component replays and writes a local SHA-256 source manifest
+- complete-hour causal replay of the served V2.1 stack is frozen and audited on
+  the locked chronological holdout with static conformal offsets and zero
+  holdout updates; it does not reconstruct fractional subhourly live windows,
+  pooled, lead-specific, and storm-regime coverage remain separately visible
 
 User operation and startup:
 
@@ -99,7 +119,12 @@ Dashboard and API:
 Provenance and tests:
 
 - discovery provenance sidecar, persisted served point fit, and a joint posterior-draws ensemble artifact; fill-fabricated storm rows excluded from discovery
-- the joint-draws artifact (`data/real_sindy_ensemble_draws.csv`) is local-only and not committed; regenerate it with `validation/generate_ensemble_draws.jl` (`init_forecast` falls back to marginal per-term sampling when it is absent)
+- current and historical joint-draw artifacts are versioned with their matching
+  SINDy cores; regeneration remains available through
+  `validation/generate_ensemble_draws.jl`
+- tracked real-data phase, coupled, cross-cycle, and reconstruction snapshots
+  are synchronized to the verified revised-paper run; legacy synthetic
+  snapshots and figures are regenerated with the identifiable 20-term library
 - canonical and legacy PlotlySupply figure generation preserves the submitted full-width and vertical-panel geometry without loading the desktop synchronization layer
 - equal-length normalization of Chromium PDF title and timestamp metadata makes repeated PlotlySupply exports byte-identical without changing PDF object offsets or plotted content
 - canonical source identity excludes generated validation output and records portable forward-slash paths

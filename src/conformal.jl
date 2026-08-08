@@ -294,8 +294,9 @@ end
 #
 # Split conformal assumes calibration and test residuals are exchangeable. Under
 # distribution shift (e.g. rising solar activity across a chronological split)
-# that assumption fails and static intervals drift off nominal. ACI restores
-# long-run coverage by adapting the effective miscoverage rate online:
+# that assumption fails and static intervals can drift off nominal. The
+# idealized ACI recursion targets long-run coverage by adapting the effective
+# miscoverage rate online:
 #
 #   half-width_t = empirical (1 - α_t) quantile of the residual history
 #   α_{t+1}      = α_t + γ (α* - err_t),   err_t = 1 if y_t fell outside, else 0

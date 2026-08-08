@@ -25,13 +25,16 @@ function main()
         v1_ci95;
         baselines=baselines,
     )
-    @assert selected.model_version == "v2"
+    @assert selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION
     @assert selected.v2_correction == 0.0
     @assert selected.v2_pred_dst == v1_pred
     @assert selected.v2_ci05_dst == v1_ci05
     @assert selected.v2_ci95_dst == v1_ci95
 
     @assert _v2_tail_tau(-30.0) > _v2_tail_tau(5.0)
+    @assert _rapid_deepening_projection_guard(-100.0, -80.0, 6, -20.0) == -125.0
+    @assert _one_hour_inertia_blend(-120.0, -100.0, 1) == -115.0
+    @assert _one_hour_inertia_blend(-120.0, -100.0, 2) == -120.0
     @assert _near_term_extreme_inertia_guard(-250.0, 2)
     @assert !_near_term_extreme_inertia_guard(-250.0, 3)
     recovery = _relaxed_tail_driver(drivers, 1, 5.0)
@@ -49,7 +52,13 @@ function main()
     @assert !s.l1_measured
     @assert s.driver == drivers
 
-    println("SolarSINDy experiments: V2 deterministic smoke PASS")
+    core = load_operational_core()
+    @assert length(core.library) == 20
+    @assert count(!=(0.0), core.coefficients) == 11
+    @assert V2_SERVED_TAIL_VERSION ==
+            "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+
+    println("SolarSINDy experiments: V2.1 deterministic smoke PASS")
     return true
 end
 

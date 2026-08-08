@@ -1,10 +1,9 @@
-# assimilation_vs_v2_redundancy.jl — the one open check before any EKF deployment decision.
+# assimilation_vs_v2_redundancy.jl — superseded small-sample EKF redundancy diagnostic.
 #
-# The fair test (assimilation_fair_test.jl) showed online decay adaptation improves the RAW v1 one-step
-# forecast out-of-sample (17.60 -> 15.98 nT). But the OPERATIONAL path is v2 = v1 + a causal linear
-# residual correction (fit_operational_v2_calibration: ridge regression of the v1 residual on the
-# standardized issue-time drivers). That correction ALSO removes v1 error. So the deployment-relevant
-# question is: does the EKF still help ON TOP of the v2 correction, or is it redundant with it?
+# This diagnostic asks whether online decay adaptation adds value after a
+# separately fitted one-step residual correction on the current V2.1 20/11
+# core. It does not reproduce the deployed V2.1 driver tail or 26-feature
+# calibration, so its result is exploratory rather than operational evidence.
 #
 # Faithful test: on the same held-out cycle-25 storms, leave-one-storm-out, we generate per-step ONE-STEP
 # predictions two ways — fixed v1 coefficients and EKF-adapted (decay, q=1e-4, the deployable single q) —
@@ -18,14 +17,13 @@
 # operational_v2_correction (the fitted ridge beta), bypassing the component selector so no baseline
 # columns are needed; this isolates exactly the v1+correction question.
 
-using SolarSINDy, CSV, DataFrames, Statistics, LinearAlgebra, Printf, Dates
+using SolarSINDy, DataFrames, Statistics, LinearAlgebra, Printf, Dates
 
 const PKG  = pkgdir(SolarSINDy)
 const PROJ = normpath(joinpath(PKG, ".."))
 const EXTRACTED = joinpath(PROJ, "paper_v2_monitor", "data", "omni_extracted.csv")
 const CATALOG   = joinpath(PKG, "data", "storm_catalog.csv")
-const COEFCSV   = joinpath(PKG, "data", "real_sindy_discovery_coefficients.csv")
-const QEKF = 1e-4   # the deployable single global process noise from the fair test
+const QEKF = 1e-4   # fixed research value shared with the powered diagnostic
 
 function fillnan!(x::Vector{Float64})
     n = length(x); last = NaN
@@ -42,11 +40,11 @@ function main()
     cand = filter(e -> e.split == "test" && year(e.min_dst_time) >= 2023, catalog)
     sort!(cand, by = e -> e.min_dst); deepest = cand[1:min(6, length(cand))]
 
-    lib = build_solar_wind_library(include_redundant_n_v2=true); term_names = get_term_names(lib)
-    coef_df = CSV.read(COEFCSV, DataFrame); ξ0 = zeros(length(lib))
-    for row in eachrow(coef_df)
-        idx = findfirst(==(row.term), term_names); idx !== nothing && (ξ0[idx] = row.coefficient)
-    end
+    core = load_operational_core(:v2)
+    lib = core.library; term_names = get_term_names(lib); ξ0 = copy(core.coefficients)
+    length(term_names) == 20 && count(!=(0.0), ξ0) == 11 &&
+        !("n*V^2" in term_names) ||
+        error("EKF redundancy diagnostic did not load the current 20/11 V2.1 core")
     i_decay = findfirst(==("Dst_star"), term_names)
 
     function window(e)
@@ -119,7 +117,7 @@ function main()
             mean(bd), se, minimum(bd), maximum(bd), nfav, nstorm, nhurt, nstorm)
     flagship_hurt = bd[1] < -0.05   # storms sorted deepest-first => index 1 is the May-2024 superstorm
     if mean(bd) > 2*se && nhurt == 0
-        println("→ EKF ADDS VALUE on top of v2: consistent positive gain across storms, beyond noise. Pursue deploy.")
+        println("→ SMALL-SAMPLE SIGNAL: EKF adds value in this diagnostic, but this superseded script cannot authorize deployment.")
     elseif abs(mean(bd)) <= se && maximum(abs.(bd)) < 0.5
         println("→ REDUNDANT: D ~ B everywhere; the v2 correction already captures the EKF gain. Keep EKF available,")
         println("  not deployed, on evidence — v2 already does the job.")
@@ -129,11 +127,13 @@ function main()
                 minimum(bd), maximum(bd), flagship_hurt ? "HURTS" : "helps")
         println("  noisy proxy (far less data than the operational broad calibration; it even hurt fixed-v1 on one")
         println("  storm). Honest status: NOT redundant, but NOT a clean additive win — partially complementary,")
-        println("  unresolved at this scale. Proper resolution needs the real broad v2 calibration + more storms")
-        println("  (and a multi-step horizon). Keep the EKF available, not deployed, pending that — the value is")
-        println("  real on raw v1 but not yet shown to survive on top of v2 without hurting the worst storm.")
+        println("  unresolved at this scale. The later powered multi-step test and exact served-tail seven-storm replays")
+        println("  supply the missing evidence and reject EKF promotion. Keep the EKF available for research only.")
     end
+    println("This small-sample result is historical development evidence; the current operational verdict is NOT PROMOTABLE.")
     return nothing
 end
 
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end

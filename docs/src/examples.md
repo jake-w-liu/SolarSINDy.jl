@@ -15,11 +15,13 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/storm_monitor.jl
 This example:
 
 - pulls near-real-time solar wind data from NOAA SWPC
-- loads the discovered SINDy coefficients from `paper_v2_monitor/data/`
+- loads the versioned V2.1 discovery artifacts from the package `data/` directory
 - advances rolling forecasts with ensemble intervals
 - prints storm alarms based on configurable thresholds
 
-This is the package's primary user-facing forecasting example.
+This is the package's primary discovery-core forecasting example. The managed
+live product uses `examples/live_monitor.jl`, which issues the complete V2.1
+forecast at 1, 2, 3, and 6 h.
 
 ## Live Verification Example
 
@@ -35,6 +37,9 @@ The script writes locked prediction rows to
 then updates the same row with the observed Dst and residual after the target
 hour is published. It also logs persistence, Burton, BurtonFull, and
 O'Brien--McPherron baselines for the same target.
+
+V2.1 is the default. Pass `--model=v1` only when an explicit uncalibrated-core
+comparison is required.
 
 Other useful modes:
 

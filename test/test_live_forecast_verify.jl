@@ -11,6 +11,33 @@ struct _InterruptingForecastText end
 Base.String(::_InterruptingForecastText) = throw(InterruptException())
 
 @testset "Live Forecast Verification Workflow" begin
+    @testset "OMNI replay windows preserve independent driver and Dst support" begin
+        t0 = DateTime(2026, 1, 1)
+        plasma = DataFrame(
+            time_tag=t0 .+ Hour.([0, 2, 4]),
+            speed=[400.0, 420.0, 440.0],
+            density=fill(5.0, 3),
+        )
+        mag = DataFrame(
+            time_tag=t0 .+ Hour.([0, 1, 2, 4]),
+            bz_gsm=fill(-2.0, 4),
+            by_gsm=fill(1.0, 4),
+        )
+        dst_times = t0 .+ Hour.(0:4)
+        dst_vals = Float64.(-10:-10:-50)
+
+        ps, ms, ts, vs = _slice_replay_window(
+            plasma, mag, dst_times, dst_vals, t0 + Hour(1), t0 + Hour(3),
+        )
+        @test ps.time_tag == [t0 + Hour(2)]
+        @test ms.time_tag == [t0 + Hour(1), t0 + Hour(2)]
+        @test ts == t0 .+ Hour.(1:3)
+        @test vs == [-20.0, -30.0, -40.0]
+        @test_throws DimensionMismatch _slice_replay_window(
+            plasma, mag, dst_times, dst_vals[1:end-1], t0, t0 + Hour(1),
+        )
+    end
+
     @testset "A/D: target time is strictly future relative to issue time" begin
         issue_time = DateTime(2026, 6, 6, 4, 0, 34)
         latest_dst_time = DateTime(2026, 6, 6, 3)
@@ -266,6 +293,10 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         @test campaign.model == :v2
         @test campaign.campaign_horizons == [1, 3, 6]
 
+        default_issue = _parse_args(String[])
+        @test default_issue.mode == :issue
+        @test default_issue.model == :v2
+
         explicit_v1 = _parse_args(["--campaign", "--model=v1"])
         @test explicit_v1.model == :v1
         @test_throws ArgumentError _parse_args(["--campaign-horizons=1,0"])
@@ -298,11 +329,22 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             ),
             baselines=(; persistence=-22.0, burton=-18.0, burton_full=-19.0, obrien=-21.0),
             v1_pred_dst=-20.0,
+            model_steps=3,
         )
         @test expert.dst_delta_3h_nt == -5.0
         @test expert.baseline_spread_nt == 4.0
         @test expert.v1_minus_persistence_nt == 2.0
         @test expert.obrien_minus_v1_nt == -1.0
+        @test expert.lead_2h_indicator == 0.0
+        @test expert.lead_3h_indicator == 1.0
+        @test expert.lead_6h_indicator == 0.0
+        @test expert.lead_latest_dst_interaction == -60.0
+        @test expert.lead_v1_persistence_interaction == 6.0
+        @test_throws ArgumentError _v2_features(
+            -20.0,
+            (; V=500.0, Bz=-4.0, By=3.0, n=5.0, Pdyn=2.25);
+            model_steps=0,
+        )
 
         # The fitted residual layer uses the driver window aligned with the Dst
         # anchor, never the final rollout-step driver.  Pin both the correction
@@ -372,7 +414,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             row = CSV.read(cfg.log_path, DataFrame)[1, :]
             # The final four target hours lie beyond measured L1 coverage. With
             # dDst/dt = -2 nT/h, the served driver uses the exact four-hour
-            # relaxation rather than the frozen pre-upgrade persistence driver.
+            # relaxation rather than the frozen-tail driver.
             relax = exp(-4 / _v2_tail_tau(-2.0))
             @test row.target_step_Bz_nt ≈ -4.0 * relax atol=1e-12
             @test row.target_step_By_nt ≈ 1.0 * relax atol=1e-12
@@ -434,8 +476,18 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
     @testset "Deployed conformal sidecar is paired to the point calibration bytes" begin
         mktempdir() do tmp
             point_path = joinpath(tmp, "point.csv")
-            write(point_path, "point calibration bytes\n")
+            nfeatures = length(V2_MEMORY_EXPERT_LEAD_FEATURES)
+            point_cal = OperationalV2Calibration(
+                copy(V2_MEMORY_EXPERT_LEAD_FEATURES),
+                zeros(nfeatures),
+                ones(nfeatures),
+                zeros(nfeatures + 1),
+                1.0,
+                "operational_v2_1_sidecar_test",
+            )
+            write_operational_v2_calibration(point_path, point_cal)
             cfg = LiveVerifyConfig(; model=:v2, v2_calibration_path=point_path)
+            @test _load_calibration_for_model(cfg).label == point_cal.label
             @test _load_conformal_for_model(cfg) === nothing
 
             cal = fit_conformal(
@@ -450,8 +502,28 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             @test loaded.coverage == cal.coverage
             @test loaded.global_stratum.half_width == cal.global_stratum.half_width
 
-            write(point_path, "changed point calibration bytes\n")
+            changed_point = OperationalV2Calibration(
+                copy(point_cal.feature_names),
+                copy(point_cal.feature_mean),
+                copy(point_cal.feature_scale),
+                vcat(0.25, point_cal.coefficients[2:end]),
+                point_cal.interval_scale,
+                point_cal.label,
+            )
+            write_operational_v2_calibration(point_path, changed_point)
             @test_throws ArgumentError _load_conformal_for_model(cfg)
+
+            # A self-consistent historical V2.0 point/sidecar pair remains valid
+            # for explicit offline replay, but the live V2.1 loader rejects it.
+            historical = operational_calibration_artifacts(:v2_0)
+            historical_cfg = LiveVerifyConfig(;
+                model=:v2,
+                v2_calibration_path=historical.point_csv,
+            )
+            @test isfile(historical.point_csv)
+            @test isfile(historical.conformal_csv)
+            @test_throws ArgumentError _load_calibration_for_model(historical_cfg)
+            @test_throws ArgumentError _load_conformal_for_model(historical_cfg)
         end
     end
 
@@ -532,8 +604,50 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         end
     end
 
+    @testset "V2.1 append refuses an unmigrated historical hot log" begin
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "legacy.csv")
+            legacy = DataFrame(
+                issue_time_utc=["2026-06-06T04:10:00"],
+                latest_dst_time_utc=["2026-06-06T04:00:00"],
+                target_time_utc=["2026-06-06T06:00:00"],
+                model_version=["v2"],
+                pred_dst_nt=[-20.0],
+                pred_dst_ci05_nt=[-30.0],
+                pred_dst_ci95_nt=[-10.0],
+                observation_dst_nt=[-22.0],
+            )
+            CSV.write(log_path, legacy)
+            current = copy(legacy)
+            current.issue_time_utc .= "2026-06-06T05:10:00"
+            current.target_time_utc .= "2026-06-06T07:00:00"
+            current.model_version .= OPERATIONAL_V2_1_MODEL_VERSION
+            before = read(log_path)
+            @test_throws ArgumentError _append_forecast!(log_path, current)
+            @test read(log_path) == before
+        end
+    end
+
     @testset "LOG-01: durable append state recovers and remains idempotent" begin
         mktempdir() do tmp
+            empty_path = joinpath(tmp, "empty_current.csv")
+            CSV.write(empty_path, DataFrame(
+                issue_time_utc=String[], latest_dst_time_utc=String[],
+                target_time_utc=String[], model_version=String[],
+                pred_dst_nt=Float64[], pred_dst_ci05_nt=Float64[],
+                pred_dst_ci95_nt=Float64[], observation_dst_nt=Float64[],
+            ))
+            empty_state = _load_or_rebuild_live_state!(empty_path)
+            @test empty_state["version"] == 3
+            @test empty_state["row_count"] == 0
+            @test isempty(empty_state["pending"])
+            @test isempty(empty_state["aci_streams"])
+            @test empty_state["pending_cache_complete"]
+            @test !empty_state["has_current_model"]
+            @test !empty_state["has_historical_model"]
+            @test !empty_state["has_ambiguous_model"]
+            @test _state_matches_log(empty_state, empty_path)
+
             log_path = joinpath(tmp, "live_forecast_log.csv")
             forecast_row(issue, target) = DataFrame(
                 issue_time_utc=[string(issue)],
@@ -948,14 +1062,14 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             @test occursin("Pending rows: 1", text)
             @test occursin("Same-row forecast comparison rows: 2", text)
             @test occursin("## Same-Row Model Comparison", text)
-            @test occursin("| V2 | 2 |", text)
+            @test occursin("| Historical V2.0 | 2 |", text)
             @test occursin("| SINDy v1 | 2 |", text)
             @test occursin("## Pending Rows", text)
             @test occursin("2026-06-06T10:00:00", text)
             @test occursin("| v2 |", text)
-            @test occursin("## Worst V2 Misses", text)
-            @test occursin("## Operational V2 Audit", text)
-            @test !occursin("| V2 | 3 |", text)
+            @test occursin("## Worst Historical V2.0 Misses", text)
+            @test occursin("## Operational V2.0 Audit", text)
+            @test !occursin("| Historical V2.0 | 3 |", text)
             @test !occursin("| Selected |", text)
         end
     end
@@ -1139,7 +1253,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             model=:v2,
             calibration=cal,
         )
-        @test all(df_v2.model_version .== "v2")
+        @test all(df_v2.model_version .== OPERATIONAL_V2_1_MODEL_VERSION)
         @test df_v2.pred_dst_nt == df_v2.v2_pred_dst_nt
         @test df_v2.pred_dst_nt == df_v2.v1_pred_dst_nt
         @test all(df_v2.v2_correction_dst_nt .== 0.0)
@@ -1395,7 +1509,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             scored = CSV.read(replace(cal_path, r"\.csv$" => "_scored.csv"), DataFrame)
             selection = CSV.read(replace(cal_path, r"\.csv$" => "_selection.csv"), DataFrame)
             # Gate failed → a v1-equivalent (zero-correction) fallback is deployed.
-            @test cal.label == "operational_v2_fallback_v1_equiv"
+            @test cal.label == "operational_v2_1_fallback_v1_equiv"
             @test all(cal.coefficients .== 0.0)            # no correction applied
             @test !any(selection.deployed)                 # nothing passed the gate
             @test all(.!selection.acceptance_gate_pass)
@@ -1453,7 +1567,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             # Honest holdout (scored once for selection, gated once for the served
             # interval) is much worse than validation and undercovers — the served
             # conformal interval gate fires and the v1-equivalent fallback deploys.
-            @test cal.label == "operational_v2_fallback_v1_equiv"
+            @test cal.label == "operational_v2_1_fallback_v1_equiv"
             @test all(cal.coefficients .== 0.0)            # no correction applied
             @test !any(selection.deployed)                 # served-interval gate blocked deploy
             @test all(.!selection.acceptance_gate_pass)
@@ -1541,11 +1655,11 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             @test nrow(df) == 2
             @test all(!ismissing, df.observation_dst_nt)
             @test occursin("Same-row forecast comparison rows: 2", text)
-            @test occursin("V2 is the operational method", text)
+            @test occursin("Historical V2.0 is the archived operational method", text)
         end
     end
 
-    @testset "C0-3: live report headlines upgraded V2 when available" begin
+    @testset "C0-3: live report headlines Operational V2.1 when available" begin
         mktempdir() do dir
             log_path = joinpath(dir, "v2_log.csv")
             report_path = joinpath(dir, "v2_report.md")
@@ -1553,7 +1667,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                 issue_time_utc=["2026-06-06T09:00:00", "2026-06-06T10:00:00"],
                 latest_dst_time_utc=["2026-06-06T09:00:00", "2026-06-06T10:00:00"],
                 target_time_utc=["2026-06-06T11:00:00", "2026-06-06T12:00:00"],
-                model_version=["v2", "v2"],
+                model_version=fill(OPERATIONAL_V2_1_MODEL_VERSION, 2),
                 wall_clock_lead_hours=[2.0, 2.0],
                 horizon_hours=[2.0, 2.0],
                 pred_dst_nt=[-40.0, -45.0],
@@ -1580,11 +1694,88 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             CSV.write(log_path, df)
             write_live_comparison_report(log_path, report_path)
             text = read(report_path, String)
-            @test occursin("V2 is the dashboard forecast", text)
-            @test occursin("V2 90% interval coverage", text)
-            @test occursin("| V2 | 2 |", text)
-            @test occursin("| Pre-upgrade baseline | 2 |", text)
-            @test occursin("pre-upgrade baseline pred", text)
+            @test occursin("V2.1 is the dashboard forecast", text)
+            @test occursin("V2.1 90% interval coverage", text)
+            @test occursin("| V2.1 | 2 |", text)
+            @test occursin("| V2.1 frozen-tail ablation | 2 |", text)
+            @test occursin("V2.1 frozen-tail pred", text)
+
+            # Expanded legacy rows can contain populated served_* columns. The
+            # persisted model identity, not column presence, controls labeling.
+            historical = copy(df)
+            historical.model_version .= "v2"
+            historical_path = joinpath(dir, "historical_with_served.csv")
+            historical_report = joinpath(dir, "historical_with_served.md")
+            CSV.write(historical_path, historical)
+            write_live_comparison_report(historical_path, historical_report)
+            historical_text = read(historical_report, String)
+            @test occursin("Historical V2.0 is the archived operational method", historical_text)
+            @test occursin("| Historical V2.0 | 2 |", historical_text)
+            @test occursin("| Historical V2.0 frozen-tail ablation | 2 |", historical_text)
+            @test !occursin("V2.1 is the dashboard forecast", historical_text)
+
+            empty_current_path = joinpath(dir, "empty_current.csv")
+            empty_current_report = joinpath(dir, "empty_current.md")
+            CSV.write(empty_current_path, first(df, 0))
+            write_live_comparison_report(
+                empty_current_path,
+                empty_current_report;
+                empty_identity=:v2_1,
+            )
+            empty_current_text = read(empty_current_report, String)
+            @test occursin("Newest issued forecast: none", empty_current_text)
+            @test occursin("V2.1 is the dashboard forecast", empty_current_text)
+            @test occursin("Verified rows used: 0", empty_current_text)
+            @test !occursin(
+                "Historical V2.0 is the archived operational method",
+                empty_current_text,
+            )
+            @test_throws ArgumentError write_live_comparison_report(
+                empty_current_path,
+                empty_current_report;
+                empty_identity=:unknown,
+            )
+
+            mixed = copy(df)
+            mixed.model_version[2] = "v2"
+            @test_throws ArgumentError write_live_comparison_report(
+                log_path,
+                report_path;
+                df=mixed,
+            )
+        end
+    end
+
+    @testset "Historical archive report preserves served/frozen V2.0 roles" begin
+        mktempdir() do dir
+            historical_log = joinpath(
+                get_data_dir(), "historical", "v2_0", "live_forecast_log.csv",
+            )
+            report_path = joinpath(dir, "historical_report.md")
+            write_live_comparison_report(historical_log, report_path)
+            text = read(report_path, String)
+            @test occursin("Same-row forecast comparison rows: 1533", text)
+            @test occursin("Historical V2.0 90% interval coverage: 0.88", text)
+            @test occursin("| Historical V2.0 | 1533 | 9.54 |", text)
+            @test occursin(
+                "| Historical V2.0 frozen-tail ablation | 1533 | 9.85 |",
+                text,
+            )
+            @test !occursin("V2.1 is the dashboard forecast", text)
+
+            summary_text = open(joinpath(dir, "historical_summary.txt"), "w+") do io
+                redirect_stdout(io) do
+                    summarize_log(historical_log)
+                end
+                seekstart(io)
+                read(io, String)
+            end
+            @test occursin(r"Historical V2\.0\s+n=1533 RMSE=9\.54", summary_text)
+            @test occursin(
+                r"Historical V2\.0 frozen-tail ablation\s+n=1533 RMSE=9\.85",
+                summary_text,
+            )
+            @test occursin("Historical V2.0 90% coverage n=1533 coverage=0.88", summary_text)
         end
     end
 
@@ -1712,7 +1903,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         tau_deepening = _v2_tail_tau(-30.0)
         @test tau_deepening > tau_recovery
         @test tau_deepening <= V2_TAIL_TAU_MAX_H
-        @test V2_SERVED_TAIL_VERSION == "v2+L1A+Bregime+Pinertia"
+        @test V2_SERVED_TAIL_VERSION == "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
 
         # Closed-form tau law (all exactly representable, so == is safe): recovery => no scaling,
         # deepening => tau0*(1+|rate|/r0), saturation => cap. Pins the formula SHAPE and constants so
@@ -1746,6 +1937,18 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         @test !_near_term_extreme_inertia_guard(-250.0, 0)     # 0 < model_steps lower bound
         @test !_near_term_extreme_inertia_guard(-250.0, 3)
         @test !_near_term_extreme_inertia_guard(-239.9, 2)
+        @test _one_hour_inertia_blend(-120.0, -100.0, 1) == -115.0
+        @test _one_hour_inertia_blend(-120.0, -100.0, 2) == -120.0
+        @test _one_hour_inertia_blend(-120.0, -100.0, 1; weight=0.0) == -100.0
+        @test _one_hour_inertia_blend(-120.0, -100.0, 1; weight=1.0) == -120.0
+        @test_throws ArgumentError _one_hour_inertia_blend(-120.0, -100.0, 1; weight=1.01)
+        # Order-sensitive oracle: Eq. (13) projects raw 100 nT to 50 nT
+        # before the rapid-rate and one-hour inertia maps, yielding -65 nT.
+        # Applying the safeguards to raw 100 first would incorrectly give -27.5.
+        @test _apply_v2_1_safeguards(100.0, -50.0, 1, -60.0) == -65.0
+        @test _apply_v2_1_safeguards(
+            100.0, -50.0, 1, -60.0; apply_rate_guard=false,
+        ) == 25.0
 
         t0 = DateTime(2026, 6, 6, 0)
         plasma = DataFrame(time_tag=[t0 + Minute(5)], speed=[410.0], density=[5.0])
@@ -1978,6 +2181,35 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         @test nrow(train) + nrow(validation) + nrow(holdout) == 12
     end
 
+    @testset "F3: embargo starts each later forecast after all earlier targets" begin
+        t0 = DateTime(2026, 1, 1)
+        anchors = t0 .+ Hour.(0:19)
+        horizons = (1, 2)
+        df = DataFrame(
+            issue_time_utc=[string(anchor) for anchor in anchors for _ in horizons],
+            target_time_utc=[string(anchor + Hour(h)) for anchor in anchors for h in horizons],
+            model_step_hours=[h for _ in anchors for h in horizons],
+            pred_dst_nt=collect(1.0:(length(anchors) * length(horizons))),
+        )
+        train, validation, holdout = _chronological_train_validation_test(df, 0.30, 0.35)
+
+        @test maximum(_parse_dt.(train.target_time_utc)) <
+              minimum(_parse_dt.(validation.issue_time_utc))
+        @test maximum(_parse_dt.(validation.target_time_utc)) <
+              minimum(_parse_dt.(holdout.issue_time_utc))
+        # Purging is anchor-wise: every retained issue still has both horizons.
+        for split in (train, validation, holdout)
+            @test nrow(split) > 0
+            for anchor in unique(split.issue_time_utc)
+                @test count(==(anchor), split.issue_time_utc) == length(horizons)
+            end
+        end
+        @test nrow(validation) < floor(Int, 0.35 * length(anchors)) * length(horizons)
+        @test nrow(holdout) <
+              (length(anchors) - floor(Int, 0.30 * length(anchors)) -
+               floor(Int, 0.35 * length(anchors))) * length(horizons)
+    end
+
     @testset "F5: a thin validation split deploys the fallback, not a v2 gate on one row" begin
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")
@@ -2022,7 +2254,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             @test nrow(validation) < V2_MIN_VALIDATION_ROWS    # degenerate gate input
             cal = fit_v2_calibration!(cfg)
             selection = CSV.read(replace(cal_path, r"\.csv$" => "_selection.csv"), DataFrame)
-            @test cal.label == "operational_v2_fallback_v1_equiv"
+            @test cal.label == "operational_v2_1_fallback_v1_equiv"
             @test !any(selection.deployed)
             @test selection.deploy_block_reason[1] == "validation_split_too_thin"
             @test !selection.validation_trusted[1]
@@ -2052,7 +2284,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         @test metrics[:v2_pred_dst_nt].rmse ≈ 1.0 atol = 1e-12
     end
 
-    @testset "F7: promotion gate requires strict pre-upgrade baseline improvement" begin
+    @testset "F7: promotion gate requires strict uncorrected-center improvement" begin
         @test !_v2_gate_pass((rmse=1.0, mae=1.0), (rmse=1.0, mae=1.0))
 
         n = 20
@@ -2104,9 +2336,11 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                 j = n + k; obs[j] = isodd(k) ? 60.0 : -60.0; ld[j] = -80.0
             end
             for i in 1:2n; push!(iss, "2026-01-01T" * lpad(string(i ÷ 60), 2, '0') * ":" * lpad(string(i % 60), 2, '0') * ":00"); end
-            CSV.write(log, DataFrame(model_step_hours=ms, horizon_hours=hh,
+            aci_rows = DataFrame(model_step_hours=ms, horizon_hours=hh,
                                      v2_pred_dst_nt=pred, observation_dst_nt=obs,
-                                     latest_dst_nt=ld, issue_time_utc=iss))
+                                     latest_dst_nt=ld, issue_time_utc=iss,
+                                     model_version=fill(OPERATIONAL_V2_1_MODEL_VERSION, 2n))
+            CSV.write(log, aci_rows)
             # Quiet query: pools only the ±5 rows -> narrow band (NOT the old ~nothing/fallback).
             q = _aci_interval_from_log(log, 0.0, 7; latest_dst=5.0)
             q_unlimited = _aci_interval_from_log(log, 0.0, 7; latest_dst=5.0,
@@ -2120,6 +2354,12 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             @test d !== nothing
             hw_d = (d[2] - d[1]) / 2
             @test hw_d > 3 * hw_q                           # storm regime band is far wider than quiet
+
+            legacy_log = joinpath(dir, "legacy.csv")
+            legacy_rows = copy(aci_rows)
+            legacy_rows.model_version .= "v2"
+            CSV.write(legacy_log, legacy_rows)
+            @test _aci_interval_from_log(legacy_log, 0.0, 7; latest_dst=5.0) === nothing
         end
     end
 
@@ -2137,7 +2377,8 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             CSV.write(log, DataFrame(model_step_hours=fill(1.0, n),
                                      v1_pred_dst_nt=v1_pred, v2_pred_dst_nt=v2_pred,
                                      observation_dst_nt=obs, latest_dst_nt=fill(-10.0, n),
-                                     issue_time_utc=iss))
+                                     issue_time_utc=iss,
+                                     model_version=fill(OPERATIONAL_V2_1_MODEL_VERSION, n)))
             b_v2 = _aci_interval_from_log(log, 0.0, 1; latest_dst=-10.0, pred_col=:v2_pred_dst_nt)
             b_v1 = _aci_interval_from_log(log, 0.0, 1; latest_dst=-10.0, pred_col=:v1_pred_dst_nt)
             @test b_v2 !== nothing && b_v1 !== nothing
@@ -2165,7 +2406,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                 issue_time_utc=string.(issues),
                 latest_dst_time_utc=string.(issues),
                 target_time_utc=string.(issues .+ Hour(1)),
-                model_version=fill("v2", n),
+                model_version=fill(OPERATIONAL_V2_1_MODEL_VERSION, n),
                 model_step_hours=fill(1.0, n),
                 latest_dst_nt=fill(-10.0, n),
                 pred_dst_nt=pred,
@@ -2189,7 +2430,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                 issue_time_utc=[string(issue)],
                 latest_dst_time_utc=[string(issue)],
                 target_time_utc=[string(target)],
-                model_version=["v2"], model_step_hours=[1.0],
+                model_version=[OPERATIONAL_V2_1_MODEL_VERSION], model_step_hours=[1.0],
                 latest_dst_nt=[-10.0], pred_dst_nt=[-20.0],
                 pred_dst_ci05_nt=[-40.0], pred_dst_ci95_nt=[0.0],
                 v2_pred_dst_nt=[-20.0], observation_dst_nt=[missing],

@@ -37,10 +37,9 @@ const PRETTY = Dict("v2_pred_dst_nt"=>"V2", "v1_pred_dst_nt"=>"SINDy v1",
 const HORIZONS = [1, 2, 3, 6]
 rmse(r) = sqrt(mean(abs2, r)); mae(r) = mean(abs.(r))
 
-"Slice the aligned (plasma, mag, dst_times, dst_vals) tuple to a [t0,t1] datetime window."
+"Slice the independently supported driver and Dst inputs to a [t0,t1] window."
 function slice_window(plasma, mag, dst_times, dst_vals, t0, t1)
-    m = (dst_times .>= t0) .& (dst_times .<= t1)
-    return plasma[m, :], mag[m, :], dst_times[m], dst_vals[m]
+    return _slice_replay_window(plasma, mag, dst_times, dst_vals, t0, t1)
 end
 
 "Replay one storm at horizons 1/2/3/6 h; rows are filtered so the ISSUE time lies in the storm window."

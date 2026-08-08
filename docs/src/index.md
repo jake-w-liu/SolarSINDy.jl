@@ -1,6 +1,7 @@
 # SolarSINDy.jl
 
-`SolarSINDy.jl` is a Julia package for sparse equation discovery and forecast-style evaluation of solar wind-magnetosphere coupling models.
+`SolarSINDy.jl` is a Julia package for sparse equation discovery and operational
+Dst forecasting from solar wind–magnetosphere coupling data.
 
 It is designed for research workflows around:
 
@@ -9,10 +10,13 @@ It is designed for research workflows around:
 - comparison against classical empirical Dst baselines
 - OMNI2 ingestion and storm extraction
 - rolling forecast utilities and storm alarms
+- a calibrated V2.1 live product built on the revised 20-candidate,
+  11-active-term SINDy equation
 
 ## Package Scope
 
-This package is aimed at reproducible research code rather than a large production framework.
+The package keeps the discovery equation auditable while providing a guarded,
+supervised operational path for locked forecasts.
 
 Core capabilities:
 
@@ -21,6 +25,8 @@ Core capabilities:
 - compare against `Burton`, `BurtonFull`, and `OBrienMcP`
 - prepare cleaned storm windows from OMNI2 data
 - run rolling Dst forecast utilities from saved coefficients
+- serve V2.1 forecasts with causal calibration, conformal intervals,
+  ballistically propagated L1 forcing, and guarded multi-hour tails
 
 ## Installation
 
@@ -54,10 +60,10 @@ The realtime forecasting example is not hidden in the validation pipeline. It is
 - `SolarSINDy.jl/examples/storm_monitor.jl`
 - `SolarSINDy.jl/examples/live_forecast_verify.jl`
 
-That example:
+The forecasting paths:
 
 - fetches live solar wind data from NOAA SWPC
-- loads saved discovered coefficients
+- load the versioned V2.1 20/11 discovery artifacts
 - advances rolling forecasts with uncertainty bands
 - emits configurable storm alarms
 
@@ -75,4 +81,7 @@ The package currently has deterministic automated tests for:
 - OMNI parsing, fill-value replacement, cleaning, and storm catalog extraction
 - realtime hourly aggregation and forecast initialization
 
-Run the complete package suite before relying on generated results or deploying the monitor.
+The operational `v2` alias resolves to V2.1. Historical V2.0 artifacts are
+available only through an explicit version request. Run the complete package
+suite and readiness audit before relying on regenerated results or deploying the
+monitor.

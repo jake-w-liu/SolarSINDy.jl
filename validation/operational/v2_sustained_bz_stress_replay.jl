@@ -1,4 +1,4 @@
-# v2_sustained_bz_stress_replay.jl -- sustained-southward-Bz stress diagnostics for V2.
+# v2_sustained_bz_stress_replay.jl -- sustained-southward-Bz stress diagnostics for V2.1.
 #
 # This is a diagnostic research replay. Realized future-Bz labels are used only to
 # stratify failure modes after the fact; they are not live selection inputs. Causal
@@ -89,25 +89,27 @@ function _regime_masks(rows::DataFrame)
 end
 
 function _candidate_cols_for_stress()
-    return [:current_v2, :r0_3_75, :r0_15, :plain_b, :selector_rmse_lean, :selector_safety_lean]
+    return [:current_v2_1, :r0_3_75, :r0_15, :plain_b, :selector_rmse_lean, :selector_safety_lean]
 end
 
 function _stress_cell(rows::DataFrame, col::Symbol)
     nrow(rows) == 0 && return nothing
     pred = Float64.(rows[!, col])
-    eb = rows.obs .- rows.audit_baseline
+    ef = rows.obs .- rows.frozen_tail_ablation
+    eh = rows.obs .- rows.historical_v2_0
     ec = rows.obs .- pred
     ep = rows.obs .- rows.persistence
-    ei = rows.obs .- rows.current_v2
-    rb, rc, rp = _rmse(eb), _rmse(ec), _rmse(ep)
-    strong_pers = rp <= rb
-    Δ, lo, hi = paired_improvement(strong_pers ? ep : eb, ec)
-    Δi, loi, hii = col == :current_v2 ? (0.0, 0.0, 0.0) : paired_improvement(ei, ec)
+    ei = rows.obs .- rows.current_v2_1
+    rf, rh, rc, rp = _rmse(ef), _rmse(eh), _rmse(ec), _rmse(ep)
+    strong_pers = rp <= rf
+    Δ, lo, hi = paired_improvement(strong_pers ? ep : ef, ec)
+    Δi, loi, hii = col == :current_v2_1 ? (0.0, 0.0, 0.0) : paired_improvement(ei, ec)
     severe = rows[rows.obs .<= -100.0, :]
     deep_bias = nrow(severe) == 0 ? NaN : mean(severe.obs .- Float64.(severe[!, col]))
     under100 = nrow(severe) == 0 ? 0 : count(Float64.(severe[!, col]) .> -100.0)
-    return (n=nrow(rows), rmse=rc, rmse_baseline=rb, rmse_persistence=rp,
-            stronger=strong_pers ? "pers" : "baseline",
+    return (n=nrow(rows), rmse=rc, rmse_frozen_tail=rf, rmse_v2_0=rh,
+            rmse_persistence=rp,
+            stronger=strong_pers ? "persistence" : "V2.1 frozen-tail",
             improve_vs_stronger=Δ, ci_lo=lo, ci_hi=hi,
             improve_vs_current=Δi, current_ci_lo=loi, current_ci_hi=hii,
             severe_n=nrow(severe), severe_signed_error=deep_bias, underwarn_100=under100)
@@ -115,7 +117,8 @@ end
 
 function _metric_table(rows::DataFrame)
     out = DataFrame(candidate=String[], lead=Int[], regime=String[], n=Int[],
-                    rmse=Float64[], rmse_baseline=Float64[], rmse_persistence=Float64[],
+                    rmse=Float64[], rmse_frozen_tail=Float64[], rmse_v2_0=Float64[],
+                    rmse_persistence=Float64[],
                     stronger=String[], improve_vs_stronger=Float64[], ci_lo=Float64[], ci_hi=Float64[],
                     improve_vs_current=Float64[], current_ci_lo=Float64[], current_ci_hi=Float64[],
                     severe_n=Int[], severe_signed_error=Float64[], underwarn_100=Int[])
@@ -125,7 +128,8 @@ function _metric_table(rows::DataFrame)
             sub = sub_h[reg.mask, :]
             c = _stress_cell(sub, col)
             c === nothing && continue
-            push!(out, (_candidate_label(col), h, reg.name, c.n, c.rmse, c.rmse_baseline, c.rmse_persistence,
+            push!(out, (_candidate_label(col), h, reg.name, c.n, c.rmse,
+                        c.rmse_frozen_tail, c.rmse_v2_0, c.rmse_persistence,
                         c.stronger, c.improve_vs_stronger, c.ci_lo, c.ci_hi,
                         c.improve_vs_current, c.current_ci_lo, c.current_ci_hi,
                         c.severe_n, c.severe_signed_error, c.underwarn_100))
@@ -148,13 +152,13 @@ end
 
 function _decision(metrics::DataFrame)
     stress6 = metrics[(metrics.lead .== 6) .& (metrics.regime .== "realized_future_south") .&
-                      (metrics.candidate .!= "current-v2"), :]
-    nrow(stress6) == 0 && return (candidate="current-v2", verdict="INCONCLUSIVE",
+                      (metrics.candidate .!= "current-v2.1"), :]
+    nrow(stress6) == 0 && return (candidate="current-v2.1", verdict="INCONCLUSIVE",
                                   reason="no non-current candidate had 6 h realized-future-south rows")
     sort!(stress6, :rmse)
     best = stress6[1, :]
     current = metrics[(metrics.lead .== 6) .& (metrics.regime .== "realized_future_south") .&
-                      (metrics.candidate .== "current-v2"), :][1, :]
+                      (metrics.candidate .== "current-v2.1"), :][1, :]
     all6 = metrics[(metrics.lead .== 6) .& (metrics.regime .== "all") .& (metrics.candidate .== best.candidate), :][1, :]
     safety_ok = best.underwarn_100 <= current.underwarn_100 &&
                 (!isfinite(best.severe_signed_error) || !isfinite(current.severe_signed_error) ||
@@ -163,19 +167,19 @@ function _decision(metrics::DataFrame)
     verdict = promotable ? "TARGETED PROMOTION CANDIDATE" : "DIAGNOSTIC ONLY"
     reason = promotable ?
         "best stress-regime candidate improves 6 h sustained-southward rows without a pooled or under-warning penalty" :
-        "do not alter live behavior: the best stress-regime candidate lacks a clean same-row/safety gate versus current V2"
+        "do not alter live behavior: the best stress-regime candidate lacks a clean same-row/safety gate versus current V2.1"
     return (candidate=best.candidate, verdict=verdict, reason=reason)
 end
 
 function _write_report(rows::DataFrame, metrics::DataFrame, counts::DataFrame)
     dec = _decision(metrics)
     open(OUT_STRESS_MD, "w") do io
-        println(io, "# Sustained southward-Bz stress replay for V2\n")
-        println(io, "Purpose: isolate whether current V2 fails in sustained southward-Bz regimes. ",
+        println(io, "# Sustained southward-Bz stress replay for V2.1\n")
+        println(io, "Purpose: isolate whether current V2.1 fails in sustained southward-Bz regimes. ",
                     "Realized future-Bz labels are diagnostic only; live selection must use causal labels.\n")
         println(io, "## CRC plan\n")
         println(io, "1. Check: annotate the existing same-row replay with issue-time Bz, trailing southward Bz, and realized future sustained-southward labels.")
-        println(io, "2. Reflect: score current V2 and candidate tails inside each stress regime, including severe under-warning counts.")
+        println(io, "2. Reflect: score current V2.1 and candidate tails inside each stress regime, including severe under-warning counts.")
         println(io, "3. Correct: keep live behavior unchanged unless a candidate clears same-row accuracy and safety gates.\n")
         println(io, "## Regime counts\n")
         println(io, "| lead h | regime | n | fraction | description |")
@@ -184,22 +188,23 @@ function _write_report(rows::DataFrame, metrics::DataFrame, counts::DataFrame)
             @printf(io, "| %d | %s | %d | %.3f | %s |\n", r.lead, r.regime, r.n, r.fraction, r.description)
         end
 
-        println(io, "\n## Current V2 stress performance\n")
-        println(io, "| lead h | regime | n | RMSE current | RMSE pre-upgrade baseline | RMSE persistence | improve vs stronger (95% CI) | severe n | severe signed err | underwarn <=-100 |")
-        println(io, "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
-        cur = metrics[metrics.candidate .== "current-v2", :]
+        println(io, "\n## Current V2.1 stress performance\n")
+        println(io, "| lead h | regime | n | RMSE current | RMSE frozen-tail | RMSE historical V2.0 | RMSE persistence | improve vs stronger (95% CI) | severe n | severe signed err | underwarn <=-100 |")
+        println(io, "| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+        cur = metrics[metrics.candidate .== "current-v2.1", :]
         for r in eachrow(cur)
-            @printf(io, "| %d | %s | %d | %.2f | %.2f | %.2f | %+.2f [%+.2f, %+.2f] | %d | %s | %d |\n",
-                    r.lead, r.regime, r.n, r.rmse, r.rmse_baseline, r.rmse_persistence,
+            @printf(io, "| %d | %s | %d | %.2f | %.2f | %.2f | %.2f | %+.2f [%+.2f, %+.2f] | %d | %s | %d |\n",
+                    r.lead, r.regime, r.n, r.rmse, r.rmse_frozen_tail,
+                    r.rmse_v2_0, r.rmse_persistence,
                     r.improve_vs_stronger, r.ci_lo, r.ci_hi, r.severe_n,
                     _fmt1(r.severe_signed_error), r.underwarn_100)
         end
 
         println(io, "\n## Candidate pressure in realized sustained-southward rows\n")
-        println(io, "`improve vs current` is paired |error current V2| - |error candidate| within the same regime.\n")
+        println(io, "`improve vs current` is paired |error current V2.1| - |error candidate| within the same regime.\n")
         println(io, "| candidate | lead h | n | RMSE | improve vs current (95% CI) | severe signed err | underwarn <=-100 |")
         println(io, "| --- | ---: | ---: | ---: | ---: | ---: | ---: |")
-        stress = metrics[(metrics.regime .== "realized_future_south") .& (metrics.candidate .!= "current-v2"), :]
+        stress = metrics[(metrics.regime .== "realized_future_south") .& (metrics.candidate .!= "current-v2.1"), :]
         for r in eachrow(stress)
             @printf(io, "| %s | %d | %d | %.2f | %+.2f [%+.2f, %+.2f] | %s | %d |\n",
                     r.candidate, r.lead, r.n, r.rmse, r.improve_vs_current,
@@ -210,7 +215,7 @@ function _write_report(rows::DataFrame, metrics::DataFrame, counts::DataFrame)
         println(io, "**Best 6 h sustained-southward stress candidate:** ", dec.candidate, ".")
         println(io, "**Verdict:** ", dec.verdict, " -- ", dec.reason, ".\n")
         println(io, "## Research reflection\n")
-        println(io, "- If current V2 remains competitive in realized sustained-southward rows, the next accuracy bottleneck is likely driver timing/resolution, not tail relaxation tuning.")
+        println(io, "- If current V2.1 remains competitive in realized sustained-southward rows, the next accuracy bottleneck is likely driver timing/resolution, not tail relaxation tuning.")
         println(io, "- If a candidate improves sustained-southward rows but worsens severe under-warning or all-row 6 h behavior, it stays diagnostic only.")
         println(io, "- The next actionable work after this diagnostic is either larger G3+ event coverage or minute-layer live shadow scoring, depending on which stress rows dominate the residuals.")
     end
@@ -242,8 +247,9 @@ function _selftest_sustained_bz()
         t0 + Hour(2) => (V=400.0, Bz=-5.5, By=0.0, n=5.0, Pdyn=2.0),
         t0 + Hour(3) => (V=400.0, Bz=-6.0, By=0.0, n=5.0, Pdyn=2.0),
     )
-    rows = DataFrame(storm=["x"], issue_utc=[t0], lead=[3], obs=[-120.0], audit_baseline=[-100.0],
-                     persistence=[-90.0], rate=[-20.0], current_v2=[-118.0],
+    rows = DataFrame(storm=["x"], issue_utc=[t0], lead=[3], obs=[-120.0],
+                     frozen_tail_ablation=[-100.0], historical_v2_0=[-98.0],
+                     persistence=[-90.0], rate=[-20.0], current_v2_1=[-118.0],
                      r0_3_75=[-124.0], r0_15=[-112.0], plain_b=[-98.0],
                      selector_rmse_lean=[-118.0], selector_safety_lean=[-124.0])
     ann = _annotate_sustained_bz(rows; drivers=drivers)

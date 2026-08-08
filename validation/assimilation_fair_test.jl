@@ -11,19 +11,23 @@
 # is internally a real deep storm, rather than trusting cross-vintage row indices. The catalog is used only
 # to locate storm centres (min_dst_time) and to confirm the split is "test".
 #
-# Question: does adapting a small physically-motivated coefficient subset online (decay rate and/or the
+# Historical development question: does adapting a small physically-motivated coefficient subset of the
+# current V2.1 20/11 core online (decay rate and/or the
 # dominant coupling scale) improve the ONE-STEP-AHEAD Dst* forecast on held-out storms, versus holding all
 # coefficients fixed at the deployed values? We score the prediction made BEFORE each observation. To give
 # adaptation its best fair chance, we sweep the coefficient process noise q_coeff and report the BEST adapted
-# result against fixed (so a negative result is conservative).
+# result against fixed (so a negative result is conservative). This is a
+# one-step extension diagnostic and does not reproduce the deployed V2.1 tail or
+# 26-feature calibration. Its bidirectional gap filling is retrospective, so this
+# script cannot establish live deployability. The later powered and served-tail
+# replays supersede its promotion interpretation and reject EKF promotion.
 
-using SolarSINDy, CSV, DataFrames, Statistics, LinearAlgebra, Printf, Dates
+using SolarSINDy, DataFrames, Statistics, LinearAlgebra, Printf, Dates
 
 const PKG  = pkgdir(SolarSINDy)
 const PROJ = normpath(joinpath(PKG, ".."))
 const EXTRACTED = joinpath(PROJ, "paper_v2_monitor", "data", "omni_extracted.csv")
 const CATALOG   = joinpath(PKG, "data", "storm_catalog.csv")
-const COEFCSV   = joinpath(PKG, "data", "real_sindy_discovery_coefficients.csv")
 
 # forward+backward fill of NaN in a column, then median fallback if all-NaN
 function fillnan!(x::Vector{Float64})
@@ -44,12 +48,11 @@ function main()
     sort!(cand, by = e -> e.min_dst)
     deepest = cand[1:min(6, length(cand))]
 
-    lib = build_solar_wind_library(include_redundant_n_v2=true); term_names = get_term_names(lib)
-    coef_df = CSV.read(COEFCSV, DataFrame)
-    ξ0 = zeros(length(lib))
-    for row in eachrow(coef_df)
-        idx = findfirst(==(row.term), term_names); idx !== nothing && (ξ0[idx] = row.coefficient)
-    end
+    core = load_operational_core(:v2)
+    lib = core.library; term_names = get_term_names(lib); ξ0 = copy(core.coefficients)
+    length(term_names) == 20 && count(!=(0.0), ξ0) == 11 &&
+        !("n*V^2" in term_names) ||
+        error("fair EKF diagnostic did not load the current 20/11 V2.1 core")
     i_decay = findfirst(==("Dst_star"), term_names)
     act = [i for i in eachindex(ξ0) if ξ0[i] != 0 && i != i_decay]
     i_inj = act[argmax(abs.(ξ0[act]))]
@@ -100,8 +103,9 @@ function main()
     @printf("  fixed = %.2f   adapt-decay(per-storm best q) = %.2f   adapt-decay+inj(per-storm best q) = %.2f\n",
             mean(tf), mean(td), mean(tdi))
 
-    # DEPLOYABLE check: a SINGLE global q (not per-storm cherry-picked) — the honest operational quantity
-    @printf("\nadapt-decay mean RMSE at a SINGLE fixed q (deployable; vs fixed = %.2f):\n", mean(tf))
+    # Shared-q check: useful as a raw-core sensitivity screen, but still selected and
+    # scored on the same retrospective storm set and therefore not a deployment gate.
+    @printf("\nadapt-decay mean RMSE at a SINGLE shared q (raw-core diagnostic; vs fixed = %.2f):\n", mean(tf))
     qmeans = [mean(getindex.(dmat, j)) for j in eachindex(qsweep)]
     for (j, q) in enumerate(qsweep)
         @printf("  q=%.0e : %.2f %s\n", q, qmeans[j], qmeans[j] < mean(tf) - 0.05 ? "(beats fixed)" : "")
@@ -109,17 +113,18 @@ function main()
     bestq_single = minimum(qmeans)
 
     if bestq_single < mean(tf) - 0.05
-        @printf("\n→ FAIR + DEPLOYABLE: a SINGLE global q (%.0e) lowers mean 1-step RMSE %.2f→%.2f nT out-of-sample\n",
+        @printf("\n→ RAW-CORE ONE-STEP SIGNAL: a shared q (%.0e) lowers mean 1-step RMSE %.2f→%.2f nT on these held-out storms\n",
                 qsweep[argmin(qmeans)], mean(tf), bestq_single)
-        @printf("  with the full library. This REVERSES the earlier confounded 'do not deploy': online decay\n")
-        @printf("  adaptation has real value on the raw v1 forecast. Open remaining question before deployment:\n")
-        @printf("  whether it adds value ON TOP of the v2 residual-correction layer (which already adapts), and\n")
-        @printf("  out-of-sample q selection — both are next steps, not blockers to the corrected conclusion.\n")
+        @printf("  with the revised 20/11 core. This is not deployable evidence: q was selected on the scored set,\n")
+        @printf("  preprocessing is retrospective, and the served V2.1 tail is absent. The later powered and exact\n")
+        @printf("  served-tail EKF replays answer the promotion question and reject EKF deployment.\n")
     else
         @printf("\n→ Per-storm best q helps, but NO single global q robustly beats fixed: the gain needs per-storm\n")
-        @printf("  tuning, so it is not yet deployable. Corrected status: OPEN (was wrongly 'do not deploy').\n")
+        @printf("  tuning. This raw-core diagnostic provides no promotion evidence; later V2.1 replays also reject EKF deployment.\n")
     end
     return nothing
 end
 
-main()
+if abspath(PROGRAM_FILE) == @__FILE__
+    main()
+end

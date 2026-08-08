@@ -20,6 +20,9 @@ using CSV, DataFrames, Dates, Statistics, JSON3
 # (-30..-50 nT). Sources recorded in app/README.md. Dst is in nT; more negative = stronger.
 const THREAT_LABELS = ("Quiet", "Minor storm", "Moderate storm", "Intense storm", "Extreme storm")
 const THREAT_BANDS_NT = (-30.0, -50.0, -100.0, -200.0)   # upper edge of levels 1..4
+const CURRENT_V2_MODEL_VERSION = "v2.1"
+const CURRENT_V2_SERVED_MODEL_VERSION =
+    "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
 
 """Return `(level, label)` for a finite Dst value in nT; non-finite input is unknown."""
 function dst_threat_level(dst::Real)
@@ -173,6 +176,14 @@ _v2_ci05(row) = (x = _col(row, :served_pred_dst_ci05_nt, :v2_pred_dst_ci05_nt); 
 _v2_ci95(row) = (x = _col(row, :served_pred_dst_ci95_nt, :v2_pred_dst_ci95_nt); x === missing ? _audit_ci95(row) : x)
 _rowget(row, name::Symbol) = hasproperty(row, name) ? getproperty(row, name) : missing
 
+function _row_is_current_v2(row)
+    model = _rowget(row, :model_version)
+    served_model = _rowget(row, :sub_hourly_model_version)
+    return model !== missing && served_model !== missing &&
+           String(model) == CURRENT_V2_MODEL_VERSION &&
+           String(served_model) == CURRENT_V2_SERVED_MODEL_VERSION
+end
+
 # Rows of the most recent forecast cycle, defined by ISSUE epoch (not driver vintage). When the
 # L1 feed stalls across issue boundaries, several hourly cycles share one latest_solar_wind_utc;
 # keying on that vintage would merge superseded issues into one payload (conflicting horizons per
@@ -243,7 +254,8 @@ function _verified_rows_uncached(df::DataFrame)
                                        tt > _rowget(r, :latest_dst_time_utc_dt))
         lo = jnum(_v2_ci05(r))
         hi = jnum(_v2_ci95(r))
-        keep[i] = valid_lead && jnum(_rowget(r, :observation_dst_nt)) !== nothing &&
+        keep[i] = _row_is_current_v2(r) && valid_lead &&
+                  jnum(_rowget(r, :observation_dst_nt)) !== nothing &&
                   jnum(_v2_pred(r)) !== nothing && lo !== nothing && hi !== nothing && lo <= hi
     end
     return view(df, keep, :)
@@ -326,6 +338,7 @@ function _compute_calibration_summary(df::DataFrame)
     n = nrow(v)
     n == 0 && return (n_verified=0, coverage_90=nothing, rmse_nt=nothing,
                       v2_n_verified=0, v2_coverage_90=nothing, v2_rmse_nt=nothing,
+                      frozen_tail_ablation_rmse_nt=nothing,
                       audit_baseline_rmse_nt=nothing,
                       rmse_persistence_nt=nothing, rmse_obrien_nt=nothing,
                       current_interval_source=live_src, n_verified_current_source=0,
@@ -389,6 +402,9 @@ function _compute_calibration_summary(df::DataFrame)
             v2_n_verified=product_n,
             v2_coverage_90=product_cov,
             v2_rmse_nt=product_rmse,
+            frozen_tail_ablation_rmse_nt=audit_rmse,
+            # Deprecated compatibility alias. New clients should use the
+            # explicit V2.1 frozen-tail-ablation field above.
             audit_baseline_rmse_nt=audit_rmse,
             rmse_persistence_nt=rmse_optional(pers, product_mask),
             rmse_obrien_nt=rmse_optional(obri, product_mask),
@@ -508,8 +524,9 @@ function _valid_live_cycle(cyc::DataFrame)
     anchor = _common_cycle_field(cyc, :latest_dst_time_utc_dt)
     anchor_dst = jnum(_common_cycle_field(cyc, :latest_dst_nt))
     vintage = _common_cycle_field(cyc, :latest_solar_wind_utc_dt)
-    all(x -> x isa AbstractString && !isempty(strip(x)),
-        (model, served_model, interval)) || return false
+    model == CURRENT_V2_MODEL_VERSION || return false
+    served_model == CURRENT_V2_SERVED_MODEL_VERSION || return false
+    interval isa AbstractString && !isempty(strip(interval)) || return false
     anchor isa DateTime && anchor_dst !== nothing && vintage isa DateTime || return false
 
     issues = DateTime[]
@@ -568,6 +585,7 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
                          pred_dst_nt=pred,
                          ci05_dst_nt=lo,
                          ci95_dst_nt=hi,
+                         frozen_tail_ablation_dst_nt=jnum(_audit_pred(r)),
                          audit_baseline_dst_nt=jnum(_audit_pred(r))))
     end
     issue = stale.issue_max
@@ -689,7 +707,7 @@ function build_status(df::DataFrame)
                     worst_credible_dst_nt=interval_lower_edge_min,
                     basis="Dst storm-intensity scale (-30/-50/-100/-200 nT)"),
             lead_time=(forecast_horizon_hours=horizon_max,
-                       driver_assumption="Ballistically propagated L1 forcing, then regime-aware relaxation beyond the measured L1 window, with a near-term extreme-Dst inertia guard",
+                       driver_assumption="Ballistically propagated L1 forcing, then regime-aware relaxation beyond the measured L1 window, followed by a causal rate projection, validation-selected one-hour and state-conditioned inertia blends, and an extreme-Dst inertia guard",
                        physical_upstream_lead_min=[30, 60],
                        note="Genuine upstream lead for new severity is the L1 advection time (~30-60 min). " *
                             "Multi-day lead requires CME eruption/propagation models, not yet in this system."),
@@ -711,6 +729,7 @@ function _build_history_uncached(df::DataFrame, hours::Real, reference_time::Dat
         inside = (obs !== nothing && lo !== nothing && hi !== nothing) ? (obs >= lo && obs <= hi) : nothing
         push!(rows, (target_utc=jdt(t), horizon_hours=jnum(_rowget(r, :horizon_hours)),
                      observed_dst_nt=obs, pred_dst_nt=p, ci05_dst_nt=lo, ci95_dst_nt=hi,
+                     frozen_tail_ablation_dst_nt=jnum(_audit_pred(r)),
                      audit_baseline_dst_nt=jnum(_audit_pred(r)),
                      inside_90ci=inside))
     end

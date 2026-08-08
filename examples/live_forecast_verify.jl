@@ -22,16 +22,14 @@ const SOLARSINDY_PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
 const DEFAULT_MONITOR_DIR = joinpath(SOLARSINDY_PACKAGE_ROOT, "var", "monitor")
 const DEFAULT_LOG_PATH = joinpath(DEFAULT_MONITOR_DIR, "live_forecast_log.csv")
 const DEFAULT_REPORT_PATH = joinpath(DEFAULT_MONITOR_DIR, "live_comparison_report.md")
-const DEFAULT_V2_CALIBRATION_PATH = joinpath(
-    SOLARSINDY_PACKAGE_ROOT, "deploy", "operational_v2_calibration.csv",
-)
+const DEFAULT_V2_CALIBRATION_PATH = operational_calibration_artifacts().point_csv
 const DEFAULT_OMNI_EXTRACTED_PATH = normpath(joinpath(
     @__DIR__, "..", "data", "omni_extracted.csv"
 ))
 
 Base.@kwdef struct LiveVerifyConfig
     mode::Symbol = :issue
-    model::Symbol = :v1
+    model::Symbol = :v2
     poll_seconds::Int = 300
     timeout_hours::Float64 = 4.0
     horizon_hours::Int = 1
@@ -88,8 +86,9 @@ function _usage()
       --comparison-report    Write standard locked-live comparison report.
 
     Options:
-      --model=v1|v2          Forecast model to log/score. Default: v1, except
-                            --campaign defaults to v2.
+      --model=v1|v2.1        Forecast model to log/score. The `v2` alias resolves
+                            to V2.1. Default: V2.1; use v1 explicitly for the
+                            uncalibrated discovery-core forecast.
       --poll-seconds=N       Poll interval for --wait/--campaign. Default: 300.
       --timeout-hours=N      Maximum wait time for --wait/--campaign. Default: 4.
       --horizon-hours=N      Hourly target index after issue time. Default: 1.
@@ -131,8 +130,8 @@ end
 
 function _parse_model(s::AbstractString)
     s == "v1" && return :v1
-    s == "v2" && return :v2
-    throw(ArgumentError("--model must be v1 or v2, got $s"))
+    s in ("v2", "v2.1", "v2_1") && return :v2
+    throw(ArgumentError("--model must be v1 or v2.1 (v2 alias accepted), got $s"))
 end
 
 function _parse_horizons(s::AbstractString)
@@ -579,7 +578,20 @@ const V2_TAIL_R0_NT_PER_H = 7.5
 const V2_TAIL_TAU_MAX_H = 48.0
 const V2_EXTREME_INERTIA_DST_NT = -240.0
 const V2_EXTREME_INERTIA_MAX_H = 2
-const V2_SERVED_TAIL_VERSION = "v2+L1A+Bregime+Pinertia"
+const V2_RAPID_DEEPENING_RATE_NT_PER_H = -15.0
+const V2_RATE_PROJECTION_FACTOR = 0.375
+const V2_RATE_PROJECTION_EXTREME_RATE_NT_PER_H = -60.0
+const V2_RATE_PROJECTION_MAX_DROP_NT = 50.0
+const V2_RATE_PROJECTION_EXTREME_MAX_DROP_NT = 120.0
+const V2_ONE_HOUR_INERTIA_WEIGHT = 0.75
+const V2_STATE_INERTIA_H1_QUIET_WEIGHT = 0.75
+const V2_STATE_INERTIA_H1_DEEPENING_WEIGHT = 0.0
+const V2_STATE_INERTIA_H2_QUIET_WEIGHT = 0.625
+const V2_STATE_INERTIA_H3_QUIET_WEIGHT = 0.875
+const V2_STATE_INERTIA_QUIET_DST_NT = -30.0
+const V2_STATE_INERTIA_DEEPENING_LO_NT_PER_H = -15.0
+const V2_STATE_INERTIA_DEEPENING_HI_NT_PER_H = -5.0
+const V2_SERVED_TAIL_VERSION = "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
 const V1_SERVED_TAIL_VERSION = "v1+L1A+Bregime"
 
 function _blend_drivers(frac::Real, measured, recent)
@@ -622,6 +634,142 @@ function _near_term_extreme_inertia_guard(latest_dst::Real, model_steps::Integer
                                           max_steps::Integer=V2_EXTREME_INERTIA_MAX_H)
     latest = Float64(latest_dst)
     return isfinite(latest) && 0 < model_steps <= max_steps && latest <= Float64(threshold)
+end
+
+"""
+    _rapid_deepening_projection_guard(pred, latest_dst, model_steps, dst_rate)
+
+Apply the validation-selected causal rate-projection floor during rapid Dst
+deepening. The projection continues a fixed fraction of the observed one-hour
+rate, while a rate-stratified cap limits how far it may move the model center.
+The separate extreme-core inertia guard remains authoritative at 1–2 h.
+"""
+function _rapid_deepening_projection_guard(
+    pred::Real,
+    latest_dst::Real,
+    model_steps::Integer,
+    dst_rate_nt_per_h::Real;
+    activation_rate::Real=V2_RAPID_DEEPENING_RATE_NT_PER_H,
+    factor::Real=V2_RATE_PROJECTION_FACTOR,
+    extreme_rate::Real=V2_RATE_PROJECTION_EXTREME_RATE_NT_PER_H,
+    max_drop::Real=V2_RATE_PROJECTION_MAX_DROP_NT,
+    extreme_max_drop::Real=V2_RATE_PROJECTION_EXTREME_MAX_DROP_NT,
+)
+    point = Float64(pred)
+    latest = Float64(latest_dst)
+    rate = Float64(dst_rate_nt_per_h)
+    all(isfinite, (point, latest, rate)) || return point
+    model_steps > 0 || return point
+    rate < Float64(activation_rate) || return point
+    cap = rate <= Float64(extreme_rate) ? Float64(extreme_max_drop) : Float64(max_drop)
+    cap >= 0.0 || throw(ArgumentError("rate-projection caps must be nonnegative"))
+    projection = latest + Float64(factor) * model_steps * rate
+    guarded = min(point, max(point - cap, projection))
+    return clamp(guarded, -2000.0, 50.0)
+end
+
+"""
+    _one_hour_inertia_blend(pred, latest_dst, model_steps)
+
+Shrink only the one-hour V2.1 center toward causal persistence. The fixed
+weight was selected on the broad-replay training/validation partitions;
+historical V2.0 is never evaluated or served by this operator.
+"""
+function _one_hour_inertia_blend(
+    pred::Real,
+    latest_dst::Real,
+    model_steps::Integer;
+    weight::Real=V2_ONE_HOUR_INERTIA_WEIGHT,
+)
+    point = Float64(pred)
+    latest = Float64(latest_dst)
+    all(isfinite, (point, latest)) || return point
+    model_steps == 1 || return point
+    0.0 <= Float64(weight) <= 1.0 || throw(ArgumentError(
+        "one-hour inertia weight must lie in [0, 1]",
+    ))
+    return clamp(latest + Float64(weight) * (point - latest), -2000.0, 50.0)
+end
+
+"""
+    _state_inertia_blend(pred, latest_dst, model_steps, dst_rate)
+
+Apply the validation-selected causal state-inertia safeguard after the general
+one-hour blend. Near-quiet one-hour centers receive the least additional
+shrinkage among development candidates tied at observational precision, while
+moderate issue-time deepening uses persistence. At two and three hours, a
+near-quiet issue and near-quiet model center receive a smaller persistence
+blend. Historical V2.0 is used only by offline selection gates and is never an
+input to this operator.
+"""
+function _state_inertia_blend(
+    pred::Real,
+    latest_dst::Real,
+    model_steps::Integer,
+    dst_rate_nt_per_h::Real;
+    h1_quiet_weight::Real=V2_STATE_INERTIA_H1_QUIET_WEIGHT,
+    h1_deepening_weight::Real=V2_STATE_INERTIA_H1_DEEPENING_WEIGHT,
+    h2_quiet_weight::Real=V2_STATE_INERTIA_H2_QUIET_WEIGHT,
+    h3_quiet_weight::Real=V2_STATE_INERTIA_H3_QUIET_WEIGHT,
+    quiet_threshold::Real=V2_STATE_INERTIA_QUIET_DST_NT,
+    deepening_lo::Real=V2_STATE_INERTIA_DEEPENING_LO_NT_PER_H,
+    deepening_hi::Real=V2_STATE_INERTIA_DEEPENING_HI_NT_PER_H,
+)
+    point = Float64(pred)
+    latest = Float64(latest_dst)
+    rate = Float64(dst_rate_nt_per_h)
+    all(isfinite, (point, latest, rate)) || return point
+    weights = Float64[
+        h1_quiet_weight, h1_deepening_weight,
+        h2_quiet_weight, h3_quiet_weight,
+    ]
+    all(w -> 0.0 <= w <= 1.0, weights) || throw(ArgumentError(
+        "state-inertia weights must lie in [0, 1]",
+    ))
+    dlo, dhi = Float64(deepening_lo), Float64(deepening_hi)
+    dlo < dhi || throw(ArgumentError("state-inertia deepening bounds must be ordered"))
+    q = Float64(quiet_threshold)
+    weight = if model_steps == 1 && dlo <= rate < dhi
+        weights[2]
+    elseif model_steps == 1 && latest > q && point > q
+        weights[1]
+    elseif model_steps == 2 && latest > q && point > q
+        weights[3]
+    elseif model_steps == 3 && latest > q && point > q
+        weights[4]
+    else
+        return point
+    end
+    return clamp(latest + weight * (point - latest), -2000.0, 50.0)
+end
+
+"Apply the published V2.1 point-center operator in its declared order."
+function _apply_v2_1_safeguards(
+    pred::Real,
+    latest_dst::Real,
+    model_steps::Integer,
+    dst_rate_nt_per_h::Real;
+    apply_rate_guard::Bool=true,
+    apply_one_hour_inertia::Bool=true,
+    apply_state_inertia::Bool=true,
+    apply_extreme_inertia::Bool=true,
+)
+    # Equation (13) defines z from the projected raw tail-plus-correction
+    # center. The rate and inertia maps act on z, not on an unclamped precursor.
+    point = clamp(Float64(pred), -2000.0, 50.0)
+    apply_rate_guard && (point = _rapid_deepening_projection_guard(
+        point, latest_dst, model_steps, dst_rate_nt_per_h,
+    ))
+    apply_one_hour_inertia && (point = _one_hour_inertia_blend(
+        point, latest_dst, model_steps,
+    ))
+    apply_state_inertia && (point = _state_inertia_blend(
+        point, latest_dst, model_steps, dst_rate_nt_per_h,
+    ))
+    if apply_extreme_inertia && _near_term_extreme_inertia_guard(latest_dst, model_steps)
+        return clamp(Float64(latest_dst), -2000.0, 50.0)
+    end
+    return clamp(point, -2000.0, 50.0)
 end
 
 function _shift_interval_to_center(center::Real, reference_center::Real,
@@ -758,7 +906,7 @@ function _with_forecast_log_lock(f, log_path::String; timeout_sec::Float64=30.0,
     end
 end
 
-const _LIVE_STATE_VERSION = 2
+const _LIVE_STATE_VERSION = 3
 const _LIVE_STATE_TAIL_BYTES = 4096
 # Exact O(1) duplicate lookup for the most recently appended unresolved rows.
 # Older unresolved identities remain authoritative in the CSV and are streamed
@@ -819,7 +967,10 @@ end
 
 function _new_live_state(path::AbstractString, columns, row_count::Integer, pending;
                          pending_cache_complete::Bool=true,
-                         streams=Dict{String,Any}())
+                         streams=Dict{String,Any}(),
+                         has_current_model::Bool=false,
+                         has_historical_model::Bool=false,
+                         has_ambiguous_model::Bool=false)
     return Dict{String,Any}(
         "version" => _LIVE_STATE_VERSION,
         "fingerprint" => _log_fingerprint(path),
@@ -828,6 +979,9 @@ function _new_live_state(path::AbstractString, columns, row_count::Integer, pend
         "pending" => Dict{String,Any}(String(k) => Int(v) for (k, v) in pairs(pending)),
         "pending_cache_complete" => pending_cache_complete,
         "aci_streams" => streams,
+        "has_current_model" => has_current_model,
+        "has_historical_model" => has_historical_model,
+        "has_ambiguous_model" => has_ambiguous_model,
     )
 end
 
@@ -840,16 +994,54 @@ function _state_matches_log(state, path::AbstractString)
     streams = get(state, "aci_streams", nothing)
     pending_cache_complete = get(state, "pending_cache_complete", nothing)
     row_count = get(state, "row_count", nothing)
+    has_current_model = get(state, "has_current_model", nothing)
+    has_historical_model = get(state, "has_historical_model", nothing)
+    has_ambiguous_model = get(state, "has_ambiguous_model", nothing)
     columns isa AbstractVector || return false
     all(c -> c isa AbstractString, columns) || return false
     pending isa AbstractDict || return false
     pending_cache_complete isa Bool || return false
     streams isa AbstractDict || return false
     row_count isa Integer && row_count >= 0 || return false
+    has_current_model isa Bool || return false
+    has_historical_model isa Bool || return false
+    has_ambiguous_model isa Bool || return false
     all(v -> v isa Integer && 1 <= v <= row_count, values(pending)) || return false
     length(pending) <= _LIVE_PENDING_CACHE_LIMIT || return false
     length(streams) <= _LIVE_ACI_STREAM_LIMIT || return false
     return true
+end
+
+function _update_model_flags!(flags::AbstractDict, value)
+    if ismissing(value) || isempty(strip(String(value)))
+        flags["has_ambiguous_model"] = true
+        return flags
+    end
+    token = strip(String(value))
+    if token == OPERATIONAL_V2_1_MODEL_VERSION
+        flags["has_current_model"] = true
+    elseif token in ("v2", "v2.0", "v2_0")
+        flags["has_historical_model"] = true
+    elseif token != "v1"
+        flags["has_ambiguous_model"] = true
+    end
+    return flags
+end
+
+function _model_flags(df::DataFrame)
+    flags = Dict{String,Any}(
+        "has_current_model" => false,
+        "has_historical_model" => false,
+        "has_ambiguous_model" => false,
+    )
+    if String(:model_version) ∉ names(df)
+        nrow(df) > 0 && (flags["has_ambiguous_model"] = true)
+        return flags
+    end
+    for value in df[!, :model_version]
+        _update_model_flags!(flags, value)
+    end
+    return flags
 end
 
 function _read_live_state(path::AbstractString)
@@ -905,8 +1097,18 @@ function _rebuild_live_state(path::AbstractString)
     pending = Dict{String,Int}()
     pending_cache_complete = true
     row_count = 0
+    flags = Dict{String,Any}(
+        "has_current_model" => false,
+        "has_historical_model" => false,
+        "has_ambiguous_model" => false,
+    )
     for csv_row in rows
         row_count += 1
+        if :model_version in column_set
+            _update_model_flags!(flags, getproperty(csv_row, :model_version))
+        else
+            flags["has_ambiguous_model"] = true
+        end
         key = _csv_pending_key(csv_row, column_set)
         if key !== nothing && !haskey(pending, key)
             pending_cache_complete = _cache_pending!(pending, key, row_count,
@@ -914,7 +1116,10 @@ function _rebuild_live_state(path::AbstractString)
         end
     end
     return _new_live_state(path, columns, row_count, pending;
-                           pending_cache_complete=pending_cache_complete)
+                           pending_cache_complete=pending_cache_complete,
+                           has_current_model=Bool(flags["has_current_model"]),
+                           has_historical_model=Bool(flags["has_historical_model"]),
+                           has_ambiguous_model=Bool(flags["has_ambiguous_model"]))
 end
 
 function _find_pending_row(path::AbstractString, wanted_key::String)
@@ -1036,6 +1241,28 @@ function _stream_schema_upgrade!(path::AbstractString, old_columns::Vector{Symbo
     return nothing
 end
 
+function _assert_append_model_compatibility(path::AbstractString, state, row::DataFrame)
+    String(:model_version) in names(row) || return nothing
+    incoming_value = row[1, :model_version]
+    ismissing(incoming_value) && return nothing
+    incoming = strip(String(incoming_value))
+    incoming_current = incoming == OPERATIONAL_V2_1_MODEL_VERSION
+    incoming_historical = incoming in ("v2", "v2.0", "v2_0")
+    (incoming_current || incoming_historical) || return nothing
+
+    has_current = Bool(state["has_current_model"])
+    has_historical = Bool(state["has_historical_model"])
+    has_ambiguous = Bool(state["has_ambiguous_model"])
+    incoming_current && (has_historical || has_ambiguous) && throw(ArgumentError(
+        "cannot append V2.1 to a historical or ambiguously versioned forecast log; " *
+        "run the V2.1 log migration first",
+    ))
+    incoming_historical && has_current && throw(ArgumentError(
+        "cannot append a historical V2.0 row to a current V2.1 forecast log",
+    ))
+    return nothing
+end
+
 function _append_forecast!(log_path::String, row::DataFrame; return_status::Bool=false)
     dir = dirname(log_path)
     !isempty(dir) && mkpath(dir)
@@ -1044,13 +1271,20 @@ function _append_forecast!(log_path::String, row::DataFrame; return_status::Bool
             _atomic_csv(log_path, row)
             key = _incoming_pending_key(row)
             pending = key === nothing ? Dict{String,Int}() : Dict(key => 1)
-            state = _new_live_state(log_path, names(row), 1, pending)
+            flags = _model_flags(row)
+            state = _new_live_state(
+                log_path, names(row), 1, pending;
+                has_current_model=Bool(flags["has_current_model"]),
+                has_historical_model=Bool(flags["has_historical_model"]),
+                has_ambiguous_model=Bool(flags["has_ambiguous_model"]),
+            )
             _write_live_state!(log_path, state)
             return return_status ? (; row_idx=1, appended=true) : 1
         end
 
         _recover_append_transaction!(log_path)
         state = _load_or_rebuild_live_state!(log_path)
+        _assert_append_model_compatibility(log_path, state, row)
         key = _incoming_pending_key(row)
         dup_idx = key === nothing ? nothing : get(state["pending"], key, nothing)
         if key !== nothing && !state["pending_cache_complete"]
@@ -1090,6 +1324,11 @@ function _append_forecast!(log_path::String, row::DataFrame; return_status::Bool
 
         row_idx = Int(state["row_count"]) + 1
         state["row_count"] = row_idx
+        if String(:model_version) in names(row)
+            _update_model_flags!(state, row[1, :model_version])
+        else
+            state["has_ambiguous_model"] = true
+        end
         key === nothing || (state["pending_cache_complete"] = _cache_pending!(
             state["pending"], key, row_idx, state["pending_cache_complete"]
         ))
@@ -1176,7 +1415,8 @@ function _score_row!(df::DataFrame, row_idx::Int, observed_dst::Float64)
         end
     end
 
-    # Score the V2 product forecast alongside the pre-upgrade baseline, so live skill is tracked on identical rows.
+    # Score the served V2.1 forecast alongside its frozen-tail ablation, so live
+    # skill is tracked on identical rows.
     served_pred = _optional_float(df, row_idx, :served_pred_dst_nt)
     if !ismissing(served_pred)
         _set_value!(df, row_idx, :served_residual_dst_nt, observed_dst - served_pred)
@@ -1362,7 +1602,9 @@ end
 function _v2_features(latest_dst::Real, drivers;
                       memory=_zero_v2_memory_features(),
                       baselines=nothing,
-                      v1_pred_dst::Real=NaN)
+                      v1_pred_dst::Real=NaN,
+                      model_steps::Integer=1)
+    model_steps >= 1 || throw(ArgumentError("model_steps must be positive"))
     base = operational_v2_feature_tuple(
         latest_dst,
         drivers.V,
@@ -1371,7 +1613,35 @@ function _v2_features(latest_dst::Real, drivers;
         drivers.n,
         drivers.Pdyn,
     )
-    return merge(base, memory, _v2_expert_features(v1_pred_dst, baselines))
+    expert = _v2_expert_features(v1_pred_dst, baselines)
+    h = Float64(model_steps)
+    lead = (
+        lead_2h_indicator=Float64(model_steps == 2),
+        lead_3h_indicator=Float64(model_steps == 3),
+        lead_6h_indicator=Float64(model_steps == 6),
+        lead_latest_dst_interaction=h * Float64(latest_dst),
+        lead_v1_persistence_interaction=h * expert.v1_minus_persistence_nt,
+    )
+    return merge(base, memory, expert, lead)
+end
+
+"Build the exact ordered feature tuple required by an operational calibration."
+function _v2_calibration_features(cal, latest_dst::Real, drivers;
+                                  v1_pred_dst::Real=NaN,
+                                  model_steps::Integer=1,
+                                  feature_source=nothing,
+                                  context::AbstractString="V2.1 forecast")
+    source = feature_source === nothing ? _v2_features(
+        latest_dst, drivers; v1_pred_dst=v1_pred_dst, model_steps=model_steps,
+    ) : feature_source
+    available = propertynames(source)
+    missing_features = [c for c in cal.feature_names if !(c in available)]
+    isempty(missing_features) || error(
+        "$context calibration feature source omits: $(join(String.(missing_features), ", "))",
+    )
+    return NamedTuple{Tuple(cal.feature_names)}(
+        Tuple(Float64(getproperty(source, c)) for c in cal.feature_names),
+    )
 end
 
 const _ANCHOR_FEATURE_DRIVER_BASIS = "anchor_aligned_ballistically_propagated_l1_hour"
@@ -1398,16 +1668,24 @@ function _load_calibration_for_model(cfg::LiveVerifyConfig)
         "V2 calibration not found at $(cfg.v2_calibration_path). " *
         "Run --fit-v2-calibration first."
     )
-    return read_operational_v2_calibration(cfg.v2_calibration_path)
+    cal = read_operational_v2_calibration(cfg.v2_calibration_path)
+    startswith(cal.label, "operational_v2_1_") || throw(ArgumentError(
+        "live V2.1 issuance requires an operational_v2_1_* calibration; " *
+        "$(cfg.v2_calibration_path) identifies $(repr(cal.label))",
+    ))
+    return cal
 end
 
 # Load the conformal interval calibration sidecar if present (v2 only). A
 # sidecar is accepted only when its metadata contains the SHA-256 digest of the
 # exact point-calibration file used for issuance.
-function _load_conformal_for_model(cfg::LiveVerifyConfig)
+function _load_conformal_for_model(cfg::LiveVerifyConfig; calibration=nothing)
     cfg.model == :v2 || return nothing
     path = _conformal_path(cfg.v2_calibration_path)
     isfile(path) || return nothing
+    # A hash-matched V2.0 point/sidecar pair is still the wrong model for the
+    # current live path. Validate the point identity before accepting its band.
+    calibration === nothing && _load_calibration_for_model(cfg)
     rows = CSV.Rows(path; select=[:stratum, :point_calibration_sha256],
                     strict=true, reusebuffer=true)
     first_row = iterate(rows)
@@ -1480,11 +1758,16 @@ function _restore_aci(snapshot, target_coverage::Real, gamma::Real,
     return ac
 end
 
+_aci_required_model_version(pred_col::Symbol) =
+    pred_col in (:v2_pred_dst_nt, :served_pred_dst_nt) ?
+    OPERATIONAL_V2_1_MODEL_VERSION : nothing
+
 function _valid_aci_entry(entry, pred_col::Symbol, horizon_steps::Integer,
                           activity_threshold::Real, target_coverage::Real,
                           gamma::Real, warmup::Integer, history_window::Integer)
     entry isa AbstractDict || return false
     get(entry, "pred_col", nothing) == String(pred_col) || return false
+    get(entry, "model_version", nothing) == _aci_required_model_version(pred_col) || return false
     get(entry, "horizon_steps", nothing) == Int(horizon_steps) || return false
     get(entry, "activity_threshold", nothing) == Float64(activity_threshold) || return false
     get(entry, "target_coverage", nothing) == Float64(target_coverage) || return false
@@ -1508,6 +1791,8 @@ function _build_aci_entry(path::AbstractString, pred_col::Symbol,
     columns = Set(Symbol.(rows.names))
     required = (:model_step_hours, pred_col, :observation_dst_nt,
                 :issue_time_utc, :latest_dst_nt)
+    required_model = _aci_required_model_version(pred_col)
+    required_model === nothing || (required = (required..., :model_version))
     all(in(columns), required) || return nothing
     states = Dict(
         :all => init_adaptive_conformal(; target_coverage=target_coverage,
@@ -1524,6 +1809,10 @@ function _build_aci_entry(path::AbstractString, pred_col::Symbol,
     last_issue = nothing
     h = Int(horizon_steps)
     for row in rows
+        if required_model !== nothing
+            model = getproperty(row, :model_version)
+            (!ismissing(model) && String(model) == required_model) || continue
+        end
         hv = getproperty(row, :model_step_hours)
         pv = getproperty(row, pred_col)
         ov = getproperty(row, :observation_dst_nt)
@@ -1551,6 +1840,7 @@ function _build_aci_entry(path::AbstractString, pred_col::Symbol,
     end
     return Dict{String,Any}(
         "pred_col" => String(pred_col),
+        "model_version" => required_model,
         "horizon_steps" => h,
         "activity_threshold" => Float64(activity_threshold),
         "target_coverage" => Float64(target_coverage),
@@ -1582,6 +1872,8 @@ function _advance_aci_entry!(entry, df::DataFrame, changed_rows::Vector{Int})
     pred_col = Symbol(entry["pred_col"])
     required = (:model_step_hours, pred_col, :observation_dst_nt,
                 :issue_time_utc, :latest_dst_nt)
+    required_model = _aci_required_model_version(pred_col)
+    required_model === nothing || (required = (required..., :model_version))
     all(c -> String(c) in names(df), required) || return true
     target_coverage = Float64(entry["target_coverage"])
     gamma = Float64(entry["gamma"])
@@ -1602,6 +1894,10 @@ function _advance_aci_entry!(entry, df::DataFrame, changed_rows::Vector{Int})
     ordered_rows = sort(changed_rows; by=i -> _parse_dt(df[i, :issue_time_utc]))
     h = Int(entry["horizon_steps"])
     for row_idx in ordered_rows
+        if required_model !== nothing
+            model = df[row_idx, :model_version]
+            (!ismissing(model) && String(model) == required_model) || continue
+        end
         hv = df[row_idx, :model_step_hours]
         pv = df[row_idx, pred_col]
         ov = df[row_idx, :observation_dst_nt]
@@ -1670,9 +1966,13 @@ function _persist_live_state_after_table_write!(path::AbstractString, previous_s
         end
     end
     pending, pending_cache_complete = _pending_from_dataframe(df)
+    flags = _model_flags(df)
     state = _new_live_state(path, names(df), nrow(df), pending;
                             pending_cache_complete=pending_cache_complete,
-                            streams=streams)
+                            streams=streams,
+                            has_current_model=Bool(flags["has_current_model"]),
+                            has_historical_model=Bool(flags["has_historical_model"]),
+                            has_ambiguous_model=Bool(flags["has_ambiguous_model"]))
     _write_live_state!(path, state)
     return state
 end
@@ -1769,7 +2069,8 @@ function _select_model_prediction(model::Symbol, calibration,
                                   v1_ci05_dst::Real,
                                   v1_ci95_dst::Real;
                                   baselines=nothing,
-                                  features=nothing)
+                                  features=nothing,
+                                  model_steps::Integer=1)
     if model == :v1
         return (
             model_version="v1",
@@ -1798,12 +2099,13 @@ function _select_model_prediction(model::Symbol, calibration,
                     drivers;
                     baselines=baselines,
                     v1_pred_dst=v1_pred_dst,
+                    model_steps=model_steps,
                 ) :
                 features,
             baselines=baselines,
         )
         return (
-            model_version="v2",
+            model_version=OPERATIONAL_V2_1_MODEL_VERSION,
             pred_dst=v2.pred_dst,
             ci05_dst=v2.ci05_dst,
             ci95_dst=v2.ci95_dst,
@@ -1841,14 +2143,12 @@ end
 
 function _forecast_one_replay(anchor_time::DateTime, target_time::DateTime,
                               anchor_dst::Float64, drivers;
-                              n_steps::Int=1, model::Symbol=:v1, calibration=nothing)
+                              n_steps::Int=1, model::Symbol=:v1, calibration=nothing,
+                              core_version::Union{AbstractString,Symbol}=OPERATIONAL_V2_1_MODEL_VERSION)
     n_steps >= 1 || throw(ArgumentError("n_steps must be ≥ 1"))
     anchor_dst_star = pressure_correct_dst([anchor_dst], [drivers.Pdyn])[1]
-    coef_csv = joinpath(get_data_dir(), "real_sindy_discovery_coefficients.csv")
-    ens_csv = joinpath(get_data_dir(), "real_ensemble_inclusion.csv")
-    state = init_forecast(;
-        coefficients_csv=coef_csv,
-        ensemble_csv=ens_csv,
+    state = init_operational_forecast(;
+        version=core_version,
         t0=anchor_time,
         dst0=anchor_dst_star,
     )
@@ -1887,6 +2187,7 @@ function _forecast_one_replay(anchor_time::DateTime, target_time::DateTime,
         v1_ci05,
         v1_ci95,
         baselines=baseline_predictions,
+        model_steps=n_steps,
     )
 
     return (
@@ -1947,6 +2248,7 @@ function replay_recent_table(plasma::DataFrame, mag::DataFrame,
                              dst_times, dst_vals; replay_hours::Int=48,
                              horizons::Vector{Int}=[1],
                              model::Symbol=:v1, calibration=nothing,
+                             core_version::Union{AbstractString,Symbol}=OPERATIONAL_V2_1_MODEL_VERSION,
                              min_samples::Union{Nothing,Int}=nothing)
     isempty(horizons) && throw(ArgumentError("horizons must not be empty"))
     any(<=(0), horizons) && throw(ArgumentError("horizons must be positive"))
@@ -1997,6 +2299,7 @@ function replay_recent_table(plasma::DataFrame, mag::DataFrame,
                 n_steps=h,
                 model=:v1,
                 calibration=nothing,
+                core_version=core_version,
             )
             observed = dst_map[target_time]
             in_ci = min(forecast.ci05_dst, forecast.ci95_dst) <= observed <=
@@ -2056,7 +2359,7 @@ function replay_recent_table(plasma::DataFrame, mag::DataFrame,
     if model == :v2
         calibration === nothing && error("V2 replay requires calibration")
         scored = score_operational_v2(out, calibration)
-        scored[!, :model_version] = fill("v2", nrow(scored))
+        scored[!, :model_version] = fill(OPERATIONAL_V2_1_MODEL_VERSION, nrow(scored))
         scored[!, :pred_dst_nt] = scored.v2_pred_dst_nt
         scored[!, :pred_dst_ci05_nt] = scored.v2_pred_dst_ci05_nt
         scored[!, :pred_dst_ci95_nt] = scored.v2_pred_dst_ci95_nt
@@ -2202,6 +2505,28 @@ function _omni_replay_inputs(path::String, year_start::Int, year_end::Int)
     return plasma, mag, DateTime.(df_dst.datetime), Float64.(df_dst.Dst)
 end
 
+"""Slice replay drivers and Dst observations independently to `[t0, t1]`.
+
+The finite-driver frames and finite-Dst vector intentionally have different row
+support. A Dst-derived Boolean mask must therefore never index the driver
+frames. This helper preserves each source's own timestamps and fails closed on
+malformed paired inputs.
+"""
+function _slice_replay_window(plasma::DataFrame, mag::DataFrame,
+                              dst_times, dst_vals,
+                              t0::DateTime, t1::DateTime)
+    t0 <= t1 || throw(ArgumentError("replay window starts after it ends"))
+    length(dst_times) == length(dst_vals) || throw(DimensionMismatch(
+        "Dst timestamp/value lengths differ: $(length(dst_times)) vs $(length(dst_vals))",
+    ))
+    :time_tag in propertynames(plasma) || throw(ArgumentError("plasma omits time_tag"))
+    :time_tag in propertynames(mag) || throw(ArgumentError("mag omits time_tag"))
+    mp = (plasma.time_tag .>= t0) .& (plasma.time_tag .<= t1)
+    mm = (mag.time_tag .>= t0) .& (mag.time_tag .<= t1)
+    md = (dst_times .>= t0) .& (dst_times .<= t1)
+    return plasma[mp, :], mag[mm, :], dst_times[md], dst_vals[md]
+end
+
 function run_replay_omni(cfg::LiveVerifyConfig)
     plasma, mag, dst_times, dst_vals =
         _omni_replay_inputs(cfg.omni_path, cfg.omni_year_start, cfg.omni_year_end)
@@ -2259,6 +2584,17 @@ const V2_MEMORY_EXPERT_FEATURES = vcat(V2_MEMORY_FEATURES, Symbol[
     :burton_minus_v1_nt,
 ])
 
+# Lead-aware terms are restricted to the declared operational horizons. The
+# indicators provide lead-specific intercepts, while the interactions scale only
+# issue-time state and core/persistence disagreement. No target-time value enters.
+const V2_MEMORY_EXPERT_LEAD_FEATURES = vcat(V2_MEMORY_EXPERT_FEATURES, Symbol[
+    :lead_2h_indicator,
+    :lead_3h_indicator,
+    :lead_6h_indicator,
+    :lead_latest_dst_interaction,
+    :lead_v1_persistence_interaction,
+])
+
 const V2_BASE_FEATURES = Symbol[
     :latest_dst_nt,
     :V_kms,
@@ -2279,6 +2615,7 @@ const V2_COUPLING_FEATURES = Symbol[
 
 function _v2_feature_sets()
     return Pair{String,Vector{Symbol}}[
+        "memory_expert_lead" => copy(V2_MEMORY_EXPERT_LEAD_FEATURES),
         "memory_expert" => copy(V2_MEMORY_EXPERT_FEATURES),
         "memory" => copy(V2_MEMORY_FEATURES),
         "full" => copy(V2_FULL_FEATURES),
@@ -2326,22 +2663,26 @@ function _chronological_train_validation_test(df::DataFrame,
     return _embargo_splits(train, validation, holdout)
 end
 
-# Purged/embargoed split: drop later-split rows whose target observation time is not strictly after
-# the previous split's last target time. Without this, a boundary anchor's multi-hour target (at
-# T+h) is used both to fit the ridge residual correction (train) and to score/gate it
-# (validation/holdout) — standard time-series leakage across split boundaries. Single-horizon tables
-# are unaffected (target times already increase monotonically with the anchor). A no-op when the
-# frame carries no target_time_utc column.
+# Purged/embargoed split: drop whole later-split anchor blocks until each retained issue time is
+# strictly after the previous split's last target observation. Comparing target-to-target is not
+# sufficient: it can retain a forecast issued before an earlier split's longest-horizon target was
+# observed. The issue-time filter preserves all horizons for each retained anchor. When issue time
+# is unavailable, retain the older target-time-only fallback; with no target time this is a no-op.
 function _embargo_splits(train::DataFrame, validation::DataFrame, holdout::DataFrame)
-    col = :target_time_utc
-    _max_target(d) = (nrow(d) == 0 || !(String(col) in names(d))) ? nothing :
-        maximum(_parse_dt(x) for x in d[!, col] if !ismissing(x); init=typemin(DateTime))
-    _after(d, t) = (t === nothing || nrow(d) == 0 || !(String(col) in names(d))) ? d :
-        d[[(!ismissing(x) && _parse_dt(x) > t) for x in d[!, col]], :]
+    target_col = :target_time_utc
+    issue_col = :issue_time_utc
+    _max_target(d) = (nrow(d) == 0 || !(String(target_col) in names(d))) ? nothing :
+        maximum(_parse_dt(x) for x in d[!, target_col] if !ismissing(x); init=typemin(DateTime))
+    function _issued_after(d, t)
+        (t === nothing || nrow(d) == 0) && return d
+        filter_col = String(issue_col) in names(d) ? issue_col : target_col
+        String(filter_col) in names(d) || return d
+        return d[[(!ismissing(x) && _parse_dt(x) > t) for x in d[!, filter_col]], :]
+    end
     tr_max = _max_target(train)
-    validation = _after(validation, tr_max)
+    validation = _issued_after(validation, tr_max)
     va_max = _max_target(validation)
-    holdout = _after(holdout, va_max)
+    holdout = _issued_after(holdout, va_max)
     return train, validation, holdout
 end
 
@@ -2369,7 +2710,8 @@ end
 Compute metrics for several predictor columns over a SINGLE common finite-row
 mask: a row counts only when its observation and EVERY listed prediction are
 present and finite (`isfinite`, not just `!ismissing`). F6: the validation gate
-compares v2 against the pre-upgrade baseline, persistence, and O'Brien, so a
+compares the calibrated center against the uncorrected SINDy center,
+persistence, and O'Brien, so a
 missing/NaN baseline row must drop the whole comparison row from all metrics.
 Otherwise the comparison is unpaired (different n per column) and a baseline can
 look artificially better or worse than v2. Returns a `Dict{Symbol,NamedTuple}`
@@ -2498,7 +2840,7 @@ function _select_validated_v2_calibration(train::DataFrame,
         all(String(c) in names(train) for c in feature_names) || continue
         nrow(train) > length(feature_names) + 1 || continue
         for ridge in cfg.v2_ridge_grid
-            label = "operational_v2_$(feature_set)_ridge$(ridge)_fit$(nrow(train))"
+            label = "operational_v2_1_$(feature_set)_ridge$(ridge)_fit$(nrow(train))"
             cal = try
                 cal0 = fit_operational_v2_calibration(
                     train;
@@ -2538,7 +2880,7 @@ function _select_validated_v2_calibration(train::DataFrame,
             end
 
             # Evaluate purely on the held-out validation split. F6: v2, the
-            # pre-upgrade baseline, persistence, and O'Brien metrics share ONE
+            # uncorrected SINDy center, persistence, and O'Brien metrics share ONE
             # common finite-row mask so the gate comparison is paired (equal n);
             # a missing/NaN baseline row drops from all columns rather than only
             # its own column.
@@ -2660,7 +3002,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     end
 
     # Acceptance gate decides deployment. A v2 candidate that does not strictly
-    # beat the pre-upgrade baseline and persistence on validation, fails O'Brien,
+    # beat the uncorrected SINDy center and persistence on validation, fails O'Brien,
     # has too thin a validation split, or whose SERVED conformal interval
     # under-covers the holdout is NOT shipped; a v1-equivalent (zero-correction)
     # fallback is deployed instead.
@@ -2669,7 +3011,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     else
         default_operational_v2_calibration(
             feature_names=copy(candidate_cal.feature_names),
-            label="operational_v2_fallback_v1_equiv",
+            label="operational_v2_1_fallback_v1_equiv",
         )
     end
     write_operational_v2_calibration(cfg.v2_calibration_path, cal)
@@ -2859,7 +3201,7 @@ function prepare_issue_inputs(cfg::LiveVerifyConfig;
                                                                     retry_delay_sec=1.0),
                               dst_fn::Function=_fetch_dst)
     calibration = _load_calibration_for_model(cfg)
-    conformal = _load_conformal_for_model(cfg)
+    conformal = _load_conformal_for_model(cfg; calibration=calibration)
     return (
         issue_time=issue_time,
         plasma=plasma_fn(),
@@ -2895,7 +3237,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
     # A deployed V2 product is defined by the paired point and conformal calibrations.
     # Serving the legacy interval-scale band under a calibrated-90% label is fail-open.
     if cfg.model == :v2 && calibration !== nothing &&
-       getfield(calibration, :label) != "operational_v2_fallback_v1_equiv" && conformal === nothing
+       getfield(calibration, :label) != "operational_v2_1_fallback_v1_equiv" && conformal === nothing
         error("Deployed V2 calibration is missing its paired conformal sidecar: " *
               _conformal_path(cfg.v2_calibration_path))
     end
@@ -2997,11 +3339,8 @@ function issue_forecast(cfg::LiveVerifyConfig;
     anchor_drivers = anchor_status.driver
     anchor_dst_star = pressure_correct_dst([latest_dst], [anchor_drivers.Pdyn])[1]
 
-    coef_csv = joinpath(get_data_dir(), "real_sindy_discovery_coefficients.csv")
-    ens_csv = joinpath(get_data_dir(), "real_ensemble_inclusion.csv")
-    state = init_forecast(;
-        coefficients_csv=coef_csv,
-        ensemble_csv=ens_csv,
+    state = init_operational_forecast(;
+        version=OPERATIONAL_V2_1_MODEL_VERSION,
         t0=latest_dst_time,
         dst0=anchor_dst_star,
     )
@@ -3056,6 +3395,8 @@ function issue_forecast(cfg::LiveVerifyConfig;
         burton_full=burton_full_dst,
         obrien=obrien_dst,
     )
+    model_steps = Int((target_time - latest_dst_time) / Hour(1))
+    wall_horizon = (target_time - issue_time) / Hour(1)
     memory_features = _live_v2_memory_features(
         plasma,
         mag,
@@ -3081,6 +3422,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
         memory=memory_features,
         baselines=baseline_predictions,
         v1_pred_dst=v1_pred_dst,
+        model_steps=model_steps,
     )
     selected = _select_model_prediction(
         cfg.model,
@@ -3092,13 +3434,11 @@ function issue_forecast(cfg::LiveVerifyConfig;
         v1_ci95_dst,
         baselines=baseline_predictions,
         features=features,
+        model_steps=model_steps,
     )
     pred_dst = selected.pred_dst
     ci05_dst = selected.ci05_dst
     ci95_dst = selected.ci95_dst
-    model_steps = Int((target_time - latest_dst_time) / Hour(1))
-    wall_horizon = (target_time - issue_time) / Hour(1)
-
     # N1: when a conformal calibration is deployed, the logged 90% interval comes
     # from the stratified conformal half-width (horizon × activity regime),
     # replacing the v1-ensemble-spread interval-scale machinery that structurally
@@ -3106,14 +3446,15 @@ function issue_forecast(cfg::LiveVerifyConfig;
     ci05_dst, ci95_dst, interval_source = _resolve_interval(
         conformal, pred_dst, model_steps, latest_dst, ci05_dst, ci95_dst,
     )
-    # N2: prefer the ONLINE adaptive-conformal (ACI) interval, which holds ~90%
-    # coverage under storm-driven distribution shift where the static stratified
-    # interval drops (≈0.84 on broad replay vs 0.89 for ACI). The ACI state is
-    # derived per horizon from the verified log. Fail-safe: insufficient history or
-    # any error keeps the static interval above; the point forecast is unchanged.
+    # N2: prefer the online adaptive-conformal (ACI) interval when a causal
+    # residual stream is ready. Its realized coverage is an empirical diagnostic;
+    # the bounded implementation does not inherit the ideal recursion's long-run
+    # guarantee. The state is derived per horizon from the verified log. If history
+    # is insufficient or the adaptive path errors, the static interval above is
+    # retained and the point forecast is unchanged.
     # Key the ACI residual pool on the SAME model whose center is being banded (v1 residuals for a
     # v1 issuance), so a v1 point forecast is never handed a v2-calibrated band tagged "aci".
-    aci_pred_col = selected.model_version == "v2" ? :v2_pred_dst_nt : :v1_pred_dst_nt
+    aci_pred_col = selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION ? :v2_pred_dst_nt : :v1_pred_dst_nt
     let aci = _aci_interval_for_policy(
         interval_policy, cfg.log_path, pred_dst, model_steps;
         latest_dst=latest_dst, pred_col=aci_pred_col,
@@ -3123,7 +3464,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
         end
     end
     # Reflect the deployed interval in the v2 CI columns the report scores.
-    if selected.model_version == "v2"
+    if selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION
         v2_ci05_log = interval_source in ("conformal", "aci") ? ci05_dst : selected.v2_ci05_dst
         v2_ci95_log = interval_source in ("conformal", "aci") ? ci95_dst : selected.v2_ci95_dst
         # Guard: a non-finite resolved interval falls back to the v2 baseline band so no NaN reaches the log/served band.
@@ -3134,7 +3475,8 @@ function issue_forecast(cfg::LiveVerifyConfig;
     end
 
     # ---- Legacy schema stability ----
-    # The improved_* columns are retained equal to the pre-upgrade baseline for CSV-schema stability. The served_* columns
+    # The improved_* columns retain the calibrated V2.1 frozen-tail center for
+    # CSV-schema stability. The served_* columns
     # carry the V2 product: L1 look-ahead while measured wind is mapped to the target hour, then
     # regime-aware relaxation after the L1-known window, plus a narrow persistence
     # guard for 1-2 h forecasts when observed Dst is already in the extreme core.
@@ -3146,9 +3488,9 @@ function issue_forecast(cfg::LiveVerifyConfig;
     # Dst deepening to avoid the shallow severe-storm bias found in the plain-B replay. If Dst is already <= -240 nT
     # and the target is within 2 model hours, the point forecast falls back to persistence; the replay scorecard
     # identifies that near-term extreme-core cell as inertia-dominated.
-    reference_pred_dst = selected.model_version == "v2" ? selected.v2_pred_dst : pred_dst
-    reference_ci05_dst = selected.model_version == "v2" ? v2_ci05_log : ci05_dst
-    reference_ci95_dst = selected.model_version == "v2" ? v2_ci95_log : ci95_dst
+    reference_pred_dst = selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION ? selected.v2_pred_dst : pred_dst
+    reference_ci05_dst = selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION ? v2_ci05_log : ci05_dst
+    reference_ci95_dst = selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION ? v2_ci95_log : ci95_dst
     sub_hourly_pred_dst = reference_pred_dst
     served_target_drivers = used_drivers
     # Tail relaxation rate from the freshest contiguous Dst pair (not the zeroed memory tuple), so an
@@ -3179,16 +3521,16 @@ function issue_forecast(cfg::LiveVerifyConfig;
         end
     catch e
         e isa InterruptException && rethrow()
-        @warn "V2 L1/regime-aware tail failed; serving pre-upgrade baseline" exception=(e, catch_backtrace())
+        @warn "V2.1 operational tail failed; serving the current frozen-tail center" exception=(e, catch_backtrace())
     end
-    if selected.model_version == "v2" &&
-       _near_term_extreme_inertia_guard(latest_dst, model_steps)
-        sub_hourly_pred_dst = latest_dst
+    if selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION
+        sub_hourly_pred_dst = _apply_v2_1_safeguards(
+            sub_hourly_pred_dst, latest_dst, model_steps, dst_rate_nt_per_h,
+        )
     end
-    # Eq. (13) projection Π_[-2000,50] on the served (non-guard) center, matching Algorithm 1 and the
-    # replay operator (v2_replay.jl); the served path otherwise leaves the center unbounded above +50 nT
-    # under extreme dynamic-pressure compression plus a positive correction. Applied before the interval
-    # shift so the served band centers on the projected value.
+    # Defensive terminal projection (the V2.1 helper already applies Eq. 13
+    # before its safeguards); v1 and non-finite fallback branches share the
+    # same physical output bounds before the interval shift.
     sub_hourly_pred_dst = clamp(sub_hourly_pred_dst, -2000.0, 50.0)
     sub_hourly_ci05, sub_hourly_ci95 = _shift_interval_to_center(
         sub_hourly_pred_dst,
@@ -3198,10 +3540,10 @@ function issue_forecast(cfg::LiveVerifyConfig;
     )
     # Served-band honesty: once enough verified served rows exist at this lead/regime, calibrate the
     # served 90% band on the served model's OWN residuals (pool served_pred_dst_nt, ACI step centered
-    # on the served center) rather than transplanting the pre-upgrade v2 band — the exchangeability
+    # on the served center) rather than transplanting the frozen-tail V2.1 band — the exchangeability
     # premise breaks exactly where the L1/relaxation/inertia tail moves the center (storm onsets).
-    # Fail-safe to the shifted pre-upgrade band while served history is insufficient (returns nothing).
-    if selected.model_version == "v2"
+    # Fail-safe to the shifted frozen-tail band while served history is insufficient (returns nothing).
+    if selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION
         served_aci = _aci_interval_for_policy(
             interval_policy, cfg.log_path, sub_hourly_pred_dst, model_steps;
             latest_dst=latest_dst, pred_col=:served_pred_dst_nt,
@@ -3211,7 +3553,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
         end
     end
 
-    # ---- V2 product forecast = pre-upgrade baseline + L1/regime-aware/inertia tail.
+    # ---- V2.1 product forecast = current frozen-tail center + operational tail.
     served_pred_dst = sub_hourly_pred_dst
     served_ci05_dst = sub_hourly_ci05
     served_ci95_dst = sub_hourly_ci95
@@ -3228,7 +3570,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
         horizon_hours=[wall_horizon],
         wall_clock_lead_hours=[wall_horizon],
         model_step_hours=[model_steps],
-        driver_assumption=["ballistically_propagated_l1_then_regime_aware_relaxation_then_extreme_inertia_guard"],
+        driver_assumption=["ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_inertia_blend_then_state_inertia_then_extreme_inertia_guard"],
         driver_data_gap=[driver_data_gap],
         dst_memory_fallback=[dst_memory_fallback],
         n_speed_finite_trailing_hour=[n_speed_finite],
@@ -3282,14 +3624,14 @@ function issue_forecast(cfg::LiveVerifyConfig;
         burton_dst_nt=[burton_dst],
         burton_full_dst_nt=[burton_full_dst],
         obrien_dst_nt=[obrien_dst],
-        improved_model_version=["v2"],
+        improved_model_version=[OPERATIONAL_V2_1_MODEL_VERSION],
         improved_pred_dst_nt=[improved_pred_dst],
         improved_pred_dst_ci05_nt=[improved_ci05],
         improved_pred_dst_ci95_nt=[improved_ci95],
         served_pred_dst_nt=[served_pred_dst],
         served_pred_dst_ci05_nt=[served_ci05_dst],
         served_pred_dst_ci95_nt=[served_ci95_dst],
-        sub_hourly_model_version=[selected.model_version == "v2" ? V2_SERVED_TAIL_VERSION : V1_SERVED_TAIL_VERSION],
+        sub_hourly_model_version=[selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION ? V2_SERVED_TAIL_VERSION : V1_SERVED_TAIL_VERSION],
         sub_hourly_pred_dst_nt=[sub_hourly_pred_dst],
         sub_hourly_pred_dst_ci05_nt=[sub_hourly_ci05],
         sub_hourly_pred_dst_ci95_nt=[sub_hourly_ci95],
@@ -3331,7 +3673,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
     elseif verbose
         println("Using existing pending forecast row $row_idx: $(cfg.log_path)")
     end
-    model_label = selected.model_version == "v2" ? "V2" : "SINDy v1"
+    model_label = selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION ? "V2.1" : "SINDy v1"
     verbose && println("Issue UTC: $issue_time")
     verbose && println("Latest SWPC solar wind: $latest_common_sw")
     verbose && println("Latest observed Kyoto Dst: $latest_dst_time = $latest_dst nT")
@@ -3339,13 +3681,13 @@ function issue_forecast(cfg::LiveVerifyConfig;
     verbose && println("Forecast model: $model_label")
     verbose && println("Lead time: $(round(wall_horizon; digits=3)) hr wall-clock, $model_steps model steps")
     verbose && println("Forecast Dst*: $(round(result.dst_predicted; digits=2)) nT")
-    if verbose && selected.model_version == "v2"
+    if verbose && selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION
         println(
-            "V2 Dst: $(round(served_pred_dst; digits=2)) nT; 90% CI " *
+            "V2.1 Dst: $(round(served_pred_dst; digits=2)) nT; 90% CI " *
             "[$(round(served_ci05_dst; digits=2)), $(round(served_ci95_dst; digits=2))]"
         )
         println(
-            "Pre-upgrade baseline Dst: $(round(pred_dst; digits=2)) nT; 90% CI " *
+            "V2.1 frozen-tail ablation Dst: $(round(pred_dst; digits=2)) nT; 90% CI " *
             "[$(round(ci05_dst; digits=2)), $(round(ci95_dst; digits=2))]"
         )
         println(
@@ -3782,13 +4124,46 @@ function _interval_coverage_fraction(df::DataFrame, rows::Vector{Int}, ci05_col:
     return mean(flags)
 end
 
-function _standard_model_columns(df::DataFrame)
-    specs = Pair{String,Symbol}[]
-    served_active = String(:served_pred_dst_nt) in names(df)
-    if served_active
-        push!(specs, "V2" => :served_pred_dst_nt)
+function _operational_log_identity(
+    df::DataFrame;
+    empty_identity::Union{Nothing,Symbol}=nothing,
+)
+    empty_identity in (nothing, :v2_0, :v2_1) || throw(ArgumentError(
+        "empty forecast-log identity must be :v2_0, :v2_1, or nothing",
+    ))
+    versions = Set{String}()
+    if String(:model_version) in names(df)
+        for value in df[!, :model_version]
+            ismissing(value) && continue
+            token = strip(String(value))
+            isempty(token) || push!(versions, token)
+        end
     end
-    v2_label = served_active ? "Pre-upgrade baseline" : "V2"
+    has_current = OPERATIONAL_V2_1_MODEL_VERSION in versions
+    # Bare `v2` is historical inside persisted logs written before the V2.1
+    # migration. New issuance always writes the explicit canonical `v2.1`.
+    has_historical = any(v -> v in ("v2", "v2.0", "v2_0"), versions)
+    has_current && has_historical && throw(ArgumentError(
+        "forecast log mixes historical V2.0 and current V2.1 rows; migrate it before reporting",
+    ))
+    has_current && return :v2_1
+    has_historical && return :v2_0
+    isempty(versions) && empty_identity !== nothing && return empty_identity
+    # No row-level V2 identity exists. Stay conservative: column presence alone
+    # is not evidence that an old expanded schema contains V2.1 forecasts.
+    return :v2_0
+end
+
+function _standard_model_columns(df::DataFrame;
+                                 identity::Symbol=_operational_log_identity(df))
+    specs = Pair{String,Symbol}[]
+    has_served_product = String(:served_pred_dst_nt) in names(df)
+    if has_served_product
+        served_label = identity == :v2_1 ? "V2.1" : "Historical V2.0"
+        push!(specs, served_label => :served_pred_dst_nt)
+    end
+    base_label = identity == :v2_1 ? "V2.1" : "Historical V2.0"
+    v2_label = has_served_product ? "$base_label frozen-tail ablation" : base_label
     append!(specs, Pair{String,Symbol}[
         v2_label => :v2_pred_dst_nt,
         "SINDy v1" => :v1_pred_dst_nt,
@@ -3931,7 +4306,12 @@ function _newest_issue_time(df::DataFrame)
     return latest
 end
 
-function write_live_comparison_report(log_path::String, report_path::String; df=nothing)
+function write_live_comparison_report(
+    log_path::String,
+    report_path::String;
+    df=nothing,
+    empty_identity::Union{Nothing,Symbol}=nothing,
+)
     isfile(log_path) || error("No forecast log exists at $log_path")
     df = df === nothing ? CSV.read(log_path, DataFrame) : df
     verified = _verified_indices(df)
@@ -3940,10 +4320,12 @@ function write_live_comparison_report(log_path::String, report_path::String; df=
     # Exclude pre-guard same-cycle duplicate scored rows from pooled metrics/coverage.
     valid_verified, n_duplicate_dropped = _dedup_scored_indices(df, strictly_future)
     pending = _pending_indices(df)
-    model_specs = _standard_model_columns(df)
+    identity = _operational_log_identity(df; empty_identity)
+    model_specs = _standard_model_columns(df; identity=identity)
     comparison_rows = _same_row_model_indices(df, valid_verified, model_specs)
     served_active = any(last(spec) == :served_pred_dst_nt for spec in model_specs)
-    headline_name = "V2"
+    current_active = identity == :v2_1
+    headline_name = current_active ? "V2.1" : "Historical V2.0"
     headline_col = served_active ? :served_pred_dst_nt : :v2_pred_dst_nt
     headline_ci05 = served_active ? :served_pred_dst_ci05_nt : :v2_pred_dst_ci05_nt
     headline_ci95 = served_active ? :served_pred_dst_ci95_nt : :v2_pred_dst_ci95_nt
@@ -3981,10 +4363,14 @@ function write_live_comparison_report(log_path::String, report_path::String; df=
     push!(lines, "")
     push!(lines, "## Same-Row Model Comparison")
     push!(lines, "")
-    if served_active
-        push!(lines, "V2 is the dashboard forecast. The pre-upgrade baseline is retained only as an audit comparator; all rows are identical verified targets.")
+    if current_active && served_active
+        push!(lines, "V2.1 is the dashboard forecast. Its frozen-tail ablation is retained only as an audit comparator; all rows are identical verified targets.")
+    elseif current_active
+        push!(lines, "V2.1 is the current operational method; all rows are identical verified targets.")
+    elseif served_active
+        push!(lines, "Historical V2.0 is the archived operational method. Its frozen-tail ablation, v1, and physical baselines are compared on identical verified rows.")
     else
-        push!(lines, "V2 is the operational method. This table compares V2, v1, and baselines on identical verified rows.")
+        push!(lines, "Historical V2.0 is the archived operational method. This table compares V2.0, v1, and baselines on identical verified rows.")
     end
     push!(lines, "")
     push!(lines, "| model | n | RMSE nT | MAE nT | bias nT |")
@@ -3997,7 +4383,7 @@ function write_live_comparison_report(log_path::String, report_path::String; df=
     push!(lines, "")
     push!(lines, "## Verified $headline_name Rows")
     push!(lines, "")
-    ref_header = served_active ? "pre-upgrade baseline pred | " : ""
+    ref_header = served_active ? "$headline_name frozen-tail pred | " : ""
     push!(lines, "| issue UTC | target UTC | lead h | observed | $(lowercase(headline_name)) pred | residual obs-pred | abs error | inside 90% CI | $(ref_header)SINDy v1 pred | persistence | Burton | OBrien |")
     if served_active
         push!(lines, "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |")
@@ -4048,10 +4434,10 @@ function write_live_comparison_report(log_path::String, report_path::String; df=
         push!(lines, "## Pending Rows")
         push!(lines, "")
         if served_active
-            push!(lines, "| issue UTC | target UTC | model | V2 pred | pre-upgrade baseline pred | CI05 | CI95 |")
+            push!(lines, "| issue UTC | target UTC | model | $headline_name pred | $headline_name frozen-tail pred | CI05 | CI95 |")
             push!(lines, "| --- | --- | --- | ---: | ---: | ---: | ---: |")
         else
-            push!(lines, "| issue UTC | target UTC | model | V2 pred | CI05 | CI95 |")
+            push!(lines, "| issue UTC | target UTC | model | Historical V2.0 pred | CI05 | CI95 |")
             push!(lines, "| --- | --- | --- | ---: | ---: | ---: |")
         end
         for row_idx in pending
@@ -4101,9 +4487,10 @@ function write_live_comparison_report(log_path::String, report_path::String; df=
 
     if String(:v2_selected_component) in names(df) && !isempty(comparison_rows)
         push!(lines, "")
-        push!(lines, "## Operational V2 Audit")
+        audit_version = current_active ? "V2.1" : "V2.0"
+        push!(lines, "## Operational $audit_version Audit")
         push!(lines, "")
-        push!(lines, "The component column is internal v2 audit metadata, not a separate headline model.")
+        push!(lines, "The component column is internal $audit_version audit metadata, not a separate headline model.")
         push!(lines, "")
         push!(lines, "| target UTC | v2 component |")
         push!(lines, "| --- | --- |")
@@ -4123,7 +4510,15 @@ function write_live_comparison_report(log_path::String, report_path::String; df=
     push!(lines, "")
     push!(lines, "- A row is correct for point accuracy only by its absolute error against the locked target observation.")
     push!(lines, "- A row is correct for probabilistic coverage only if the observation falls inside the locked interval.")
-    push!(lines, "- V2 is the dashboard forecast; judge it against the pre-upgrade audit baseline and physical baselines on the same verified rows.")
+    if current_active && served_active
+        push!(lines, "- V2.1 is the dashboard forecast; judge it against its frozen-tail ablation and physical baselines on the same verified rows.")
+    elseif current_active
+        push!(lines, "- These rows identify V2.1; judge its point forecast against physical baselines on the same verified rows.")
+    elseif served_active
+        push!(lines, "- These rows are historical V2.0 evidence; judge its served product against the frozen-tail ablation and physical baselines on the same verified rows.")
+    else
+        push!(lines, "- These rows are historical V2.0 evidence and must not be attributed to V2.1.")
+    end
     push!(lines, "- Pending rows are not evidence for or against the model.")
 
     dir = dirname(report_path)
@@ -4142,35 +4537,44 @@ function summarize_log(log_path::String)
     isfile(log_path) || error("No forecast log exists at $log_path")
     df = CSV.read(log_path, DataFrame)
     println("Live forecast log: $log_path")
-    served_active = String(:served_pred_dst_nt) in names(df)
-    v2_label = served_active ? "Pre-upgrade baseline" : "V2"
-    model_specs = Pair{String,Symbol}[
-        "V2" => :served_pred_dst_nt,
-        v2_label => :v2_pred_dst_nt,
-        "SINDy v1" => :v1_pred_dst_nt,
-        "Persistence" => :persistence_dst_nt,
-        "Burton" => :burton_dst_nt,
-        "BurtonFull" => :burton_full_dst_nt,
-        "OBrienMcP" => :obrien_dst_nt,
-    ]
+    identity = _operational_log_identity(df)
+    model_specs = _standard_model_columns(df; identity=identity)
     # Deduplicate scored rows by (issue hour, target, model) so pre-guard duplicate rows do
     # not double-count in the pooled metrics/coverage (see _dedup_scored_indices).
     verified = _verified_indices(df)
     kept, n_duplicate_dropped = _dedup_scored_indices(df, verified)
     n_duplicate_dropped > 0 && println(
         "(excluded $n_duplicate_dropped duplicate (issue hour, target, model) scored row(s) from pooled metrics)")
+    comparison_rows = _same_row_model_indices(df, kept, model_specs)
     for (name, col) in model_specs
         (col == :v1_pred_dst_nt || String(col) in names(df)) || continue
-        preds, obs = _metric_rows_for_indices(df, col, kept)
+        preds, obs = _metric_rows_for_indices(df, col, comparison_rows)
         _print_metric(name, preds, obs)
     end
-    if String(:observed_in_90ci) in names(df)
+    served_active = any(last(spec) == :served_pred_dst_nt for spec in model_specs)
+    ci05_col = served_active ? :served_pred_dst_ci05_nt : :v2_pred_dst_ci05_nt
+    ci95_col = served_active ? :served_pred_dst_ci95_nt : :v2_pred_dst_ci95_nt
+    flags = Bool[]
+    for i in comparison_rows
+        value = _interval_contains(df, i, ci05_col, ci95_col)
+        ismissing(value) || push!(flags, Bool(value))
+    end
+    if !isempty(flags)
+        headline = identity == :v2_1 ? "V2.1" : "Historical V2.0"
+        println(
+            "$headline 90% coverage n=$(length(flags)) " *
+            "coverage=$(round(mean(flags); digits=3))",
+        )
+    elseif String(:observed_in_90ci) in names(df) && isempty(model_specs)
         flags = Bool[]
         for i in kept
             value = df[i, :observed_in_90ci]
             ismissing(value) || push!(flags, Bool(value))
         end
-        isempty(flags) || println("SINDy 90% coverage n=$(length(flags)) coverage=$(round(mean(flags); digits=3))")
+        isempty(flags) || println(
+            "Unversioned SINDy 90% coverage n=$(length(flags)) " *
+            "coverage=$(round(mean(flags); digits=3))",
+        )
     end
     return nothing
 end
@@ -4199,7 +4603,11 @@ function main(args=ARGS)
     elseif cfg.mode == :summary
         summarize_log(cfg.log_path)
     elseif cfg.mode == :comparison_report
-        write_live_comparison_report(cfg.log_path, cfg.report_path)
+        write_live_comparison_report(
+            cfg.log_path,
+            cfg.report_path;
+            empty_identity=(cfg.model == :v2 ? :v2_1 : nothing),
+        )
     else
         error("Unsupported mode: $(cfg.mode)")
     end

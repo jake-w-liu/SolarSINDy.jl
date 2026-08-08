@@ -15,6 +15,7 @@ include(joinpath(@__DIR__, "v2_lookahead_replay.jl"))   # _transit_hours, _blend
 const HRO_DIR   = OPERATIONAL_HRO_CACHE
 const OUT_CSV_SA = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_subhourly_A_replay_scored.csv")
 const OUT_MD_SA  = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_subhourly_A_replay_report.md")
+const HRO_BASE_URL = "https://cdaweb.gsfc.nasa.gov/pub/data/omni/high_res_omni/monthly_1min"
 
 # OMNI HRO 1-min, whitespace-delimited. 1-based split columns (verified against hroformat.txt):
 #   f[1]year f[2]doy f[3]hour f[4]minute  f[10]timeshift_sec  f[18]By_GSM f[19]Bz_GSM  f[22]V  f[26]n  f[28]Pdyn
@@ -41,13 +42,24 @@ function parse_hro(path::AbstractString)
     return df
 end
 
-"Load 1-min HRO covering a storm window (one or two monthly files), concatenated + sorted."
+"Calendar months intersecting the padded HRO window for a storm."
+function _hro_months_for_storm(storm)
+    first_month = Date(year(storm.t0 - Hour(6)), month(storm.t0 - Hour(6)), 1)
+    last_month = Date(year(storm.t1 + Hour(7)), month(storm.t1 + Hour(7)), 1)
+    return collect(first_month:Month(1):last_month)
+end
+
+_hro_month_path(d::Date) = joinpath(HRO_DIR, "omni_min$(year(d))$(lpad(month(d), 2, '0')).asc")
+
+"Load 1-min HRO covering a storm window, concatenated and time-sorted."
 function _hro_for_storm(storm)
-    months = unique([(year(d), month(d)) for d in (storm.t0 - Hour(6), storm.t1 + Hour(7))])
     dfs = DataFrame[]
-    for (y, mo) in months
-        p = joinpath(HRO_DIR, "omni_min$(y)$(lpad(mo, 2, '0')).asc")
-        isfile(p) || error("missing HRO month file: $p")
+    for d in _hro_months_for_storm(storm)
+        p = _hro_month_path(d)
+        isfile(p) || error(
+            "missing NASA OMNI HRO month file: $p\n" *
+            "Run `julia --project=. validation/operational/fetch_omni_hro.jl` from the package root.",
+        )
         push!(dfs, parse_hro(p))
     end
     df = vcat(dfs...); sort!(df, :time); return df
@@ -68,8 +80,11 @@ end
 
 """h-step sub-hourly A forecast: step-k driver = f·(HRO mean over the L1-KNOWN minutes of the step) +
 (1-f)·issue_drv, where "known" = the minute's L1 measurement time ≤ issue t (exact per-parcel horizon, no
-constant-Δ approximation). Engine-faithful clamp; issue-time v2 correction. force_frozen ⇒ v2."""
-function _subA_forecast(lib, ξ0, anchor_dst_star, issue_drv, hro, it::DateTime, latest_dst, cal, h::Int; force_frozen::Bool = false)
+constant-Δ approximation). The revised 20/11 core and V2.1 calibration are used. `force_frozen` reproduces
+the V2.1 frozen-tail ablation; this component study does not reproduce the fully served product."""
+function _subA_forecast(lib, ξ0, anchor_dst_star, issue_drv, hro, it::DateTime,
+                        latest_dst, cal, h::Int; force_frozen::Bool=false,
+                        calibration_features=nothing)
     fc = init_assimilation(lib, ξ0, Int[], anchor_dst_star)
     for k in 1:h
         drv_k = issue_drv
@@ -82,10 +97,10 @@ function _subA_forecast(lib, ξ0, anchor_dst_star, issue_drv, hro, it::DateTime,
     end
     pred_dst_star = current_dst(fc)
     pred_dst = pred_dst_star + 7.26 * sqrt(max(issue_drv.Pdyn, 0.0)) - 11.0
-    feat_df = DataFrame(latest_dst_nt = [latest_dst], V_kms = [issue_drv.V], Bz_nt = [issue_drv.Bz],
-                        By_nt = [issue_drv.By], n_cm3 = [issue_drv.n], Pdyn_npa = [issue_drv.Pdyn])
-    prep = SolarSINDy.add_operational_v2_features!(feat_df)
-    feats = NamedTuple{Tuple(cal.feature_names)}(Tuple(Float64(prep[1, c]) for c in cal.feature_names))
+    feats = _v2_calibration_features(
+        cal, latest_dst, issue_drv; v1_pred_dst=pred_dst, model_steps=h,
+        feature_source=calibration_features, context="subhourly-A",
+    )
     corr = SolarSINDy.operational_v2_correction(cal, feats)
     return clamp(pred_dst, -2000.0, 50.0), clamp(pred_dst + corr, -2000.0, 50.0)
 end
@@ -94,9 +109,12 @@ function replay_subA_storm(storm, lib, ξ0, cal)
     hro = _hro_for_storm(storm)
     yr = year(storm.t1)
     plasma, mag, dst_times, dst_vals = _omni_replay_inputs(OMNI, yr - 1, yr)
-    m = (dst_times .>= storm.t0 - Hour(6)) .& (dst_times .<= storm.t1 + Hour(7))
-    rh = Int(ceil(Dates.value((storm.t1 + Hour(7)) - (storm.t0 - Hour(6))) / 3_600_000))
-    df = replay_recent_table(plasma[m, :], mag[m, :], dst_times[m], dst_vals[m];
+    win_lo, win_hi = storm.t0 - Hour(6), storm.t1 + Hour(7)
+    plasma, mag, dst_times, dst_vals = _slice_replay_window(
+        plasma, mag, dst_times, dst_vals, win_lo, win_hi,
+    )
+    rh = Int(ceil(Dates.value(win_hi - win_lo) / 3_600_000))
+    df = replay_recent_table(plasma, mag, dst_times, dst_vals;
                              replay_hours = rh, horizons = LEADS, model = :v2, calibration = cal)
     df[!, :issue_dt] = DateTime.(df.issue_time_utc)
     df = df[(df.issue_dt .>= storm.t0) .& (df.issue_dt .<= storm.t1), :]
@@ -118,8 +136,14 @@ function replay_subA_storm(storm, lib, ξ0, cal)
             (ismissing(r.observation_dst_nt) || ismissing(r.v2_pred_dst_nt)) && continue
             isfinite(Float64(r.observation_dst_nt)) && isfinite(Float64(r.v2_pred_dst_nt)) || continue
             h = Int(r.model_step_hours)
-            _, sa  = _subA_forecast(lib, ξ0, anchor_star, issue_drv, hro, it, latest, cal, h)
-            _, saf = _subA_forecast(lib, ξ0, anchor_star, issue_drv, hro, it, latest, cal, h; force_frozen = true)
+            _, sa = _subA_forecast(
+                lib, ξ0, anchor_star, issue_drv, hro, it, latest, cal, h;
+                calibration_features=r,
+            )
+            _, saf = _subA_forecast(
+                lib, ξ0, anchor_star, issue_drv, hro, it, latest, cal, h;
+                force_frozen=true, calibration_features=r,
+            )
             isfinite(sa) && isfinite(saf) || continue
             push!(out, (storm.name, it, h, Float64(r.observation_dst_nt), Float64(r.v2_pred_dst_nt),
                         sa, saf, latest, _transit_hours(issue_drv.V), rate))
@@ -133,8 +157,8 @@ function _cell_subA(rows)
     ev2 = rows.obs .- rows.v2; es = rows.obs .- rows.subA; ep = rows.obs .- rows.persistence
     rv2, rs, rp = _rmse(ev2), _rmse(es), _rmse(ep)
     strong_pers = rp <= rv2
-    Δ, lo, hi = paired_improvement(strong_pers ? ep : ev2, es)
-    return (n = nrow(rows), rmse_v2 = rv2, rmse_s = rs, rmse_pers = rp, stronger = strong_pers ? "pers" : "v2",
+    Δ, lo, hi = paired_improvement(strong_pers ? ep : ev2, es; storms=rows.storm)
+    return (n = nrow(rows), rmse_v2 = rv2, rmse_s = rs, rmse_pers = rp, stronger = strong_pers ? "pers" : "frozen-tail",
             improve = Δ, ci_lo = lo, ci_hi = hi, fair = maximum(abs.(rows.subA_frozen .- rows.v2)))
 end
 
@@ -151,13 +175,16 @@ function main_subA()
     end
     CSV.write(OUT_CSV_SA, all_rows)
     open(OUT_MD_SA, "w") do io
-        println(io, "# Sub-hourly Direction A (1-min OMNI HRO) vs V2 + persistence (multi-lead, causal)\n")
+        println(io, "# Sub-hourly Direction A (1-min OMNI HRO) vs V2.1 frozen-tail ablation + persistence\n")
         println(io, "At issue t, each rollout step is driven by the AVERAGE 1-min HRO wind over its L1-KNOWN ",
                     "minutes — those whose L1 measurement time (bow-shock time − HRO timeshift) is ≤ t — blended ",
                     "with the frozen issue driver by the known fraction. This is the EXACT per-parcel L1 horizon ",
-                    "(no constant-Δ approximation), so it is leakage-safe even when the wind accelerates. `improve` ",
-                    "= paired |err stronger-baseline| − |err A|; `fair` = max|subA_frozen − v2| (continuity).\n")
-        println(io, "| lead [h] | regime | n | RMSE v2 | RMSE subA | RMSE pers | stronger | improve [nT] (95% CI) | fair |")
+                    "(no constant-Δ approximation), so it is leakage-safe even when the wind accelerates. The arm ",
+                    "uses the revised 20/11 core and V2.1 calibration but substitutes this driver path for the frozen ",
+                    "rollout. It is component-development evidence, not a replay of the fully served V2.1 product. ",
+                    "`improve` = paired RMSE(stronger {frozen-tail, persistence}) − RMSE(A), with a storm-cluster ",
+                    "95% CI; `fair` verifies exact continuity to the frozen-tail ablation.\n")
+        println(io, "| lead [h] | regime | n | RMSE frozen-tail | RMSE subA | RMSE pers | stronger | improve [nT] (95% CI) | fair |")
         println(io, "|---|---|---|---|---|---|---|---|---|")
         println("\n  lead regime    n   v2    subA  pers  strong  improve[CI]            fair")
         for h in LEADS
@@ -172,10 +199,12 @@ function main_subA()
             end
         end
         max_fair = maximum(abs.(all_rows.subA_frozen .- all_rows.v2))
-        println(io, "\nMax fairness gap max|subA_frozen − v2| = ", round(max_fair; digits=2),
+        println(io, "\nMax continuity gap max|subA_frozen − V2.1 frozen-tail| = ", round(max_fair; digits=2),
                     " nT. Compare to the hourly Direction A (Δ≥1 subset +1.40/+2.14/+2.37 at 1/2/3 h): the sub-hourly ",
                     "version uses every issue's true sub-hour window, not just Δ≥1.\n")
-        println("\n  sub-hourly A: max fairness gap = ", round(max_fair; digits=2), " nT")
+        println(io, "This measured-timeshift arm is a high-information diagnostic; a live system cannot know the ",
+                    "per-parcel OMNI propagation shift. The ballistic component is evaluated separately.\n")
+        println("\n  sub-hourly A: max frozen-tail continuity gap = ", round(max_fair; digits=2), " nT")
     end
     println("  wrote ", OUT_CSV_SA, " and ", OUT_MD_SA)
     return all_rows
@@ -199,18 +228,18 @@ function _selftest_subA()
         @assert 0.0 <= fnow < 1.0 "known fraction at issue time must be < 1 (leakage horizon): $fnow"
     end
     drv = (V = 300.0, Bz = -10.0, By = 2.0, n = 6.0, Pdyn = 2.0)
-    # Oracle 1 — CONTINUITY: force_frozen ⇒ frozen issue driver ⇒ v2-equivalent _shadow_forecast (no HRO).
+    # Oracle 1 — ABLATION CONTINUITY: force_frozen reproduces the revised-core frozen-tail reference.
     dummy = DataFrame(time = DateTime[], ltime = DateTime[], V = Float64[], Bz = Float64[], By = Float64[], n = Float64[], Pdyn = Float64[])
     for h in (1, 3, 6)
         a = _subA_forecast(lib, ξ0, -150.0, drv, dummy, DateTime(2024, 5, 10, 18), -148.0, _calSA(), h; force_frozen = true)
         b = _shadow_forecast(lib, ξ0, i_decay, ξ0[i_decay], -150.0, drv, -148.0, _calSA(); nsteps = h)
-        @assert a == b "continuity broken at h=$h: subA_frozen=$a v2=$b"
+        @assert a == b "frozen-tail continuity broken at h=$h: subA_frozen=$a reference=$b"
     end
     # Oracle 2 — empty HRO window ⇒ falls back to the frozen issue driver (no spurious look-ahead).
     e = _subA_forecast(lib, ξ0, -150.0, drv, dummy, DateTime(2024, 5, 10, 18), -148.0, _calSA(), 1)
     f = _subA_forecast(lib, ξ0, -150.0, drv, dummy, DateTime(2024, 5, 10, 18), -148.0, _calSA(), 1; force_frozen = true)
     @assert e == f "empty-HRO look-ahead must fall back to frozen ($e != $f)"
-    println("  ✓ sub-hourly A self-test: HRO parse plausible, continuity to v2, empty-window frozen fallback")
+    println("  ✓ sub-hourly A self-test: HRO parse plausible, frozen-tail continuity, empty-window fallback")
     return true
 end
 

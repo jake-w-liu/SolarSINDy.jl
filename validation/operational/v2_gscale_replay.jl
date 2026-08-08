@@ -295,23 +295,33 @@ function _with_gscale_metadata(rows::DataFrame, storm)
     return select(out, :g_event_id, :storm, :g_level, :peak_kp, :peak_kp_utc,
                   :n_kp_bins, :event_start_utc, :event_end_utc, :replay_start_utc,
                   :replay_end_utc, :issue_utc, :target_utc, :lead, :obs,
-                  :audit_baseline, :v2, :v2_frozen, :persistence, :rate)
+                  :v2_1, :v2_1_pre_rate_guard, :v2_1_pre_one_hour_inertia,
+                  :v2_1_pre_state_inertia,
+                  :v2_0, :v2_1_frozen,
+                  :persistence, :rate)
 end
 
 function run_gscale_replay(events::DataFrame)
-    lib, ξ0, _ = _shadow_library()
-    cal = _load_calibration_for_model(LiveVerifyConfig(model = :v2))
-    lookups = Dict{Int,Any}()
+    current_core = load_operational_core(OPERATIONAL_V2_1_MODEL_VERSION)
+    historical_core = load_operational_core(OPERATIONAL_V2_0_MODEL_VERSION)
+    current_cal = read_operational_v2_calibration(
+        operational_calibration_artifacts(OPERATIONAL_V2_1_MODEL_VERSION).point_csv,
+    )
+    historical_cal = read_operational_v2_calibration(
+        operational_calibration_artifacts(OPERATIONAL_V2_0_MODEL_VERSION).point_csv,
+    )
+    min_year = minimum(year(DateTime(t)) for t in events.replay_start_utc) - 1
+    max_year = maximum(year(DateTime(t)) for t in events.replay_end_utc)
+    archive = _load_replay_archive(min_year, max_year)
     scored = DataFrame()
     skipped = DataFrame(g_event_id = Int[], reason = String[])
     for r in eachrow(events)
         storm = _gscale_storm_from_row(r)
-        yr = year(storm.t1)
-        if !haskey(lookups, yr)
-            lookups[yr] = _driver_lookup(yr)
-        end
         try
-            rows = replay_v2_storm(storm, lib, ξ0, cal, lookups[yr])
+            rows = replay_v2_storm(
+                storm, current_core, current_cal, historical_core, historical_cal,
+                archive.lookup; replay_inputs=archive.inputs,
+            )
             if nrow(rows) == 0
                 push!(skipped, (storm.event_id, "no finite scored rows"))
             else
@@ -329,10 +339,9 @@ _gscale_rmse(residuals) = sqrt(mean(abs2, Float64.(residuals)))
 function _gscale_metric_row(rows::DataFrame, cohort::AbstractString, lead::Int)
     sub = rows[Int.(rows.lead) .== lead, :]
     nrow(sub) == 0 && return nothing
-    rbase = _gscale_rmse(sub.obs .- sub.audit_baseline)
-    rv2 = _gscale_rmse(sub.obs .- sub.v2)
+    rv20 = _gscale_rmse(sub.obs .- sub.v2_0)
+    rv21 = _gscale_rmse(sub.obs .- sub.v2_1)
     rpers = _gscale_rmse(sub.obs .- sub.persistence)
-    fair = maximum(abs.(Float64.(sub.v2_frozen) .- Float64.(sub.audit_baseline)))
     return (
         cohort = String(cohort),
         lead_h = lead,
@@ -340,20 +349,22 @@ function _gscale_metric_row(rows::DataFrame, cohort::AbstractString, lead::Int)
         n_events = length(unique(Int.(sub.g_event_id))),
         min_g_level = minimum(Int.(sub.g_level)),
         max_g_level = maximum(Int.(sub.g_level)),
-        rmse_preupgrade_nt = rbase,
-        rmse_v2_nt = rv2,
+        rmse_v2_0_nt = rv20,
+        rmse_v2_1_nt = rv21,
         rmse_persistence_nt = rpers,
-        improvement_vs_best_nt = min(rbase, rpers) - rv2,
-        fair_max_abs_nt = fair,
+        improvement_vs_best_nt = min(rv20, rpers) - rv21,
+        max_tail_effect_nt = maximum(abs.(Float64.(sub.v2_1) .- Float64.(sub.v2_1_frozen))),
+        max_core_change_nt = maximum(abs.(Float64.(sub.v2_1_frozen) .- Float64.(sub.v2_0))),
     )
 end
 
 function gscale_summary(rows::DataFrame)
     out = DataFrame(cohort = String[], lead_h = Int[], n_rows = Int[], n_events = Int[],
                     min_g_level = Int[], max_g_level = Int[],
-                    rmse_preupgrade_nt = Float64[], rmse_v2_nt = Float64[],
+                    rmse_v2_0_nt = Float64[], rmse_v2_1_nt = Float64[],
                     rmse_persistence_nt = Float64[],
-                    improvement_vs_best_nt = Float64[], fair_max_abs_nt = Float64[])
+                    improvement_vs_best_nt = Float64[], max_tail_effect_nt = Float64[],
+                    max_core_change_nt = Float64[])
     isempty(rows) && return out
     for lead in LEADS
         m = _gscale_metric_row(rows, "all_G3plus", lead)
@@ -372,25 +383,29 @@ end
 function _validate_gscale_rows(rows::DataFrame)
     isempty(rows) && error("G-scale replay produced no scored rows")
     required = [:g_event_id, :storm, :g_level, :peak_kp, :event_start_utc, :event_end_utc,
-                :issue_utc, :target_utc, :lead, :obs, :audit_baseline, :v2, :v2_frozen,
+                :issue_utc, :target_utc, :lead, :obs, :v2_1,
+                :v2_1_pre_rate_guard, :v2_1_pre_one_hour_inertia,
+                :v2_1_pre_state_inertia,
+                :v2_0, :v2_1_frozen,
                 :persistence, :rate]
     missing_cols = [String(c) for c in required if !(String(c) in names(rows))]
     isempty(missing_cols) || error("G-scale replay missing columns: $(join(missing_cols, ", "))")
     all(rows.target_utc .== rows.issue_utc .+ Hour.(Int.(rows.lead))) ||
         error("target_utc does not match issue_utc + lead")
-    for col in (:obs, :audit_baseline, :v2, :v2_frozen, :persistence, :peak_kp)
+    for col in (:obs, :v2_1, :v2_1_pre_rate_guard, :v2_1_pre_one_hour_inertia,
+                :v2_1_pre_state_inertia,
+                :v2_0, :v2_1_frozen,
+                :persistence, :peak_kp)
         all(isfinite, Float64.(rows[!, col])) || error("non-finite values in $col")
     end
     all(Int.(rows.g_level) .>= GSCALE_MIN_LEVEL) || error("found rows below G3")
-    fair = maximum(abs.(Float64.(rows.v2_frozen) .- Float64.(rows.audit_baseline)))
-    fair <= 1e-9 || error("frozen-tail continuity failed: max gap $fair")
     return true
 end
 
 function _write_gscale_report(path::AbstractString, events::DataFrame, scored::DataFrame,
                               skipped::DataFrame, summary::DataFrame, cfg::GScaleReplayConfig)
     open(path, "w") do io
-        println(io, "# V2 exact Kp/G-scale replay\n")
+        println(io, "# Operational V2.1 exact Kp/G-scale replay\n")
         println(io, "Selection: GFZ three-hour Kp bins with Kp >= ", cfg.min_kp,
                 " (NOAA G", cfg.min_level, "+), clustered with gap <= ", cfg.gap_hours,
                 " h; replay window = event start - ", cfg.pre_hours,
@@ -400,13 +415,13 @@ function _write_gscale_report(path::AbstractString, events::DataFrame, scored::D
                 isempty(scored) ? 0 : length(unique(Int.(scored.g_event_id))),
                 "; scored rows=", nrow(scored), "; skipped events=", nrow(skipped), ".")
         println(io, "Source: GFZ Kp/ap since 1932; NOAA G-scale thresholds are Kp 5/6/7/8/9 for G1/G2/G3/G4/G5.\n")
-        println(io, "| cohort | lead h | rows | events | G range | RMSE pre-upgrade | RMSE V2 | RMSE persistence | improve vs best | fair |")
-        println(io, "| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |")
+        println(io, "| cohort | lead h | rows | events | G range | RMSE historical V2.0 | RMSE V2.1 | RMSE persistence | improve vs best | max tail effect | max core change |")
+        println(io, "| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |")
         for r in eachrow(summary)
-            @printf(io, "| %s | %d | %d | %d | G%d-G%d | %.2f | %.2f | %.2f | %+.2f | %.3g |\n",
+            @printf(io, "| %s | %d | %d | %d | G%d-G%d | %.2f | %.2f | %.2f | %+.2f | %.2f | %.2f |\n",
                     r.cohort, r.lead_h, r.n_rows, r.n_events, r.min_g_level, r.max_g_level,
-                    r.rmse_preupgrade_nt, r.rmse_v2_nt, r.rmse_persistence_nt,
-                    r.improvement_vs_best_nt, r.fair_max_abs_nt)
+                    r.rmse_v2_0_nt, r.rmse_v2_1_nt, r.rmse_persistence_nt,
+                    r.improvement_vs_best_nt, r.max_tail_effect_nt, r.max_core_change_nt)
         end
         if nrow(skipped) > 0
             println(io, "\n## Skipped events")
@@ -450,16 +465,20 @@ function _selftest_gscale()
                     target_utc = DateTime(2024, 1, 1) .+ Hour.([1, 2, 3, 6]),
                     lead = [1, 2, 3, 6],
                     obs = [-10.0, -20.0, -30.0, -40.0],
-                    audit_baseline = [-12.0, -22.0, -32.0, -42.0],
-                    v2 = [-11.0, -21.0, -29.0, -39.0],
-                    v2_frozen = [-12.0, -22.0, -32.0, -42.0],
+                    v2_1 = [-11.0, -21.0, -29.0, -39.0],
+                    v2_1_pre_rate_guard = [-11.0, -21.0, -29.0, -39.0],
+                    v2_1_pre_one_hour_inertia = [-11.0, -21.0, -29.0, -39.0],
+                    v2_1_pre_state_inertia = [-11.0, -21.0, -29.0, -39.0],
+                    v2_0 = [-12.0, -22.0, -32.0, -42.0],
+                    v2_1_frozen = [-11.5, -21.5, -31.5, -41.5],
                     persistence = [-8.0, -18.0, -33.0, -45.0],
                     rate = [NaN, -1.0, -2.0, -3.0])
     @assert _validate_gscale_rows(toy)
     sm = gscale_summary(toy)
     one = sm[(sm.cohort .== "all_G3plus") .& (sm.lead_h .== 1), :][1, :]
     @assert one.n_rows == 1
-    @assert isapprox(one.rmse_v2_nt, 1.0; atol = 1e-12)
+    @assert isapprox(one.rmse_v2_1_nt, 1.0; atol = 1e-12)
+    @assert isapprox(one.rmse_v2_0_nt, 2.0; atol = 1e-12)
     bad = copy(toy)
     bad.target_utc[1] = bad.issue_utc[1]
     try
@@ -483,7 +502,7 @@ function main_gscale(args = ARGS)
                                  start_utc = cfg.start_utc, end_utc = cfg.end_utc,
                                  limit = cfg.limit)
     isempty(events) && error("no G-scale events selected")
-    println("G-scale V2 replay: selected ", nrow(events), " exact Kp/G events at Kp >= ", cfg.min_kp)
+    println("G-scale V2.1 replay: selected ", nrow(events), " exact Kp/G events at Kp >= ", cfg.min_kp)
     scored, skipped = run_gscale_replay(events)
     _validate_gscale_rows(scored)
     summary = gscale_summary(scored)

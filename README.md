@@ -7,14 +7,17 @@ NOAA SWPC–driven monitor.
 
 The package is organized as two layers:
 
-1. **Discovery (v1).** Sparse identification of nonlinear dynamics (SINDy) recovers a
-   closed-form solar wind–magnetosphere coupling equation for the Dst index from storm
-   time series, alongside classical physical baselines.
-2. **Operational forecasting (v2).** A causal post-processing layer corrects
-   the v1 point forecast and attaches **distribution-free conformal predictive
-   intervals** with finite-sample coverage. V2 then applies
-   ballistically propagated L1 forcing, regime-aware Bz/By relaxation, and guarded fallback selection,
-   producing the calibrated Dst forecast used by the live monitor and dashboard.
+1. **Discovery.** Sparse identification of nonlinear dynamics (SINDy) recovers a
+   closed-form solar wind–magnetosphere coupling equation for Dst from storm time
+   series, alongside classical physical baselines. The current discovery artifact has
+   20 candidate terms and 11 active terms.
+2. **Operational forecasting (V2.1).** A causal post-processing layer calibrates the
+   revised 20/11 point forecast and attaches **split-conformal predictive intervals
+   with finite-sample marginal coverage under exchangeability**. It then applies
+   ballistically propagated L1 forcing, regime-aware
+   Bz/By relaxation, a causal rapid-deepening projection, a validation-selected
+   one-hour inertia blend, and an extreme-Dst inertia guard. The archived 21/10 V2.0
+   core is available only through an explicit historical request.
 
 ## Capabilities
 
@@ -26,16 +29,17 @@ The package is organized as two layers:
 - classical baselines: Burton, Burton-full, and O'Brien–McPherron
 - NASA OMNI2 ingestion, cleaning, and storm-catalog extraction
 
-**Operational forecasting (v2)**
+**Operational forecasting (V2.1)**
 
 - a causal correction layer, `Dst_v2 = Dst_v1 + β₀ + Σ βⱼ zⱼ`, fit only from prior
   (replay/live) rows so it never looks ahead of the issue time
-- stratified split-conformal predictive intervals with finite-sample coverage, stratified
-  by lead time × geomagnetic activity regime
+- stratified split-conformal predictive intervals with finite-sample marginal coverage
+  under exchangeability, stratified by lead time × geomagnetic activity regime
 - adaptive (online) conformal updating under distribution shift
-- V2 tail: ballistically propagated L1 forcing when the corresponding upstream window
-  has sufficient coverage, then regime-aware Bz/By relaxation that lengthens during rapid
-  Dst deepening
+- V2.1 tail: ballistically propagated L1 forcing when the corresponding upstream window
+  has sufficient coverage, then regime-aware Bz/By relaxation, a capped causal
+  rapid-deepening projection, one-hour persistence shrinkage selected on development
+  partitions, and a separate extreme-core persistence guard
 - guarded component selection over corrected SINDy, uncorrected SINDy v1, persistence,
   Burton, Burton-full, and O'Brien–McPherron, deployed only after chronological validation
 - online assimilation utilities for reproducibility and shadow experiments; EKF-on-SINDy
@@ -47,18 +51,27 @@ The package is organized as two layers:
 - NOAA SWPC plasma / magnetic-field / Dst fetchers
 - a rolling monitor loop with calibrated storm-severity alarms
 
-## V2 forecast status
+## Operational forecast status
 
-The dashboard and live monitor show a single V2 forecast. The live log keeps
-historical schema compatibility internally, but the dashboard, API, reports, and
-paper present the upgraded product simply as V2. The earlier V2 correction remains
-only as a pre-upgrade audit baseline for same-row comparisons.
+The dashboard and live monitor serve a single V2.1 forecast whose SINDy core is the
+same 20-candidate/11-active-term artifact used by the revised discovery paper. The
+former 21/10 product is labeled V2.0 and retained under `data/historical/v2_0/` and
+`deploy/historical/v2_0/` only for reproducible matched comparisons. The `v2` API
+alias resolves to V2.1; loading V2.0 requires an explicit version.
 
 EKF-on-SINDy is retained as research infrastructure only. Both tested deployment paths
 (decay-only and injection-adaptive EKF) failed promotion gates, so they are not exposed
 through the dashboard, daemon, alerting path, or V2 forecast columns. Recent
 lower-RMSE relaxed-tail variants also remain diagnostic until they avoid severe-storm
 under-warning in sustained southward-Bz stress rows.
+
+The files named `v2_lookahead`, `v2_envelope`, `v2_improved`, `v2_subhourly`, and
+the EKF replays are development-lineage experiments. They now load the same revised
+20/11 core and V2.1 calibration features as the package, but deliberately substitute
+or omit parts of the served tail to isolate one idea. Their frozen-tail comparisons
+must not be read as evaluations of the complete V2.1 product. Historical 21/10
+execution is confined to the explicit V2.0 artifact resolver and matched provenance
+comparisons.
 
 ## Installation
 
@@ -195,9 +208,8 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/storm_monitor.jl
 The monitor:
 
 - fetches near-real-time solar wind from NOAA SWPC (`fetch_realtime_solar_wind`)
-- forward-integrates the eleven-term SINDy refit at hourly cadence, loading the
-  refit artifacts from `data/` (`real_sindy_*_refit.csv`, distinct from the frozen
-  operational files)
+- forward-integrates the current eleven-active-term SINDy equation at hourly cadence,
+  loading the canonical V2.1 artifacts from `data/`
 - propagates the 500-member coefficient ensemble for prediction intervals
 - emits configurable storm-severity alarms (`QUIET` / `MODERATE` / `INTENSE` / `SUPERINTENSE`)
 
@@ -263,29 +275,28 @@ state, report, and outage artifacts remain in `var/monitor/`. Remove the service
 
 ### Artifact regeneration
 
-- **Joint ensemble draws** (`data/real_sindy_ensemble_draws.csv`) are local-only and gitignored.
-  When absent, `init_forecast` warns and falls back to the marginal per-term ensemble; regenerate
-  the joint draws with
-  [`validation/generate_ensemble_draws.jl`](validation/generate_ensemble_draws.jl).
-- **Refit prototype artifacts** — `examples/storm_monitor.jl` runs the eleven-term retrospective
-  refit (20-term identifiable library, no redundant `n*V^2`), whose coefficients, inclusion
-  summary, and joint draws are bundled as `data/real_sindy_discovery_coefficients_refit.csv`,
-  `data/real_ensemble_inclusion_refit.csv`, and `data/real_sindy_ensemble_draws_refit.csv`. The
-  first two are committed; the 500-draw file is gitignored on the same policy as the frozen draws.
-  All three come from the canonical discovery pipeline
-  [`validation/real_data_discovery.jl`](validation/real_data_discovery.jl) (run in canonical mode
-  with `SOLARSINDY_OUTPUT_ROOT` set to the revision output root; joint draws finalized by
-  [`validation/generate_ensemble_draws.jl`](validation/generate_ensemble_draws.jl)), fit at
-  `λ ≈ 186.72` (largest λ within one standard error, seed 42, 500 draws) over 483 storms /
-  46,935 hourly points. To rebuild the gitignored refit draws on a fresh clone, rerun that pipeline
-  and copy its `real_sindy_ensemble_draws.csv` output to `data/real_sindy_ensemble_draws_refit.csv`.
-  These files never overwrite the frozen operational artifacts (`data/real_sindy_*` without the
-  `_refit` suffix), which the live V2 monitor and `init_forecast` defaults continue to load.
+- **Current discovery artifacts** — V2.1 loads
+  `data/real_sindy_discovery_coefficients.csv`,
+  `data/real_ensemble_inclusion.csv`, and
+  `data/real_sindy_ensemble_draws.csv`. These tracked files encode the revised
+  20-candidate/11-active-term equation and 500 joint coefficient draws. Regenerate
+  them with [`validation/real_data_discovery.jl`](validation/real_data_discovery.jl)
+  followed by [`validation/generate_ensemble_draws.jl`](validation/generate_ensemble_draws.jl),
+  then rerun the artifact-identity and replay tests before promotion.
+- **Historical V2.0 artifacts** — the former 21-candidate/10-active-term files are
+  preserved under `data/historical/v2_0/`; their calibration is under
+  `deploy/historical/v2_0/`. They are provenance inputs, never current defaults.
 - **Conformal interval sidecar** — the primary live interval is the adaptive-conformal band
   derived from the verified log; the stratified sidecar is a cold-start/fallback interval.
   Regenerate it from a verified log with
   [`validation/make_operational_conformal_sidecar.jl`](validation/make_operational_conformal_sidecar.jl)
   (`SOLARSINDY_LIVE_LOG` / `SOLARSINDY_V2_CONFORMAL_SIDECAR` override the paths).
+- **One-minute OMNI HRO cache** — the sub-hourly component replays use NASA CDAWeb
+  monthly files kept under the ignored validation cache. Fetch and verify the seven-storm
+  set with
+  `julia --project=. validation/operational/fetch_omni_hro.jl`; pass `YYYYMM`
+  arguments to fetch selected months. The fetcher validates the file structure and writes
+  a local SHA-256 manifest before the replay consumes the data.
 
 ## Web dashboard
 
@@ -323,7 +334,7 @@ environment (`app/Project.toml`) and test suite (`app/test/runtests.jl`, also ru
 
 ## Data
 
-Pre-computed SINDy coefficients and validation datasets ship in `data/` (~1.6 MB), available
+Pre-computed SINDy coefficients and validation datasets ship in `data/`, available
 through both `Pkg.add` and cloned repos. Access them programmatically:
 
 ```julia
@@ -331,11 +342,11 @@ data_dir = get_data_dir()
 coef_csv = joinpath(data_dir, "real_sindy_discovery_coefficients.csv")
 ```
 
-The joint SINDy ensemble draws (`data/real_sindy_ensemble_draws.csv`) are intentionally **not**
-committed — they are a regenerable local artifact. A fresh clone therefore falls back to the
-marginal per-term ensemble for the v1 uncertainty intervals, which drops the cross-term
-covariance carried by the joint draws. Regenerate them with
-`validation/generate_ensemble_draws.jl` to reproduce the production intervals exactly.
+The current joint SINDy ensemble draws (`data/real_sindy_ensemble_draws.csv`) are versioned
+with the 20/11 point artifact. The V2.0 joint draws are retained beside the historical 21/10
+core. A fresh clone therefore preserves the cross-term covariance used by each matched
+forecast. Regenerate a draw artifact with `validation/generate_ensemble_draws.jl`, then rerun
+the artifact-identity and replay gates before replacing a tracked file.
 
 ### Fetching the OMNI2 dataset
 
@@ -387,11 +398,18 @@ end to end with no external paths.
 **Metrics** — `rmse`, `correlation`, `skill_score`, `prediction_efficiency`,
 `metrics_summary`, `wilcoxon_signed_rank_p`
 
-**Forecast (v1 + V2 correction and audit baseline)** — `ForecastState`, `ForecastResult`, `init_forecast`,
+**Forecast (v1 + V2.1 correction and frozen-tail ablation)** — `ForecastState`, `ForecastResult`, `init_forecast`,
 `step_forecast!`, `forecast_ahead`, `OperationalV2Calibration`,
 `default_operational_v2_calibration`, `operational_v2_feature_tuple`,
 `fit_operational_v2_calibration`, `operational_v2_predict`, `score_operational_v2`,
 `write_operational_v2_calibration`, `read_operational_v2_calibration`
+
+**Versioned operational core** — `OPERATIONAL_V2_1_MODEL_VERSION`,
+`OPERATIONAL_V2_0_MODEL_VERSION`, `OperationalCoreArtifacts`,
+`OperationalCalibrationArtifacts`, `OperationalCore`,
+`canonical_operational_version`, `operational_core_artifacts`,
+`operational_calibration_artifacts`, `validate_operational_core_artifacts`,
+`load_operational_core`, `init_operational_forecast`, `operational_core_forecast`
 
 **Conformal UQ** — `ConformalCalibration`, `ConformalStratum`, `fit_conformal`,
 `conformal_stratum`, `conformal_halfwidth`, `conformal_interval`, `conformal_coverage`,

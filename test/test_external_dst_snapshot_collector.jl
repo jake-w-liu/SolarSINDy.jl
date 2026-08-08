@@ -975,8 +975,11 @@ end
         v2_pred_dst_ci05_nt=fill(-35.0, length(L.HORIZONS)),
         v2_pred_dst_ci95_nt=fill(-15.0, length(L.HORIZONS)),
         interval_source=fill("aci", length(L.HORIZONS)),
-        model_version=fill("v2", length(L.HORIZONS)),
-        sub_hourly_model_version=fill("v2+L1A+Bregime+Pinertia", length(L.HORIZONS)),
+        model_version=fill(L.CURRENT_V2_MODEL_VERSION, length(L.HORIZONS)),
+        sub_hourly_model_version=fill(
+            L.CURRENT_V2_SERVED_MODEL_VERSION,
+            length(L.HORIZONS),
+        ),
     )
     mktempdir() do dir
         log_path = joinpath(dir, "cycle.csv")

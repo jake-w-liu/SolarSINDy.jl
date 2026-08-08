@@ -51,9 +51,12 @@ include(GSCALE_REPLAY_SCRIPT)
                             target_utc = DateTime(2024, 1, 1) .+ Hour.([1, 2, 3, 6]),
                             lead = [1, 2, 3, 6],
                             obs = [-10.0, -20.0, -30.0, -40.0],
-                            audit_baseline = [-12.0, -22.0, -32.0, -42.0],
-                            v2 = [-11.0, -21.0, -29.0, -39.0],
-                            v2_frozen = [-12.0, -22.0, -32.0, -42.0],
+                            v2_1 = [-11.0, -21.0, -29.0, -39.0],
+                            v2_1_pre_rate_guard = [-11.0, -21.0, -29.0, -39.0],
+                            v2_1_pre_one_hour_inertia = [-11.0, -21.0, -29.0, -39.0],
+                            v2_1_pre_state_inertia = [-11.0, -21.0, -29.0, -39.0],
+                            v2_0 = [-12.0, -22.0, -32.0, -42.0],
+                            v2_1_frozen = [-11.5, -21.5, -31.5, -41.5],
                             persistence = [-8.0, -18.0, -33.0, -45.0],
                             rate = [NaN, -1.0, -2.0, -3.0])
             @test _validate_gscale_rows(toy)
@@ -61,11 +64,12 @@ include(GSCALE_REPLAY_SCRIPT)
             one = sm[(sm.cohort .== "all_G3plus") .& (sm.lead_h .== 1), :][1, :]
             @test one.n_rows == 1
             @test one.n_events == 1
-            @test isapprox(one.rmse_v2_nt, 1.0; atol = 1e-12)
-            @test isapprox(one.rmse_preupgrade_nt, 2.0; atol = 1e-12)
+            @test isapprox(one.rmse_v2_1_nt, 1.0; atol = 1e-12)
+            @test isapprox(one.rmse_v2_0_nt, 2.0; atol = 1e-12)
             @test isapprox(one.rmse_persistence_nt, 2.0; atol = 1e-12)
             @test isapprox(one.improvement_vs_best_nt, 1.0; atol = 1e-12)
-            @test isapprox(one.fair_max_abs_nt, 0.0; atol = 1e-12)
+            @test isapprox(one.max_tail_effect_nt, 0.5; atol = 1e-12)
+            @test isapprox(one.max_core_change_nt, 0.5; atol = 1e-12)
 
             broken = copy(toy)
             broken.target_utc[1] = broken.issue_utc[1]

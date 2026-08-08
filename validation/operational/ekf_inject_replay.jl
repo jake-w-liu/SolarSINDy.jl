@@ -1,22 +1,22 @@
-# ekf_inject_replay.jl — v3 candidate: INJECTION-adaptive constrained EKF vs V2 + persistence.
+# ekf_inject_replay.jl — injection-adaptive EKF vs the V2.1 frozen-tail ablation.
 #
 # Diagnosis of the decay-only shadow EKF: its sole adaptive lever is the ring-current DECAY coefficient
 # ("Dst_star"), a restoring/recovery term, so adaptation can only push the forecast toward zero — correct in
 # recovery, harmful at storm onset where Dst is still dropping (verified +3.37 nT main-phase bias). The
-# discovered SINDy ODE already contains a southward-field INJECTION term ("Bs", coefficient ≈ -0.693) that
+# current V2.1 SINDy ODE contains a southward-field INJECTION term ("Bs") that
 # drives Dst* DOWN; it is held fixed. This variant adds that injection coefficient to the EKF's adaptive
 # state, giving the filter a downward lever to track a fast drop — staying entirely within the discovered
 # sparse SINDy model (more of its coefficients adapted online, no new model, no swap to O'Brien).
 #
 # Everything else mirrors ekf_storm_replay.jl exactly: same 7 causal storms, leads [1,2,3,6], pooled +
-# main-phase regimes, paired-bootstrap CI vs the STRONGER of {v2, persistence}, and the ekf_fixed fairness
-# oracle (fixed discovered coefficients must reproduce the locked v2 engine, so fair≈0 validates the rollout).
+# main-phase regimes, paired-bootstrap CI vs the STRONGER of {V2.1 frozen-tail, persistence}, and the
+# ekf_fixed fairness oracle (fixed discovered coefficients must reproduce the frozen-tail engine).
 #
 # Run from the package root: julia --project=. validation/operational/ekf_inject_replay.jl
 
 include(joinpath(@__DIR__, "ekf_storm_replay.jl"))   # STORMS, LEADS, MAIN_RATE, _rmse, _ffill!, OMNI,
                                                      # paired_improvement, _cell, _per_storm_signs,
-                                                     # _shadow_library, DECAY_CAP, BOOT_YEAR0, Q_* consts
+                                                     # _shadow_library, _shadow_decay_cap, BOOT_YEAR0, Q_* consts
 
 const OUT_CSV_INJ = joinpath(OPERATIONAL_OUTPUT_DIR, "ekf_inject_replay_scored.csv")
 const OUT_MD_INJ  = joinpath(OPERATIONAL_OUTPUT_DIR, "ekf_inject_replay_report.md")
@@ -27,7 +27,7 @@ const BS_TERM = "Bs"
 const BS_BOX  = (-2.0, 0.0)
 # Process-noise for the injection coefficient, set by RELATIVE-rate matching to the validated decay walk
 # (q/ξ² equal): q_Bs = Q_COEFF · (ξ_Bs/ξ_decay)². This is a principled, leakage-free choice — NOT tuned on
-# the test storms. ξ_Bs≈-0.693, ξ_decay≈-0.0479 → ratio²≈209 → q_Bs≈2.1e-2.
+# the test storms. The ratio is recomputed from the current V2.1 coefficients.
 _q_bs(ξ0, i_decay, i_Bs) = Q_COEFF * (ξ0[i_Bs] / ξ0[i_decay])^2
 
 "Index of the discovered southward-injection term in the library."
@@ -39,16 +39,19 @@ end
 
 "Constrained EKF adapting BOTH [decay, Bs]: decay box (-Inf, cap], Bs box BS_BOX, decay walk Q_COEFF, Bs walk q_bs."
 function _new_inject_filter(lib, ξ0, i_decay, i_Bs, dst0; q_bs)
+    decay_cap = _shadow_decay_cap(ξ0, i_decay)
     f = init_assimilation(lib, ξ0, [i_decay, i_Bs], dst0; q_coeff = Q_COEFF, q_dst = Q_DST, R = R_OBS,
                           dst_var0 = DST_VAR0, coeff_var0 = COEFF_VAR0,
-                          coeff_bounds = [(-Inf, DECAY_CAP), BS_BOX])
+                          coeff_bounds = [(-Inf, decay_cap), BS_BOX])
     f.Q[3, 3] = q_bs        # decay keeps Q_COEFF (index 2); injection gets its own walk variance (index 3)
     return f
 end
 
 "h-step forecast with adapted [decay, Bs], engine-faithful per-step + final Dst* clamp, then the v2 correction.
 Identical to _shadow_forecast except two discovered coefficients are overridden instead of one."
-function _inject_forecast(lib, ξ0, i_decay, i_Bs, decay, bscoef, anchor_dst_star, drv, latest_dst, cal; nsteps::Int = 1)
+function _inject_forecast(lib, ξ0, i_decay, i_Bs, decay, bscoef,
+                          anchor_dst_star, drv, latest_dst, cal;
+                          nsteps::Int=1, calibration_features=nothing)
     ξ = copy(ξ0); ξ[i_decay] = decay; ξ[i_Bs] = bscoef
     fc = init_assimilation(lib, ξ, Int[], anchor_dst_star)
     for _ in 1:nsteps
@@ -57,10 +60,17 @@ function _inject_forecast(lib, ξ0, i_decay, i_Bs, decay, bscoef, anchor_dst_sta
     end
     pred_dst_star = current_dst(fc)
     pred_dst = pred_dst_star + 7.26 * sqrt(max(drv.Pdyn, 0.0)) - 11.0
-    feat_df = DataFrame(latest_dst_nt = [latest_dst], V_kms = [drv.V], Bz_nt = [drv.Bz],
-                        By_nt = [drv.By], n_cm3 = [drv.n], Pdyn_npa = [drv.Pdyn])
-    prep = SolarSINDy.add_operational_v2_features!(feat_df)
-    feats = NamedTuple{Tuple(cal.feature_names)}(Tuple(Float64(prep[1, c]) for c in cal.feature_names))
+    fallback = _v2_features(
+        latest_dst, drv; v1_pred_dst=pred_dst, model_steps=nsteps,
+    )
+    source = calibration_features === nothing ? fallback : calibration_features
+    missing_features = [c for c in cal.feature_names if !(c in propertynames(source))]
+    isempty(missing_features) || error(
+        "injection-EKF calibration feature source omits: $(join(String.(missing_features), ", "))",
+    )
+    feats = NamedTuple{Tuple(cal.feature_names)}(
+        Tuple(Float64(getproperty(source, c)) for c in cal.feature_names),
+    )
     corr = SolarSINDy.operational_v2_correction(cal, feats)
     return clamp(pred_dst, -2000.0, 50.0), clamp(pred_dst + corr, -2000.0, 50.0)
 end
@@ -72,7 +82,8 @@ function causal_bootstrap_inject(lib, ξ0, i_decay, i_Bs, year_end::Int; q_bs)
     df = parse_omni2(OMNI; year_start = BOOT_YEAR0, year_end = year_end); clean_omni_data!(df; causal = true)
     V  = _ffill!(Float64.(coalesce.(df.V, NaN)));  Bz = _ffill!(Float64.(coalesce.(df.Bz, NaN)))
     By = _ffill!(Float64.(coalesce.(df.By, NaN))); nn = _ffill!(Float64.(coalesce.(df.n, NaN)))
-    Pd = _ffill!(Float64.(coalesce.(df.Pdyn, NaN))); dst = Float64.(coalesce.(df.Dst_star, NaN))
+    Pd = [dynamic_pressure(nn[k], V[k]) for k in eachindex(V)]
+    dst = Float64.(coalesce.(df.Dst_star, NaN))
     f = _new_inject_filter(lib, ξ0, i_decay, i_Bs, isfinite(dst[1]) ? dst[1] : 0.0; q_bs = q_bs)
     for k in 1:length(dst)-1
         (isfinite(dst[k+1]) && isfinite(V[k])) || continue
@@ -86,34 +97,41 @@ end
 function replay_inject_storm(storm, lib, ξ0, i_decay, i_Bs, cal, f)
     yr = year(storm.t1)
     plasma, mag, dst_times, dst_vals = _omni_replay_inputs(OMNI, yr - 1, yr)
-    m = (dst_times .>= storm.t0 - Hour(6)) .& (dst_times .<= storm.t1 + Hour(7))
-    rh = Int(ceil(Dates.value((storm.t1 + Hour(7)) - (storm.t0 - Hour(6))) / 3_600_000))
-    df = replay_recent_table(plasma[m, :], mag[m, :], dst_times[m], dst_vals[m];
+    win_lo, win_hi = storm.t0 - Hour(6), storm.t1 + Hour(7)
+    plasma, mag, dst_times, dst_vals = _slice_replay_window(
+        plasma, mag, dst_times, dst_vals, win_lo, win_hi,
+    )
+    (nrow(plasma) > 0 && !isempty(dst_times)) || error("No finite OMNI drivers/Dst inside replay window")
+    rh = Int(ceil(Dates.value(win_hi - win_lo) / 3_600_000))
+    df = replay_recent_table(plasma, mag, dst_times, dst_vals;
                              replay_hours = rh, horizons = LEADS, model = :v2, calibration = cal)
     df[!, :issue_dt] = DateTime.(df.issue_time_utc)
     df = df[(df.issue_dt .>= storm.t0) .& (df.issue_dt .<= storm.t1), :]
     sort!(df, [:issue_dt, :model_step_hours])
+    dst_map = Dict{DateTime,Float64}(zip(dst_times, Float64.(dst_vals)))
     out = DataFrame(storm = String[], issue_utc = DateTime[], lead = Int[], obs = Float64[],
-                    v2 = Float64[], ekf = Float64[], ekf_fixed = Float64[], persistence = Float64[],
+                    frozen_tail = Float64[], ekf = Float64[], ekf_fixed = Float64[], persistence = Float64[],
                     adapted_decay = Float64[], adapted_bs = Float64[], rate = Float64[])
-    prev_anchor = NaN
     for it in sort!(unique(df.issue_dt))
         g = df[df.issue_dt .== it, :]; r1 = g[1, :]
         drv = (V = Float64(r1.V_kms), Bz = Float64(r1.Bz_nt), By = Float64(r1.By_nt),
                n = Float64(r1.n_cm3), Pdyn = Float64(r1.Pdyn_npa))
         latest = Float64(r1.latest_dst_nt)
-        all(isfinite, (drv.V, drv.Bz, drv.By, drv.n, drv.Pdyn, latest)) || (prev_anchor = NaN; continue)
+        all(isfinite, (drv.V, drv.Bz, drv.By, drv.n, drv.Pdyn, latest)) || continue
         anchor_star = pressure_correct_dst([latest], [drv.Pdyn])[1]
         assimilation_predict!(f, drv); assimilation_update!(f, anchor_star)
         decay, bs = current_coeffs(f)            # [decay, Bs] in adapt_idx order
-        rate = isfinite(prev_anchor) ? latest - prev_anchor : NaN
-        prev_anchor = latest
+        prev1 = get(dst_map, it - Hour(1), NaN)
+        rate = isfinite(prev1) ? latest - prev1 : NaN
         for r in eachrow(g)
             (ismissing(r.observation_dst_nt) || ismissing(r.v2_pred_dst_nt)) && continue
             isfinite(Float64(r.observation_dst_nt)) && isfinite(Float64(r.v2_pred_dst_nt)) || continue
             h = Int(r.model_step_hours)
-            _, ekf_a = _inject_forecast(lib, ξ0, i_decay, i_Bs, decay,       bs,         anchor_star, drv, latest, cal; nsteps = h)
-            _, ekf_f = _inject_forecast(lib, ξ0, i_decay, i_Bs, ξ0[i_decay], ξ0[i_Bs],   anchor_star, drv, latest, cal; nsteps = h)
+            _, ekf_a = _inject_forecast(lib, ξ0, i_decay, i_Bs, decay, bs,
+                anchor_star, drv, latest, cal; nsteps=h, calibration_features=r)
+            _, ekf_f = _inject_forecast(lib, ξ0, i_decay, i_Bs,
+                ξ0[i_decay], ξ0[i_Bs], anchor_star, drv, latest, cal;
+                nsteps=h, calibration_features=r)
             isfinite(ekf_a) && isfinite(ekf_f) || continue
             push!(out, (storm.name, it, h, Float64(r.observation_dst_nt), Float64(r.v2_pred_dst_nt),
                         ekf_a, ekf_f, latest, decay, bs, rate))
@@ -156,19 +174,20 @@ function _sweep(lib, ξ0, i_decay, i_Bs, cal)
             @printf(io, "| %.2e | [%.2f, %.2f] | %+.2f [%+.2f, %+.2f] | %+.2f [%+.2f, %+.2f] |\n",
                     q, blo, bhi, c1.improve, c1.ci_lo, c1.ci_hi, c6.improve, c6.ci_lo, c6.ci_hi)
         end
-        println(io, "\nAcross a 100× span of q_Bs the 1h-pooled improvement stays negative (CI spans 0, never ",
-                    "above it) and the 6h-main improvement is strongly negative with CI below 0; injection ",
-                    "adaptation does not earn v3 at any setting.")
+        println(io, "\nThe table is the current sensitivity result. A setting earns promotion only if its ",
+                    "paired confidence interval and cross-storm checks satisfy the declared gates; no ",
+                    "historical V2.0 verdict is carried forward.")
     end
 end
 
 function main_inject()
     lib, ξ0, i_decay = _shadow_library()
     i_Bs = _bs_index(lib)
+    decay_cap = _shadow_decay_cap(ξ0, i_decay)
     q_bs = _q_bs(ξ0, i_decay, i_Bs)
-    println("Injection-adaptive EKF (v3 candidate): adapt [decay, Bs] vs v2 + persistence, leads ", LEADS)
+    println("Injection-adaptive EKF: adapt [decay, Bs] vs V2.1 frozen-tail ablation + persistence, leads ", LEADS)
     @printf("  discovered ξ_Bs=%.4f  box=%s  q_Bs=%.3e  (decay cap %.4f, Q_decay=%.0e)\n",
-            ξ0[i_Bs], string(BS_BOX), q_bs, DECAY_CAP, Q_COEFF)
+            ξ0[i_Bs], string(BS_BOX), q_bs, decay_cap, Q_COEFF)
     println("="^80)
     cal = _load_calibration_for_model(LiveVerifyConfig(model = :v2))
     all_rows = replay_all(lib, ξ0, i_decay, i_Bs, cal, q_bs)
@@ -179,16 +198,16 @@ function main_inject()
 
     candidates = NamedTuple[]
     open(OUT_MD_INJ, "w") do io
-        println(io, "# Injection-adaptive EKF (v3 candidate) — adapt [decay, Bs] vs v2 + persistence (multi-lead, causal)\n")
+        println(io, "# Injection-adaptive EKF — V2.1 frozen-tail ablation and persistence\n")
         println(io, "Same causal protocol as the decay-only retirement test, but the EKF also adapts the discovered ",
                     "southward-injection coefficient `Bs` (box $(BS_BOX), q_Bs ≈ $(round(_q_bs(ξ0,i_decay,i_Bs);sigdigits=2))), ",
                     "giving the filter a downward lever. `improve` = paired |err stronger-baseline| − |err EKF| ",
-                    "(positive = EKF beats the stronger of {v2, persistence}); v3 needs its 95% CI > 0. `bias` = ",
-                    "mean(obs − EKF); the decay-only EKF carried +3.37 nT main-phase bias to beat. `fair` = ",
-                    "max|ekf_fixed − v2|, must be ≈0.\n")
-        println(io, "| lead [h] | regime | n | RMSE v2 | RMSE EKF | RMSE pers | stronger | improve [nT] (95% CI) | bias | fair |")
+                    "(positive = EKF beats the stronger of {V2.1 frozen-tail, persistence}); v3 needs its 95% CI > 0. `bias` = ",
+                    "mean(obs − EKF). `fair` = ",
+                    "max|ekf_fixed − frozen_tail|, must be ≈0.\n")
+        println(io, "| lead [h] | regime | n | RMSE frozen-tail | RMSE EKF | RMSE pers | stronger | improve [nT] (95% CI) | bias | fair |")
         println(io, "|---|---|---|---|---|---|---|---|---|---|")
-        println("\n  lead regime    n   v2    EKF   pers  strong  improve[CI]            bias  fair")
+        println("\n  lead regime    n frozen  EKF   pers  strong       improve[CI]            bias  fair")
         for h in LEADS
             sub_h = all_rows[all_rows.lead .== h, :]
             for (label, sub) in (("pooled", sub_h),
@@ -196,15 +215,15 @@ function main_inject()
                 c = _cell(sub); c === nothing && continue
                 bias = mean(sub.obs .- sub.ekf)
                 @printf("  %3d  %-6s %4d %5.1f %5.1f %5.1f  %-4s  %+5.2f [%+5.2f,%+5.2f]  %+5.2f %.2f\n",
-                        h, label, c.n, c.rmse_v2, c.rmse_ekf, c.rmse_pers, c.stronger, c.improve, c.ci_lo, c.ci_hi, bias, c.fair)
+                        h, label, c.n, c.rmse_frozen, c.rmse_ekf, c.rmse_pers, c.stronger, c.improve, c.ci_lo, c.ci_hi, bias, c.fair)
                 @printf(io, "| %d | %s | %d | %.2f | %.2f | %.2f | %s | %+.2f [%+.2f, %+.2f] | %+.2f | %.2f |\n",
-                        h, label, c.n, c.rmse_v2, c.rmse_ekf, c.rmse_pers, c.stronger, c.improve, c.ci_lo, c.ci_hi, bias, c.fair)
+                        h, label, c.n, c.rmse_frozen, c.rmse_ekf, c.rmse_pers, c.stronger, c.improve, c.ci_lo, c.ci_hi, bias, c.fair)
                 c.ci_lo > 0 && push!(candidates, (lead = h, regime = label, rows = sub, cell = c))
             end
         end
         dlo, dhi = minimum(all_rows.adapted_decay), maximum(all_rows.adapted_decay)
         blo, bhi = minimum(all_rows.adapted_bs), maximum(all_rows.adapted_bs)
-        max_fair = maximum(abs.(all_rows.ekf_fixed .- all_rows.v2))
+        max_fair = maximum(abs.(all_rows.ekf_fixed .- all_rows.frozen_tail))
         promotable = false; detail = ""
         for cand in candidates
             signs = _per_storm_signs(cand.rows); npos = count(>(0), values(signs)); ntot = length(signs)
@@ -218,8 +237,8 @@ function main_inject()
         end
         verdict = max_fair > 2.0 ? "INCONCLUSIVE: fairness gap $(round(max_fair;digits=2)) nT — rollout mismatch" :
                   promotable ? "PROMOTABLE: $detail" :
-                  "NOT PROMOTABLE: injection adaptation does not beat the stronger of {v2, persistence} with CI>0 at any lead/regime"
-        println(io, "\nAdapted decay ∈ [", round(dlo;digits=3), ", ", round(dhi;digits=3), "] (cap ", DECAY_CAP,
+                  "NOT PROMOTABLE: injection adaptation does not beat the stronger of {V2.1 frozen-tail, persistence} with CI>0 at any lead/regime"
+        println(io, "\nAdapted decay ∈ [", round(dlo;digits=3), ", ", round(dhi;digits=3), "] (cap ", decay_cap,
                     "); adapted Bs ∈ [", round(blo;digits=3), ", ", round(bhi;digits=3), "] (box ", BS_BOX,
                     "). Max fairness gap: ", round(max_fair;digits=2), " nT.\n")
         println(io, "**v3 promotion verdict:** ", verdict)
@@ -232,26 +251,29 @@ end
 # ---- CRC self-test: independent oracles for the injection variant ----
 function _selftest_inject()
     lib, ξ0, i_decay = _shadow_library(); i_Bs = _bs_index(lib)
+    decay_cap = _shadow_decay_cap(ξ0, i_decay)
     # Oracle A — discovered injection coefficient sanity (the lever we adapt is the real Bs term).
-    @assert isapprox(ξ0[i_Bs], -0.6929180631210645; atol = 1e-6) "ξ_Bs != discovered value: $(ξ0[i_Bs])"
+    @assert isfinite(ξ0[i_Bs]) && ξ0[i_Bs] < 0.0 "V2.1 Bs coefficient is not a finite driver: $(ξ0[i_Bs])"
     drv = (V = 500.0, Bz = -10.0, By = 0.0, n = 6.0, Pdyn = 2.0)   # Bs>0 (southward) → injection active
     # Oracle B — CONTINUITY: with the injection held at its discovered value, the 2-coeff forecast is
     # byte-identical to the decay-only _shadow_forecast. This is the strongest correctness check: injection
     # adaptation OFF must reduce exactly to the retired EKF.
-    for h in (1, 3, 6), dc in (-0.048, -0.2)
+    for h in (1, 3, 6), dc in (decay_cap, -0.2)
         a = _inject_forecast(lib, ξ0, i_decay, i_Bs, dc, ξ0[i_Bs], -120.0, drv, -118.0, cal_selftest(); nsteps = h)
         b = _shadow_forecast(lib, ξ0, i_decay, dc, -120.0, drv, -118.0, cal_selftest(); nsteps = h)
         @assert a == b "continuity broken at h=$h decay=$dc: inject=$a shadow=$b"
     end
     # Oracle C — DOWNWARD LEVER: strengthening the injection (more negative Bs) makes the rollout MORE
     # negative under southward driving — the mechanism that lets the filter track a fast drop.
-    v1_disc = _inject_forecast(lib, ξ0, i_decay, i_Bs, -0.048, ξ0[i_Bs],       -120.0, drv, -118.0, cal_selftest(); nsteps = 3)[1]
-    v1_strong = _inject_forecast(lib, ξ0, i_decay, i_Bs, -0.048, ξ0[i_Bs]*1.6, -120.0, drv, -118.0, cal_selftest(); nsteps = 3)[1]
+    v1_disc = _inject_forecast(lib, ξ0, i_decay, i_Bs, decay_cap, ξ0[i_Bs],
+        -120.0, drv, -118.0, cal_selftest(); nsteps=3)[1]
+    v1_strong = _inject_forecast(lib, ξ0, i_decay, i_Bs, decay_cap, ξ0[i_Bs]*1.6,
+        -120.0, drv, -118.0, cal_selftest(); nsteps=3)[1]
     @assert v1_strong < v1_disc "stronger injection did not deepen the forecast ($v1_strong !< $v1_disc)"
     # Oracle D — SIGN BOX binds: a causal bootstrap keeps decay ≤ cap and Bs within its (≤0) box.
     f = causal_bootstrap_inject(lib, ξ0, i_decay, i_Bs, 2022; q_bs = _q_bs(ξ0, i_decay, i_Bs))
     dc, bs = current_coeffs(f)
-    @assert dc <= DECAY_CAP + 1e-9 "decay above cap: $dc"
+    @assert dc <= decay_cap + 1e-9 "decay above cap: $dc"
     @assert BS_BOX[1] - 1e-9 <= bs <= BS_BOX[2] + 1e-9 "Bs left its box: $bs"
     println("  ✓ injection self-test: ξ_Bs sane, continuity to decay-only EKF, downward lever, sign box binds")
     return true

@@ -598,6 +598,15 @@ function add_operational_v2_features!(df::DataFrame)
     sqrt_pdyn = Float64.(df.sqrt_Pdyn_npa)
     horizon = _column_float_or_default(df, :model_step_hours, ones(nrow(df)))
     horizon = max.(horizon, 1.0)
+    _maybe_add_column!(df, :lead_2h_indicator, Float64.(horizon .== 2.0))
+    _maybe_add_column!(df, :lead_3h_indicator, Float64.(horizon .== 3.0))
+    _maybe_add_column!(df, :lead_6h_indicator, Float64.(horizon .== 6.0))
+    _maybe_add_column!(df, :lead_latest_dst_interaction, horizon .* latest)
+    _maybe_add_column!(
+        df,
+        :lead_v1_persistence_interaction,
+        horizon .* _column_float_or_default(df, :v1_minus_persistence_nt, zeros(nrow(df))),
+    )
     main_phase_pressure = max.(-dst_delta_1h, 0.0) .* sqrt_pdyn
     main_phase_pressure_6h = max.(-dst_delta_6h, 0.0) .* sqrt_pdyn
     # Storm main-phase gate. VBsouth_mvm = 1e-3·V·max(-Bz,0) is nonnegative by

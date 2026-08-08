@@ -48,7 +48,7 @@ sweep_results = sweep_lambda(Θ, dDst, lambdas; normalize=true)
 # Print sweep summary
 println("  Lambda sweep results:")
 for s in sweep_results
-    if s.n_terms <= 10 || s.n_terms == 21
+    if s.n_terms <= 10 || s.n_terms == length(lib)
         println("    λ=$(round(s.λ, sigdigits=4)), n_terms=$(s.n_terms), rmse=$(round(s.rmse, sigdigits=4))")
     end
 end

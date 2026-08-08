@@ -7,7 +7,7 @@ forecast **with its calibrated 90% uncertainty band**, a **rolling forecast-vs-o
 statement, the scored track record, and the Sun → grid warning chain.
 
 This dashboard ships **as part of [`SolarSINDy.jl`](../)** — it is the operational front-end over
-the package's V2 forecaster. A Julia REST backend (no web framework — just
+the package's V2.1 forecaster. A Julia REST backend (no web framework — just
 `HTTP.jl`) serving a Plotly UI. Single origin, no build step.
 
 > Research tool, not an operational authority. For official alerts use **NOAA SWPC**.
@@ -92,8 +92,8 @@ The integrity rules of this project carry into the UI:
   for a *new* disturbance is the L1 advection time (~30–60 min). Multi-day
   confident-severity lead needs CME models not yet in this system.
 - **Calibration is computed from the log.** Coverage and RMSE are recomputed from the
-  scored rows every load, with the full baseline set (pre-upgrade baseline, SINDy v1,
-  persistence, O'Brien) and a per-method breakdown. V2 and every baseline are scored on the same
+  scored rows every load, with the full comparator set (V2.1 frozen-tail ablation, SINDy v1,
+  persistence, O'Brien) and a per-method breakdown. V2.1 and every baseline are scored on the same
   observed targets, so the UI never compares methods on mismatched samples.
 
 ## Threat scale
@@ -115,10 +115,10 @@ These thresholds follow the classifications used by
 
 ## Data & provenance
 
-- **Dst forecast**: the project's **V2** nowcaster: interpretable discovered sparse equation,
+- **Dst forecast**: the project's **V2.1** nowcaster: interpretable discovered sparse equation,
   causal correction, online adaptive-conformal intervals, ballistically propagated L1 forcing,
-  regime-aware Bz/By relaxation, and guarded fallback selection. The pre-upgrade baseline remains in the log
-  only for same-row comparison.
+  regime-aware Bz/By relaxation, and guarded fallback selection. The V2.1
+  frozen-tail center remains in the log only for same-row ablation.
 - **Solar wind (L1)**: NOAA SWPC real-time products (`rtsw_wind_1m`, `rtsw_mag_1m`) for live
   issuance; the NASA OMNI archive (CDAWeb) is used for offline calibration and historical replay.
   **Dst**: Kyoto WDC (via NOAA SWPC `kyoto-dst`). **Ground dB/dt**: the provisional USGS
