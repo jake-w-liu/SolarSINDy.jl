@@ -67,6 +67,10 @@ User operation and startup:
 - dashboard startup banner and warm-up lines are explicitly flushed, so nohup/launchd log
   files capture them immediately instead of losing them to block buffering (crash forensics
   and readiness checks read these lines).
+- CLI dashboard launch parity: `bin/solarsindy start dashboard` runs the server with
+  `--compile=min` (matching the supervised launchd deployment), so a first cold upstream
+  refresh cannot monopolize Julia code generation and stall every HTTP route after start;
+  the numerical-kernel monitor daemon is intentionally left at full compilation.
 
 Causality and leakage:
 
@@ -96,6 +100,7 @@ Industrial robustness:
 - fixed-rate live-monitor scheduling subtracts cycle runtime and skips missed slots, preventing cumulative hourly issuance drift and catch-up bursts
 - fixed 1, 2, 3, and 6 h product horizons, with health determined from the exact API cycle contract; partial or internally inconsistent rows remain failed even when all four calls returned
 - hot-log retention rejects limits below four rows, so it cannot truncate a complete product cycle immediately after validation
+- FIFO cold-archive durability and schema guard: rows dropped by hot-log retention are appended, under the same lock, to a cold archive resolved from the log's own directory (a non-default log never writes the production archive), with a sidecar manifest tracking cumulative rows, byte size, and per-segment SHA-256; the append aborts and leaves the rows in the hot log if the archive size drifted since the last manifest or if the pruned columns do not match the existing archive header, so a hot-log schema change can no longer append positionally misaligned rows
 - cycle-level interval selection uses ACI only when both point and served residual streams are ready at the model-step lead corresponding to every 1, 2, 3, and 6 h target; otherwise the entire issuance uses the shared static conformal fallback
 - per-key single-flight refreshes, bounded waits, and failure cooldowns for USGS dB/dt and station-network requests, preventing duplicate work or repeated requests to a failed service
 - one shared NOAA/USGS execution slot for potentially blocking DNS, TLS, and HTTP work, leaving the other server threads available while cached or unavailable responses return immediately
@@ -108,10 +113,11 @@ Dashboard and API:
 - log-independent endpoints stay up when the forecast log is absent; internal errors no longer echo the log path
 - input-staleness demotion and served-pipeline capability labels surfaced to the front end
 - stale or unavailable status responses clear previously displayed metrics and WATCH state instead of leaving an obsolete forecast on screen
+- the sub-hour display trajectory spans the full anchor-to-target lead, so under a lagging Kyoto Dst anchor (which places the h=6 target one model step beyond a fixed six-hour window) the served display line ends exactly at the furthest issued horizon instead of one hour short; hourly issuance, scoring, and API values are unchanged
 - responsive WATCH placement in normal document flow so it cannot cover metric labels
 - a bounded four-thread default across shell and Docker launch paths, leaving request capacity during the serialized upstream refresh while preserving the one-request public-data gate
 - WCAG-AA contrast for muted labels on every dashboard background surface
-- conformal WATCH values are identified as the lower edge of a displayed calibrated 90% interval, without treating the symmetric interval as a one-sided confidence bound or storm probability; value-equivalent legacy API keys remain for already-loaded clients
+- WATCH values are identified as the lower edge of a displayed 90% target interval, without treating the symmetric interval as a one-sided confidence bound, a guaranteed-coverage set, or a storm probability; value-equivalent legacy API keys remain for already-loaded clients
 - ground dB/dt is presented as a GIC-hazard indicator, with the four values identified as unit-converted Pulkkinen et al. threshold magnitudes rather than a reproduction of their nonoverlapping-window protocol or named grid-risk tiers; unsupported generic geoelectric/GIC risk categories were removed
 - browser notifications use the stronger of the point-forecast and interval-edge WATCH ranges; unsupported explicit dB/dt stations and malformed query encodings return HTTP 400 instead of aliasing to FRD or surfacing as server errors
 - deployment parity across the committed Julia 1.12.6 app environment, Docker image, bundled models, and operational-evidence path; launchers now fail closed when Julia or dependency setup is unsuitable

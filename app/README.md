@@ -1,8 +1,8 @@
 # Space-Weather Threat Monitor
 
 A 100% open-source dashboard over a live geomagnetic-storm (**Dst**) forecaster. It turns the
-forecast log into a calibrated threat view: current storm level, the Dst
-forecast **with its calibrated 90% uncertainty band**, a **rolling forecast-vs-observed track**
+forecast log into an evidence-bounded threat view: current storm level, the Dst
+forecast **with its empirically evaluated 90% target band**, a **rolling forecast-vs-observed track**
 (each issued forecast plotted against the observation that later arrived), an explicit lead-time
 statement, the scored track record, and the Sun → grid warning chain.
 
@@ -44,7 +44,7 @@ Offline use: `./vendor-plotly.sh` downloads Plotly locally; otherwise the page f
 the Plotly CDN automatically.
 
 Alerting: with `SWM_WEBHOOK_URL` set, the server re-evaluates the combined alert level (Dst
-forecast + calibrated-band watch + SWPC upstream + ground dB/dt) every 5 min and POSTs a
+forecast + target-interval watch + SWPC upstream + ground dB/dt) every 5 min and POSTs a
 JSON payload (`{text, level, reasons, ...}`) **only when the level changes** — escalation or
 all-clear, never per-poll spam. With the dashboard open, the browser also raises a desktop
 notification on escalation (with permission).
@@ -65,7 +65,7 @@ compatibility with older clients.
 |---|---|
 | `GET /api/health` | complete-cycle health (`ok`, `no_log`, `stale`, or `incomplete`), log age, and server time |
 | `GET /api/status` | Dst threat level, lead time, calibration summary, SWPC upstream snapshot |
-| `GET /api/forecast` | latest forecast cycle: per-horizon point + 90% band |
+| `GET /api/forecast` | latest forecast cycle: per-horizon point + 90% target band |
 | `GET /api/history?hours=72` | recent scored forecasts (observed vs predicted) |
 | `GET /api/swpc` | NOAA SWPC upstream: L1 solar wind, Kp, G/S/R scales, alerts |
 | `GET /api/dbdt` | live ground dB/dt nowcast from the provisional USGS adjusted product; selects the first available FRD/CMO feed and reports why the retrospective forecast is disabled |
@@ -82,19 +82,21 @@ rather than holding the dashboard request open on DNS, TLS, or a public-data out
 
 The integrity rules of this project carry into the UI:
 
-- **No bare point forecasts.** Every forecast is shown with its calibrated 90% interval. A
+- **No bare point forecasts.** Every forecast is shown with its 90% target interval. A
   watch appears when the most negative lower edge among the displayed intervals enters a
   stronger Dst range than the point forecast; it is not a one-sided confidence bound or a
-  storm probability.
+  storm probability. The served-center shift and bounded online update do not retain the
+  frozen-center distribution-free guarantee, so coverage is reported empirically.
 - **Lead time is stated against physics.** Forecast steps use ballistically propagated L1 forcing
   when the corresponding upstream window has sufficient coverage, then regime-aware Bz/By
   relaxation beyond the measured L1 window. The genuine upstream lead
   for a *new* disturbance is the L1 advection time (~30–60 min). Multi-day
   confident-severity lead needs CME models not yet in this system.
-- **Calibration is computed from the log.** Coverage and RMSE are recomputed from the
-  scored rows every load, with the full comparator set (V2.1 frozen-tail ablation, SINDy v1,
-  persistence, O'Brien) and a per-method breakdown. V2.1 and every baseline are scored on the same
-  observed targets, so the UI never compares methods on mismatched samples.
+- **Live evaluation is computed from the log.** Coverage and RMSE are recomputed from the
+  scored rows every load. The matched RMSE table includes served V2.1, its frozen-tail ablation,
+  SINDy v1, persistence, Burton, Burton full, and O'Brien--McPherron on exactly the same
+  observed targets. No best method is highlighted before 48 common rows mature, and the
+  storm-row count remains visible so quiet-only evidence cannot be mistaken for storm skill.
 
 ## Threat scale
 

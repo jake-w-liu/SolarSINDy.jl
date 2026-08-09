@@ -1825,7 +1825,11 @@ function audit_dashboard_payload!(state::AuditState, payload, api_url::AbstractS
 
     api_rmse = float_or_missing(nested_get(payload, ["calibration", "v2_rmse_nt"], missing))
     log_rmse = get(state.live_metrics, :served_rmse, missing)
-    if !ismissing(api_rmse) && !ismissing(log_rmse) && abs(api_rmse - round(Float64(log_rmse); digits = 2)) <= 0.015
+    zero_verified = !ismissing(expected_n) && Int(expected_n) == 0
+    if zero_verified && ismissing(api_rmse) && ismissing(log_rmse)
+        pass!(state, "dashboard API V2 RMSE",
+              "undefined in both API and log before any V2.1 row matures")
+    elseif !zero_verified && !ismissing(api_rmse) && !ismissing(log_rmse) && abs(api_rmse - round(Float64(log_rmse); digits = 2)) <= 0.015
         pass!(state, "dashboard API V2 RMSE", @sprintf("api %.2f matches log %.2f", api_rmse, log_rmse))
     else
         fail!(state, "dashboard API V2 RMSE", "api=$(api_rmse), log=$(log_rmse)")
@@ -1833,7 +1837,10 @@ function audit_dashboard_payload!(state::AuditState, payload, api_url::AbstractS
 
     api_baseline_rmse = float_or_missing(nested_get(payload, ["calibration", "audit_baseline_rmse_nt"], missing))
     log_baseline_rmse = get(state.live_metrics, :baseline_rmse, missing)
-    if !ismissing(api_baseline_rmse) && !ismissing(log_baseline_rmse) && abs(api_baseline_rmse - round(Float64(log_baseline_rmse); digits = 2)) <= 0.015
+    if zero_verified && ismissing(api_baseline_rmse) && ismissing(log_baseline_rmse)
+        pass!(state, "dashboard API audit-baseline RMSE",
+              "undefined in both API and log before any V2.1 row matures")
+    elseif !zero_verified && !ismissing(api_baseline_rmse) && !ismissing(log_baseline_rmse) && abs(api_baseline_rmse - round(Float64(log_baseline_rmse); digits = 2)) <= 0.015
         pass!(state, "dashboard API audit-baseline RMSE", @sprintf("api %.2f matches log %.2f", api_baseline_rmse, log_baseline_rmse))
     else
         fail!(state, "dashboard API audit-baseline RMSE", "api=$(api_baseline_rmse), log=$(log_baseline_rmse)")
@@ -1923,6 +1930,30 @@ function selftest_readiness_audit()
                              max_issue_age_hours = 3.0,
                              now_utc = fixed_now)
     @assert count(c -> c.level == :fail, state.checks) == 0 "good dashboard payload should not fail"
+    passed += 1
+
+    zero = deepcopy(good)
+    zero["calibration"]["v2_n_verified"] = 0
+    zero["calibration"]["v2_rmse_nt"] = nothing
+    zero["calibration"]["audit_baseline_rmse_nt"] = nothing
+    zero_state = AuditState()
+    zero_state.live_metrics[:served_n] = 0
+    audit_dashboard_payload!(zero_state, zero, "selftest://zero";
+                             require_fresh = true,
+                             max_issue_age_hours = 3.0,
+                             now_utc = fixed_now)
+    @assert count(c -> c.level == :fail, zero_state.checks) == 0 "zero-row dashboard payload should accept undefined sample metrics"
+    passed += 1
+
+    fabricated_zero = deepcopy(zero)
+    fabricated_zero["calibration"]["v2_rmse_nt"] = 0.0
+    fabricated_state = AuditState()
+    fabricated_state.live_metrics[:served_n] = 0
+    audit_dashboard_payload!(fabricated_state, fabricated_zero, "selftest://fabricated-zero";
+                             require_fresh = true,
+                             max_issue_age_hours = 3.0,
+                             now_utc = fixed_now)
+    @assert any(c -> c.level == :fail && c.name == "dashboard API V2 RMSE", fabricated_state.checks) "zero-row dashboard payload must reject fabricated RMSE"
     passed += 1
 
     bad = deepcopy(good)

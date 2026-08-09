@@ -1,6 +1,6 @@
 # Documentation Verification Report
 
-Date: 2026-08-08
+Date: 2026-08-10
 
 ## Coverage
 
@@ -31,6 +31,9 @@ rendered the home, core API, operational API, examples, live-verification, and
 EKF-decision pages. A separate Julia binding audit counted 132 exports and zero
 missing docstrings. Generated `docs/build/` content remains ignored and is not
 tracked.
+
+This clean build and binding audit were repeated on the final 2026-08-10
+forecast-system tree after the launchd recovery and dashboard cold-start fixes.
 
 ## Remaining Gaps
 

@@ -1,8 +1,8 @@
 "use strict";
 // Space-Weather Threat Monitor — dashboard logic.
-// Fetches the backend JSON API and renders an honest, calibrated view: V2 is
-// shown with its 90% interval, lead time is stated against the physical L1 ceiling,
-// and calibration is reported with relevant comparators.
+// Fetches the backend JSON API and renders an evidence-bounded view: V2.1 is
+// shown with its 90%-target interval, lead time is stated against the physical L1
+// ceiling, and empirical live performance is reported on matched comparator rows.
 
 const WONG = { obs: "#e69f00", fcst: "#0072b2", band: "rgba(0,114,178,0.20)" };
 const TIER_COLORS = ["#2e9e6b", "#c9a227", "#d55e00", "#c0392b", "#8e44ad"];
@@ -115,7 +115,7 @@ function renderThreat(st) {
 
   const wf = $("watch-flag");
   if (th.watch) {
-    wf.textContent = `WATCH · a calibrated 90% interval extends to ${fmt(lowerEdge,0)} nT (${th.watch_label} range)`;
+    wf.textContent = `WATCH · a 90% target interval extends to ${fmt(lowerEdge,0)} nT (${th.watch_label} range)`;
     wf.classList.remove("hidden");
   } else { wf.classList.add("hidden"); }
 
@@ -269,7 +269,7 @@ async function renderForecast(forecast, history, status) {
   const src = forecast.interval_source || "—";
   cap.innerHTML = `Solid blue: V2.1 issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
     + `<span data-reltime="${forecast.latest_solar_wind_utc}">${relTime(forecast.latest_solar_wind_utc)}</span>. L1 look-ahead drives target hours already measured upstream; beyond the L1-known window, Bz/By relax toward quiet with a longer timescale during rapid Dst deepening. `
-    + `Shaded: the calibrated 90% interval (${src}); a watch appears when a displayed interval's lower edge enters a stronger Dst range than the point forecast. `
+    + `Shaded: the 90% target interval (${src}); served-center coverage is assessed empirically and no distribution-free guarantee is claimed. A watch appears when a displayed interval's lower edge enters a stronger Dst range than the point forecast. `
     + `Dotted blue: previously issued V2.1 forecasts for hours that now have observed Dst (orange). `
     + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Genuine new-disturbance lead is the L1 transit (~30–60 min).`;
 }
@@ -284,7 +284,8 @@ async function renderHistory(history) {
   }
   if (!(await ensurePlotly())) return;
   const rows = (history.rows || []).filter(r => r.observed_dst_nt != null && r.pred_dst_nt != null);
-  $("cov-badge").textContent = history.coverage_90 != null ? `coverage ${fmt(history.coverage_90,3)}` : "—";
+  $("cov-badge").textContent = history.coverage_90 != null
+    ? `empirical coverage ${fmt(history.coverage_90,3)} · n ${rows.length}` : "—";
   if (rows.length === 0) { Plotly.purge("history-plot"); cap.textContent = "No verified forecasts in this window yet."; return; }
 
   const obs = observedSeries(history);
@@ -305,52 +306,67 @@ async function renderHistory(history) {
   layout.margin.t = 10;
   await Plotly.react("history-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
 
-  cap.innerHTML = `Last ${fmt(history.hours,0)} h of V2.1 forecasts, scored after observation. `
+  cap.innerHTML = `Last ${fmt(history.hours,0)} h of V2.1 forecasts, scored after observation (n=${rows.length}). `
     + `Green = observation fell inside the 90% interval, red = outside. `
-    + `Empirical coverage ${fmt(history.coverage_90,3)} vs nominal 0.90.`;
+    + `Empirical coverage ${fmt(history.coverage_90,3)} vs target 0.90; small samples are provisional.`;
 }
 
 function renderCalib(status) {
   const c = (status && status.calibration) || {};
   const el = $("calib");
-  if (!c || c.n_verified == null || c.n_verified === 0) { el.innerHTML = `<p class="caption">Calibration accrues once forecasts are verified.</p>`; return; }
+  if (!c || c.n_verified == null || c.n_verified === 0) { el.innerHTML = `<p class="caption">Empirical coverage and matched skill accrue once forecasts are verified.</p>`; return; }
   const bse = (v) => v == null ? "—" : `${fmt(v,2)}`;
   const v2Rmse = c.v2_rmse_nt != null ? c.v2_rmse_nt : c.rmse_nt;
   const v2Cov = c.v2_coverage_90 != null ? c.v2_coverage_90 : c.coverage_90;
   const v2N = c.v2_n_verified != null && c.v2_n_verified > 0 ? c.v2_n_verified : c.n_verified;
+  const matchedN = c.comparison_n_verified != null ? c.comparison_n_verified : 0;
+  const minN = c.live_skill_min_verified != null ? c.live_skill_min_verified : 48;
+  const mature = c.live_skill_mature === true && matchedN >= minN;
   const rows = [
-    ["V2.1", v2Rmse, true],
-    ["Persistence", c.rmse_persistence_nt, false],
-    ["O'Brien (physics)", c.rmse_obrien_nt, false],
+    ["V2.1 served", c.v2_matched_rmse_nt],
+    ["V2.1 frozen-tail ablation", c.frozen_tail_ablation_matched_rmse_nt],
+    ["SINDy v1", c.sindy_v1_matched_rmse_nt],
+    ["Persistence", c.persistence_matched_rmse_nt],
+    ["Burton", c.burton_matched_rmse_nt],
+    ["Burton full", c.burton_full_matched_rmse_nt],
+    ["O'Brien–McPherron", c.obrien_matched_rmse_nt],
   ];
-  // honest highlight: best (lowest) RMSE among the displayed point forecasts
+  // A tiny live sample cannot support a winner. Highlight tied minima only after
+  // the predeclared matched-row maturity threshold is reached.
   const vals = rows.map(r => r[1]).filter(v => v != null);
-  const best = vals.length ? Math.min(...vals) : null;
+  const best = mature && vals.length ? Math.min(...vals) : null;
 
   let html = `<div class="big">
-      <div class="stat"><div class="v">${fmt(v2Cov,3)}</div><div class="k">V2.1 90% coverage</div></div>
+      <div class="stat"><div class="v">${fmt(v2Cov,3)}</div><div class="k">empirical coverage (90% target)</div></div>
       <div class="stat"><div class="v">${bse(v2Rmse)}</div><div class="k">V2.1 RMSE nT</div></div>
-      <div class="stat"><div class="v">${v2N}</div><div class="k">V2.1 verified</div></div>
+      <div class="stat"><div class="v">${v2N}</div><div class="k">V2.1 verified forecasts</div></div>
     </div>
-    <table><thead><tr><th>point forecast</th><th>RMSE [nT]</th></tr></thead><tbody>`;
-  for (const [name, v, isV2] of rows) {
-    const win = (v != null && best != null && Math.abs(v-best) < 1e-9) ? ` class="win"` : "";
+    <table><thead><tr><th>matched point forecast (n=${matchedN})</th><th>RMSE [nT]</th></tr></thead><tbody>`;
+  for (const [name, v] of rows) {
+    const win = (mature && v != null && best != null && Math.abs(v-best) < 1e-9) ? ` class="win"` : "";
     html += `<tr><td>${name}</td><td${win}>${bse(v)}</td></tr>`;
   }
   html += `</tbody></table>`;
 
-  // honest interval-method note
+  // Scope note: live served-center intervals are empirically evaluated. Their
+  // center shift and bounded online update do not inherit the ideal theorem.
   const liveSrc = c.current_interval_source || "—";
   const nLive = c.n_verified_current_source != null ? c.n_verified_current_source : 0;
-  let note = `The headline score is V2.1. Live intervals use <strong>${liveSrc}</strong> (online, distribution-free). `;
-  if (nLive === 0) note += `Its forecasts are still pending verification (0 scored so far); the coverage above is over all `
-    + `${c.n_verified} verified forecasts, mostly the prior interval method. `;
+  const remaining = Math.max(0, minN - matchedN);
+  const targetNoun = matchedN === 1 ? "target" : "targets";
+  const remainingNoun = remaining === 1 ? "row is" : "rows are";
+  let note = `<strong>Product forecast: V2.1.</strong> The RMSE table uses only the ${matchedN} ${targetNoun} shared by every listed method. `;
+  if (!mature) note += `<strong>Provisional live evidence:</strong> ${remaining} more matched ${remainingNoun} required before the ${minN}-row live-skill reporting threshold; no best method is highlighted. `;
+  else note += `The ${minN}-row minimum reporting threshold is met; regime coverage still governs interpretation. `;
+  note += `Live intervals use <strong>${liveSrc}</strong> and target 90% coverage. The served-center shift and bounded online update do not retain a distribution-free coverage guarantee, so coverage is empirical. `;
+  if (nLive === 0) note += `No forecast from the current interval source has matured yet. `;
+  else note += `${nLive} verified ${nLive === 1 ? "forecast has" : "forecasts have"} matured from the current interval source. `;
   if (c.deepest_obs_dst_nt != null) note += `This live period has been geomagnetically quiet — deepest observed Dst `
-    + `${fmt(c.deepest_obs_dst_nt,0)} nT, ${c.n_storm_verified} storm hour(s) below −50 nT — so storm-time calibration is not yet stress-tested.`;
+    + `${fmt(c.deepest_obs_dst_nt,0)} nT, ${c.n_storm_verified} ${c.n_storm_verified === 1 ? "storm hour" : "storm hours"} below −50 nT — so storm-time performance is not yet stress-tested.`;
   html += `<div class="note">${note}</div>`;
 
   if (c.by_source && c.by_source.length > 1) {
-    html += `<table><thead><tr><th>interval method</th><th>n</th><th>coverage</th></tr></thead><tbody>`;
+    html += `<table><thead><tr><th>interval method</th><th>n</th><th>empirical coverage</th></tr></thead><tbody>`;
     for (const b of c.by_source) html += `<tr><td>${b.source}</td><td>${b.n}</td><td>${fmt(b.coverage_90,3)}</td></tr>`;
     html += `</tbody></table>`;
   }
@@ -538,7 +554,7 @@ function browserNotify(status) {
     try {
       const alertLabel = watchLevel > pointLevel ? th.watch_label : th.label;
       const body = watchLevel > pointLevel
-        ? `A displayed calibrated 90% interval extends to ${fmt(intervalLowerEdge(th), 0)} nT (${alertLabel} range).`
+        ? `A displayed 90% target interval extends to ${fmt(intervalLowerEdge(th), 0)} nT (${alertLabel} range).`
         : `The point forecast reaches the ${alertLabel} range.`;
       new Notification("⛬ Space-Weather alert", {
         body,

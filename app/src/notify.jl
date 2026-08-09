@@ -1,6 +1,6 @@
 # notify.jl — alert escalation + outbound webhook for the threat monitor.
 #
-# Combines the live layers (Dst forecast level, calibrated-band watch, SWPC upstream
+# Combines the live layers (Dst forecast level, 90%-target-interval watch, SWPC upstream
 # indicator, ground-dB/dt threshold band) into one application routing priority, and POSTs to a configured
 # webhook ONLY on a level transition (no per-poll spam). Slack/Discord/generic compatible
 # (payload carries both a `text` field and the structured fields).
@@ -41,7 +41,7 @@ function compute_alert_state(status, upstream_status, dbdt)
         if th.level >= 1; level = max(level, th.level); push!(reasons, "Dst forecast $(th.label)"); end
         if th.watch
             level = max(level, th.watch_level)
-            push!(reasons, "a calibrated 90% interval extends into the $(th.watch_label) range")
+            push!(reasons, "a 90% target interval extends into the $(th.watch_label) range")
         end
     end
     if upstream_status !== nothing && getproperty(upstream_status, :available) == true &&

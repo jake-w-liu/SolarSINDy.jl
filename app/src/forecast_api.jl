@@ -4,7 +4,7 @@
 # turns it into honest JSON payloads. Design principles:
 #   * The locked log is the single source of truth. This layer never re-computes a
 #     forecast; it serves exactly what was issued and (later) verified.
-#   * A watch is assessed from the most negative lower edge among the displayed calibrated
+#   * A watch is assessed from the most negative lower edge among the displayed 90%-target
 #     predictive intervals, not only from the point forecast. The watch is a conservative
 #     screen, not a one-sided confidence statement or a storm probability.
 #   * Calibration (coverage, RMSE) is recomputed from the log itself, so the dashboard
@@ -23,6 +23,7 @@ const THREAT_BANDS_NT = (-30.0, -50.0, -100.0, -200.0)   # upper edge of levels 
 const CURRENT_V2_MODEL_VERSION = "v2.1"
 const CURRENT_V2_SERVED_MODEL_VERSION =
     "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+const LIVE_SKILL_MIN_VERIFIED = 48
 
 """Return `(level, label)` for a finite Dst value in nT; non-finite input is unknown."""
 function dst_threat_level(dst::Real)
@@ -179,9 +180,9 @@ _rowget(row, name::Symbol) = hasproperty(row, name) ? getproperty(row, name) : m
 function _row_is_current_v2(row)
     model = _rowget(row, :model_version)
     served_model = _rowget(row, :sub_hourly_model_version)
-    return model !== missing && served_model !== missing &&
-           String(model) == CURRENT_V2_MODEL_VERSION &&
-           String(served_model) == CURRENT_V2_SERVED_MODEL_VERSION
+    return model isa AbstractString && served_model isa AbstractString &&
+           model == CURRENT_V2_MODEL_VERSION &&
+           served_model == CURRENT_V2_SERVED_MODEL_VERSION
 end
 
 # Rows of the most recent forecast cycle, defined by ISSUE epoch (not driver vintage). When the
@@ -244,14 +245,14 @@ function _verified_rows_uncached(df::DataFrame)
      hasproperty(df, :observation_dst_nt)) || return view(df, Int[], :)
     has_issue  = hasproperty(df, :issue_time_utc_dt)
     has_anchor = hasproperty(df, :latest_dst_time_utc_dt)
+    (has_issue && has_anchor) || return view(df, Int[], :)
     keep = trues(nrow(df))
     for (i, r) in enumerate(eachrow(df))
         tt = _rowget(r, :target_time_utc_dt)
-        valid_lead = tt !== missing &&
-                     (!has_issue  || _rowget(r, :issue_time_utc_dt) === missing ||
-                                      tt > _rowget(r, :issue_time_utc_dt)) &&
-                     (!has_anchor || _rowget(r, :latest_dst_time_utc_dt) === missing ||
-                                       tt > _rowget(r, :latest_dst_time_utc_dt))
+        issue = _rowget(r, :issue_time_utc_dt)
+        anchor = _rowget(r, :latest_dst_time_utc_dt)
+        valid_lead = tt isa DateTime && issue isa DateTime && anchor isa DateTime &&
+                     tt > issue && tt > anchor
         lo = jnum(_v2_ci05(r))
         hi = jnum(_v2_ci95(r))
         keep[i] = _row_is_current_v2(r) && valid_lead &&
@@ -340,7 +341,22 @@ function _compute_calibration_summary(df::DataFrame)
                       v2_n_verified=0, v2_coverage_90=nothing, v2_rmse_nt=nothing,
                       frozen_tail_ablation_rmse_nt=nothing,
                       audit_baseline_rmse_nt=nothing,
-                      rmse_persistence_nt=nothing, rmse_obrien_nt=nothing,
+                      rmse_sindy_v1_nt=nothing, rmse_persistence_nt=nothing,
+                      rmse_burton_nt=nothing, rmse_burton_full_nt=nothing,
+                      rmse_obrien_nt=nothing,
+                      comparison_n_verified=0,
+                      v2_matched_rmse_nt=nothing,
+                      frozen_tail_ablation_matched_rmse_nt=nothing,
+                      sindy_v1_matched_rmse_nt=nothing,
+                      persistence_matched_rmse_nt=nothing,
+                      burton_matched_rmse_nt=nothing,
+                      burton_full_matched_rmse_nt=nothing,
+                      obrien_matched_rmse_nt=nothing,
+                      live_skill_min_verified=LIVE_SKILL_MIN_VERIFIED,
+                      live_skill_mature=false,
+                      live_skill_rows_remaining=LIVE_SKILL_MIN_VERIFIED,
+                      interval_target_coverage=0.90,
+                      served_interval_coverage_scope="empirical_only",
                       current_interval_source=live_src, n_verified_current_source=0,
                       deepest_obs_dst_nt=nothing, n_storm_verified=0, by_source=[])
     obs   = Float64.(v.observation_dst_nt)
@@ -384,17 +400,35 @@ function _compute_calibration_summary(df::DataFrame)
     fallback_rmse = rmse(pred)
     product_rmse = product_col_n > 0 ? product_col_rmse :
         fallback_rmse === nothing ? nothing : jnum(round(fallback_rmse; digits=2))
+    v1   = "v1_pred_dst_nt" in names(v) ? jnum.(v.v1_pred_dst_nt) : fill(nothing, n)
     pers = "persistence_dst_nt" in names(v) ? jnum.(v.persistence_dst_nt) : fill(nothing, n)
+    burt = "burton_dst_nt" in names(v) ? jnum.(v.burton_dst_nt) : fill(nothing, n)
+    burf = "burton_full_dst_nt" in names(v) ? jnum.(v.burton_full_dst_nt) : fill(nothing, n)
     obri = "obrien_dst_nt" in names(v) ? jnum.(v.obrien_dst_nt) : fill(nothing, n)
+
+    # The displayed comparison is a genuinely matched cohort: a target enters only when
+    # the served product, frozen-tail ablation, and every declared comparator are finite.
+    # This prevents a method with missing hard cases from receiving an incomparable RMSE.
+    comparison_mask = copy(product_mask)
+    for values in (audit_pred, v1, pers, burt, burf, obri)
+        comparison_mask .&= .!isnothing.(values)
+    end
+    comparison_n = count(comparison_mask)
+    matched_rmse(values) = rmse_optional(values, comparison_mask)
+    v2_values = jnum.(pred)
+    live_skill_mature = comparison_n >= LIVE_SKILL_MIN_VERIFIED
 
     # per-method coverage breakdown
     srcs = "interval_source" in names(v) ? _src_label.(v.interval_source) : fill("unknown", n)
+    product_srcs = srcs[product_mask]
+    product_inside = inside[product_mask]
     by_source = NamedTuple[]
-    for s in sort(unique(srcs))
-        m = srcs .== s
-        push!(by_source, (source=s, n=count(m), coverage_90=round(mean(inside[m]); digits=3)))
+    for s in sort(unique(product_srcs))
+        m = product_srcs .== s
+        push!(by_source, (source=s, n=count(m),
+                         coverage_90=round(mean(product_inside[m]); digits=3)))
     end
-    n_live = count(srcs .== live_src)
+    n_live = count(product_srcs .== live_src)
 
     return (n_verified=product_n,
             coverage_90=product_cov,
@@ -406,12 +440,28 @@ function _compute_calibration_summary(df::DataFrame)
             # Deprecated compatibility alias. New clients should use the
             # explicit V2.1 frozen-tail-ablation field above.
             audit_baseline_rmse_nt=audit_rmse,
+            rmse_sindy_v1_nt=rmse_optional(v1, product_mask),
             rmse_persistence_nt=rmse_optional(pers, product_mask),
+            rmse_burton_nt=rmse_optional(burt, product_mask),
+            rmse_burton_full_nt=rmse_optional(burf, product_mask),
             rmse_obrien_nt=rmse_optional(obri, product_mask),
+            comparison_n_verified=comparison_n,
+            v2_matched_rmse_nt=matched_rmse(v2_values),
+            frozen_tail_ablation_matched_rmse_nt=matched_rmse(audit_pred),
+            sindy_v1_matched_rmse_nt=matched_rmse(v1),
+            persistence_matched_rmse_nt=matched_rmse(pers),
+            burton_matched_rmse_nt=matched_rmse(burt),
+            burton_full_matched_rmse_nt=matched_rmse(burf),
+            obrien_matched_rmse_nt=matched_rmse(obri),
+            live_skill_min_verified=LIVE_SKILL_MIN_VERIFIED,
+            live_skill_mature=live_skill_mature,
+            live_skill_rows_remaining=max(0, LIVE_SKILL_MIN_VERIFIED - comparison_n),
+            interval_target_coverage=0.90,
+            served_interval_coverage_scope="empirical_only",
             current_interval_source=live_src,
             n_verified_current_source=n_live,
-            deepest_obs_dst_nt=jnum(round(minimum(obs); digits=1)),
-            n_storm_verified=count(obs .< -50),
+            deepest_obs_dst_nt=jnum(round(minimum(obs[product_mask]); digits=1)),
+            n_storm_verified=count(obs[product_mask] .< -50),
             by_source=by_source)
 end
 
@@ -683,7 +733,7 @@ function build_status(df::DataFrame)
     lvl_pt, lbl_pt = dst_threat_level(point_min)
     lvl_wc, lbl_wc = dst_threat_level(interval_lower_edge_min)
     # Reported threat level is the point-forecast level; a "watch" flag fires when the
-    # lower edge of a displayed calibrated interval reaches a stronger storm tier than the
+    # lower edge of a displayed 90%-target interval reaches a stronger storm tier than the
     # point forecast. This does not turn the marginal interval into a one-sided bound.
     watch = lvl_wc > lvl_pt
     horizon_max = (h = filter(!isnothing,
@@ -780,7 +830,7 @@ function build_alerts(df::DataFrame, st=build_status(df))
     end
     if th.watch && th.watch_level > th.level
         push!(alerts, (severity=th.watch_label, level=th.watch_level, kind="watch",
-                       message="A displayed calibrated 90% interval extends to " *
+                       message="A displayed 90% target interval extends to " *
                                "$(round(th.interval_lower_edge_min_dst_nt; digits=0)) nT " *
                                "($(th.watch_label) range) at one or more horizons."))
     end

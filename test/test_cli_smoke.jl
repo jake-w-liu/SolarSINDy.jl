@@ -33,6 +33,14 @@
 
         @test success(`$bash -n $cli`)                       # parses under bash
 
+        # The dashboard is request/serialization bound: its launch carries --compile=min so a cold
+        # SWPC refresh cannot monopolize Julia code generation and stall HTTP routes for minutes,
+        # matching the supervised launchd deployment. The numerical-kernel monitor daemon is left at
+        # full compilation, so exactly one launch line carries the flag.
+        script = read(cli, String)
+        @test occursin("--compile=min --project=\"\$ROOT/app\"", script)
+        @test length(findall("--compile=min --project=", script)) == 1
+
         help_out = read(setenv(`$bash $cli help`, env), String)
         for word in ("setup", "start", "stop", "restart", "status", "once", "logs",
                      "open", "install-service", "uninstall-service")

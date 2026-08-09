@@ -49,7 +49,7 @@ The package is organized as two layers:
 **Real-time**
 
 - NOAA SWPC plasma / magnetic-field / Dst fetchers
-- a rolling monitor loop with calibrated storm-severity alarms
+- a rolling monitor loop with interval-aware storm-severity alarms
 
 ## Operational forecast status
 
@@ -144,7 +144,7 @@ issue-time drivers ──▶ v1 SINDy point forecast ──▶ v2 correction (ca
                                                  └─▶ guarded component selection
                                                           │
                                                           ▼
-                                          calibrated operational Dst + 90% band
+                              operational Dst + empirically evaluated 90% target band
 ```
 
 Because the v2 correction and the conformal quantiles are fit only from rows strictly
@@ -302,10 +302,15 @@ state, report, and outage artifacts remain in `var/monitor/`. Remove the service
 
 A self-contained operational dashboard ships in [`app/`](app/): a minimal-dependency
 `HTTP.jl` backend serving a Plotly UI over the locked-live forecast log — current storm level,
-the Dst forecast with its calibrated 90% band, a **rolling forecast-vs-observed track** (every
+the Dst forecast with its empirically evaluated 90% target band, a **rolling forecast-vs-observed track** (every
 locked forecast plotted against the observation that later arrived), the verified track record,
 calibration/skill, a live ground-d*B*/d*t* nowcast, and the Sun → grid
 warning chain.
+
+The served-center shift and bounded online interval update do not retain the
+frozen-center distribution-free guarantee. The dashboard therefore labels coverage as
+empirical, reports every point comparator on one common target cohort, and withholds
+best-method highlighting until at least 48 matched live rows have matured.
 
 The ground-d*B*/d*t* panel uses the provisional USGS adjusted near-real-time product and is a
 GIC-hazard indicator; archival quality control can revise the live magnetic vectors. The bundled

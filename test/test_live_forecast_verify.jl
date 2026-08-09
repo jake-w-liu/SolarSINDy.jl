@@ -420,6 +420,23 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             @test row.target_step_By_nt ≈ 1.0 * relax atol=1e-12
             @test row.target_step_Bz_nt != -4.0
             @test row.Bz_nt == -4.0  # anchor-feature provenance remains unchanged
+
+            # The logged served-model identity promises that the operational tail ran.
+            # If that computation fails, issuance must fail closed before a row exists.
+            failed_cfg = LiveVerifyConfig(;
+                model=:v2,
+                horizon_hours=6,
+                log_path=joinpath(dir, "failed_tail_log.csv"),
+                report_path=joinpath(dir, "failed_tail_report.md"),
+            )
+            throwing_tail = (args...) -> error("injected tail failure")
+            @test_throws ErrorException redirect_stdout(devnull) do
+                issue_forecast(
+                    failed_cfg; inputs, write_trajectory=false, verbose=false,
+                    tail_step_fn=throwing_tail,
+                )
+            end
+            @test !isfile(failed_cfg.log_path)
         end
     end
 
@@ -931,6 +948,54 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             @test written
             @test payload_calls[] == 1
             @test String(JSON3.read(read(path, String))["generation"]) == "new"
+        end
+    end
+
+    @testset "sub-hour display trajectory ends at the h=6 target under a lagged Dst anchor" begin
+        mktempdir() do dir
+            issue_time = DateTime(2026, 7, 15, 12, 30)
+            sw_times = collect((issue_time - Hour(12)):Minute(1):issue_time)
+            plasma = DataFrame(
+                time_tag=sw_times,
+                speed=fill(500.0, length(sw_times)),
+                density=fill(6.0, length(sw_times)),
+            )
+            mag = DataFrame(
+                time_tag=sw_times,
+                bz_gsm=fill(-4.0, length(sw_times)),
+                by_gsm=fill(1.0, length(sw_times)),
+            )
+            # Anchor lags the issue hour by 1 h (the normal live condition): floor(issue)=12:00 but the
+            # freshest Kyoto Dst is 11:00, so the served h=6 target 18:00 sits 7 model-steps from the
+            # anchor. A fixed 6 h display window would end at 17:00, one hour short of the furthest
+            # issued horizon; the trajectory must span the full anchor->target lead.
+            latest_dst_time = floor(issue_time, Hour) - Hour(1)
+            dst_times = collect((latest_dst_time - Hour(12)):Hour(1):latest_dst_time)
+            dst_values = collect(range(-20.0, -44.0; length=length(dst_times)))
+            cfg = LiveVerifyConfig(;
+                model=:v2,
+                horizon_hours=6,
+                log_path=joinpath(dir, "live_forecast_log.csv"),
+                report_path=joinpath(dir, "live_comparison_report.md"),
+            )
+            inputs = prepare_issue_inputs(
+                cfg; issue_time,
+                plasma_fn=() -> plasma,
+                mag_fn=() -> mag,
+                dst_fn=() -> (dst_times, dst_values),
+            )
+            target_time = _next_hourly_target(issue_time, 6, latest_dst_time)
+            @test (target_time - latest_dst_time) / Hour(1) == 7
+            redirect_stdout(devnull) do
+                issue_forecast(cfg; inputs, write_trajectory=true, verbose=false)
+            end
+            sidecar = joinpath(dir, "subhour_trajectory.json")
+            @test isfile(sidecar)
+            payload = JSON3.read(read(sidecar, String))
+            points = payload["points"]
+            @test !isempty(points)
+            @test DateTime(String(payload["anchor_time_utc"])) == latest_dst_time
+            @test DateTime(String(last(points)["t"])) == target_time
         end
     end
 
@@ -1931,6 +1996,20 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         lo, hi = _shift_interval_to_center(-90.0, -80.0, -100.0, -60.0)
         @test (lo, hi) == (-110.0, -70.0)
         @test_throws ArgumentError _shift_interval_to_center(NaN, -80.0, -100.0, -60.0)
+        @test _served_interval_with_source(-110.0, -70.0, "conformal", nothing) ==
+              (-110.0, -70.0, "conformal")
+        @test _served_interval_with_source(-110.0, -70.0, "conformal", (-120.0, -60.0)) ==
+              (-120.0, -60.0, "aci")
+        @test_throws ArgumentError _served_interval_with_source(
+            -110.0, -70.0, "conformal", (NaN, -60.0),
+        )
+        @test_throws ArgumentError _served_interval_with_source(
+            -110.0, -70.0, "conformal", (-60.0, -120.0),
+        )
+        @test _served_driver_assumption(OPERATIONAL_V2_1_MODEL_VERSION) ==
+              V2_DRIVER_ASSUMPTION
+        @test _served_driver_assumption("v1") == V1_DRIVER_ASSUMPTION
+        @test_throws ArgumentError _served_driver_assumption("v0")
         @test _near_term_extreme_inertia_guard(-250.0, 1)
         @test _near_term_extreme_inertia_guard(-250.0, 2)
         @test _near_term_extreme_inertia_guard(-240.0, 2)      # exact inclusive (<=) threshold boundary

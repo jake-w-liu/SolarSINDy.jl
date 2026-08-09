@@ -178,6 +178,10 @@ function _archive_pruned_rows!(pruned::DataFrame;
                                archive_path::AbstractString=FORECAST_ARCHIVE,
                                manifest_path::AbstractString=FORECAST_ARCHIVE_MANIFEST)
     nrow(pruned) == 0 && return 0
+    # Normalize to absolute paths at entry so a bare relative log path (dirname("live.csv")=="")
+    # cannot silently land the archive/manifest under a cwd-relative "archive/" directory.
+    archive_path = abspath(archive_path)
+    manifest_path = abspath(manifest_path)
     mkpath(dirname(archive_path))
     existed = isfile(archive_path)
 
@@ -199,6 +203,34 @@ function _archive_pruned_rows!(pruned::DataFrame;
     existed && prev_bytes != 0 && filesize(archive_path) != prev_bytes && error(
         "cold archive size changed outside retention: expected $prev_bytes bytes, " *
         "found $(filesize(archive_path)) at $archive_path")
+
+    # Manifest-completeness guard: a non-empty archive with no readable manifest (missing, or corrupt
+    # JSON swallowed to prev_bytes==0) has no verified byte baseline. Without it the post-append
+    # accounting check below (new_bytes == base_bytes + length(seg), base_bytes==0) can only fire
+    # AFTER CSV.write has already appended the segment, so every retention retry re-appends the same
+    # rows (duplicating archived evidence) and throws again while retention never completes. Refuse
+    # before serializing (like the schema-drift guard) so retention aborts and the rows stay safely in
+    # the hot log until the archive/manifest is repaired.
+    existed && prev_bytes == 0 && filesize(archive_path) > 0 && error(
+        "cold archive manifest missing or unreadable at $manifest_path beside a non-empty archive " *
+        "($(filesize(archive_path)) bytes) at $archive_path; refusing to append without a verified " *
+        "byte baseline")
+
+    # Schema-drift guard: CSV.write appends positionally and never re-reads the target header, so a
+    # pruned frame whose columns differ from the existing archive header would silently write
+    # misaligned rows under the wrong header. Refuse before touching the file so retention aborts and
+    # the rows stay safely in the hot log for the next attempt.
+    if existed
+        archive_header = try
+            names(CSV.read(archive_path, DataFrame; limit=0))
+        catch e
+            e isa InterruptException && rethrow()
+            error("cold archive header unreadable at $archive_path: $(sprint(showerror, e))")
+        end
+        names(pruned) == archive_header || error(
+            "cold archive header mismatch at $archive_path: archive columns $archive_header " *
+            "!= pruned columns $(names(pruned)); refusing to append misaligned rows")
+    end
 
     # Serialize the segment once (header only when creating), hash it, append, flush.
     buf = IOBuffer()
@@ -318,7 +350,18 @@ function _complete_issuance_cycle(log_path::AbstractString, issue_time::DateTime
     return true
 end
 
-clear_outage_sentinel() = (isfile(OUTAGE_SENTINEL) && rm(OUTAGE_SENTINEL; force=true); nothing)
+function clear_outage_sentinel(path::AbstractString=OUTAGE_SENTINEL)
+    isfile(path) || return false
+    body = try
+        read(path, String)
+    catch e
+        e isa InterruptException && rethrow()
+        return false
+    end
+    occursin("Source: daemon issuance dead-man", body) || return false
+    rm(path; force=true)
+    return true
+end
 
 # Advance a fixed-rate cycle deadline without catch-up bursts. Sleeping for a full interval after
 # each completed cycle accumulates fetch/runtime latency and eventually skips an hourly product.
@@ -393,7 +436,12 @@ function _retain_live_forecast_log!(log_path::AbstractString, max_rows::Int)
         # Durability: cold-archive the oldest rows about to be dropped BEFORE the hot log is
         # rewritten, so the locked-live record survives the FIFO cap. A failed/short archive throws
         # here (retention aborts, rows stay in the hot log) rather than silently destroying evidence.
-        _archive_pruned_rows!(df[1:(n - max_rows), :])
+        # The archive lives beside the log it protects (a non-default log path archives to its own
+        # sibling directory, never the module-const production archive).
+        archive_path = joinpath(dirname(path), "archive", "live_forecast_log_archive.csv")
+        _archive_pruned_rows!(df[1:(n - max_rows), :];
+                              archive_path=archive_path,
+                              manifest_path=string(archive_path, ".manifest.json"))
         _atomic_csv(path, retained)
         _persist_live_state_after_table_write!(
             path, previous_state, retained, Int[]; revised=true,

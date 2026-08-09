@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Space-Weather Threat Monitor</title>
-  <meta name="description" content="Open-source, calibrated geomagnetic-storm (Dst) threat monitor over a live forecaster." />
+  <meta name="description" content="Open-source geomagnetic-storm (Dst) forecast monitor with empirically evaluated uncertainty." />
   <link rel="stylesheet" href="/style.css" />
   <!-- Plotly: prefer a locally vendored copy (offline); fall back to the official CDN. -->
   <script src="/vendor/plotly.min.js"
@@ -17,7 +17,7 @@
         <span class="logo" aria-hidden="true">⛬</span>
         <div>
           <h1>Space-Weather Threat Monitor</h1>
-          <p class="tagline">Calibrated geomagnetic-storm forecasting &mdash; open source, honest lead time</p>
+          <p class="tagline">Geomagnetic-storm forecasting &mdash; open source, honest lead time</p>
         </div>
       </div>
       <div class="status-meta">
@@ -36,7 +36,7 @@
       </div>
       <div class="threat-right">
         <div class="metric"><span class="metric-val" id="cur-dst">&mdash;</span><span class="metric-key">current Dst (nT)</span></div>
-        <div class="metric"><span class="metric-val" id="worst-dst">&mdash;</span><span class="metric-key">90% interval lower edge (nT)</span></div>
+        <div class="metric"><span class="metric-val" id="worst-dst">&mdash;</span><span class="metric-key">90% target-interval lower edge (nT)</span></div>
         <div class="metric"><span class="metric-val" id="horizon">&mdash;</span><span class="metric-key">forecast horizon</span></div>
       </div>
       <div id="watch-flag" class="watch-flag hidden"></div>
@@ -53,10 +53,10 @@
       <p class="caption" id="upstream-caption"></p>
     </section>
 
-    <!-- Forecast: past observed Dst + forward forecast with calibrated band -->
+    <!-- Forecast: past observed Dst + forward forecast with empirically evaluated target band -->
     <section class="card">
       <div class="card-head">
-        <h2>Dst forecast &amp; calibrated uncertainty</h2>
+        <h2>Dst forecast &amp; 90% target interval</h2>
         <span class="src-badge" id="interval-badge">&mdash;</span>
       </div>
       <div id="forecast-plot" class="plot"></div>
@@ -95,7 +95,7 @@
 
       <!-- Calibration / skill -->
       <section class="card">
-        <div class="card-head"><h2>Calibration &amp; skill</h2></div>
+        <div class="card-head"><h2>Live evidence: coverage &amp; skill</h2></div>
         <div id="calib" class="calib"></div>
       </section>
     </div>

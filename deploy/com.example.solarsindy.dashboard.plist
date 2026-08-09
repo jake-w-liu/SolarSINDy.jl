@@ -25,6 +25,12 @@
   <key>ProgramArguments</key>
   <array>
     <string>__JULIA_BIN__</string>
+    <!-- The dashboard is request/serialization bound, not numerical-kernel bound. `--compile=min`
+         keeps a cold SWPC refresh from monopolizing Julia code generation and stalling every HTTP
+         route for minutes after a restart; measured cold API latency remains inside the external
+         watchdog's eight-second health deadline. -->
+    <string>--startup-file=no</string>
+    <string>--compile=min</string>
     <string>--project=__APP_DIR__</string>
     <string>__APP_DIR__/src/server.jl</string>
   </array>

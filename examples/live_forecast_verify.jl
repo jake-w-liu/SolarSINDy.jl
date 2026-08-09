@@ -593,6 +593,14 @@ const V2_STATE_INERTIA_DEEPENING_LO_NT_PER_H = -15.0
 const V2_STATE_INERTIA_DEEPENING_HI_NT_PER_H = -5.0
 const V2_SERVED_TAIL_VERSION = "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
 const V1_SERVED_TAIL_VERSION = "v1+L1A+Bregime"
+const V2_DRIVER_ASSUMPTION = "ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_inertia_blend_then_state_inertia_then_extreme_inertia_guard"
+const V1_DRIVER_ASSUMPTION = "ballistically_propagated_l1_then_regime_aware_relaxation"
+
+function _served_driver_assumption(model_version::AbstractString)
+    model_version == OPERATIONAL_V2_1_MODEL_VERSION && return V2_DRIVER_ASSUMPTION
+    model_version == "v1" && return V1_DRIVER_ASSUMPTION
+    throw(ArgumentError("unsupported served model version: $model_version"))
+end
 
 function _blend_drivers(frac::Real, measured, recent)
     f = clamp(Float64(frac), 0.0, 1.0)
@@ -780,6 +788,17 @@ function _shift_interval_to_center(center::Real, reference_center::Real,
     ))
     c, rc, lo, hi = vals
     return (c + (lo - rc), c + (hi - rc))
+end
+
+function _served_interval_with_source(ci05::Real, ci95::Real,
+                                      interval_source::AbstractString, aci)
+    aci === nothing && return (Float64(ci05), Float64(ci95), String(interval_source))
+    length(aci) == 2 || throw(ArgumentError("ACI interval must contain exactly two endpoints"))
+    lo, hi = Float64(aci[1]), Float64(aci[2])
+    (isfinite(lo) && isfinite(hi) && lo <= hi) || throw(ArgumentError(
+        "ACI interval must be finite and ordered, got ($lo, $hi)",
+    ))
+    return (lo, hi, "aci")
 end
 
 # Minute (sub-hourly) layer: for a frozen-tail forecast step, drive it with the 1-min L1 wind that PROPAGATES
@@ -3218,7 +3237,8 @@ function issue_forecast(cfg::LiveVerifyConfig;
                         inputs=nothing,
                         write_trajectory::Bool=true,
                         verbose::Bool=true,
-                        interval_policy::Symbol=:auto)
+                        interval_policy::Symbol=:auto,
+                        tail_step_fn::Function=step_forecast!)
     _assert_issuable_model(cfg.model, cfg.horizon_hours)
     interval_policy = _checked_interval_policy(interval_policy)
     prepared = inputs === nothing ? prepare_issue_inputs(cfg) : inputs
@@ -3510,18 +3530,24 @@ function issue_forecast(cfg::LiveVerifyConfig;
                 hours_since_l1 += 1
                 _relaxed_tail_driver(last_known, hours_since_l1, dst_rate_nt_per_h)
             end
-            sresult = step_forecast!(sstate, sst, sdrv.V, sdrv.Bz, sdrv.By, sdrv.n, sdrv.Pdyn)
+            sresult = tail_step_fn(sstate, sst, sdrv.V, sdrv.Bz, sdrv.By, sdrv.n, sdrv.Pdyn)
             sst += Hour(1)
         end
-        if sresult !== nothing && isfinite(sresult.dst_predicted)
-            sv1 = _dst_from_dst_star(sresult.dst_predicted, sdrv.Pdyn)   # target-step Pdyn (sub-hourly tail), not the stale v2 driver
-            # v2 mode adds the residual correction; v1 mode (no correction) serves the raw L1 prediction (avoid sv1+missing).
-            sub_hourly_pred_dst = ismissing(selected.v2_correction) ? sv1 : sv1 + selected.v2_correction
-            served_target_drivers = sdrv
-        end
+        sresult === nothing && error("operational tail produced no target-step result")
+        isfinite(sresult.dst_predicted) || error(
+            "operational tail produced a non-finite target-step prediction",
+        )
+        sv1 = _dst_from_dst_star(sresult.dst_predicted, sdrv.Pdyn)   # target-step Pdyn (sub-hourly tail), not the stale v2 driver
+        # v2 mode adds the residual correction; v1 mode (no correction) serves the raw L1 prediction (avoid sv1+missing).
+        sub_hourly_pred_dst = ismissing(selected.v2_correction) ? sv1 : sv1 + selected.v2_correction
+        isfinite(sub_hourly_pred_dst) || error(
+            "operational tail produced a non-finite served prediction",
+        )
+        served_target_drivers = sdrv
     catch e
         e isa InterruptException && rethrow()
-        @warn "V2.1 operational tail failed; serving the current frozen-tail center" exception=(e, catch_backtrace())
+        @error "Operational tail failed; refusing to append a mislabeled forecast row" exception=(e, catch_backtrace())
+        rethrow()
     end
     if selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION
         sub_hourly_pred_dst = _apply_v2_1_safeguards(
@@ -3538,6 +3564,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
         reference_ci05_dst,
         reference_ci95_dst,
     )
+    served_interval_source = interval_source
     # Served-band honesty: once enough verified served rows exist at this lead/regime, calibrate the
     # served 90% band on the served model's OWN residuals (pool served_pred_dst_nt, ACI step centered
     # on the served center) rather than transplanting the frozen-tail V2.1 band — the exchangeability
@@ -3548,9 +3575,10 @@ function issue_forecast(cfg::LiveVerifyConfig;
             interval_policy, cfg.log_path, sub_hourly_pred_dst, model_steps;
             latest_dst=latest_dst, pred_col=:served_pred_dst_nt,
         )
-        if served_aci !== nothing && isfinite(served_aci[1]) && isfinite(served_aci[2])
-            sub_hourly_ci05, sub_hourly_ci95 = served_aci[1], served_aci[2]
-        end
+        sub_hourly_ci05, sub_hourly_ci95, served_interval_source =
+            _served_interval_with_source(
+                sub_hourly_ci05, sub_hourly_ci95, interval_source, served_aci,
+            )
     end
 
     # ---- V2.1 product forecast = current frozen-tail center + operational tail.
@@ -3570,7 +3598,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
         horizon_hours=[wall_horizon],
         wall_clock_lead_hours=[wall_horizon],
         model_step_hours=[model_steps],
-        driver_assumption=["ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_inertia_blend_then_state_inertia_then_extreme_inertia_guard"],
+        driver_assumption=[_served_driver_assumption(selected.model_version)],
         driver_data_gap=[driver_data_gap],
         dst_memory_fallback=[dst_memory_fallback],
         n_speed_finite_trailing_hour=[n_speed_finite],
@@ -3578,7 +3606,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
         n_density_finite_trailing_hour=[n_density_finite],
         n_by_finite_trailing_hour=[n_by_finite],
         n_steps_driver_fallback=[n_steps_driver_fallback],
-        interval_source=[interval_source],
+        interval_source=[served_interval_source],
         feature_driver_basis=[_ANCHOR_FEATURE_DRIVER_BASIS],
         V_kms=[driver_audit.V_kms],
         Bz_nt=[driver_audit.Bz_nt],
@@ -3654,10 +3682,15 @@ function issue_forecast(cfg::LiveVerifyConfig;
             joinpath(dirname(cfg.log_path), "subhour_trajectory.json"),
             write_trajectory && append_result.appended,
         ) do
+            # Span the display trajectory over the full anchor->target lead (model_steps hours), not a
+            # fixed 6 h window: when the Kyoto Dst anchor lags the issue hour the served h=6 target sits
+            # at anchor + model_steps (model_steps > 6), so a fixed window ends one hour short of the
+            # furthest issued horizon. Threading model_steps pins the sidecar's last point to the target.
             traj = _subhour_trajectory(
                 state, latest_dst_time, anchor_dst_star, plasma, mag,
                 recent, latest_common_sw,
                 selected.v2_correction; dst_rate_nt_per_h=dst_rate_nt_per_h,
+                window_h=model_steps,
             )
             Dict("issue_time_utc" => string(issue_time),
                  "anchor_time_utc" => string(latest_dst_time),

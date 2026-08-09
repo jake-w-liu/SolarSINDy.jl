@@ -122,7 +122,7 @@ frozen-tail and selector fields are audit evidence, not additional products.
 The default live model is V2.1; `--model=v2` is its accepted short alias.
 Use `--model=v1` explicitly to reproduce the uncalibrated discovery-core path.
 V2.1 applies a causal ridge residual correction to the current revised 20/11
-SINDy forecast and supplies a calibrated prediction interval. The correction
+SINDy forecast and supplies an empirically evaluated 90%-target prediction interval. The correction
 uses only issue-time fields: latest Dst, solar-wind
 speed, IMF components, density, dynamic pressure, and derived causal coupling
 features such as southward IMF, `V Bs`, transverse IMF magnitude, IMF clock-angle
@@ -136,6 +136,11 @@ validation rows, which fit neither. The holdout is scored exactly once and is
 never used for selection or tuning. This calibration-stage score applies to the
 V2.1 frozen-tail center. It must not be reported as performance of the served
 stack after its center-changing tail and safeguards.
+
+The dashboard evaluates served V2.1 and every displayed comparator on one common
+target cohort. Live RMSE rankings remain provisional and receive no winner styling
+until at least 48 matched rows have matured. The served-center shift and bounded
+online update do not inherit the frozen-center distribution-free guarantee.
 
 Deployment is decided by an acceptance gate evaluated on the validation rows: a
 v2 candidate is deployed only if it beats persistence and O'Brien--McPherron on
@@ -233,13 +238,19 @@ conformal interval and the legacy interval-scale band.
 
 When the sidecar is present, `--model=v2` issuance sources the logged 90%
 interval from the conformal half-width for the row's horizon and activity
-regime, instead of the v1-ensemble-spread interval scale. Each row records an
-`interval_source` column (`conformal` or `interval_scale`) for audit. The point
+regime, instead of the v1-ensemble-spread interval scale. Each row records the
+band actually served in `interval_source` (`aci`, `conformal`, or
+`interval_scale`) for audit. The point
 forecast is unchanged; only the uncertainty band changes. The static half-width
 is shifted from the frozen center to the served V2.1 center. This preserves the
 width but does not automatically transfer the frozen-center guarantee; the
 complete-hour served-stack holdout supplies the corresponding empirical
 coverage evidence.
+
+The operational tail is part of the served-model identity. A thrown or
+non-finite tail result aborts issuance before the forecast row is appended;
+the system does not relabel the frozen-tail ablation as a successful served
+forecast.
 
 To populate the horizon strata, build the conformal calibration table with
 multiple lead times via `--replay-horizons`:

@@ -245,7 +245,10 @@ end
             served_lo=[-69.0, -70.0, -71.0, -72.0],
             served_hi=[-49.0, -50.0, -51.0, -52.0],
         )
+        df[!, :v1_pred_dst_nt] = [-55.0, -56.0, -57.0, -58.0]
         df[!, :persistence_dst_nt] = fill(-50.0, nrow(df))
+        df[!, :burton_dst_nt] = [-57.0, -58.0, -59.0, -60.0]
+        df[!, :burton_full_dst_nt] = [-56.0, -57.0, -58.0, -59.0]
         df[!, :obrien_dst_nt] = [-58.0, -59.0, -60.0, -61.0]
         cal = calibration_summary(df)
         expected_v2_rmse = round(sqrt(mean((df.observation_dst_nt .- df.served_pred_dst_nt).^2)); digits=2)
@@ -256,6 +259,54 @@ end
         @test cal.audit_baseline_rmse_nt == expected_audit_rmse
         @test cal.frozen_tail_ablation_rmse_nt == expected_audit_rmse
         @test cal.v2_coverage_90 == 1.0
+        # Hand-derived constant residuals verify every displayed method and catch a
+        # dropped comparator or a substitution of the unmatched product RMSE.
+        @test cal.comparison_n_verified == 4
+        @test cal.v2_matched_rmse_nt == 1.0
+        @test cal.frozen_tail_ablation_matched_rmse_nt == 15.0
+        @test cal.sindy_v1_matched_rmse_nt == 5.0
+        @test cal.persistence_matched_rmse_nt == 11.55
+        @test cal.burton_matched_rmse_nt == 3.0
+        @test cal.burton_full_matched_rmse_nt == 4.0
+        @test cal.obrien_matched_rmse_nt == 2.0
+        @test cal.live_skill_min_verified == 48
+        @test !cal.live_skill_mature
+        @test cal.live_skill_rows_remaining == 44
+        @test cal.served_interval_coverage_scope == "empirical_only"
+
+        # One missing O'Brien value removes that target from every matched RMSE.
+        # Persistence then has squared errors 100, 121, and 144: sqrt(365/3)=11.03
+        # after the API's declared two-decimal presentation rounding.
+        partial = copy(df)
+        partial[!, :obrien_dst_nt] = Union{Missing,Float64}[-58.0, -59.0, -60.0, missing]
+        partial_cal = calibration_summary(partial)
+        @test partial_cal.comparison_n_verified == 3
+        @test partial_cal.persistence_matched_rmse_nt == 11.03
+        @test partial_cal.rmse_persistence_nt == 11.55
+
+        # Boundary oracle for the live-skill gate: 12 complete four-horizon cycles
+        # are exactly 48 matched targets; deleting one row must return to provisional.
+        mature = vcat((live_cycle_fixture(issue - Hour(8 * k);
+                      observations=[-40.0, -41.0, -42.0, -43.0],
+                      served_pred=[-39.0, -40.0, -41.0, -42.0],
+                      served_lo=[-49.0, -50.0, -51.0, -52.0],
+                      served_hi=[-29.0, -30.0, -31.0, -32.0],
+                      audit_pred=[-38.0, -39.0, -40.0, -41.0],
+                      audit_lo=[-48.0, -49.0, -50.0, -51.0],
+                      audit_hi=[-28.0, -29.0, -30.0, -31.0]) for k in 0:11)...)
+        mature[!, :v1_pred_dst_nt] = mature.observation_dst_nt .+ 5.0
+        mature[!, :persistence_dst_nt] = mature.observation_dst_nt .+ 6.0
+        mature[!, :burton_dst_nt] = mature.observation_dst_nt .+ 3.0
+        mature[!, :burton_full_dst_nt] = mature.observation_dst_nt .+ 4.0
+        mature[!, :obrien_dst_nt] = mature.observation_dst_nt .+ 2.0
+        mature_cal = calibration_summary(mature)
+        @test mature_cal.comparison_n_verified == 48
+        @test mature_cal.live_skill_mature
+        @test mature_cal.live_skill_rows_remaining == 0
+        almost_mature_cal = calibration_summary(mature[1:47, :])
+        @test almost_mature_cal.comparison_n_verified == 47
+        @test !almost_mature_cal.live_skill_mature
+        @test almost_mature_cal.live_skill_rows_remaining == 1
         hist = build_history(df, 24)
         @test hist.rmse_nt == cal.v2_rmse_nt
         @test hist.rows[1].pred_dst_nt == df.served_pred_dst_nt[1]
@@ -274,6 +325,20 @@ end
         @test calibration_summary(legacy).v2_n_verified == 0
         @test isempty(build_history(legacy, 24).rows)
         @test !build_forecast(legacy).available
+
+        malformed_version = copy(df)
+        malformed_version[!, :model_version] = Any[1, "v2.1", "v2.1", "v2.1"]
+        @test nrow(verified_rows(malformed_version)) == 3
+
+        missing_issue = copy(df)
+        missing_issue[!, :issue_time_utc_dt] =
+            Union{Missing,DateTime}[missing, df.issue_time_utc_dt[2:end]...]
+        @test nrow(verified_rows(missing_issue)) == 3
+
+        missing_anchor = copy(df)
+        missing_anchor[!, :latest_dst_time_utc_dt] =
+            Union{Missing,DateTime}[missing, df.latest_dst_time_utc_dt[2:end]...]
+        @test nrow(verified_rows(missing_anchor)) == 3
     end
 
     @testset "static file serving is traversal-guarded" begin
@@ -517,7 +582,7 @@ end
         alerts = build_alerts(df, st).alerts
         @test any(alert -> alert.kind == "watch" && alert.level == 1, alerts)
         watch = only(filter(alert -> alert.kind == "watch", alerts))
-        @test occursin("displayed calibrated 90% interval", watch.message)
+        @test occursin("displayed 90% target interval", watch.message)
         @test !occursin("cannot be excluded", watch.message)
         fc = build_forecast(df)
         @test length(fc.horizons) == 4
@@ -752,6 +817,192 @@ end
         @test warmup(junk) >= 0
         _LOG_CACHE[] = nothing
         _LATEST_CYCLE_CACHE[] = nothing; _HISTORY_CACHE[] = nothing
+    end
+
+    @testset "dashboard launch bounds cold-request compilation" begin
+        template = read(joinpath(@__DIR__, "..", "..", "deploy",
+                                 "com.example.solarsindy.dashboard.plist"), String)
+        @test occursin("<string>--startup-file=no</string>", template)
+        @test occursin("<string>--compile=min</string>", template)
+        @test first(findfirst("<string>--compile=min</string>", template)) <
+              first(findfirst("<string>--project=__APP_DIR__</string>", template))
+    end
+
+    @testset "launchd installer retries bootstrap without restart-killing the service" begin
+        project_root = normpath(joinpath(@__DIR__, "..", ".."))
+        installer_path = joinpath(project_root, "deploy", "install_launchd.sh")
+        installer = read(installer_path, String)
+        @test startswith(installer, "#!/bin/bash\n")
+        @test occursin("for attempt in 1 2 3", installer)
+        @test occursin("bootstrap_service \"\$label\" \"\$dst\"", installer)
+        @test occursin("launchctl kickstart \"\$DOMAIN/\$label\"", installer)
+        @test !occursin("launchctl kickstart -k", installer)
+
+        if Sys.isapple()
+            mktempdir() do dir
+                fake_bin = joinpath(dir, "bin")
+                fake_home = joinpath(dir, "home")
+                event_log = joinpath(dir, "launchctl.log")
+                mkpath(fake_bin)
+                fake_launchctl = joinpath(fake_bin, "launchctl")
+                write(fake_launchctl, raw"""#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$SOLARSINDY_TEST_LAUNCHCTL_LOG"
+case "$1" in
+  bootout|enable|kickstart) exit 0 ;;
+  bootstrap)
+    [ "${SOLARSINDY_TEST_BOOTSTRAP_MODE:-transient}" != "persistent" ] || exit 5
+    attempts=$(grep -c '^bootstrap ' "$SOLARSINDY_TEST_LAUNCHCTL_LOG" || true)
+    [ "$attempts" -ge 3 ] || exit 5
+    exit 0
+    ;;
+  *) exit 2 ;;
+esac
+""")
+                chmod(fake_launchctl, 0o755)
+                cmd = `/bin/bash $installer_path $project_root dashboard`
+                installer_cmd(mode) = addenv(cmd,
+                    "PATH" => string(fake_bin, ":", get(ENV, "PATH", "")),
+                    "HOME" => fake_home,
+                    "SOLARSINDY_TEST_LAUNCHCTL_LOG" => event_log,
+                    "SOLARSINDY_TEST_BOOTSTRAP_MODE" => mode,
+                    "SOLARSINDY_JULIA" => "/usr/bin/true",
+                    "SOLARSINDY_MONITOR_DIR" => joinpath(dir, "monitor"),
+                    "SOLARSINDY_ORG" => "installer-test",
+                    "SOLARSINDY_LOAD" => "1",
+                )
+                run(pipeline(installer_cmd("transient"); stdout=devnull, stderr=devnull))
+                events = readlines(event_log)
+                @test count(startswith("bootstrap "), events) == 3
+                @test count(startswith("enable "), events) == 1
+                @test count(startswith("kickstart "), events) == 1
+                @test all(!occursin("kickstart -k", event) for event in events)
+                @test startswith(last(events), "kickstart gui/")
+
+                # A persistent launchctl error must remain bounded and propagate as failure.
+                write(event_log, "")
+                persistent = run(pipeline(installer_cmd("persistent");
+                                          stdout=devnull, stderr=devnull); wait=false)
+                wait(persistent)
+                @test !success(persistent)
+                persistent_events = readlines(event_log)
+                @test count(startswith("bootstrap "), persistent_events) == 3
+                @test !any(startswith("enable "), persistent_events)
+                @test !any(startswith("kickstart "), persistent_events)
+            end
+        end
+    end
+
+    @testset "external watchdog outage state machine" begin
+        wd = normpath(joinpath(@__DIR__, "..", "..", "deploy", "watchdog.sh"))
+        @test isfile(wd)
+        wd_src = read(wd, String)
+        # Structural pins (hold even where bash/curl differ): the data-route wedge class, the stable
+        # kind-keyed dedup signature, and the sentinel-ownership marker the recovery branch keys on.
+        @test occursin("dash_wedged", wd_src)
+        @test occursin("PROBLEM: \$kinds", wd_src)
+        @test occursin("Source: external watchdog", wd_src)
+
+        bash = Sys.isunix() ? Sys.which("bash") : nothing
+        if bash === nothing
+            @warn "external watchdog harness skipped: POSIX bash required" wd
+        else
+            mktempdir() do dir
+                # Shadow curl on PATH so probe reachability and webhook delivery are fully controllable
+                # and no network is touched. The real stat/date/grep/rm the script needs stay resolvable
+                # because the real PATH is appended.
+                fake_bin = joinpath(dir, "bin"); mkpath(fake_bin)
+                fake_curl = joinpath(fake_bin, "curl")
+                write(fake_curl, raw"""#!/bin/bash
+set -u
+is_post=0
+url=""
+for a in "$@"; do
+  [ "$a" = "POST" ] && is_post=1
+  url="$a"
+done
+if [ "$is_post" = "1" ]; then
+  printf '%s\n' "$*" >> "$WD_TEST_WEBHOOK_LOG"
+  exit 0
+fi
+case "$url" in
+  */api/health) [ "${WD_TEST_HEALTH_OK:-1}" = "1" ] && exit 0 || exit 7 ;;
+  */api/forecast) [ "${WD_TEST_DATA_OK:-1}" = "1" ] && exit 0 || exit 7 ;;
+  *) exit 0 ;;
+esac
+""")
+                chmod(fake_curl, 0o755)
+
+                webhook_log = joinpath(dir, "webhook.log")
+                run_wd = function (mon; health, data)
+                    cmd = addenv(`$bash $wd`,
+                        "PATH" => string(fake_bin, ":", get(ENV, "PATH", "")),
+                        "SOLARSINDY_MONITOR_DIR" => mon,
+                        "SOLARSINDY_WATCHDOG_STALE_SEC" => "999999",  # isolate the dashboard branches
+                        "SOLARSINDY_WATCHDOG_DASH_URL" => "http://127.0.0.1:65999/api/health",
+                        "SWM_WEBHOOK_URL" => "http://webhook.test/post",
+                        "WD_TEST_WEBHOOK_LOG" => webhook_log,
+                        "WD_TEST_HEALTH_OK" => health ? "1" : "0",
+                        "WD_TEST_DATA_OK" => data ? "1" : "0",
+                    )
+                    run(pipeline(cmd; stdout=devnull, stderr=devnull))
+                end
+                fresh_log = function (mon)
+                    mkpath(mon)
+                    write(joinpath(mon, "live_forecast_log.csv"),
+                          "issue_time_utc\n2026-07-15T12:00\n")   # present + just-written => not stale
+                end
+                state_of = function (mon)
+                    sf = joinpath(mon, "logs", "watchdog_state")
+                    isfile(sf) ? read(sf, String) : ""
+                end
+                sentinel_of = mon -> joinpath(mon, "OUTAGE.md")
+                webhook_lines = () -> isfile(webhook_log) ? readlines(webhook_log) : String[]
+
+                # --- Cycle A: detect -> sentinel -> dedup -> recover --------------------------------
+                monA = joinpath(dir, "monA"); fresh_log(monA)
+                run_wd(monA; health=false, data=true)                       # A1 detect: health down
+                @test isfile(sentinel_of(monA))
+                @test occursin("Source: external watchdog", read(sentinel_of(monA), String))
+                @test state_of(monA) == "PROBLEM: dash_down"
+                @test length(webhook_lines()) == 1
+                @test occursin("\"kind\":\"outage\"", last(webhook_lines()))
+
+                run_wd(monA; health=false, data=true)                       # A2 dedup: same kind
+                @test state_of(monA) == "PROBLEM: dash_down"
+                @test length(webhook_lines()) == 1                          # no second POST
+
+                run_wd(monA; health=true, data=true)                        # A3 recover
+                @test !isfile(sentinel_of(monA))                            # watchdog sentinel cleared
+                @test state_of(monA) == "OK"
+                @test length(webhook_lines()) == 2
+                @test occursin("\"kind\":\"recovery\"", last(webhook_lines()))
+
+                # --- Cycle B: functional data-route wedge (health answers, /api/forecast hangs) -----
+                monB = joinpath(dir, "monB"); fresh_log(monB)
+                wh_b = length(webhook_lines())
+                run_wd(monB; health=true, data=false)
+                @test state_of(monB) == "PROBLEM: dash_wedged"   # only the data-route branch sets this kind
+                @test occursin("Source: external watchdog", read(sentinel_of(monB), String))
+                @test length(webhook_lines()) == wh_b + 1
+                @test occursin("data route unresponsive", last(webhook_lines()))  # wedge message delivered
+
+                # --- Cycle C: never clobber or clear a daemon-authored dead-man sentinel ------------
+                monC = joinpath(dir, "monC"); fresh_log(monC)
+                daemon_body = "# LIVE FORECAST ISSUANCE OUTAGE\n\nSource: daemon issuance dead-man\n"
+                write(sentinel_of(monC), daemon_body)
+                wh_c = length(webhook_lines())
+                run_wd(monC; health=false, data=true)                       # C1 problem: don't clobber
+                @test read(sentinel_of(monC), String) == daemon_body
+
+                run_wd(monC; health=true, data=true)                        # C2 healthy: don't clear
+                @test isfile(sentinel_of(monC))
+                @test read(sentinel_of(monC), String) == daemon_body
+                @test state_of(monC) == "DAEMON_OUTAGE"                      # held, not recovered
+                @test !any(occursin("\"kind\":\"recovery\"", l)
+                           for l in webhook_lines()[(wh_c + 1):end])
+            end
+        end
     end
 
     @testset "sub-hour trajectory served only for the matching cycle" begin
@@ -1455,6 +1706,16 @@ end
     @testset "live-source API routes never wait for third-party refreshes" begin
         # A held refresh is a deterministic oracle for the request contract: each route must
         # return its unavailable/cached payload promptly and leave the one in-flight worker intact.
+        # Compile the route and JSON parser against a fresh local sentinel before starting the
+        # stopwatch. The latency assertion is an oracle for waiting on the held third-party task,
+        # not for unrelated first-call Julia code generation under system load.
+        lock(_SWPC_LOCK) do
+            _SWPC_CACHE[] = (time(), _unavailable_swpc_snapshot())
+            _SWPC_REFRESH_TASK[] = nothing
+        end
+        warm_swpc = api_handler("/api/swpc", "", "unused.csv")
+        @test JSON3.read(String(warm_swpc.body)).available == false
+
         swpc_gate = Channel{Nothing}(0)
         swpc_held = Threads.@spawn (take!(swpc_gate); (source="test", available=false))
         lock(_SWPC_LOCK) do
@@ -1707,20 +1968,27 @@ end
         @test occursin("const lvl = Math.max(pointLevel, watchLevel);", js)
         @test occursin("const alertLabel = watchLevel > pointLevel ? th.watch_label : th.label;", js)
         @test occursin("const body = watchLevel > pointLevel", js)
-        @test occursin("A displayed calibrated 90% interval extends to", js)
+        @test occursin("A displayed 90% target interval extends to", js)
         @test occursin("interval_lower_edge_min_dst_nt", js)
         @test !occursin("? status.threat.level : 0", js)
-        for label in ("Forecast: V2.1 (", "Verified V2.1", "V2.1 90% coverage",
-                      "V2.1 RMSE nT", "V2.1 verified", "headline score is V2.1")
+        for label in ("Forecast: V2.1 (", "Verified V2.1", "Product forecast: V2.1.",
+                      "V2.1 RMSE nT", "V2.1 verified forecasts",
+                      "V2.1 frozen-tail ablation", "SINDy v1", "Persistence",
+                      "Burton full", "O'Brien–McPherron", "live_skill_mature",
+                      "matched point forecast (n=\${matchedN})", "no best method is highlighted")
             @test occursin(label, js)
         end
         for retired_label in ("Forecast: V2 (", "name:\"Verified V2\"",
                               "V2 90% coverage", "V2 RMSE nT", "V2 verified",
-                              "headline score is V2. Live")
+                              "headline score", "(online, distribution-free)",
+                              "calibrated 90% interval")
             @test !occursin(retired_label, js)
         end
+        @test occursin("mature && v != null", js)
+        @test !occursin("calibrated uncertainty", html)
         @test occursin("package's V2.1 forecaster", readme)
-        @test occursin("V2.1 and every baseline", readme)
+        @test occursin("exactly the same", readme)
+        @test occursin("48 common rows", readme)
         @test occursin("project's **V2.1** nowcaster", readme)
         @test !occursin("package's V2 forecaster", readme)
         @test !occursin("V2 and every baseline", readme)
@@ -1732,7 +2000,7 @@ end
             @test !occursin(unsupported, served_source)
         end
         @test occursin("GIC-hazard indicator", html)
-        @test occursin("90% interval lower edge", html)
+        @test occursin("90% target-interval lower edge", html)
         for metric in ("cur-dst", "worst-dst", "horizon")
             @test occursin("\$(\"" * metric * "\").textContent = \"—\"", js)
         end

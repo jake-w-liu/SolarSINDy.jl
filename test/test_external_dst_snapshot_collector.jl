@@ -16,7 +16,10 @@ end
 
 module LiveMonitorRetentionTestHarness
 using Test
-include(joinpath(@__DIR__, "..", "examples", "live_monitor.jl"))
+const TEST_MONITOR_DIR = mktempdir()
+withenv("SOLARSINDY_MONITOR_DIR" => TEST_MONITOR_DIR) do
+    include(joinpath(@__DIR__, "..", "examples", "live_monitor.jl"))
+end
 end
 
 function _two_point_swpc_fixture(target::AbstractString, dst::Real)
@@ -945,6 +948,8 @@ end
 
 @testset "Live monitor forecast-log retention" begin
     L = LiveMonitorRetentionTestHarness
+    @test L.MONITOR_DIR == L.TEST_MONITOR_DIR
+    @test L.DIAG_LOG == joinpath(L.TEST_MONITOR_DIR, "logs", "monitor.log")
     @test L.HORIZONS == (1, 2, 3, 6)
     @test L._advance_cycle_deadline(100.0, 120.0, 60.0) ==
           (deadline=160.0, skipped=0)
@@ -1053,6 +1058,12 @@ end
         @test occursin("/api/swpc", body)
         @test occursin("Kyoto Dst", body)
         @test !occursin("stdout log", body)
+        @test L.clear_outage_sentinel(sentinel)
+        @test !isfile(sentinel)
+
+        write(sentinel, "# OUTAGE\n\nSource: external watchdog\n")
+        @test !L.clear_outage_sentinel(sentinel)
+        @test isfile(sentinel)
     end
     mktempdir() do dir
         path = joinpath(dir, "live.csv")
@@ -1078,5 +1089,145 @@ end
         @test L._retain_live_forecast_log!(path, 4) == 0
         @test_throws ArgumentError L._retain_live_forecast_log!(path, 0)
         @test_throws ArgumentError L._retain_live_forecast_log!(path, 3)
+    end
+end
+
+@testset "Live monitor cold-archive schema-drift guard" begin
+    L = LiveMonitorRetentionTestHarness
+    base = L.DateTime(2026, 7, 1)
+    make_log = (log_path) -> begin
+        rows = L.DataFrame(
+            issue_time_utc=string.([base + L.Hour(i) for i in 0:5]),
+            latest_dst_time_utc=string.([base + L.Hour(i) for i in 0:5]),
+            target_time_utc=string.([base + L.Hour(i + 1) for i in 0:5]),
+            model_version=fill("v2", 6),
+            observation_dst_nt=fill(missing, 6),
+            marker=collect(1:6),
+        )
+        L.CSV.write(log_path, rows)
+        L._load_or_rebuild_live_state!(log_path)
+        return rows
+    end
+
+    # A pre-existing archive whose header does not match the hot-log schema (the v2.0->v2.1
+    # column-addition drift class) must abort retention before any append: the prune throws, the hot
+    # log keeps every row, and the archive is byte-identical, so no misaligned rows are written.
+    mktempdir() do dir
+        log_path = joinpath(dir, "live.csv")
+        make_log(log_path)
+        archive_path = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+        mkpath(dirname(archive_path))
+        write(archive_path, "issue_time_utc,target_time_utc,marker\n")  # 3 columns vs the 6-col log
+        archive_before = read(archive_path)
+        @test_throws ErrorException L._retain_live_forecast_log!(log_path, 4)
+        @test read(archive_path) == archive_before
+        @test L.CSV.read(log_path, L.DataFrame).marker == collect(1:6)
+    end
+
+    # Retention derives the archive path from the log's own directory and, when no archive exists yet,
+    # creates one with the matching header. The guard is not a blanket refusal: a fresh/matching
+    # archive still accepts the prune, and the dropped rows land in the sibling archive.
+    mktempdir() do dir
+        log_path = joinpath(dir, "live.csv")
+        make_log(log_path)
+        archive_path = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+        @test !ispath(archive_path)
+        @test L._retain_live_forecast_log!(log_path, 4) == 2
+        @test isfile(archive_path)
+        archived = L.CSV.read(archive_path, L.DataFrame)
+        @test names(archived) ==
+              ["issue_time_utc", "latest_dst_time_utc", "target_time_utc",
+               "model_version", "observation_dst_nt", "marker"]
+        @test archived.marker == [1, 2]
+        @test L.CSV.read(log_path, L.DataFrame).marker == [3, 4, 5, 6]
+        # Isolation: the derived archive stays beside its own log, never the module-const production
+        # archive.
+        @test dirname(dirname(archive_path)) == dir
+        @test archive_path != L.FORECAST_ARCHIVE
+    end
+end
+
+@testset "Live monitor cold-archive manifest-completeness guard" begin
+    L = LiveMonitorRetentionTestHarness
+    base = L.DateTime(2026, 7, 1)
+    make_log = (log_path) -> begin
+        rows = L.DataFrame(
+            issue_time_utc=string.([base + L.Hour(i) for i in 0:5]),
+            latest_dst_time_utc=string.([base + L.Hour(i) for i in 0:5]),
+            target_time_utc=string.([base + L.Hour(i + 1) for i in 0:5]),
+            model_version=fill("v2", 6),
+            observation_dst_nt=fill(missing, 6),
+            marker=collect(1:6),
+        )
+        L.CSV.write(log_path, rows)
+        L._load_or_rebuild_live_state!(log_path)
+        return rows
+    end
+    # Exact header of the hot-log schema make_log writes, so the schema-drift guard passes and the
+    # manifest-completeness guard is the one under test.
+    matched_header =
+        "issue_time_utc,latest_dst_time_utc,target_time_utc,model_version,observation_dst_nt,marker\n"
+
+    # A non-empty archive whose header MATCHES the hot log but has NO manifest (no verified byte
+    # baseline) must abort retention before any append. Before this guard the byte-completeness check
+    # fired only AFTER CSV.write had appended the segment, so every retry re-appended the same rows and
+    # grew the archive (12->20->28) while retention never completed. The hot log stayed intact, but the
+    # archive accumulated duplicates. Now retention refuses before touching the file: archive
+    # byte-identical, hot log unchanged, manifest still absent, and retries never grow the archive.
+    mktempdir() do dir
+        log_path = joinpath(dir, "live.csv")
+        make_log(log_path)
+        archive_path = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+        manifest_path = string(archive_path, ".manifest.json")
+        mkpath(dirname(archive_path))
+        write(archive_path, matched_header)
+        archive_before = read(archive_path)
+        @test !ispath(manifest_path)
+        @test_throws ErrorException L._retain_live_forecast_log!(log_path, 4)
+        @test read(archive_path) == archive_before
+        @test !ispath(manifest_path)
+        @test L.CSV.read(log_path, L.DataFrame).marker == collect(1:6)
+        # Absorbing-duplicate check: a second retry still refuses and never grows the archive.
+        @test_throws ErrorException L._retain_live_forecast_log!(log_path, 4)
+        @test read(archive_path) == archive_before
+        @test !ispath(manifest_path)
+    end
+
+    # Corrupt-JSON manifest beside the matched-header non-empty archive is swallowed to prev_bytes==0
+    # and must fail closed identically: refuse before append, archive and manifest byte-identical, hot
+    # log intact.
+    mktempdir() do dir
+        log_path = joinpath(dir, "live.csv")
+        make_log(log_path)
+        archive_path = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+        manifest_path = string(archive_path, ".manifest.json")
+        mkpath(dirname(archive_path))
+        write(archive_path, matched_header)
+        write(manifest_path, "{not valid json")
+        archive_before = read(archive_path)
+        manifest_before = read(manifest_path)
+        @test_throws ErrorException L._retain_live_forecast_log!(log_path, 4)
+        @test read(archive_path) == archive_before
+        @test read(manifest_path) == manifest_before
+        @test L.CSV.read(log_path, L.DataFrame).marker == collect(1:6)
+    end
+
+    # Healthy-path regression: when the manifest matches the archive, the append path still works.
+    # First call creates archive+manifest (existed=false, guard not applicable); second call appends
+    # under the matching manifest (existed=true, prev_bytes>0), and no rows are duplicated.
+    mktempdir() do dir
+        archive_path = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+        manifest_path = string(archive_path, ".manifest.json")
+        frame1 = L.DataFrame(a=[1, 2], b=["p", "q"])
+        frame2 = L.DataFrame(a=[3, 4], b=["r", "s"])
+        @test L._archive_pruned_rows!(
+            frame1; archive_path=archive_path, manifest_path=manifest_path) == 2
+        @test isfile(archive_path)
+        @test isfile(manifest_path)
+        @test L._archive_pruned_rows!(
+            frame2; archive_path=archive_path, manifest_path=manifest_path) == 2
+        archived = L.CSV.read(archive_path, L.DataFrame)
+        @test archived.a == [1, 2, 3, 4]
+        @test archived.b == ["p", "q", "r", "s"]
     end
 end

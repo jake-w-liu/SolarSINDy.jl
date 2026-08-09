@@ -373,10 +373,14 @@ _start_dashboard_locked() {
   mkdir -p "$MONITOR_DIR" "$LOG_DIR" "$RUN_DIR"
   rotate_cli_log "$DASH_LOG"
   say "dashboard: starting on $URL …"
+  # The dashboard is request/serialization bound, not numerical-kernel bound. `--compile=min` keeps a
+  # cold SWPC refresh from monopolizing Julia code generation and stalling every HTTP route for
+  # minutes after start, matching the supervised launchd deployment (deploy/*.dashboard.plist). The
+  # monitor daemon runs the numerical forecast kernel and is intentionally left at full compilation.
   SWM_HOST="$HOST" SWM_PORT="$PORT" \
   SOLARSINDY_LOG="$MONITOR_DIR/live_forecast_log.csv" \
   JULIA_NUM_THREADS="${SOLARSINDY_JULIA_THREADS:-4}" \
-    nohup "$JULIA" --startup-file=no --project="$ROOT/app" \
+    nohup "$JULIA" --startup-file=no --compile=min --project="$ROOT/app" \
       "$ROOT/app/src/server.jl" >> "$DASH_LOG" 2>&1 &
   local newpid=$!
   disown 2>/dev/null || true              # suppress job-control "Terminated" noise on stop

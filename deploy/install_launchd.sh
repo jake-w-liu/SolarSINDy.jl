@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Render + install the SolarSINDy launchd services from the tracked templates, so the deployed
 # ~/Library/LaunchAgents plists are reproducible instead of hand-edited drift.
 #
@@ -11,7 +11,7 @@
 #   SOLARSINDY_ORG        reverse-DNS org segment for the installed Label (default: empire)
 #   SOLARSINDY_MONITOR_DIR  monitor state dir (default: CLONE_DIR/var/monitor)
 #   SOLARSINDY_JULIA      julia launcher (default: ~/.juliaup/bin/julia if present, else `which julia`)
-#   SOLARSINDY_LOAD=0     render + install the plists but do not bootstrap/kickstart them
+#   SOLARSINDY_LOAD=0     render + install the plists but do not bootstrap them
 #
 # The installed plists use the STABLE juliaup shim, not a version-pinned juliaup directory, so a
 # `juliaup gc`/`update` cannot delete the interpreter out from under the service.
@@ -43,6 +43,19 @@ esac
 
 mkdir -p "$LA_DIR" "$MONITOR_DIR/logs"
 
+bootstrap_service() {
+  local label="$1" dst="$2" attempt output=""
+  for attempt in 1 2 3; do
+    if output="$(launchctl bootstrap "$DOMAIN" "$dst" 2>&1)"; then
+      return 0
+    fi
+    [ "$attempt" -eq 3 ] || sleep 1
+  done
+  printf 'error: launchctl bootstrap failed for %s after 3 attempts\n%s\n' \
+    "$label" "$output" >&2
+  return 1
+}
+
 render() {
   # $1 = service short name; maps to the template + installed label suffix.
   local svc="$1" suffix tmpl label dst
@@ -67,9 +80,12 @@ render() {
   echo "rendered $dst"
   if [ "${SOLARSINDY_LOAD:-1}" = "1" ]; then
     launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
-    launchctl bootstrap "$DOMAIN" "$dst"
-    launchctl enable "$DOMAIN/$label" 2>/dev/null || true
-    launchctl kickstart -k "$DOMAIN/$label" 2>/dev/null || true
+    bootstrap_service "$label" "$dst"
+    launchctl enable "$DOMAIN/$label"
+    # RunAtLoad normally starts the new job during bootstrap. A non-killing kickstart also
+    # starts a previously disabled job without terminating a healthy process and invoking
+    # launchd's restart throttle.
+    launchctl kickstart "$DOMAIN/$label"
     echo "bootstrapped + kickstarted $label"
   fi
 }
