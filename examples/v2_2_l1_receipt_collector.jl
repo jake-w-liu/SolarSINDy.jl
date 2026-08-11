@@ -11,6 +11,7 @@ using JSON3
 using SHA
 
 const V22_L1_RECEIPT_SCHEMA_VERSION = "v2_2_l1_receipt_v4"
+const V22_L1_ISSUE_CUTOFF_SCHEMA_VERSION = "v2_2_l1_issue_cutoff_v1"
 const V22_L1_METADATA_CONTRACT_VERSION = "noaa_rtsw_metadata_v2"
 const V22_L1_NOAA_METADATA_AUTHORITY_URL =
     "https://www.weather.gov/media/notification/pdf_2026/" *
@@ -1646,15 +1647,20 @@ end
 
 function _v22_l1_verify_source(root::AbstractString, source;
                                require_nonempty::Bool,
-                               head_only::Bool=false)
-    current = _v22_l1_read_latest(root, source.name)
+                               head_only::Bool=false,
+                               fixed_head=nothing,
+                               require_complete_tree::Bool=true)
+    current = fixed_head === nothing ?
+        _v22_l1_read_latest(root, source.name) : fixed_head
     if current.sequence == 0
         require_nonempty && error(
             "V2.2 L1 source has no receipt records: $(source.name)",
         )
-        isempty(_v22_l1_source_record_files(root, source.name)) || error(
-            "V2.2 L1 source has orphan records without a latest pointer",
-        )
+        if require_complete_tree
+            isempty(_v22_l1_source_record_files(root, source.name)) || error(
+                "V2.2 L1 source has orphan records without a latest pointer",
+            )
+        end
         return (
             source_name=String(source.name), records=0,
             latest_record_sha256=V22_L1_RECEIPT_ZERO_SHA256,
@@ -1754,9 +1760,11 @@ function _v22_l1_verify_source(root::AbstractString, source;
         expected_sequence -= 1
     end
     expected_sequence == 0 || error("V2.2 L1 receipt chain ended early")
-    _v22_l1_source_record_files(root, source.name) == seen || error(
-        "V2.2 L1 source contains orphan or unchained record files",
-    )
+    if require_complete_tree
+        _v22_l1_source_record_files(root, source.name) == seen || error(
+            "V2.2 L1 source contains orphan or unchained record files",
+        )
+    end
     return (
         source_name=String(source.name),
         records=records,
@@ -1842,6 +1850,8 @@ function verify_v2_2_l1_receipts(root::AbstractString;
             source_name=verified.source_name,
             records=verified.records,
             latest_record_sha256=verified.latest_record_sha256,
+            latest_receipt_completed_utc=
+                _v22_l1_utc(verified.latest_receipt_completed_utc),
         ))
     end
     actual_raw = _v22_l1_tree_files(
@@ -1851,6 +1861,235 @@ function verify_v2_2_l1_receipts(root::AbstractString;
         "V2.2 L1 raw store contains missing or orphan content",
     )
     return result
+end
+
+function _v22_l1_issue_cutoff_relative(issue_time_utc::DateTime)
+    token = Dates.format(issue_time_utc, dateformat"yyyymmddTHHMMSSsss") * "Z"
+    return joinpath("issue_cutoffs", token * ".json")
+end
+
+const _V22_L1_ISSUE_CUTOFF_FIELDS = (
+    :schema_version,
+    :receipt_schema_version,
+    :issue_time_utc,
+    :cutoff_relative_path,
+    :sources,
+)
+
+const _V22_L1_ISSUE_CUTOFF_SOURCE_FIELDS = (
+    :source_name,
+    :source_url,
+    :sequence,
+    :record_relative_path,
+    :record_sha256,
+    :latest_receipt_completed_utc,
+)
+
+function _v22_l1_issue_cutoff_payload(cutoff)
+    source_rows = [(
+        source_name=String(row.source_name),
+        source_url=String(row.source_url),
+        sequence=Int(row.sequence),
+        record_relative_path=String(row.record_relative_path),
+        record_sha256=String(row.record_sha256),
+        latest_receipt_completed_utc=String(row.latest_receipt_completed_utc),
+    ) for row in cutoff.sources]
+    return (
+        schema_version=String(cutoff.schema_version),
+        receipt_schema_version=String(cutoff.receipt_schema_version),
+        issue_time_utc=String(cutoff.issue_time_utc),
+        cutoff_relative_path=String(cutoff.cutoff_relative_path),
+        sources=source_rows,
+    )
+end
+
+_v22_l1_issue_cutoff_sha256(cutoff) = _v22_l1_sha256(
+    codeunits(JSON3.write(_v22_l1_issue_cutoff_payload(cutoff))),
+)
+
+function _v22_l1_validate_cutoff_sources(sources)
+    isempty(sources) && throw(ArgumentError(
+        "V2.2 L1 cutoff sources must not be empty",
+    ))
+    validated = map(_v22_l1_validate_source, sources)
+    length(unique(lowercase(source.name) for source in validated)) ==
+        length(validated) || throw(ArgumentError(
+            "V2.2 L1 cutoff source names must be unique ignoring case",
+        ))
+    _v22_l1_reject_reused_source_urls(validated)
+    return validated
+end
+
+function _v22_l1_verify_issue_cutoff(
+        storage::AbstractString,
+        issue_time_utc::DateTime,
+        cutoff_relative_path::AbstractString,
+        sources)
+    expected_relative = _v22_l1_issue_cutoff_relative(issue_time_utc)
+    relative = normpath(String(cutoff_relative_path))
+    relative == expected_relative || throw(ArgumentError(
+        "V2.2 L1 cutoff path does not match its issue time",
+    ))
+    path = _v22_l1_resolve_relative(storage, relative, "issue cutoff path")
+    isfile(path) && !islink(path) || throw(ArgumentError(
+        "V2.2 L1 issue cutoff must be a regular non-symlink file",
+    ))
+    cutoff = JSON3.read(read(path, String))
+    Set(propertynames(cutoff)) ==
+        Set((_V22_L1_ISSUE_CUTOFF_FIELDS..., :cutoff_sha256)) ||
+        throw(ArgumentError("V2.2 L1 issue-cutoff schema fields changed"))
+    String(cutoff.schema_version) == V22_L1_ISSUE_CUTOFF_SCHEMA_VERSION ||
+        throw(ArgumentError("V2.2 L1 issue-cutoff schema is unsupported"))
+    String(cutoff.receipt_schema_version) == V22_L1_RECEIPT_SCHEMA_VERSION ||
+        throw(ArgumentError("V2.2 L1 cutoff receipt schema changed"))
+    _v22_l1_parse_utc(cutoff.issue_time_utc) == issue_time_utc ||
+        throw(ArgumentError("V2.2 L1 cutoff issue time changed"))
+    String(cutoff.cutoff_relative_path) == relative || throw(ArgumentError(
+        "V2.2 L1 cutoff location is not self-consistent",
+    ))
+    checksum = String(cutoff.cutoff_sha256)
+    occursin(r"^[0-9a-f]{64}$", checksum) &&
+        _v22_l1_issue_cutoff_sha256(cutoff) == checksum ||
+        throw(ArgumentError("V2.2 L1 issue-cutoff checksum mismatch"))
+    length(cutoff.sources) == length(sources) || throw(ArgumentError(
+        "V2.2 L1 cutoff source count changed",
+    ))
+
+    prefixes = NamedTuple[]
+    for (index, source) in pairs(sources)
+        row = cutoff.sources[index]
+        Set(propertynames(row)) == Set(_V22_L1_ISSUE_CUTOFF_SOURCE_FIELDS) ||
+            throw(ArgumentError("V2.2 L1 cutoff source fields changed"))
+        String(row.source_name) == String(source.name) &&
+            String(row.source_url) == String(source.url) ||
+            throw(ArgumentError("V2.2 L1 cutoff source identity changed"))
+        sequence = Int(row.sequence)
+        sequence >= 1 || throw(ArgumentError(
+            "V2.2 L1 cutoff source sequence must be positive",
+        ))
+        record_relative = String(row.record_relative_path)
+        record_relative == _v22_l1_record_relative(source.name, sequence) ||
+            throw(ArgumentError("V2.2 L1 cutoff head path changed"))
+        record_sha = String(row.record_sha256)
+        occursin(r"^[0-9a-f]{64}$", record_sha) || throw(ArgumentError(
+            "V2.2 L1 cutoff head checksum is malformed",
+        ))
+        latest_receipt = _v22_l1_parse_utc(
+            row.latest_receipt_completed_utc,
+        )
+        latest_receipt <= issue_time_utc || throw(ArgumentError(
+            "V2.2 L1 cutoff contains a post-issue receipt",
+        ))
+        verified = _v22_l1_verify_source(
+            storage,
+            source;
+            require_nonempty=true,
+            fixed_head=(
+                sequence=sequence,
+                record_relative_path=record_relative,
+                record_sha256=record_sha,
+            ),
+            require_complete_tree=false,
+        )
+        verified.records == sequence &&
+            verified.latest_record_sha256 == record_sha &&
+            verified.latest_receipt_completed_utc == latest_receipt ||
+            throw(ArgumentError(
+                "V2.2 L1 cutoff head disagrees with its verified prefix",
+            ))
+        push!(prefixes, (
+            source_name=String(source.name),
+            records=sequence,
+            latest_record_sha256=record_sha,
+            latest_receipt_completed_utc=_v22_l1_utc(latest_receipt),
+        ))
+    end
+    return (
+        schema_version=V22_L1_ISSUE_CUTOFF_SCHEMA_VERSION,
+        issue_time_utc=_v22_l1_utc(issue_time_utc),
+        cutoff_relative_path=relative,
+        cutoff_sha256=checksum,
+        prefixes=Tuple(prefixes),
+    )
+end
+
+"Verify an immutable issue cutoff and only the exact record/raw prefixes it binds."
+function verify_v2_2_l1_issue_cutoff(
+        root::AbstractString,
+        issue_time_utc::DateTime,
+        cutoff_relative_path::AbstractString;
+        sources=V22_L1_RECEIPT_SOURCES)
+    storage = _v22_l1_validate_root(root; create=false)
+    validated = _v22_l1_validate_cutoff_sources(sources)
+    return _v22_l1_verify_issue_cutoff(
+        storage, issue_time_utc, cutoff_relative_path, validated,
+    )
+end
+
+function _v22_l1_capture_issue_cutoff_unlocked(
+        storage::AbstractString,
+        issue_time_utc::DateTime,
+        sources)
+    verified = verify_v2_2_l1_receipts(storage; sources=sources)
+    rows = NamedTuple[]
+    for (source, result) in zip(sources, verified)
+        latest_receipt = _v22_l1_parse_utc(
+            result.latest_receipt_completed_utc,
+        )
+        latest_receipt <= issue_time_utc || throw(ArgumentError(
+            "V2.2 L1 live cutoff requires the full archive to contain no post-issue receipts",
+        ))
+        push!(rows, (
+            source_name=String(source.name),
+            source_url=String(source.url),
+            sequence=Int(result.records),
+            record_relative_path=_v22_l1_record_relative(
+                source.name, Int(result.records),
+            ),
+            record_sha256=String(result.latest_record_sha256),
+            latest_receipt_completed_utc=_v22_l1_utc(latest_receipt),
+        ))
+    end
+    relative = _v22_l1_issue_cutoff_relative(issue_time_utc)
+    payload = (
+        schema_version=V22_L1_ISSUE_CUTOFF_SCHEMA_VERSION,
+        receipt_schema_version=V22_L1_RECEIPT_SCHEMA_VERSION,
+        issue_time_utc=_v22_l1_utc(issue_time_utc),
+        cutoff_relative_path=relative,
+        sources=rows,
+    )
+    record = merge(payload, (
+        cutoff_sha256=_v22_l1_issue_cutoff_sha256(payload),
+    ))
+    path = _v22_l1_resolve_relative(storage, relative, "issue cutoff path")
+    if ispath(path)
+        existing = _v22_l1_verify_issue_cutoff(
+            storage, issue_time_utc, relative, sources,
+        )
+        existing.cutoff_sha256 == record.cutoff_sha256 || throw(ArgumentError(
+            "V2.2 L1 immutable issue cutoff already exists with different heads",
+        ))
+        return existing
+    end
+    _v22_l1_atomic_text(storage, relative, JSON3.write(record))
+    return _v22_l1_verify_issue_cutoff(
+        storage, issue_time_utc, relative, sources,
+    )
+end
+
+"Capture immutable per-source archive heads for a live forecast issue."
+function capture_v2_2_l1_issue_cutoff!(
+        root::AbstractString,
+        issue_time_utc::DateTime;
+        sources=V22_L1_RECEIPT_SOURCES,
+        lock_timeout_sec::Real=30.0)
+    storage = _v22_l1_validate_root(root; create=false)
+    validated = _v22_l1_validate_cutoff_sources(sources)
+    return _v22_l1_with_lock(storage; timeout_sec=lock_timeout_sec) do
+        _v22_l1_capture_issue_cutoff_unlocked(
+            storage, issue_time_utc, validated,
+        )
+    end
 end
 
 function _v22_l1_argument(args, prefix, fallback)

@@ -190,6 +190,7 @@ function operational_v22_matured_h1_history(
     duplicates = Set{DateTime}()
     earliest = issue_time - Hour(_OPERATIONAL_V22_ERROR_BUFFER_H)
     for record in records
+        record.observation_available_at <= issue_time || continue
         earliest <= record.issued_at < issue_time || continue
         if haskey(relevant, record.issued_at)
             push!(duplicates, record.issued_at)
@@ -582,21 +583,8 @@ const _OPERATIONAL_V22_ERROR_CSV_COLUMNS = (
 
 function _operational_v22_error_atomic_csv(path::String, rows)
     target = abspath(path)
-    islink(target) && throw(ArgumentError(
-        "V2.2-M3 error-state artifact target must not be a symlink: $target",
-    ))
-    ispath(target) && !isfile(target) && throw(ArgumentError(
-        "V2.2-M3 error-state artifact target must be a regular file: $target",
-    ))
     mkpath(dirname(target))
-    temporary, io = mktemp(dirname(target))
-    close(io)
-    try
-        CSV.write(temporary, rows)
-        mv(temporary, target; force=true)
-    finally
-        isfile(temporary) && rm(temporary; force=true)
-    end
+    _write_selection_csv(target, rows)
     return path
 end
 

@@ -67,6 +67,19 @@ end
             post_issue_mutation, issue_time, V22E_HASH,
         ) == history
 
+        late_same_key = _v22e_record(
+            29,
+            -90_000.0;
+            available_at=issue_time + Hour(1),
+            center_hash=V22E_OTHER_HASH,
+        )
+        @test operational_v22_matured_h1_history(
+            vcat(records, [late_same_key]), issue_time, V22E_HASH,
+        ) == history
+        @test operational_v22_matured_h1_history(
+            vcat([late_same_key], records), issue_time, V22E_HASH,
+        ) == history
+
         missing = [record for record in records
                    if record.issued_at != issue_time - Hour(5)]
         missing_history = operational_v22_matured_h1_history(
@@ -83,7 +96,7 @@ end
         )
         @test operational_v22_matured_h1_history(
             delayed, issue_time, V22E_HASH,
-        ).fallback_reason == :observation_not_mature
+        ).fallback_reason == :missing_history
 
         wrong_center = copy(records)
         wrong_center[30] = _v22e_record(29, 29.0; center_hash=V22E_OTHER_HASH)
@@ -139,6 +152,21 @@ end
         # q[t+1] = 1 + 0.5*3.5 + 0.25*4 = 3.75.
         @test lead_two.raw_correction_nt == 3.75
         @test lead_two.pred_dst_nt == -26.25
+
+        late_same_key = _v22e_record(
+            29,
+            -90_000.0;
+            available_at=issue_time + Hour(1),
+            center_hash=V22E_OTHER_HASH,
+        )
+        @test operational_v22_error_state_predict(
+            artifact,
+            issue_time,
+            2,
+            V22E_HASH,
+            -30.0,
+            vcat(records, [late_same_key]),
+        ) == lead_two
 
         future_a = vcat(records, [_v22e_record(50, 1.0)])
         future_b = vcat(records, [_v22e_record(50, -100_000.0)])
@@ -317,6 +345,11 @@ end
             ) == operational_v22_error_state_predict(
                 artifact, issue_time, 2, V22E_HASH, -30.0, records,
             )
+            replacement = _v22e_artifact(intercept=2.0)
+            @test begin
+                write_operational_v22_error_state(path, replacement)
+                read_operational_v22_error_state(path) == replacement
+            end
 
             valid = CSV.read(path, DataFrame)
             corrupted = copy(valid)

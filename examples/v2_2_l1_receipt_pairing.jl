@@ -5,9 +5,12 @@ module V22L1ReceiptPairing
 # guarded main entry point is not executed.
 include(joinpath(@__DIR__, "v2_2_l1_receipt_collector.jl"))
 
-export V22_L1_ISSUE_PAIR_SCHEMA_VERSION, select_v2_2_l1_issue_pair
+export V22_L1_ISSUE_CUTOFF_SCHEMA_VERSION,
+       V22_L1_ISSUE_PAIR_SCHEMA_VERSION,
+       capture_v2_2_l1_issue_cutoff!, verify_v2_2_l1_issue_cutoff,
+       select_v2_2_l1_issue_pair, select_v2_2_l1_issue_pairs
 
-const V22_L1_ISSUE_PAIR_SCHEMA_VERSION = "v2_2_l1_issue_pair_v1"
+const V22_L1_ISSUE_PAIR_SCHEMA_VERSION = "v2_2_l1_issue_pair_v2"
 
 function _v22_l1_pair_position(metadata)
     text = String(metadata.ephemeris_record_json)
@@ -124,6 +127,9 @@ function _v22_l1_pair_candidate(root::AbstractString, source, record,
         "V2.2 L1 admitted response has no unique active latest row",
     )
     target = selected.target
+    target.timestamp <= receipt || error(
+        "V2.2 L1 admitted measurement time is later than its receipt",
+    )
     target.source == "DSCOVR" || error(
         "V2.2 L1 admitted response does not target DSCOVR",
     )
@@ -228,7 +234,10 @@ function _v22_l1_pair_candidate(root::AbstractString, source, record,
             metadata.ephemeris_source_object_sha256,
         ),
         ephemeris_record_sha256=String(metadata.ephemeris_record_sha256),
+        source_product_id=String(source.name),
+        quality_source_product=String(metadata.quality_source_product),
         quality_value=Int(metadata.quality_value),
+        quality_binding_status=String(metadata.quality_binding_status),
         quality_decision=String(metadata.quality_decision),
         quality_required_fields_status=String(
             metadata.quality_required_fields_status,
@@ -329,39 +338,31 @@ function _v22_l1_assert_candidate_unchanged(root::AbstractString, candidate)
 end
 
 """
-    select_v2_2_l1_issue_pair(root, issue_time_utc::DateTime)
+    select_v2_2_l1_issue_pair(root, issue_time_utc::DateTime; lock_timeout_sec=30.0)
 
-Verify a quiescent receipt archive and return the latest common, individually
-admitted DSCOVR magnetometer/wind row received no later than `issue_time_utc`.
-The feeds must report the exact same nominal UTC minute; this function never
-interpolates measurement values and performs no network access or writes.
+Acquire the collector lock, fully verify the live receipt archive, save its
+immutable issue cutoff, and return the latest common, individually admitted
+DSCOVR magnetometer/wind row received no later than `issue_time_utc`. The
+three-argument overload requires an existing cutoff and reads only its exact
+source prefixes. Neither overload interpolates measurement values or performs
+network access.
 """
-function select_v2_2_l1_issue_pair(root::AbstractString,
-                                   issue_time_utc::DateTime)
-    sources = V22_L1_RECEIPT_SOURCES
-    before = verify_v2_2_l1_receipts(root; sources=sources)
-    storage = _v22_l1_validate_root(root; create=false)
-    counts = Dict(result.source_name => result.records for result in before)
-    mag = _v22_l1_pair_candidates(
-        storage, sources[1], counts[sources[1].name], :mag, issue_time_utc,
+function _v22_l1_pair_floor_30(time::DateTime)
+    minute = Dates.minute(time) < 30 ? 0 : 30
+    return DateTime(
+        Dates.year(time), Dates.month(time), Dates.day(time), Dates.hour(time),
+        minute,
     )
-    wind = _v22_l1_pair_candidates(
-        storage, sources[2], counts[sources[2].name], :wind, issue_time_utc,
-    )
-    common = intersect(
-        Set(candidate.timestamp for candidate in mag.admitted),
-        Set(candidate.timestamp for candidate in wind.admitted),
-    )
-    isempty(common) && error(
-        "V2.2 L1 archive has no exact admitted mag/wind timestamp by issue time",
-    )
-    timestamp = maximum(common)
-    mag_selected = _v22_l1_stable_candidate(
-        mag.admitted, mag.observations, timestamp, "magnetometer",
-    )
-    wind_selected = _v22_l1_stable_candidate(
-        wind.admitted, wind.observations, timestamp, "wind",
-    )
+end
+
+function _v22_l1_pair_ceil_30(time::DateTime)
+    floored = _v22_l1_pair_floor_30(time)
+    return floored == time ? floored : floored + Minute(30)
+end
+
+function _v22_l1_issue_pair_output(mag_selected, wind_selected,
+                                   issue_time_utc::DateTime,
+                                   cutoff)
     mag_selected.source == wind_selected.source == "DSCOVR" || error(
         "V2.2 L1 paired records changed spacecraft identity",
     )
@@ -372,18 +373,26 @@ function select_v2_2_l1_issue_pair(root::AbstractString,
         wind_selected.ephemeris_record_sha256 || error(
         "V2.2 L1 paired records disagree on the bound GSE position",
     )
-
-    after = verify_v2_2_l1_receipts(storage; sources=sources)
-    before == after || error("V2.2 L1 archive changed during issue pairing")
-    _v22_l1_assert_candidate_unchanged(storage, mag_selected)
-    _v22_l1_assert_candidate_unchanged(storage, wind_selected)
-
     position = mag_selected.position
-    return (
+    first_eligible = _v22_l1_pair_ceil_30(max(
+        mag_selected.receipt, wind_selected.receipt,
+    ))
+    payload = (
         schema_version=V22_L1_ISSUE_PAIR_SCHEMA_VERSION,
         issue_time_utc=_v22_l1_utc(issue_time_utc),
+        first_eligible_issue_time_utc=_v22_l1_utc(first_eligible),
+        issue_cutoff_relative_path=cutoff.cutoff_relative_path,
+        issue_cutoff_sha256=cutoff.cutoff_sha256,
         measurement_time_utc=mag_selected.timestamp_utc,
         source="DSCOVR",
+        mag_source_product_id=mag_selected.source_product_id,
+        wind_source_product_id=wind_selected.source_product_id,
+        magnetic_component_frame="GSM",
+        magnetic_component_units="nT",
+        proton_speed_units="km/s",
+        proton_density_units="cm^-3",
+        proton_vx_frame="GSE",
+        proton_vx_units="km/s",
         bx_gsm=mag_selected.drivers.bx_gsm,
         by_gsm=mag_selected.drivers.by_gsm,
         bz_gsm=mag_selected.drivers.bz_gsm,
@@ -400,12 +409,24 @@ function select_v2_2_l1_issue_pair(root::AbstractString,
         position_upper_time_utc=position.upper_time_utc,
         position_interpolation_fraction=position.interpolation_fraction,
         ephemeris_record_sha256=mag_selected.ephemeris_record_sha256,
+        mag_quality_source_product=mag_selected.quality_source_product,
+        mag_quality_value=mag_selected.quality_value,
+        mag_quality_binding_status=mag_selected.quality_binding_status,
+        mag_quality_decision=mag_selected.quality_decision,
+        mag_quality_required_fields_status=
+            mag_selected.quality_required_fields_status,
         mag_sequence=mag_selected.sequence,
         mag_receipt_completed_utc=mag_selected.receipt_completed_utc,
         mag_record_sha256=mag_selected.record_sha256,
         mag_raw_sha256=mag_selected.raw_sha256,
         mag_ephemeris_source_object_sha256=
             mag_selected.ephemeris_source_object_sha256,
+        wind_quality_source_product=wind_selected.quality_source_product,
+        wind_quality_value=wind_selected.quality_value,
+        wind_quality_binding_status=wind_selected.quality_binding_status,
+        wind_quality_decision=wind_selected.quality_decision,
+        wind_quality_required_fields_status=
+            wind_selected.quality_required_fields_status,
         wind_sequence=wind_selected.sequence,
         wind_receipt_completed_utc=wind_selected.receipt_completed_utc,
         wind_record_sha256=wind_selected.record_sha256,
@@ -413,6 +434,149 @@ function select_v2_2_l1_issue_pair(root::AbstractString,
         wind_ephemeris_source_object_sha256=
             wind_selected.ephemeris_source_object_sha256,
     )
+    return merge(payload, (
+        pair_contract_sha256=_v22_l1_sha256(
+            codeunits(JSON3.write(payload)),
+        ),
+    ))
+end
+
+function _select_v2_2_l1_issue_pairs_unlocked(
+        storage::AbstractString,
+        issue_time_utc::DateTime,
+        measurement_start_utc::DateTime,
+        cutoff_relative_path::AbstractString;
+        latest_only::Bool=false)
+    measurement_start_utc <= issue_time_utc || throw(ArgumentError(
+        "V2.2 L1 measurement window starts after its issue time",
+    ))
+    sources = V22_L1_RECEIPT_SOURCES
+    before = _v22_l1_verify_issue_cutoff(
+        storage, issue_time_utc, cutoff_relative_path, sources,
+    )
+    counts = Dict(result.source_name => result.records for result in before.prefixes)
+    mag = _v22_l1_pair_candidates(
+        storage, sources[1], counts[sources[1].name], :mag, issue_time_utc,
+    )
+    wind = _v22_l1_pair_candidates(
+        storage, sources[2], counts[sources[2].name], :wind, issue_time_utc,
+    )
+    common = intersect(
+        Set(candidate.timestamp for candidate in mag.admitted),
+        Set(candidate.timestamp for candidate in wind.admitted),
+    )
+    timestamps = sort!(collect(filter(
+        timestamp -> timestamp >= measurement_start_utc, common,
+    )))
+    isempty(timestamps) && error(
+        "V2.2 L1 archive has no exact admitted mag/wind timestamp in the requested causal window",
+    )
+    latest_only && (timestamps = [last(timestamps)])
+    selected = Tuple((
+        mag=_v22_l1_stable_candidate(
+            mag.admitted, mag.observations, timestamp, "magnetometer",
+        ),
+        wind=_v22_l1_stable_candidate(
+            wind.admitted, wind.observations, timestamp, "wind",
+        ),
+    ) for timestamp in timestamps)
+
+    after = _v22_l1_verify_issue_cutoff(
+        storage, issue_time_utc, cutoff_relative_path, sources,
+    )
+    before == after || error("V2.2 L1 archive changed during issue pairing")
+    for pair in selected
+        _v22_l1_assert_candidate_unchanged(storage, pair.mag)
+        _v22_l1_assert_candidate_unchanged(storage, pair.wind)
+    end
+    return Tuple(
+        _v22_l1_issue_pair_output(
+            pair.mag, pair.wind, issue_time_utc, before,
+        )
+        for pair in selected
+    )
+end
+
+function _select_v2_2_l1_issue_pair_unlocked(storage::AbstractString,
+                                             issue_time_utc::DateTime,
+                                             cutoff_relative_path::AbstractString)
+    pairs = _select_v2_2_l1_issue_pairs_unlocked(
+        storage, issue_time_utc, typemin(DateTime), cutoff_relative_path;
+        latest_only=true,
+    )
+    return last(pairs)
+end
+
+function select_v2_2_l1_issue_pair(root::AbstractString,
+                                   issue_time_utc::DateTime;
+                                   lock_timeout_sec::Real=30.0)
+    storage = _v22_l1_validate_root(root; create=false)
+    return _v22_l1_with_lock(storage; timeout_sec=lock_timeout_sec) do
+        sources = V22_L1_RECEIPT_SOURCES
+        cutoff = _v22_l1_capture_issue_cutoff_unlocked(
+            storage, issue_time_utc, sources,
+        )
+        _select_v2_2_l1_issue_pair_unlocked(
+            storage, issue_time_utc, cutoff.cutoff_relative_path,
+        )
+    end
+end
+
+function select_v2_2_l1_issue_pair(
+        root::AbstractString,
+        issue_time_utc::DateTime,
+        cutoff_relative_path::AbstractString;
+        lock_timeout_sec::Real=30.0)
+    storage = _v22_l1_validate_root(root; create=false)
+    return _v22_l1_with_lock(storage; timeout_sec=lock_timeout_sec) do
+        _select_v2_2_l1_issue_pair_unlocked(
+            storage, issue_time_utc, cutoff_relative_path,
+        )
+    end
+end
+
+
+"""
+    select_v2_2_l1_issue_pairs(root, issue_time_utc::DateTime;
+                               measurement_start_utc, lock_timeout_sec=30.0)
+
+Under one collector lock, build the verified magnetometer and wind candidate
+sets once per call and return every stable exact DSCOVR minute in the inclusive
+measurement-time window. The result is chronological and contains only records
+received by the issue. The live overload first saves a fully verified issue
+cutoff; the cutoff-bound overload verifies and reads only those saved prefixes.
+"""
+function select_v2_2_l1_issue_pairs(
+        root::AbstractString,
+        issue_time_utc::DateTime;
+        measurement_start_utc::DateTime,
+        lock_timeout_sec::Real=30.0)
+    storage = _v22_l1_validate_root(root; create=false)
+    return _v22_l1_with_lock(storage; timeout_sec=lock_timeout_sec) do
+        cutoff = _v22_l1_capture_issue_cutoff_unlocked(
+            storage, issue_time_utc, V22_L1_RECEIPT_SOURCES,
+        )
+        _select_v2_2_l1_issue_pairs_unlocked(
+            storage, issue_time_utc, measurement_start_utc,
+            cutoff.cutoff_relative_path,
+        )
+    end
+end
+
+
+function select_v2_2_l1_issue_pairs(
+        root::AbstractString,
+        issue_time_utc::DateTime,
+        cutoff_relative_path::AbstractString;
+        measurement_start_utc::DateTime,
+        lock_timeout_sec::Real=30.0)
+    storage = _v22_l1_validate_root(root; create=false)
+    return _v22_l1_with_lock(storage; timeout_sec=lock_timeout_sec) do
+        _select_v2_2_l1_issue_pairs_unlocked(
+            storage, issue_time_utc, measurement_start_utc,
+            cutoff_relative_path,
+        )
+    end
 end
 
 end # module V22L1ReceiptPairing

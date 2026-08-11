@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Explicit-only launchd template for prospective V2.2 L1 receipt capture.
+  It is not part of the default install set. Selecting collector without an
+  explicit SOLARSINDY_LOAD value renders without starting it:
+
+    deploy/install_launchd.sh collector
+
+  Starting capture requires SOLARSINDY_LOAD=1 explicitly. This job archives
+  inputs only; it never issues forecasts.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.solarsindy.v22-receipt-collector</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__JULIA_BIN__</string>
+    <string>--startup-file=no</string>
+    <string>--project=__CLONE_DIR__</string>
+    <string>__CLONE_DIR__/examples/v2_2_l1_receipt_collector.jl</string>
+    <string>--root=__RECEIPT_DIR__</string>
+    <string>--interval-sec=60</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__CLONE_DIR__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>JULIA_NUM_THREADS</key>
+    <string>1</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+
+  <key>StandardOutPath</key>
+  <string>__RECEIPT_LOG_DIR__/launchd.out</string>
+
+  <key>StandardErrorPath</key>
+  <string>__RECEIPT_LOG_DIR__/launchd.err</string>
+</dict>
+</plist>

@@ -111,6 +111,12 @@ function _v22_pair_tree_hashes(root)
     return hashes
 end
 
+function _v22_pair_contract_sha(pair)
+    names = Tuple(filter(!=(:pair_contract_sha256), propertynames(pair)))
+    payload = NamedTuple{names}(Tuple(getproperty(pair, name) for name in names))
+    return bytes2hex(sha256(codeunits(JSON3.write(payload))))
+end
+
 function _v22_pair_rehash_latest!(root, source; record_changes=NamedTuple(),
                                   metadata_changes=NamedTuple())
     latest_path = joinpath(root, "latest", source.name * ".json")
@@ -148,14 +154,28 @@ end
                 root, DateTime(2022, 5, 5, 0, 30, 10),
                 mag_response, wind_response,
             )
+            issue = DateTime(2022, 5, 5, 0, 30, 11)
+            cutoff = L1P.capture_v2_2_l1_issue_cutoff!(root, issue)
             before = _v22_pair_tree_hashes(root)
             pair = L1P.select_v2_2_l1_issue_pair(
-                root, DateTime(2022, 5, 5, 0, 30, 11),
+                root, issue, cutoff.cutoff_relative_path,
             )
             @test pair.schema_version == L1P.V22_L1_ISSUE_PAIR_SCHEMA_VERSION
             @test pair.issue_time_utc == "2022-05-05T00:30:11.000Z"
+            @test pair.first_eligible_issue_time_utc ==
+                  "2022-05-05T01:00:00.000Z"
+            @test pair.issue_cutoff_relative_path == cutoff.cutoff_relative_path
+            @test pair.issue_cutoff_sha256 == cutoff.cutoff_sha256
             @test pair.measurement_time_utc == "2022-05-05T00:30:00.000Z"
             @test pair.source == "DSCOVR"
+            @test pair.mag_source_product_id == "swpc_rtsw_mag_1m"
+            @test pair.wind_source_product_id == "swpc_rtsw_wind_1m"
+            @test pair.magnetic_component_frame == "GSM"
+            @test pair.magnetic_component_units == "nT"
+            @test pair.proton_speed_units == "km/s"
+            @test pair.proton_density_units == "cm^-3"
+            @test pair.proton_vx_frame == "GSE"
+            @test pair.proton_vx_units == "km/s"
             # Independent raw-row values catch component swaps and sign changes.
             @test pair.bx_gsm == 1.5
             @test pair.by_gsm == -2.5
@@ -179,7 +199,43 @@ end
             @test pair.ephemeris_record_sha256 ==
                   records[1].metadata_provenance.ephemeris_record_sha256 ==
                   records[2].metadata_provenance.ephemeris_record_sha256
+            @test pair.mag_quality_source_product == "dscovr_m1m"
+            @test pair.wind_quality_source_product == "dscovr_f1m"
+            @test pair.mag_quality_value == pair.wind_quality_value == 0
+            @test pair.mag_quality_binding_status ==
+                  pair.wind_quality_binding_status ==
+                  "bound_noaa_dscovr_overall_quality"
+            @test pair.mag_quality_decision == pair.wind_quality_decision ==
+                  "accept_normal_overall_quality"
+            @test pair.mag_quality_required_fields_status ==
+                  "bound_required_bx_by_bz_gsm"
+            @test pair.wind_quality_required_fields_status ==
+                  "bound_required_speed_density_vx_gse"
+            @test pair.pair_contract_sha256 == _v22_pair_contract_sha(pair)
+            @test !ispath(joinpath(root, ".collector.lock"))
             @test _v22_pair_tree_hashes(root) == before
+        end
+    end
+
+    @testset "collector lock makes the pairing snapshot quiescent" begin
+        mktempdir() do root
+            mag_response = _v22_pair_mag(measurement_time)
+            wind_response = _v22_pair_wind(measurement_time)
+            _v22_capture_pair!(
+                root, DateTime(2022, 5, 5, 0, 30, 10),
+                mag_response, wind_response,
+            )
+            storage = realpath(root)
+            L1P._v22_l1_with_lock(storage; timeout_sec=1.0) do
+                @test_throws ErrorException L1P.select_v2_2_l1_issue_pair(
+                    storage, DateTime(2022, 5, 5, 0, 30, 11);
+                    lock_timeout_sec=0.0,
+                )
+            end
+            @test !ispath(joinpath(storage, ".collector.lock"))
+            @test L1P.select_v2_2_l1_issue_pair(
+                storage, DateTime(2022, 5, 5, 0, 30, 11),
+            ).measurement_time_utc == "2022-05-05T00:30:00.000Z"
         end
     end
 
@@ -189,6 +245,10 @@ end
                 root, DateTime(2022, 5, 5, 0, 30, 10),
                 _v22_pair_mag(measurement_time; bz=-5.0),
                 _v22_pair_wind(measurement_time; speed=400.0),
+            )
+            early_issue = DateTime(2022, 5, 5, 0, 30, 20)
+            early_cutoff = L1P.capture_v2_2_l1_issue_cutoff!(
+                root, early_issue,
             )
             later_mag = _v22_pair_response(JSON3.write([
                 (
@@ -207,11 +267,14 @@ end
                 _v22_pair_wind("2022-05-05T00:31:00Z"; speed=500.0),
             )
             early = L1P.select_v2_2_l1_issue_pair(
-                root, DateTime(2022, 5, 5, 0, 30, 20),
+                root, early_issue, early_cutoff.cutoff_relative_path,
             )
             @test early.measurement_time_utc == "2022-05-05T00:30:00.000Z"
             @test early.mag_record_sha256 == first[1].record_sha256
             @test early.wind_record_sha256 == first[2].record_sha256
+            @test_throws ArgumentError L1P.select_v2_2_l1_issue_pair(
+                root, early_issue,
+            )
             late = L1P.select_v2_2_l1_issue_pair(
                 root, DateTime(2022, 5, 5, 0, 31, 20),
             )
@@ -238,6 +301,117 @@ end
             # No interpolation or nearest-minute join: the older exact pair wins.
             @test pair.measurement_time_utc == "2022-05-05T00:30:00.000Z"
             @test pair.mag_sequence == pair.wind_sequence == 1
+        end
+    end
+
+    @testset "saved cutoff isolates replay from every later object" begin
+        mktempdir() do root
+            early_issue = DateTime(2022, 5, 5, 0, 30, 20)
+            _v22_capture_pair!(
+                root, DateTime(2022, 5, 5, 0, 30, 10),
+                _v22_pair_mag(measurement_time; bz=-5.0),
+                _v22_pair_wind(measurement_time; speed=400.0),
+            )
+            cutoff = L1P.capture_v2_2_l1_issue_cutoff!(root, early_issue)
+            baseline = L1P.select_v2_2_l1_issue_pair(
+                root, early_issue, cutoff.cutoff_relative_path,
+            )
+            verified = L1P.verify_v2_2_l1_issue_cutoff(
+                root, early_issue, cutoff.cutoff_relative_path,
+            )
+            @test verified.cutoff_sha256 == cutoff.cutoff_sha256
+
+            _v22_capture_pair!(
+                root, DateTime(2022, 5, 5, 0, 31, 10),
+                _v22_pair_mag("2022-05-05T00:31:00Z"; bz=-9.0),
+                _v22_pair_wind("2022-05-05T00:31:00Z"; speed=500.0),
+            )
+            @test_throws ArgumentError L1P.select_v2_2_l1_issue_pair(
+                root, early_issue,
+            )
+
+            later_record_path = joinpath(
+                root, "records", sources[1].name,
+                "00000000000000000002.json",
+            )
+            later_record = JSON3.read(read(later_record_path, String))
+            later_raw_path = joinpath(
+                root, String(later_record.raw_relative_path),
+            )
+            open(later_raw_path, "a") do io
+                write(io, UInt8('x'))
+            end
+            write(later_record_path, "{")
+            write(joinpath(root, "latest", sources[1].name * ".json"), "{")
+
+            # The saved head verifies exactly its prefixes and never reads the
+            # corrupted later record, raw body, or latest pointer.
+            @test L1P.verify_v2_2_l1_issue_cutoff(
+                root, early_issue, cutoff.cutoff_relative_path,
+            ).cutoff_sha256 == cutoff.cutoff_sha256
+            @test L1P.select_v2_2_l1_issue_pair(
+                root, early_issue, cutoff.cutoff_relative_path,
+            ) == baseline
+        end
+
+        mktempdir() do root
+            issue = DateTime(2022, 5, 5, 0, 30, 20)
+            _v22_capture_pair!(
+                root, DateTime(2022, 5, 5, 0, 30, 10),
+                _v22_pair_mag(measurement_time),
+                _v22_pair_wind(measurement_time),
+            )
+            cutoff = L1P.capture_v2_2_l1_issue_cutoff!(root, issue)
+            cutoff_path = joinpath(root, cutoff.cutoff_relative_path)
+            original = read(cutoff_path, String)
+            document = JSON3.read(original)
+            mutated = replace(
+                original,
+                String(document.cutoff_sha256) => repeat("0", 64),
+            )
+            write(cutoff_path, mutated)
+            @test_throws ArgumentError L1P.verify_v2_2_l1_issue_cutoff(
+                root, issue, cutoff.cutoff_relative_path,
+            )
+            @test_throws ArgumentError L1P.select_v2_2_l1_issue_pair(
+                root, issue, cutoff.cutoff_relative_path,
+            )
+        end
+    end
+
+    @testset "one-pass causal-window pairing returns every stable minute" begin
+        mktempdir() do root
+            for minute in 28:30
+                timestamp = "2022-05-05T00:$(minute):00Z"
+                _v22_capture_pair!(
+                    root, DateTime(2022, 5, 5, 0, minute, 10),
+                    _v22_pair_mag(timestamp; bz=-minute),
+                    _v22_pair_wind(timestamp; speed=400.0 + minute),
+                )
+            end
+            issue = DateTime(2022, 5, 5, 0, 31)
+            cutoff = L1P.capture_v2_2_l1_issue_cutoff!(root, issue)
+            before = _v22_pair_tree_hashes(root)
+            pairs = L1P.select_v2_2_l1_issue_pairs(
+                root, issue, cutoff.cutoff_relative_path;
+                measurement_start_utc=DateTime(2022, 5, 5, 0, 29),
+            )
+            @test length(pairs) == 2
+            @test getproperty.(pairs, :measurement_time_utc) == (
+                "2022-05-05T00:29:00.000Z",
+                "2022-05-05T00:30:00.000Z",
+            )
+            @test getproperty.(pairs, :bz_gsm) == (-29.0, -30.0)
+            @test all(pair -> pair.issue_time_utc ==
+                      "2022-05-05T00:31:00.000Z", pairs)
+            @test last(pairs) == L1P.select_v2_2_l1_issue_pair(
+                root, issue, cutoff.cutoff_relative_path,
+            )
+            @test _v22_pair_tree_hashes(root) == before
+            @test_throws ArgumentError L1P.select_v2_2_l1_issue_pairs(
+                root, issue, cutoff.cutoff_relative_path;
+                measurement_start_utc=DateTime(2022, 5, 5, 0, 32),
+            )
         end
     end
 
@@ -357,6 +531,18 @@ end
 
     @testset "receipt, metadata, raw, and orbit mutations fail closed" begin
         mktempdir() do root
+            future_measurement = "2022-05-05T00:31:00Z"
+            _v22_capture_pair!(
+                root, DateTime(2022, 5, 5, 0, 30, 10),
+                _v22_pair_mag(future_measurement),
+                _v22_pair_wind(future_measurement),
+            )
+            @test_throws ErrorException L1P.select_v2_2_l1_issue_pair(
+                root, DateTime(2022, 5, 5, 0, 32),
+            )
+        end
+
+        mktempdir() do root
             _v22_capture_pair!(
                 root, DateTime(2022, 5, 5, 0, 30, 10),
                 _v22_pair_mag(measurement_time),
@@ -368,7 +554,7 @@ end
                     receipt_completed_utc="2022-05-05T00:31:00.000Z",
                 ),
             )
-            @test_throws ErrorException L1P.select_v2_2_l1_issue_pair(
+            @test_throws ArgumentError L1P.select_v2_2_l1_issue_pair(
                 root, DateTime(2022, 5, 5, 0, 30, 30),
             )
         end

@@ -8,7 +8,7 @@
 | Contract | Preserve the V2.1 coefficients; use issue-time information only; retain at least 60% combined served/frozen SINDy weight; distinguish anchor-relative model step from issue-relative product horizon; fail closed on missing rows, unsupported leads, lag mismatch, or corrupt artifacts. |
 | Evidence | The source replay, primary stack, residual table, cross-fit table, feature schema, and learner version are hash-pinned. The development partitions end before 2023. |
 | Independent oracles | Hand-computed constrained blends, synthetic known-weight recovery, exact live-kernel/replay identity, post-issue mutation invariance, whole-anchor embargoes, exact portable-EvoTrees inference, and artifact corruption tests. |
-| Test plan | Focused tests cover the primary stack, sparse residual, portable boosted residual, served replay, expanding-window cross-fit, causal sparse-history kernel, M1 cross-fit helpers, and prospective receipt collector. The full package suite and deterministic package experiment are required before handoff. |
+| Test plan | Focused tests cover the primary stack, residual candidates, served replay, chronological cross-fit, sparse history and driver kernels, prospective L1/Dst receipt capture, half-hour issue commitments, causal pairing and arrival transport, the core path, both M3 candidates, and the composite boundary. The full package suite and deterministic package experiment are required before a scientific handoff. |
 | Baseline verification | Every development row carries served and frozen V2.1, raw SINDy, persistence, Burton, Burton full, and O'Brien--McPherron predictions under a common finite-row mask. |
 | Data regeneration trigger | Changes to split, feature, primary-stack, or learner code require rebuilding the affected replay and audit tables and rechecking their pinned hashes before interpreting scores. |
 | Harness | `julia --project=. -e 'using Pkg; Pkg.test()'`; `julia --project=. examples/experiments.jl`; the repository development-harness audit against this worktree. |
@@ -140,25 +140,111 @@ timestamps therefore identify the same nominal UTC minute. This does not prove
 that the instruments used identical lower-level acquisition windows, so the
 pairing layer makes no such claim and never interpolates measurement values.
 
-`select_v2_2_l1_issue_pair` first verifies the complete v4 archive. It considers
-only canonical magnetometer and wind records received no later than the issue
-time, then selects the latest exact timestamp shared by individually admitted
-DSCOVR rows. It returns finite GSM Bx, By, and Bz; proton speed, density, and GSE
-Vx; the common bound GSE position; and the selected record, response, and
-ephemeris hashes. Repeated identical rows are allowed and resolve to the latest
-receipt. Every occurrence of the selected timestamp is checked across all
-pre-issue HTTP-200 responses, including historical rows below a newer latest
-row. Conflicting revisions, different bound positions, altered metadata,
-or corrupt raw content fail closed. Records received after the issue are
-excluded rather than treated as archive errors; selection fails if no exact
-admitted pair remains. Verification is repeated after selection, and the
-selected objects are rehashed before return.
+The live `select_v2_2_l1_issue_pair` overload verifies the complete v4 archive
+under the collector lock, requires every current source head to have been
+received by the issue, and atomically records a checksummed issue-cutoff file.
+The replay overload requires that saved cutoff path. It verifies and reads only
+the two exact hash-chain prefixes named by the cutoff; it does not inspect a
+later latest pointer, record, response body, or ephemeris object. Later replay
+therefore cannot infer a historical boundary from the first future record, and
+corruption strictly after a saved head cannot change the bound result.
 
-The pairing layer performs no network request, write, capture, or forecast. If
+Within the bound prefixes, selection considers canonical magnetometer and wind
+records received no later than the issue and chooses the latest exact timestamp
+shared by individually admitted DSCOVR rows. The v2 pair contract retains the
+two product identifiers, units and frames, original quality values and binding
+decisions, first eligible half-hour issue, cutoff identity, GSE position, and
+the selected record, response, and ephemeris hashes. Every field is covered by
+the pair checksum. Repeated byte-identical rows are allowed; receipt, revision,
+quality, position, or metadata disagreement fails closed.
+
+`select_v2_2_l1_issue_pairs` applies the same revision and provenance checks to
+every exact common timestamp in an inclusive measurement-time window. It
+acquires the collector lock once, constructs the two candidate sets once per
+call, returns rows in chronological order, and rehashes every selected record,
+raw response, and ephemeris object before releasing the lock. This is the causal
+input vector for the arrival queue; history is not reconstructed by repeatedly
+requesting one latest row.
+
+The cutoff-bound pairing layer performs no network request, receipt-data write,
+capture, or forecast. The live overload writes only its immutable issue-cutoff
+record. Both overloads acquire and remove the collector lock so the selected
+prefix cannot advance during selection. If
 the newest feed rows have different timestamps, it may return an older exact
 common minute; downstream transport must enforce its own freshness limit using
 the returned measurement and receipt times. No collector or serving process is
 started by importing or calling it.
+
+## Prospective issue and Dst capture
+
+`examples/v2_2_prospective_issue_capture.jl` is an explicit, off-by-default
+research scheduler. It archives the raw SWPC Kyoto-Dst response, HTTP headers,
+UTC and monotonic receipt clocks, parser outcome, first-body receipt, and
+same-observation revision lineage in a content-addressed hash chain. Every
+scheduled issue is an exact UTC half-hour, binds immutable L1 and Dst cutoffs,
+records the causal Dst anchor and fixed 1/2/3/4/6/7 h targets, and links to the
+preceding issue. A non-grid time is rejected rather than shifted or backfilled.
+
+The scheduler creates a pending guard before an issue becomes durable and
+requires matching archived guard and completion records during replay. A
+record completed after `H+5 min` writes a durable invalid-cohort marker; later
+capture and verification then refuse the root. Full-chain checks reject orphan
+records and clock regression. Saved cutoffs isolate historical verification
+from later receipts and raw objects, while any bound-object mutation fails.
+
+No fitted or gated V2.2 model exists. Issue records therefore state
+`research_capture_only_unavailable` and contain no numeric forecast. The exact
+L1 pair is selected from the saved cutoff and hash-bound when available; lack of
+a common admitted minute is recorded explicitly and rederived during replay.
+The scheduler is not registered as a service and has never contacted a live
+endpoint. Local hash chains cannot detect a coordinated rewrite of every bound
+object; the blind protocol consequently requires an independent pre-target
+commitment witness before any cohort can support promotion.
+
+## Receipt-causal M2 arrival queue
+
+`build_operational_v22_arrival_queue` consumes only checksum-valid selector-v2
+pair outputs from one issue-cutoff snapshot whose magnetometer and wind
+receipts are no later than the forecast issue. It requires the issue and every
+admitted pair issue to lie exactly on the 30 min UTC grid, and checks product
+identity, retained quality decisions, DSCOVR, GSM magnetic components, GSE Vx
+and position, kilometres, positive speed and density, and `Vx < 0`. The Earth-UT driver
+boundary is fixed at `x_ref_gse_km = 0`; V2.1's `1.5e6 km` scalar L1 distance is
+retained only as a compatibility diagnostic. The causal Vx median uses the
+measurement-time interval `(s - 15 min, s]`, and accepted delays are 20--120
+min. UTC arrival bins are half-open and use componentwise physical medians.
+
+The sparse seed contains 25 complete half-hour bins in chronological order and
+has state order `(Bx, By, Bz, logV, logn)`. Exactly one isolated missing bin may
+be copied from its immediate predecessor. A complete observed seed remains
+fresh at exactly 90 min and falls back one millisecond later. A later packet may
+arrive exactly 30 min before the preceding arrival maximum; a larger reversal
+falls back. A partially elapsed issue bin is excluded from both history and the
+future queue. A post-issue candidate is skipped after parsing only its issue
+timestamp; none of its remaining fields are read. On invalid plasma, Vx, delay,
+or overtaking, every safe transported prefix and bin is retained so any causal
+seed can produce a fourteen-step persistence fallback with the original reason.
+
+`build_operational_v22_arrival_path` copies a contiguous prefix of known future
+arrival bins without modification, recursively applies the stable sparse
+driver artifact only to the remaining tail, and returns exactly fourteen rows.
+`operational_v22_arrival_path_matrix` exposes those rows as the low-level
+research matrix `(Bx, By, Bz, logV, logn)`. Queue, selector record/raw hashes,
+driver-artifact identity, origins, and
+physical states are bound into composite checksums. Expected transport,
+history, queue-prefix, or numerical-domain failures return an explicit
+transported-persistence path and reason; corrupt structural provenance or a
+checksum mismatch raises an error.
+
+This layer is pure and performs no archive write, network request, capture, or
+serving action. Its path schema is explicitly `ungated_candidate`. The direct
+path-to-core overload is disabled; the bound overload reverifies the queue and
+driver artifact plus a caller-pinned semantic frozen-core SHA, then still fails
+closed. Training-fold support envelopes, activation, asymmetric clipping, Bz
+sign protection, and an unobserved-shock gate have not been fitted or frozen,
+and no thresholds are invented in their place.
+No observational M2 fit, prospective storm score, promotion decision, or
+service change follows from the synthetic verification.
 
 ## Combined-mechanism recoverability bound
 
@@ -206,3 +292,43 @@ This AR-only component is a mechanism control, not the full M3 candidate. It
 does not yet include the predeclared exogenous M2 trajectory, Dst, driver, and
 issue-time features. It has only synthetic verification and cannot support an
 accuracy or deployment claim.
+
+## Checksum-bound shadow chain
+
+`OperationalV22ShadowChainArtifact` is the offline identity boundary for the
+complete V2.2 candidate. Its center hash binds the receipt-pair and
+transport/support contracts, the anchor-pressure contract, the M2 artifact,
+the fixed two-substep hourly aggregation and pressure-inversion policy, the
+frozen V2.1 point core, the issue-relative horizon schema, and the same-hour
+anchor rule. The manifest separately binds the product version, exact feature
+order, conformal object's semantic hash, conformal sidecar, paired point
+calibration, and either the AR control or all six lead-specific full-M3
+artifacts. The frozen-core identity includes the canonical nonzero executable
+term-code tuple, and conformal strata must retain the exact finite-sample
+coverage floor implied by their sample counts and nominal coverage.
+
+The research-only arithmetic accepts an explicit base-center record tied to its
+issue, anchor, target, horizon, and center identity. Numeric centers require
+`execution_scope=:synthetic_research_only`; the low-level M2-to-core result
+requires and carries `execution_scope=:low_level_research_only`. Neither is
+issued-path provenance. `operational_v22_shadow_predict` therefore fails closed
+until a frozen issued-path gate artifact and proof exist; only the explicitly
+named `operational_v22_shadow_research_predict` performs the existing offline
+arithmetic. Component, feature, horizon, anchor, calibration, and provenance
+mismatches throw before a research forecast is returned. Missing causal M3
+history can return only the supplied exact base center; history associated with
+another center is rejected. Checksummed
+one-row artifact I/O rejects malformed, corrupt, symbolic-link, directory, and
+other non-regular targets. Writes use the shared two-check atomic replacement
+path so a target changed to a non-regular object after staging is preserved and
+the installation fails closed.
+
+Receipt-pair, transport/support, anchor-pressure, conformal-sidecar, and point
+calibration checksums are explicit evidence tokens. This layer verifies their
+presence and exact equality but cannot infer or independently prove the
+upstream provenance semantics represented by those tokens.
+
+This layer performs no observational fit, skill scoring, live fetch, or
+serving action. Its synthetic verification establishes identity and causality
+mechanics only; it does not establish forecast accuracy or authorize V2.2
+promotion.

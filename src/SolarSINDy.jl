@@ -31,8 +31,12 @@ include("operational_v22.jl")
 include("operational_v22_residual.jl")
 include("operational_v22_boost.jl")
 include("operational_v22_driver.jl")
+include("operational_v22_arrival.jl")
+include("operational_v22_core_path.jl")
 include("operational_v22_error_state.jl")
+include("operational_v22_error_exogenous.jl")
 include("conformal.jl")
+include("operational_v22_shadow_chain.jl")
 include("assimilation.jl")
 include("alarm.jl")
 include("realtime.jl")
@@ -138,6 +142,37 @@ export # Utils
        operational_v22_driver_rollout,
        operational_v22_driver_sha256,
        write_operational_v22_driver, read_operational_v22_driver,
+       # Operational V2.2-M2 receipt transport and arrival queue
+       OPERATIONAL_V22_ARRIVAL_PAIR_SCHEMA_VERSION,
+       OPERATIONAL_V22_ARRIVAL_SCHEMA_VERSION,
+       OPERATIONAL_V22_ARRIVAL_PATH_SCHEMA_VERSION,
+       OPERATIONAL_V22_ARRIVAL_PATH_GATE_STATUS,
+       OPERATIONAL_V22_ARRIVAL_CADENCE_MINUTES,
+       OPERATIONAL_V22_ARRIVAL_TRAILING_MINUTES,
+       OPERATIONAL_V22_ARRIVAL_HISTORY_ROWS,
+       OPERATIONAL_V22_ARRIVAL_PATH_STEPS,
+       OPERATIONAL_V22_ARRIVAL_MIN_DELAY_MINUTES,
+       OPERATIONAL_V22_ARRIVAL_MAX_DELAY_MINUTES,
+       OPERATIONAL_V22_ARRIVAL_MAX_FRESHNESS_MINUTES,
+       OPERATIONAL_V22_ARRIVAL_X_REF_GSE_KM,
+       OPERATIONAL_V22_ARRIVAL_V21_COMPATIBILITY_DISTANCE_KM,
+       OperationalV22ArrivalBin, OperationalV22ArrivalQueue,
+       OperationalV22ArrivalPathStep, OperationalV22ArrivalPath,
+       build_operational_v22_arrival_queue,
+       operational_v22_arrival_history,
+       operational_v22_arrival_sha256,
+       verify_operational_v22_arrival_queue,
+       build_operational_v22_arrival_path,
+       operational_v22_arrival_path_matrix,
+       operational_v22_arrival_path_sha256,
+       verify_operational_v22_arrival_path,
+       # Operational V2.2 M2-to-frozen-core path
+       OPERATIONAL_V22_CORE_PATH_SCHEMA_VERSION,
+       OPERATIONAL_V22_CORE_PATH_HOURS,
+       OPERATIONAL_V22_CORE_PATH_SUBSTEPS_PER_HOUR,
+       OPERATIONAL_V22_CORE_PATH_SUPPORTED_MODEL_STEPS,
+       operational_v22_hourly_drivers,
+       operational_v22_core_path_forecast,
        # Operational V2.2-M3 causal error-state control
        OPERATIONAL_V22_ERROR_LAGS_H,
        OPERATIONAL_V22_ERROR_SUPPORTED_MODEL_STEPS,
@@ -149,6 +184,45 @@ export # Utils
        operational_v22_error_state_predict,
        operational_v22_error_state_sha256,
        write_operational_v22_error_state, read_operational_v22_error_state,
+       # Operational V2.2-M3 full exogenous error model
+       OPERATIONAL_V22_ERROR_EXOGENOUS_LAGS_H,
+       OPERATIONAL_V22_ERROR_EXOGENOUS_TEMPORAL_VARIABLES,
+       OPERATIONAL_V22_ERROR_EXOGENOUS_M2_FEATURES,
+       OPERATIONAL_V22_ERROR_EXOGENOUS_FEATURES,
+       OPERATIONAL_V22_ERROR_EXOGENOUS_GROUPS,
+       OPERATIONAL_V22_ERROR_EXOGENOUS_FEATURE_GROUPS,
+       OPERATIONAL_V22_ERROR_EXOGENOUS_SUPPORTED_MODEL_STEPS,
+       OPERATIONAL_V22_ERROR_EXOGENOUS_RIDGE_GRID,
+       OPERATIONAL_V22_ERROR_EXOGENOUS_THRESHOLD_GRID,
+       OPERATIONAL_V22_ERROR_EXOGENOUS_MAX_SPECTRAL_RADIUS,
+       OperationalV22ErrorExogenousIssue,
+       OperationalV22ErrorExogenousFeatures,
+       OperationalV22ErrorExogenousFitRow,
+       OperationalV22ErrorExogenousArtifact,
+       operational_v22_error_exogenous_features,
+       fit_operational_v22_error_exogenous,
+       operational_v22_error_exogenous_predict,
+       operational_v22_error_exogenous_sha256,
+       write_operational_v22_error_exogenous,
+       read_operational_v22_error_exogenous,
+       # Operational V2.2 checksum-bound shadow chain
+       OPERATIONAL_V22_SHADOW_SCHEMA_VERSION,
+       OPERATIONAL_V22_SHADOW_PRODUCT_VERSION,
+       OPERATIONAL_V22_SHADOW_SUPPORTED_HORIZONS_H,
+       OPERATIONAL_V22_SHADOW_DEFAULT_FEATURE_SCHEMA,
+       OperationalV22ShadowBindings,
+       OperationalV22BaseCenterForecast,
+       OperationalV22ShadowChainArtifact,
+       operational_v22_regular_file_sha256,
+       operational_v22_core_sha256,
+       operational_v22_conformal_sha256,
+       operational_v22_base_center_sha256,
+       validate_operational_v22_shadow_chain,
+       operational_v22_shadow_research_predict,
+       operational_v22_shadow_predict,
+       operational_v22_shadow_chain_sha256,
+       write_operational_v22_shadow_chain,
+       read_operational_v22_shadow_chain,
        # Conformal UQ
        ConformalCalibration, ConformalStratum, fit_conformal,
        conformal_stratum, conformal_halfwidth, conformal_interval,

@@ -1,3 +1,11 @@
+using Test
+using CSV
+using DataFrames
+using LinearAlgebra
+using Random
+using SolarSINDy
+using Statistics
+
 const V22D = SolarSINDy
 
 function _v22d_hand_rollout(artifact, history)
