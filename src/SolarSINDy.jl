@@ -26,6 +26,7 @@ include("metrics.jl")
 include("performance_statistics.jl")
 include("forecast.jl")
 include("operational_artifacts.jl")
+include("operational_v22_history.jl")
 include("operational_v22.jl")
 include("operational_v22_residual.jl")
 include("operational_v22_boost.jl")
@@ -83,6 +84,19 @@ export # Utils
        operational_core_artifacts, operational_calibration_artifacts,
        validate_operational_core_artifacts, load_operational_core,
        init_operational_forecast, operational_core_forecast,
+       # Operational V2.2-M1 causal sparse-history core
+       OPERATIONAL_V22_HISTORY_TERMS,
+       OPERATIONAL_V22_HISTORY_SUPPORTED_ANCHOR_LAGS,
+       OPERATIONAL_V22_HISTORY_SCHEMA_VERSION,
+       OPERATIONAL_V22_HISTORY_DEFAULT_COUPLING_BOUND_MVM,
+       OperationalV22HistoryDriver, OperationalV22HistoryState,
+       OperationalV22HistoryArtifact,
+       operational_v22_history_rho, operational_v22_history_coupling,
+       operational_v22_history_memory, operational_v22_history_features,
+       operational_v22_history_derivative, operational_v22_history_step,
+       init_operational_v22_history_state, operational_v22_history_rollout,
+       fit_operational_v22_history, operational_v22_history_sha256,
+       write_operational_v22_history, read_operational_v22_history,
        # Operational V2.2 constrained stack
        OPERATIONAL_V22_COMPONENTS, DEFAULT_OPERATIONAL_V22_COMPONENT_COLUMNS,
        OperationalV22Cell, OperationalV22Stack,

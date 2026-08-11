@@ -2,7 +2,7 @@
 
 ## Coverage
 
-The focused suite contains 342 assertions across the new V2.2 surfaces:
+The focused suite contains 544 assertions across the new V2.2 surfaces:
 
 | Surface | Assertions |
 |---|---:|
@@ -11,6 +11,9 @@ The focused suite contains 342 assertions across the new V2.2 surfaces:
 | Portable boosted residual | 76 |
 | Causal served replay | 100 |
 | Leakage-safe primary cross-fit | 63 |
+| Causal sparse-history kernel | 100 |
+| Purged M1 cross-fit helpers | 12 |
+| Prospective L1 receipt collector | 90 |
 
 The tests cover constraint projection, pooled fallback, synthetic recovery,
 causal feature construction, split embargoes, target maturity, lag and horizon
@@ -28,6 +31,13 @@ inference, checksummed artifact round trips, and corruption rejection.
   model steps.
 - Cross-fit rows are checked for exact key coverage, whole anchors, and a 168 h
   target-to-evaluation-block gap.
+- Sparse-history one-step and multi-step trajectories are checked against hand
+  calculations, exact zero-augmentation continuity, all-support synthetic
+  recovery, stability bounds, and artifact mutation.
+- Receipt capture is checked against deterministic clocks and responses,
+  content hashes, complete chain traversal, source/URL identity, chronology,
+  rollback, orphaned and missing records, intermediate symbolic links,
+  transport failures, and strict JSON parsing.
 
 ## Tolerances
 
@@ -51,10 +61,10 @@ execution.
 
 ## Full verification
 
-- Clean full package suite: 4,896/4,896 assertions passed.
+- Clean full package suite: 5,098/5,098 assertions passed.
 - Deterministic package experiment: `SolarSINDy experiments: V2.1 deterministic
   smoke PASS`.
-- Development harness: 147 passes, 3 warnings, and 0 failures. One warning is
+- Development harness: 155 passes, 3 warnings, and 0 failures. One warning is
   the conservative loose-tolerance scan documented above; the other two report
   that this package-only worktree does not contain the workspace manuscript
   data and figure directories.
@@ -69,3 +79,13 @@ workspace source artifact was then mounted at the worktree's expected ignored
 cache path, preserving both file content and path identity. No source behavior,
 test expectation, or tolerance was weakened. A clean default-path rerun is the
 decisive result.
+
+The first collector verification exposed a Julia ownership detail:
+`String(::Vector{UInt8})` consumed the response buffer before its size was
+recorded. Copying the buffer for diagnostics fixed the source. An independent
+adversarial audit then reproduced intermediate-symlink escape, head rollback,
+orphan acceptance, missing-predecessor append, chronology regression, source-URL
+reuse, empty verification, transport-exception loss, and permissive nonstandard
+JSON. The archive implementation and mutation tests were strengthened at the
+source; the final focused collector suite is 90/90 and the subsequent full
+package suite is 5,098/5,098.
