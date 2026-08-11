@@ -51,10 +51,28 @@ function _v22_l1_capture_at(root, source, response, start::DateTime, serial::Int
     ))
 end
 
+function _v22_l1_rehash_metadata!(root, source, record, changes)
+    path = joinpath(root, record.record_relative_path)
+    stored = JSON3.read(read(path, String))
+    payload = L1C._v22_l1_record_payload(stored)
+    mutated_metadata = merge(payload.metadata_provenance, changes)
+    mutated_payload = merge(
+        payload, (metadata_provenance=mutated_metadata,),
+    )
+    mutated_sha = L1C._v22_l1_record_sha256(mutated_payload)
+    write(path, JSON3.write(merge(
+        mutated_payload, (record_sha256=mutated_sha,),
+    )))
+    _v22_l1_test_latest!(
+        root, source, record.sequence, record.record_relative_path, mutated_sha,
+    )
+    return mutated_sha
+end
+
 @testset "V2.2 prospective L1 receipt collector" begin
     source = (
         name="test_swpc_mag",
-        url="https://example.invalid/rtsw_mag_1m.json",
+        url=L1C.V22_L1_RECEIPT_SOURCES[1].url,
     )
     body = """[{"time_tag":"2022-12-31T23:58:00Z","source":"DSCOVR","active":true}]"""
     response = _v22_l1_fake_response(
@@ -116,6 +134,39 @@ end
               "00000000000000000001.json"
         @test basename(only(second_capture).record_relative_path) ==
               "00000000000000000002.json"
+
+        metadata = only(first_capture).metadata_provenance
+        @test metadata.metadata_contract_version ==
+              L1C.V22_L1_METADATA_CONTRACT_VERSION
+        @test metadata.identity_authority_url ==
+              L1C.V22_L1_NOAA_METADATA_AUTHORITY_URL
+        @test metadata.source_field_semantics ==
+              L1C.V22_L1_SOURCE_FIELD_SEMANTICS
+        @test metadata.source_tokens == ["DSCOVR"]
+        @test metadata.source_rows == 1
+        @test metadata.identity_status == "bound_noaa_source_field"
+        @test metadata.active_field_semantics ==
+              L1C.V22_L1_ACTIVE_FIELD_SEMANTICS
+        @test metadata.active_source_tokens == ["DSCOVR"]
+        @test metadata.active_boolean_rows == 1
+        @test metadata.active_status == "bound_noaa_active_field"
+        @test metadata.quality_binding_status ==
+              "missing_noaa_overall_quality"
+        @test metadata.quality_semantics == L1C.V22_L1_QUALITY_SEMANTICS
+        @test metadata.archive_quality_semantics ==
+              L1C.V22_L1_ARCHIVE_QUALITY_SEMANTICS
+        @test metadata.archive_quality_transfer_status ==
+              "not_bound_to_swpc_rows"
+        @test metadata.ephemeris_binding_status ==
+              "missing_bound_ephemeris_record"
+        @test metadata.ephemeris_record_sha256 ==
+              L1C.V22_L1_RECEIPT_ZERO_SHA256
+        @test isempty(metadata.ephemeris_record_json)
+        @test !metadata.rows_admissible
+        @test metadata.admissibility_blockers == [
+            "missing_or_non_normal_row_quality",
+            "missing_bound_ephemeris_record",
+        ]
 
         raw_files = String[]
         for (directory, _, files) in walkdir(joinpath(root, "raw"))
@@ -179,6 +230,16 @@ end
                          (name="casename", url=source.url)),
                 http_get=(url; kwargs...) -> response_ok,
             )
+            equivalent_url = replace(
+                source.url,
+                "services.swpc.noaa.gov" => "SERVICES.SWPC.NOAA.GOV:443",
+            )
+            @test_throws ArgumentError L1C.capture_v2_2_l1_receipts!(
+                root;
+                sources=((name="first_name", url=source.url),
+                         (name="second_name", url=equivalent_url)),
+                http_get=(url; kwargs...) -> response_ok,
+            )
             @test_throws ArgumentError L1C.capture_v2_2_l1_receipts!(
                 root;
                 sources=((name="insecure", url="http://example.invalid"),),
@@ -205,6 +266,30 @@ end
                     linked_root; sources=(source,),
                 )
             end
+        end
+    end
+
+    @testset "verification rejects an existing duplicate-URL archive" begin
+        mktempdir() do root
+            first_source = (name="first_name", url=source.url)
+            second_source = (name="second_name", url=source.url)
+            _v22_l1_capture_at(
+                root, first_source, response, DateTime(2022, 1, 2), 100,
+            )
+            @test_throws ArgumentError _v22_l1_capture_at(
+                root, second_source, response, DateTime(2022, 1, 2), 200,
+            )
+            # Bypass the public gate to model an archive created by the prior
+            # collector implementation; public verification must still reject it.
+            L1C._v22_l1_install_record!(
+                realpath(root), second_source, response,
+                DateTime(2022, 1, 2),
+                DateTime(2022, 1, 2) + Millisecond(1),
+                200, 201,
+            )
+            @test_throws ArgumentError L1C.verify_v2_2_l1_receipts(
+                root; sources=(first_source, second_source),
+            )
         end
     end
 
@@ -329,6 +414,9 @@ end
             old_record = _v22_l1_capture_at(
                 root, old_source, response, DateTime(2022, 4, 1), 100,
             )
+            @test old_record.metadata_provenance.identity_status ==
+                  "untrusted_non_noaa_rtsw_endpoint"
+            @test !old_record.metadata_provenance.rows_admissible
             @test_throws ErrorException _v22_l1_capture_at(
                 root, new_source, response, DateTime(2022, 4, 1, 0, 1), 200,
             )
@@ -421,6 +509,465 @@ end
         end
     end
 
+    @testset "authoritative row metadata stays fail closed" begin
+        mktempdir() do root
+            mixed_body = """[
+                {"time_tag":"2022-05-02T00:00:00Z","source":"DSCOVR","active":true},
+                {"time_tag":"2022-05-02T00:01:00Z","source":"ACE","active":false}
+            ]"""
+            record = _v22_l1_capture_at(
+                root, source, _v22_l1_fake_response(200, mixed_body),
+                DateTime(2022, 5, 2), 200,
+            )
+            metadata = record.metadata_provenance
+            # Exact sorted tokens independently follow the two raw `source` values.
+            @test metadata.source_tokens == ["ACE", "DSCOVR"]
+            @test metadata.source_rows == 2
+            @test metadata.identity_status == "bound_noaa_source_field"
+            # Only the literal Boolean-true DSCOVR row has the NOAA active designation.
+            @test metadata.active_source_tokens == ["DSCOVR"]
+            @test metadata.active_boolean_rows == 2
+            @test metadata.active_status == "bound_noaa_active_field"
+            @test !metadata.rows_admissible
+            @test only(L1C.verify_v2_2_l1_receipts(
+                root; sources=(source,),
+            )).records == 1
+        end
+
+        mktempdir() do root
+            unbound_body = """[
+                {"time_tag":"2022-05-03T00:00:00Z","source":"DSCOVR",
+                 "active":"true","quality":0,"position_x":1.0},
+                {"time_tag":"2022-05-03T00:01:00Z","active":false}
+            ]"""
+            record = _v22_l1_capture_at(
+                root, source, _v22_l1_fake_response(200, unbound_body),
+                DateTime(2022, 5, 3), 300,
+            )
+            metadata = record.metadata_provenance
+            # One absent source makes identity partial; no token is invented.
+            @test metadata.source_tokens == ["DSCOVR"]
+            @test metadata.source_rows == 1
+            @test metadata.identity_status == "partial_noaa_source_field"
+            @test "spacecraft_identity_not_fully_bound" in
+                  metadata.admissibility_blockers
+            # A string lookalike must not be promoted to NOAA's documented Boolean field.
+            @test metadata.active_boolean_rows == 1
+            @test isempty(metadata.active_source_tokens)
+            @test metadata.active_status == "partial_noaa_active_field"
+            @test "active_designation_not_fully_bound" in
+                  metadata.admissibility_blockers
+            # Undocumented lookalike quality/position fields confer no provenance.
+            @test metadata.quality_binding_status ==
+                  "missing_documented_per_row_quality"
+            @test metadata.ephemeris_binding_status ==
+                  "missing_bound_ephemeris_record"
+            @test isempty(metadata.ephemeris_record_json)
+            @test !metadata.rows_admissible
+        end
+
+        mktempdir() do root
+            record = _v22_l1_capture_at(
+                root, source, response, DateTime(2022, 5, 4), 400,
+            )
+            path = joinpath(root, record.record_relative_path)
+            stored = JSON3.read(read(path, String))
+            payload = L1C._v22_l1_record_payload(stored)
+            forged_metadata = merge(payload.metadata_provenance, (
+                quality_binding_status="bound",
+                ephemeris_binding_status="bound",
+                ephemeris_record_sha256=repeat("a", 64),
+                ephemeris_record_json="{}",
+                rows_admissible=true,
+                admissibility_blockers=String[],
+            ))
+            forged_payload = merge(
+                payload, (metadata_provenance=forged_metadata,),
+            )
+            forged_sha = L1C._v22_l1_record_sha256(forged_payload)
+            write(path, JSON3.write(merge(
+                forged_payload, (record_sha256=forged_sha,),
+            )))
+            _v22_l1_test_latest!(
+                root, source, 1, record.record_relative_path, forged_sha,
+            )
+            # Rehashing cannot make quality, position, or admissibility appear.
+            @test_throws ErrorException L1C.verify_v2_2_l1_receipts(
+                root; sources=(source,),
+            )
+        end
+    end
+
+    @testset "issue-causal GSE ephemeris is archived and independently replayed" begin
+        measurement_body = """[
+            {"time_tag":"2022-05-05T00:29:00Z","source":"DSCOVR","active":true,
+             "overall_quality":0,"bx_gsm":1.0,"by_gsm":-2.0,"bz_gsm":-4.0},
+            {"time_tag":"2022-05-05T00:30:00Z","source":"DSCOVR","active":true,
+             "overall_quality":0,"bx_gsm":2.0,"by_gsm":-3.0,"bz_gsm":-5.0}
+        ]"""
+        measurement_response = _v22_l1_fake_response(200, measurement_body)
+        ephemeris_body = """[
+            {"time_tag":"2022-05-05T00:00:00Z","source":"DSCOVR","active":true,
+             "x_gse":10.0,"y_gse":20.0,"z_gse":30.0},
+            {"time_tag":"2022-05-05T01:00:00Z","source":"DSCOVR","active":true,
+             "x_gse":20.0,"y_gse":40.0,"z_gse":60.0}
+        ]"""
+        ephemeris_response = _v22_l1_fake_response(
+            200, ephemeris_body;
+            headers=[
+                "Date" => "Thu, 05 May 2022 00:30:30 GMT",
+                "ETag" => "\"ephemeris-frozen\"",
+                "Last-Modified" => "Thu, 05 May 2022 00:30:00 GMT",
+            ],
+        )
+
+        function capture_bound_ephemeris(root; ephemeris=ephemeris_response,
+                                         measurement=measurement_response,
+                                         capture_source=source)
+            base = DateTime(2022, 5, 5, 0, 30, 30)
+            return only(L1C.capture_v2_2_l1_receipts!(
+                root;
+                sources=(capture_source,),
+                http_get=(url; kwargs...) -> begin
+                    @test url == capture_source.url
+                    measurement
+                end,
+                ephemeris_http_get=(url; kwargs...) -> begin
+                    @test url == L1C.V22_L1_NOAA_EPHEMERIS_URL
+                    ephemeris
+                end,
+                utc_clock=_v22_l1_sequence_clock([
+                    base,
+                    base + Millisecond(10),
+                    base + Second(1),
+                    base + Second(1) + Millisecond(10),
+                ]),
+                monotonic_clock=_v22_l1_sequence_clock([100, 110, 120, 130]),
+            ))
+        end
+
+        mktempdir() do root
+            record = capture_bound_ephemeris(root)
+            metadata = record.metadata_provenance
+            @test metadata.ephemeris_capture_outcome == "http_response"
+            @test metadata.ephemeris_http_status == 200
+            @test metadata.ephemeris_http_etag == "\"ephemeris-frozen\""
+            @test metadata.ephemeris_receipt_completed_utc ==
+                  "2022-05-05T00:30:30.010Z"
+            @test metadata.ephemeris_source_available_before_issue
+            @test metadata.ephemeris_binding_status ==
+                  "bound_issue_causal_swpc_ephemeris"
+            @test metadata.ephemeris_position_timestamp_utc ==
+                  "2022-05-05T00:30:00.000Z"
+            @test metadata.ephemeris_position_frame == "GSE"
+            @test metadata.ephemeris_position_units == "km"
+            @test metadata.ephemeris_interpolation_rule ==
+                  L1C.V22_L1_EPHEMERIS_INTERPOLATION_RULE
+            @test metadata.ephemeris_source_object_sha256 ==
+                  L1C._v22_l1_sha256(codeunits(ephemeris_body))
+            @test isfile(joinpath(
+                root, metadata.ephemeris_source_object_raw_relative_path,
+            ))
+            position = JSON3.read(metadata.ephemeris_record_json)
+            @test position.source == "DSCOVR"
+            @test position.method == "linear"
+            @test position.interpolation_fraction == 0.5
+            @test position.x_gse == 15.0
+            @test position.y_gse == 30.0
+            @test position.z_gse == 45.0
+            @test metadata.ephemeris_record_sha256 ==
+                  L1C._v22_l1_sha256(codeunits(metadata.ephemeris_record_json))
+            @test metadata.quality_authority_url ==
+                  L1C.V22_L1_NOAA_MAG_QUALITY_SCHEMA_URL
+            @test metadata.quality_source_product == "dscovr_m1m"
+            @test metadata.quality_row_timestamp_utc ==
+                  "2022-05-05T00:30:00.000Z"
+            @test metadata.quality_row_source == "DSCOVR"
+            @test metadata.quality_value == 0
+            @test metadata.quality_binding_status ==
+                  "bound_noaa_dscovr_overall_quality"
+            @test metadata.quality_required_fields_status ==
+                  "bound_required_bx_by_bz_gsm"
+            @test metadata.quality_decision ==
+                  "accept_normal_overall_quality"
+            @test metadata.rows_admissible
+            @test isempty(metadata.admissibility_blockers)
+            @test only(L1C.verify_v2_2_l1_receipts(
+                root; sources=(source,),
+            )).records == 1
+
+            ephemeris_path = joinpath(
+                root, metadata.ephemeris_source_object_raw_relative_path,
+            )
+            open(ephemeris_path, "a") do io
+                write(io, UInt8('x'))
+            end
+            @test_throws ErrorException L1C.verify_v2_2_l1_receipts(
+                root; sources=(source,),
+            )
+        end
+
+        exact_measurement = _v22_l1_fake_response(
+            200,
+            """[{"time_tag":"2022-05-05T00:00:00Z",\
+                   "source":"DSCOVR","active":true,\
+                   "overall_quality":0,"bx_gsm":1.0,"by_gsm":-2.0,
+                   "bz_gsm":-5.0}]""",
+        )
+        mktempdir() do root
+            metadata = capture_bound_ephemeris(
+                root; measurement=exact_measurement,
+            ).metadata_provenance
+            position = JSON3.read(metadata.ephemeris_record_json)
+            @test position.method == "exact"
+            @test position.lower_time_utc == position.upper_time_utc ==
+                  "2022-05-05T00:00:00.000Z"
+            @test position.x_gse == 10.0
+            @test only(L1C.verify_v2_2_l1_receipts(
+                root; sources=(source,),
+            )).records == 1
+        end
+
+        @testset "NOAA DSCOVR row-quality decisions fail closed" begin
+            rejected = (
+                (
+                    body="""[{"time_tag":"2022-05-05T00:30:00Z",\
+                               "source":"DSCOVR","active":true,\
+                               "overall_quality":1,"bz_gsm":-5.0}]""",
+                    status="bound_noaa_dscovr_overall_quality",
+                    decision="reject_suspect_overall_quality",
+                ),
+                (
+                    body="""[{"time_tag":"2022-05-05T00:30:00Z",\
+                               "source":"DSCOVR","active":true,\
+                               "overall_quality":2,"bz_gsm":-5.0}]""",
+                    status="bound_noaa_dscovr_overall_quality",
+                    decision="reject_error_overall_quality",
+                ),
+                (
+                    body="""[{"time_tag":"2022-05-05T00:30:00Z",\
+                               "source":"DSCOVR","active":true,\
+                               "bz_gsm":-5.0}]""",
+                    status="missing_noaa_overall_quality",
+                    decision="reject_missing_noaa_overall_quality",
+                ),
+                (
+                    body="""[{"time_tag":"2022-05-05T00:30:00Z",\
+                               "source":"DSCOVR","active":true,\
+                               "overall_quality":0,"by_gsm":-2.0,
+                               "bz_gsm":-5.0}]""",
+                    status="bound_noaa_dscovr_overall_quality",
+                    decision="reject_missing_or_invalid_required_forecast_fields",
+                ),
+                (
+                    body="""[{"time_tag":"2022-05-05T00:30:00Z",\
+                               "source":"ACE","active":true,\
+                               "overall_quality":0,"bz_gsm":-5.0}]""",
+                    status="unverified_non_dscovr_quality_semantics",
+                    decision="reject_unverified_source_quality_semantics",
+                ),
+            )
+            for case in rejected
+                mktempdir() do root
+                    response = _v22_l1_fake_response(200, case.body)
+                    metadata = capture_bound_ephemeris(
+                        root; measurement=response,
+                    ).metadata_provenance
+                    @test metadata.quality_binding_status == case.status
+                    @test metadata.quality_decision == case.decision
+                    @test !metadata.rows_admissible
+                    @test "missing_or_non_normal_row_quality" in
+                          metadata.admissibility_blockers
+                    @test only(L1C.verify_v2_2_l1_receipts(
+                        root; sources=(source,),
+                    )).records == 1
+                end
+            end
+
+            invalid_quality_values = ("true", "0.5", "3", "1e300", "\"0\"")
+            for value in invalid_quality_values
+                mktempdir() do root
+                    body = """[{"time_tag":"2022-05-05T00:30:00Z",\
+                                  "source":"DSCOVR","active":true,\
+                                  "overall_quality":$value,"bz_gsm":-5.0}]"""
+                    response = _v22_l1_fake_response(200, body)
+                    record = capture_bound_ephemeris(
+                        root; measurement=response,
+                    )
+                    metadata = record.metadata_provenance
+                    @test metadata.quality_binding_status ==
+                          "invalid_noaa_overall_quality"
+                    @test metadata.quality_decision ==
+                          "reject_invalid_noaa_overall_quality"
+                    @test !metadata.rows_admissible
+                    @test read(joinpath(root, record.raw_relative_path), String) == body
+                    @test only(L1C.verify_v2_2_l1_receipts(
+                        root; sources=(source,),
+                    )).records == 1
+                end
+            end
+
+            wind_source = (
+                name="test_swpc_wind",
+                url=L1C.V22_L1_RECEIPT_SOURCES[2].url,
+            )
+            wind_response = _v22_l1_fake_response(
+                200,
+                """[{"time_tag":"2022-05-05T00:30:00Z",\
+                       "source":"DSCOVR","active":true,\
+                       "overall_quality":0.0,"proton_speed":400.0,\
+                       "proton_density":5.0,"proton_vx_gse":-395.0}]""",
+            )
+            mktempdir() do root
+                metadata = capture_bound_ephemeris(
+                    root; measurement=wind_response,
+                    capture_source=wind_source,
+                ).metadata_provenance
+                @test metadata.quality_authority_url ==
+                      L1C.V22_L1_NOAA_WIND_QUALITY_SCHEMA_URL
+                @test metadata.quality_source_product == "dscovr_f1m"
+                @test metadata.quality_value == 0
+                @test metadata.quality_required_fields_status ==
+                      "bound_required_speed_density_vx_gse"
+                @test metadata.quality_decision ==
+                      "accept_normal_overall_quality"
+                @test metadata.rows_admissible
+                @test isempty(metadata.admissibility_blockers)
+                @test only(L1C.verify_v2_2_l1_receipts(
+                    root; sources=(wind_source,),
+                )).records == 1
+            end
+
+            invalid_wind_fields = (
+                """[{"time_tag":"2022-05-05T00:30:00Z",\
+                       "source":"DSCOVR","active":true,\
+                       "overall_quality":0,"proton_speed":400.0,\
+                       "proton_vx_gse":-395.0}]""",
+                """[{"time_tag":"2022-05-05T00:30:00Z",\
+                       "source":"DSCOVR","active":true,\
+                       "overall_quality":0,"proton_speed":400.0,\
+                       "proton_density":5.0}]""",
+            )
+            for body in invalid_wind_fields
+                mktempdir() do root
+                    metadata = capture_bound_ephemeris(
+                        root; measurement=_v22_l1_fake_response(200, body),
+                        capture_source=wind_source,
+                    ).metadata_provenance
+                    @test metadata.quality_binding_status ==
+                          "bound_noaa_dscovr_overall_quality"
+                    @test metadata.quality_required_fields_status ==
+                          "missing_or_invalid_required_speed_density_vx_gse"
+                    @test metadata.quality_decision ==
+                          "reject_missing_or_invalid_required_forecast_fields"
+                    @test !metadata.rows_admissible
+                    @test only(L1C.verify_v2_2_l1_receipts(
+                        root; sources=(wind_source,),
+                    )).records == 1
+                end
+            end
+        end
+
+        wide_gap_response = _v22_l1_fake_response(
+            200,
+            """[
+                {"time_tag":"2022-05-05T00:00:00Z","source":"DSCOVR",\
+                 "active":true,"x_gse":10.0,"y_gse":20.0,"z_gse":30.0},
+                {"time_tag":"2022-05-05T02:00:00Z","source":"DSCOVR",\
+                 "active":true,"x_gse":20.0,"y_gse":40.0,"z_gse":60.0}
+            ]""",
+        )
+        mktempdir() do root
+            metadata = capture_bound_ephemeris(
+                root; ephemeris=wide_gap_response,
+            ).metadata_provenance
+            @test metadata.ephemeris_binding_status ==
+                  "ephemeris_bracket_exceeds_one_hour"
+            @test isempty(metadata.ephemeris_record_json)
+            @test !metadata.rows_admissible
+            @test only(L1C.verify_v2_2_l1_receipts(
+                root; sources=(source,),
+            )).records == 1
+        end
+
+        sentinel_response = _v22_l1_fake_response(
+            200,
+            """[
+                {"time_tag":"2022-05-05T00:00:00Z","source":"DSCOVR",\
+                 "active":true,"x_gse":-99999.0,"y_gse":20.0,"z_gse":30.0},
+                {"time_tag":"2022-05-05T01:00:00Z","source":"DSCOVR",\
+                 "active":true,"x_gse":20.0,"y_gse":40.0,"z_gse":60.0}
+            ]""",
+        )
+        mktempdir() do root
+            metadata = capture_bound_ephemeris(
+                root; ephemeris=sentinel_response,
+            ).metadata_provenance
+            @test metadata.ephemeris_binding_status ==
+                  "ephemeris_extrapolation_required"
+            @test isempty(metadata.ephemeris_record_json)
+            @test metadata.ephemeris_source_available_before_issue
+            @test !metadata.rows_admissible
+            @test only(L1C.verify_v2_2_l1_receipts(
+                root; sources=(source,),
+            )).records == 1
+        end
+
+        mktempdir() do root
+            base = DateTime(2022, 5, 5, 0, 30, 30)
+            record = only(L1C.capture_v2_2_l1_receipts!(
+                root;
+                sources=(source,),
+                http_get=(url; kwargs...) -> measurement_response,
+                ephemeris_http_get=(url; kwargs...) ->
+                    error("synthetic ephemeris transport outage"),
+                utc_clock=_v22_l1_sequence_clock([
+                    base,
+                    base + Millisecond(10),
+                    base + Second(1),
+                    base + Second(1) + Millisecond(10),
+                ]),
+                monotonic_clock=_v22_l1_sequence_clock([100, 110, 120, 130]),
+            ))
+            metadata = record.metadata_provenance
+            @test metadata.ephemeris_capture_outcome == "transport_error"
+            @test occursin(
+                "synthetic ephemeris transport outage",
+                metadata.ephemeris_transport_error_message,
+            )
+            @test metadata.ephemeris_binding_status ==
+                  "ephemeris_transport_error"
+            @test metadata.ephemeris_source_object_sha256 ==
+                  L1C.V22_L1_RECEIPT_ZERO_SHA256
+            @test isempty(metadata.ephemeris_source_object_raw_relative_path)
+            @test !metadata.rows_admissible
+            @test only(L1C.verify_v2_2_l1_receipts(
+                root; sources=(source,),
+            )).records == 1
+        end
+
+        mutations = (
+            (ephemeris_position_units="m",),
+            (ephemeris_interpolation_rule="nearest neighbor",),
+            (quality_decision="accept_active_and_finite",),
+            (quality_authority_url=L1C.V22_L1_NOAA_QUALITY_AUTHORITY_URL,),
+            (quality_row_timestamp_utc="2022-05-05T00:29:00.000Z",),
+            (quality_row_source="ACE",),
+            (quality_value=1,),
+            (quality_required_fields_status="unverified",),
+            (ephemeris_receipt_completed_utc="2022-05-05T00:30:31.005Z",),
+        )
+        for mutation in mutations
+            mktempdir() do root
+                record = capture_bound_ephemeris(root)
+                _v22_l1_rehash_metadata!(root, source, record, mutation)
+                @test_throws ErrorException L1C.verify_v2_2_l1_receipts(
+                    root; sources=(source,),
+                )
+            end
+        end
+    end
+
     @testset "transport exceptions are durable and do not stop sibling sources" begin
         mktempdir() do root
             failing_source = (
@@ -457,6 +1004,11 @@ end
             @test occursin("ErrorException", records[1].transport_error_type)
             @test occursin("synthetic transport outage", records[1].transport_error_message)
             @test isempty(records[1].raw_relative_path)
+            @test records[1].metadata_provenance.identity_status ==
+                  "unavailable_no_http_response"
+            @test records[1].metadata_provenance.active_status ==
+                  "unavailable_no_http_response"
+            @test !records[1].metadata_provenance.rows_admissible
             @test records[2].capture_outcome == "http_response"
             verification = L1C.verify_v2_2_l1_receipts(
                 root; sources=(failing_source, healthy_source),
@@ -486,6 +1038,9 @@ end
                 @test !record.json_valid
                 @test !record.array_valid
                 @test record.row_count == 0
+                @test record.metadata_provenance.identity_status ==
+                      "missing_noaa_source_field"
+                @test !record.metadata_provenance.rows_admissible
                 @test read(joinpath(root, record.raw_relative_path), String) == invalid_body
                 @test only(L1C.verify_v2_2_l1_receipts(
                     root; sources=(source,),

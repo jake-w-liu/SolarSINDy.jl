@@ -30,6 +30,8 @@ include("operational_v22_history.jl")
 include("operational_v22.jl")
 include("operational_v22_residual.jl")
 include("operational_v22_boost.jl")
+include("operational_v22_driver.jl")
+include("operational_v22_error_state.jl")
 include("conformal.jl")
 include("assimilation.jl")
 include("alarm.jl")
@@ -120,6 +122,33 @@ export # Utils
        operational_v22_boost_raw_predict, operational_v22_boost_predict,
        score_operational_v22_boost,
        write_operational_v22_boost, read_operational_v22_boost,
+       # Operational V2.2-M2 sparse driver continuation
+       OPERATIONAL_V22_DRIVER_STATES, OPERATIONAL_V22_DRIVER_LAGS,
+       OPERATIONAL_V22_DRIVER_CADENCE_MINUTES,
+       OPERATIONAL_V22_DRIVER_ROLLOUT_STEPS,
+       OPERATIONAL_V22_DRIVER_STABILITY_TOLERANCE,
+       OPERATIONAL_V22_DRIVER_RIDGE_GRID,
+       OPERATIONAL_V22_DRIVER_THRESHOLD_GRID,
+       OperationalV22DriverArtifact,
+       fit_operational_v22_driver,
+       operational_v22_driver_coefficients,
+       operational_v22_driver_support,
+       operational_v22_driver_companion,
+       operational_v22_driver_spectral_radius,
+       operational_v22_driver_rollout,
+       operational_v22_driver_sha256,
+       write_operational_v22_driver, read_operational_v22_driver,
+       # Operational V2.2-M3 causal error-state control
+       OPERATIONAL_V22_ERROR_LAGS_H,
+       OPERATIONAL_V22_ERROR_SUPPORTED_MODEL_STEPS,
+       OPERATIONAL_V22_ERROR_MAX_SPECTRAL_RADIUS,
+       OperationalV22H1Innovation, operational_v22_h1_innovation,
+       OperationalV22ErrorHistory, operational_v22_matured_h1_history,
+       OperationalV22ErrorStateArtifact,
+       fit_operational_v22_error_state,
+       operational_v22_error_state_predict,
+       operational_v22_error_state_sha256,
+       write_operational_v22_error_state, read_operational_v22_error_state,
        # Conformal UQ
        ConformalCalibration, ConformalStratum, fit_conformal,
        conformal_stratum, conformal_halfwidth, conformal_interval,
