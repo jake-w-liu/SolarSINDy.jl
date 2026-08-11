@@ -26,6 +26,9 @@ include("metrics.jl")
 include("performance_statistics.jl")
 include("forecast.jl")
 include("operational_artifacts.jl")
+include("operational_v22.jl")
+include("operational_v22_residual.jl")
+include("operational_v22_boost.jl")
 include("conformal.jl")
 include("assimilation.jl")
 include("alarm.jl")
@@ -80,6 +83,29 @@ export # Utils
        operational_core_artifacts, operational_calibration_artifacts,
        validate_operational_core_artifacts, load_operational_core,
        init_operational_forecast, operational_core_forecast,
+       # Operational V2.2 constrained stack
+       OPERATIONAL_V22_COMPONENTS, DEFAULT_OPERATIONAL_V22_COMPONENT_COLUMNS,
+       OperationalV22Cell, OperationalV22Stack,
+       operational_v22_regime, fit_operational_v22_stack,
+       operational_v22_predict, score_operational_v22,
+       write_operational_v22_stack, read_operational_v22_stack,
+       # Operational V2.2 secondary residual
+       OPERATIONAL_V22_RESIDUAL_FEATURES,
+       OPERATIONAL_V22_RESIDUAL_RIDGE_GRID,
+       OPERATIONAL_V22_RESIDUAL_TOP_K_GRID,
+       OperationalV22ResidualCell, OperationalV22ResidualCore,
+       fit_operational_v22_residual, operational_v22_residual_predict,
+       score_operational_v22_residual,
+       write_operational_v22_residual, read_operational_v22_residual,
+       # Operational V2.2 portable boosted residual
+       OPERATIONAL_V22_BOOST_FEATURES,
+       OPERATIONAL_V22_BOOST_SUPPORTED_MODEL_STEPS,
+       OPERATIONAL_V22_BOOST_SCHEMA_VERSION,
+       OperationalV22BoostArtifact,
+       extract_operational_v22_boost, fit_operational_v22_boost,
+       operational_v22_boost_raw_predict, operational_v22_boost_predict,
+       score_operational_v22_boost,
+       write_operational_v22_boost, read_operational_v22_boost,
        # Conformal UQ
        ConformalCalibration, ConformalStratum, fit_conformal,
        conformal_stratum, conformal_halfwidth, conformal_interval,

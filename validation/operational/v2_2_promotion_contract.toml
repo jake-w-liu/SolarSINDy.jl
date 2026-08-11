@@ -1,0 +1,119 @@
+schema = "SolarSINDy-V2.2-promotion/1.0"
+primary_leads_h = [1, 2, 3, 6]
+supported_model_steps_h = [1, 2, 3, 4, 6, 7]
+point_development_anchor_lag_steps = [0]
+required_prospective_anchor_lag_steps = [0, 1]
+horizon_semantics = "target=latest_dst+model_step=issue+product_horizon"
+sindy_candidate_count = 20
+sindy_active_count = 11
+sindy_coefficient_sha256 = "3751ddd0fc86e6323216abb7ac0d861f148d897ac93da57d960d475970b14802"
+sindy_family_weight_floor = 0.60
+nominal_interval_coverage = 0.90
+bootstrap_replicates = 10000
+bootstrap_seed = 22022026
+exposed_benchmark_access_default = false
+
+[splits.point_fit]
+minimum_issue_utc = "2010-01-01T01:00:00"
+maximum_issue_utc = "2017-10-20T15:00:00"
+maximum_target_utc = "2017-10-20T22:00:00"
+allowed_use = "fit_point_parameters"
+
+[splits.point_validation]
+minimum_issue_utc = "2017-10-20T23:00:00"
+maximum_issue_utc = "2020-05-22T19:00:00"
+maximum_target_utc = "2020-05-23T02:00:00"
+allowed_use = "select_model_form_features_hyperparameters_and_guards"
+
+[splits.interval_calibration]
+minimum_issue_utc = "2020-05-23T03:00:00"
+maximum_issue_utc = "2022-12-31T22:00:00"
+maximum_full_six_step_anchor_issue_utc = "2022-12-31T16:00:00"
+maximum_target_utc = "2022-12-31T23:00:00"
+allowed_use = "fit_interval_quantiles_only"
+
+[splits.exposed_retrospective_benchmark]
+minimum_issue_utc = "2023-01-01T00:00:00"
+maximum_target_utc = "2025-12-31T23:00:00"
+allowed_use = "context_only_never_promotion_or_model_selection"
+analyst_exposure = "exposed_in_v2_1_work_and_later_broad_read_only_search_not_pristine"
+
+[same_row]
+key = ["issue_time_utc", "target_time_utc", "model_step_hours"]
+comparators = [
+  "v2_1_served",
+  "v2_1_frozen_tail",
+  "v2_0_served_historical",
+  "sindy20x11_raw",
+  "persistence",
+  "burton",
+  "burton_full",
+  "obrien_mcpherron",
+]
+missing_prediction_policy = "fail_candidate"
+
+[accuracy]
+cohorts = ["all_conditions", "dst_intense", "g3plus", "g4plus"]
+required_each_primary_lead = true
+minimum_general_gain_nt = 0.25
+minimum_general_fraction = 0.02
+minimum_g4plus_gain_nt = 1.00
+minimum_g4plus_fraction = 0.02
+one_sided_alpha = 0.05
+multiplicity_adjustment = "holm"
+all_conditions_cluster_hours = 168
+
+[regimes]
+joint_cell_min_n = 40
+joint_cell_max_loss_vs_best_nt = 0.50
+intense_extreme_deepening_max_loss_vs_best_nt = 0.00
+six_hour_deepening_bias_min_nt = -10.0
+six_hour_deepening_bias_max_nt = 10.0
+
+[alarms]
+thresholds_nt = [-50, -100]
+hss_loss_tolerance = 0.01
+tss_loss_tolerance = 0.01
+pod_loss_vs_v2_1_tolerance = 0.02
+far_increase_vs_v2_1_tolerance = 0.02
+
+[intervals]
+pooled_coverage_min = 0.85
+pooled_coverage_max = 0.95
+each_supported_step_coverage_min = 0.80
+storm_coverage_min = 0.80
+mean_width_max_ratio_to_v2_1 = 1.10
+interval_score_max_ratio_to_v2_1 = 1.00
+benchmark_residual_updates = 0
+
+[continuity]
+required_logged_fields = [
+  "served_v2_1_pred_nt",
+  "frozen_v2_1_pred_nt",
+  "sindy_family_weight",
+  "v2_2_correction_nt",
+  "v2_2_pred_nt",
+]
+validation_ablation_min_gain_nt = 0.10
+validation_ablation_min_fraction = 0.01
+exposed_benchmark_loss_to_removal_ablation_max_nt = 0.25
+target_derived_runtime_gating = false
+
+[prospective]
+minimum_calendar_days = 90
+minimum_unique_issue_hours = 1000
+minimum_verified_rows_per_primary_lead = 800
+minimum_independent_dst_le_minus_50_episodes = 8
+minimum_dst_le_minus_100_episodes = 3
+minimum_exact_g3plus_episodes = 1
+minimum_storm_rows_per_primary_lead = 50
+episode_separation_quiet_hours = 24
+reset_on_any_model_or_interval_update = true
+
+[software]
+pkg_test_failures = 0
+experiments_result = "PASS"
+dev_harness_failures = 0
+strict_readiness_failures = 0
+required_product_identity = "v2.2+sindy20x11+explicit_stack_tail_calibration_revision"
+deployed_artifact_rule = "byte_identical_to_development_and_prospective_shadow_artifact"
