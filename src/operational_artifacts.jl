@@ -6,6 +6,9 @@ const OPERATIONAL_V2_1_MODEL_VERSION = "v2.1"
 "Canonical identifier for the archived 21-candidate/10-active-term operational core."
 const OPERATIONAL_V2_0_MODEL_VERSION = "v2.0"
 
+"Model-step horizons admitted when the Dst anchor lags the issue hour by at most one step."
+const OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS = Int[1, 2, 3, 4, 6, 7]
+
 """
     OperationalCoreArtifacts
 

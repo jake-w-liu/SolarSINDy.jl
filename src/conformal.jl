@@ -534,12 +534,14 @@ Persist a [`ConformalCalibration`](@ref) to CSV. Row 1 is a `__meta__` record
 holding the nominal coverage, horizon edges, activity threshold, `min_stratum_n`,
 and the largest calibrated horizon; the remaining rows are one per stratum
 (including `global`). The `max_horizon` column is new; readers default it to
-`Inf` when absent so older sidecars still load. `point_calibration_sha256` can
-bind an operational interval sidecar to the exact point calibration it bands;
-the generic reader ignores that deployment metadata.
+`Inf` when absent so older sidecars still load. `point_calibration_sha256` and
+`supported_model_steps` can bind an operational interval sidecar to the exact
+point calibration and discrete horizons it bands; the generic reader ignores
+that deployment metadata.
 """
 function write_conformal_calibration(path::String, cal::ConformalCalibration;
-                                     point_calibration_sha256::AbstractString="")
+                                     point_calibration_sha256::AbstractString="",
+                                     supported_model_steps::AbstractString="")
     dir = dirname(path)
     !isempty(dir) && mkpath(dir)
     rows = NamedTuple[]
@@ -552,6 +554,7 @@ function write_conformal_calibration(path::String, cal::ConformalCalibration;
         min_stratum_n=cal.min_stratum_n,
         max_horizon=cal.max_horizon,
         point_calibration_sha256=String(point_calibration_sha256),
+        supported_model_steps=String(supported_model_steps),
     ))
     function _push_stratum(s::ConformalStratum)
         push!(rows, (
@@ -563,6 +566,7 @@ function write_conformal_calibration(path::String, cal::ConformalCalibration;
             min_stratum_n=cal.min_stratum_n,
             max_horizon=cal.max_horizon,
             point_calibration_sha256="",
+            supported_model_steps="",
         ))
     end
     _push_stratum(cal.global_stratum)

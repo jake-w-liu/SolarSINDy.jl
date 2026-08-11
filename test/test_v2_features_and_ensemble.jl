@@ -150,13 +150,20 @@ end
     mktempdir() do dir
         path = joinpath(dir, "duplicate_features.csv")
         cal = OperationalV2Calibration(
-            [:Bz_nt, :By_nt], zeros(2), ones(2), zeros(3), 1.0, "duplicate_read",
+            [:Bz_nt, :By_nt], zeros(2), ones(2), zeros(3), 1.0, "duplicate_read";
+            supported_model_steps=[3, 1, 2],
         )
         write_operational_v2_calibration(path, cal)
         artifact = CSV.read(path, DataFrame)
+        @test read_operational_v2_calibration(path).supported_model_steps == [1, 2, 3]
         artifact.feature[3] = artifact.feature[2]
         CSV.write(path, artifact)
         @test_throws ArgumentError read_operational_v2_calibration(path)
+
+        @test_throws ArgumentError OperationalV2Calibration(
+            [:Bz_nt], [0.0], [1.0], [0.0, 0.0], 1.0, "bad_support";
+            supported_model_steps=[1, 1],
+        )
     end
 end
 

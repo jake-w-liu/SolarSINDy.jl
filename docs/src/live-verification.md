@@ -247,6 +247,12 @@ width but does not automatically transfer the frozen-center guarantee; the
 complete-hour served-stack holdout supplies the corresponding empirical
 coverage evidence.
 
+The public product horizons remain 1, 2, 3, and 6 hours, but point and interval
+calibration are keyed by the integration steps from the latest hourly Dst anchor.
+With the admitted zero- or one-step anchor lag, the bundled artifacts support exactly
+`1,2,3,4,6,7` model steps. Issuance fails closed if the Dst lag or any computed model
+step falls outside that calibrated set.
+
 The operational tail is part of the served-model identity. A thrown or
 non-finite tail result aborts issuance before the forecast row is appended;
 the system does not relabel the frozen-tail ablation as a successful served

@@ -24,6 +24,7 @@ function _subA_ballistic_forecast(lib, ξ0, anchor_dst_star, issue_drv, hro,
                                   calibration_features=nothing)
     fc = init_assimilation(lib, ξ0, Int[], anchor_dst_star)
     lag = Millisecond(round(Int, (L1_DIST_KM / max(issue_drv.V, 1.0) / 3600.0) * 3_600_000))
+    final_drv = issue_drv
     for k in 1:h
         drv_k = issue_drv
         if !force_frozen
@@ -40,9 +41,10 @@ function _subA_ballistic_forecast(lib, ξ0, anchor_dst_star, issue_drv, hro,
         end
         assimilation_predict!(fc, drv_k)
         fc.mean[1] = clamp(fc.mean[1], -2000.0, 50.0)
+        final_drv = drv_k
     end
     pred_dst_star = current_dst(fc)
-    pred_dst = pred_dst_star + 7.26 * sqrt(max(issue_drv.Pdyn, 0.0)) - 11.0
+    pred_dst = dst_star_to_dst(pred_dst_star, final_drv.Pdyn)
     feats = _v2_calibration_features(
         cal, latest_dst, issue_drv; v1_pred_dst=pred_dst, model_steps=h,
         feature_source=calibration_features, context="ballistic-subhourly-A",

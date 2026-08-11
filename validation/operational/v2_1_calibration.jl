@@ -18,7 +18,7 @@ include(joinpath(OPERATIONAL_PACKAGE_ROOT, "examples", "live_forecast_verify.jl"
 
 const V21_CALIBRATION_YEAR_START = 2010
 const V21_CALIBRATION_YEAR_END = 2022
-const V21_CALIBRATION_HORIZONS = Int[1, 2, 3, 6]
+const V21_CALIBRATION_HORIZONS = copy(OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS)
 const V21_CALIBRATION_TRAIN_FRACTION = 0.60
 const V21_CALIBRATION_VALIDATION_FRACTION = 0.20
 const V21_CALIBRATION_COVERAGE = 0.90
@@ -251,6 +251,9 @@ function fit_and_promote_v2_1_calibration!(table_path::AbstractString=V21_CALIBR
     cal = fit_v2_calibration!(cfg)
     startswith(cal.label, "operational_v2_1_") || error(
         "calibration label does not identify V2.1: $(cal.label)",
+    )
+    cal.supported_model_steps == V21_CALIBRATION_HORIZONS || error(
+        "V2.1 calibration does not cover every admitted model step",
     )
     occursin("fallback", cal.label) && error(
         "V2.1 candidate did not clear the unchanged deployment gates",

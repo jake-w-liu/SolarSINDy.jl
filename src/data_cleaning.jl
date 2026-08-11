@@ -93,10 +93,11 @@ In-place cleaning of raw OMNI2 DataFrame:
 Short-gap filling depends on `causal`:
 - `causal=false` (default, offline/training preprocessing): centered linear
   interpolation, which uses the post-gap bound.
-- `causal=true` (replay/serving inputs): forward-fill (last-observation-carried-
-  forward). No gap hour is ever filled with a value measured *after* it, so
-  issue-time replay inputs stay strictly causal. `Dst` is never causally filled
-  (a missing target/anchor Dst is left NaN rather than persisted).
+- `causal=true` (replay/serving inputs): carry the last observation forward for
+  at most three consecutive hours. No decision depends on the eventual outage
+  length or a post-gap value, so every cleaned prefix is identical to the same
+  prefix cleaned in isolation. `Dst` is never causally filled (a missing
+  target/anchor Dst is left NaN rather than persisted).
 
 Dynamic pressure is always recomputed proton-only (`1.6726e-6·n·V²`) via
 [`dynamic_pressure`](@ref); the OMNI word-29 alpha-inclusive pressure is not kept,
@@ -109,6 +110,27 @@ Returns the modified DataFrame.
 function clean_omni_data!(df::DataFrame; causal::Bool=false)
     n_raw = nrow(df)
 
+    # Own a homogeneous Float64 copy of every measured channel before filling or
+    # derived-field assignment. Raw DataFrames may legitimately contain Julia
+    # `missing`, integer columns, or non-finite values; all unavailable or
+    # unrepresentable measurements share the package's NaN sentinel downstream.
+    for col in OMNI_OBSERVATION_COLUMNS
+        col in propertynames(df) || throw(ArgumentError("missing OMNI column: $col"))
+        df[!, col] = Float64[
+            if x isa Real
+                y = try
+                    Float64(x)
+                catch
+                    NaN
+                end
+                isfinite(y) ? y : NaN
+            else
+                NaN
+            end
+            for x in df[!, col]
+        ]
+    end
+
     # --- Short-gap (≤3 h) filling of the measured columns. Pdyn is NOT filled as
     #     an independent column; it is recomputed from the filled n, V below so it
     #     keeps the n·V² identity (an independently interpolated Pdyn drifts from
@@ -117,7 +139,6 @@ function clean_omni_data!(df::DataFrame; causal::Bool=false)
     fill_cols = causal ? [:V, :Bz, :By, :n, :T, :AE, :AL, :AU] :
                          [:V, :Bz, :By, :n, :T, :Dst, :AE, :AL, :AU]
     for col in fill_cols
-        map!(x -> isfinite(x) ? x : NaN, df[!, col], df[!, col])
         causal ? _ffill_short_gaps!(df[!, col], 3) : _interp_short_gaps!(df[!, col], 3)
     end
 
@@ -216,33 +237,25 @@ end
 """
     _ffill_short_gaps!(x, max_gap)
 
-Causal forward-fill for gaps of ≤ `max_gap` consecutive NaN values in-place:
-each short gap is filled with the last finite value BEFORE the gap
-(last-observation-carried-forward). Uses no post-gap (future) value, so replay/
-serving inputs stay strictly causal. Longer gaps, and leading gaps with no prior
-value, remain NaN.
+Causal forward-fill in-place: carry the last finite value through at most
+`max_gap` consecutive NaN values, then leave the remainder of a longer outage
+missing. Each decision uses only the current prefix, so cleaning is prefix
+invariant. Leading gaps with no prior value remain NaN.
 """
 function _ffill_short_gaps!(x::AbstractVector{Float64}, max_gap::Int)
-    n = length(x)
-    i = 1
-    while i <= n
+    max_gap >= 0 || throw(ArgumentError("max_gap must be nonnegative"))
+    last_value = NaN
+    gap_age = 0
+    for i in eachindex(x)
         if isnan(x[i])
-            gap_start = i
-            while i <= n && isnan(x[i])
-                i += 1
-            end
-            gap_end = i - 1
-            gap_len = gap_end - gap_start + 1
-            if gap_len <= max_gap && gap_start > 1 && !isnan(x[gap_start - 1])
-                v0 = x[gap_start - 1]
-                for j in gap_start:gap_end
-                    x[j] = v0
-                end
-            end
+            gap_age += 1
+            gap_age <= max_gap && !isnan(last_value) && (x[i] = last_value)
         else
-            i += 1
+            last_value = x[i]
+            gap_age = 0
         end
     end
+    return x
 end
 
 # ============================================================

@@ -252,6 +252,10 @@ Configuration is by environment variable:
 - `LIVE_MONITOR_INTERVAL_SEC`, `LIVE_MONITOR_MAX_CYCLES`, and
   `LIVE_MONITOR_DEADMAN_CYCLES` — cadence, cycle cap, and issuance dead-man threshold. The
   product horizons are fixed at 1, 2, 3, and 6 h to match the dashboard/API cycle contract. The
+  actual integration step is measured from the latest hourly Dst anchor, which may lag the issue
+  hour by at most one step. The shipped V2.1 point and conformal artifacts therefore declare and
+  validate the exact model-step support `{1,2,3,4,6,7}`; a cycle whose computed step lies outside
+  that set fails before scoring or logging. The
   cadence is fixed-rate: cycle runtime is subtracted from the next wait and fully elapsed slots are
   skipped instead of accumulating drift or producing catch-up bursts. Interval selection is also
   atomic across the four-row product: ACI is used only when its point and served residual streams

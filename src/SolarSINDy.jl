@@ -74,6 +74,7 @@ export # Utils
        read_operational_v2_calibration,
        # Versioned operational core
        OPERATIONAL_V2_1_MODEL_VERSION, OPERATIONAL_V2_0_MODEL_VERSION,
+       OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS,
        OperationalCoreArtifacts, OperationalCalibrationArtifacts,
        OperationalCore, canonical_operational_version,
        operational_core_artifacts, operational_calibration_artifacts,

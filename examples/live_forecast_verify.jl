@@ -66,6 +66,7 @@ const V2_MIN_COMPONENT_ROWS = 12
 # by the deployed-calibration regression fixtures so the guard rejects only the
 # genuinely degenerate splits and stays a no-op on valid multi-row calibrations.
 const V2_MIN_VALIDATION_ROWS = 3
+const V2_PRODUCT_HORIZONS = (1, 2, 3, 6)
 
 function _usage()
     return """
@@ -398,7 +399,7 @@ end
 const LIVE_MIN_HOURLY_DRIVER_SAMPLES = SolarSINDy.MIN_HOURLY_DRIVER_SAMPLES
 const LIVE_FUTURE_CLOCK_TOLERANCE = Minute(2)
 const LIVE_MAX_SOLAR_WIND_AGE_HOURS = 6.0
-const LIVE_MAX_DST_AGE_HOURS = 6.0
+const LIVE_MAX_DST_ANCHOR_LAG_STEPS = 1
 const LIVE_WARN_SOLAR_WIND_AGE_HOURS = 2.0
 
 function _finite_mean(v, default::Float64, min_samples::Int)
@@ -1692,6 +1693,12 @@ function _load_calibration_for_model(cfg::LiveVerifyConfig)
         "live V2.1 issuance requires an operational_v2_1_* calibration; " *
         "$(cfg.v2_calibration_path) identifies $(repr(cal.label))",
     ))
+    cal.supported_model_steps == OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS ||
+        throw(ArgumentError(
+            "live V2.1 calibration must cover model steps " *
+            "$(join(OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS, ',')); found " *
+            "$(join(cal.supported_model_steps, ','))",
+        ))
     return cal
 end
 
@@ -1704,8 +1711,9 @@ function _load_conformal_for_model(cfg::LiveVerifyConfig; calibration=nothing)
     isfile(path) || return nothing
     # A hash-matched V2.0 point/sidecar pair is still the wrong model for the
     # current live path. Validate the point identity before accepting its band.
-    calibration === nothing && _load_calibration_for_model(cfg)
-    rows = CSV.Rows(path; select=[:stratum, :point_calibration_sha256],
+    calibration === nothing && (calibration = _load_calibration_for_model(cfg))
+    rows = CSV.Rows(path; select=[:stratum, :point_calibration_sha256,
+                                  :supported_model_steps],
                     strict=true, reusebuffer=true)
     first_row = iterate(rows)
     first_row === nothing && throw(ArgumentError("empty conformal sidecar: $path"))
@@ -1718,6 +1726,12 @@ function _load_conformal_for_model(cfg::LiveVerifyConfig; calibration=nothing)
     actual == expected || throw(ArgumentError(
         "conformal sidecar does not match its point calibration: $path",
     ))
+    supported = ismissing(meta.supported_model_steps) ? "" :
+                String(meta.supported_model_steps)
+    supported == join(calibration.supported_model_steps, ";") ||
+        throw(ArgumentError(
+            "conformal sidecar model-step support does not match its point calibration: $path",
+        ))
     return read_conformal_calibration(path)
 end
 
@@ -2786,6 +2800,7 @@ function _calibration_with_validation_selector(cal::OperationalV2Calibration,
         selector_weights=selector.selector_weights === nothing ? nothing : copy(selector.selector_weights),
         selected_component=selector.selected_component,
         guard_margin_nt=cal.guard_margin_nt,
+        supported_model_steps=copy(cal.supported_model_steps),
     )
 end
 
@@ -2827,6 +2842,19 @@ function _scored_horizons(scored::DataFrame)
     return Float64[ismissing(x) ? 1.0 : Float64(x) for x in scored.model_step_hours]
 end
 
+function _supported_horizon_edges(model_steps::AbstractVector{<:Integer})
+    steps = sort!(unique(Int.(model_steps)))
+    !isempty(steps) && all(>(0), steps) || throw(ArgumentError(
+        "supported model steps must contain positive integers",
+    ))
+    edges = Float64[0.0]
+    for i in 1:(length(steps) - 1)
+        push!(edges, (steps[i] + steps[i + 1]) / 2)
+    end
+    push!(edges, Inf)
+    return edges
+end
+
 """
     _fit_deployed_conformal(scored, cfg)
 
@@ -2835,14 +2863,24 @@ Fit a stratified conformal calibration from the DEPLOYED model's residuals on
 using the v2 point forecast, horizon, and issue-time Dst. Returns `nothing` if
 there are no finite calibration rows.
 """
-function _fit_deployed_conformal(scored::DataFrame, cfg::LiveVerifyConfig)
+function _fit_deployed_conformal(
+    scored::DataFrame,
+    cfg::LiveVerifyConfig;
+    supported_model_steps::AbstractVector{<:Integer}=Int[],
+)
     nrow(scored) >= 1 || return nothing
     pts = Float64.(scored.v2_pred_dst_nt)
     obs = Float64.(scored.observation_dst_nt)
     hor = _scored_horizons(scored)
     latest = Float64.(scored.latest_dst_nt)
     any(i -> isfinite(pts[i]) && isfinite(obs[i]), eachindex(pts)) || return nothing
-    return fit_conformal(pts, obs, hor, latest; coverage=cfg.v2_interval_coverage)
+    isempty(supported_model_steps) &&
+        return fit_conformal(pts, obs, hor, latest; coverage=cfg.v2_interval_coverage)
+    return fit_conformal(
+        pts, obs, hor, latest;
+        coverage=cfg.v2_interval_coverage,
+        horizon_edges=_supported_horizon_edges(supported_model_steps),
+    )
 end
 
 function _select_validated_v2_calibration(train::DataFrame,
@@ -2992,7 +3030,10 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     # splits are scored here only to drive that served-interval gate.
     candidate_validation_scored = score_operational_v2(validation, candidate_cal)
     candidate_holdout_scored = score_operational_v2(holdout, candidate_cal)
-    candidate_conformal = _fit_deployed_conformal(candidate_validation_scored, cfg)
+    candidate_conformal = _fit_deployed_conformal(
+        candidate_validation_scored, cfg;
+        supported_model_steps=candidate_cal.supported_model_steps,
+    )
     candidate_conformal_holdout_coverage = NaN
     if candidate_conformal !== nothing && nrow(candidate_holdout_scored) >= 1
         candidate_conformal_holdout_coverage = conformal_coverage(
@@ -3031,6 +3072,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
         default_operational_v2_calibration(
             feature_names=copy(candidate_cal.feature_names),
             label="operational_v2_1_fallback_v1_equiv",
+            supported_model_steps=copy(candidate_cal.supported_model_steps),
         )
     end
     write_operational_v2_calibration(cfg.v2_calibration_path, cal)
@@ -3079,7 +3121,10 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     # validation residuals (out-of-sample for β), persist a sidecar, and report
     # coverage on the untouched holdout — the honest out-of-sample check. When v2
     # deploys, this reproduces the candidate sidecar already gated above.
-    conformal = _fit_deployed_conformal(validation_scored, cfg)
+    conformal = _fit_deployed_conformal(
+        validation_scored, cfg;
+        supported_model_steps=cal.supported_model_steps,
+    )
     conformal_path = _conformal_path(cfg.v2_calibration_path)
     holdout_conformal_coverage = NaN
     if conformal === nothing
@@ -3088,6 +3133,7 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
         write_conformal_calibration(
             conformal_path, conformal;
             point_calibration_sha256=bytes2hex(sha256(read(cfg.v2_calibration_path))),
+            supported_model_steps=join(cal.supported_model_steps, ";"),
         )
         if nrow(holdout_scored) >= 1
             holdout_conformal_coverage = conformal_coverage(
@@ -3171,6 +3217,20 @@ function _assert_issuable_model(model::Symbol, horizon_hours::Integer)
         "multi-step v1 issuance (horizon_hours=$horizon_hours) is unsupported: the " *
         "per-step ensemble band is structurally too narrow at horizon > 1. Issue v2 " *
         "(conformal interval) or use the forecast_ahead-based replay path instead."
+    ))
+    (model == :v2 && !(horizon_hours in V2_PRODUCT_HORIZONS)) &&
+        throw(ArgumentError(
+            "V2.1 product horizon $horizon_hours h is unsupported; choose one of " *
+            "$(join(V2_PRODUCT_HORIZONS, ',')) h",
+        ))
+    return nothing
+end
+
+function _assert_supported_model_step(calibration::OperationalV2Calibration,
+                                      model_steps::Integer)
+    model_steps in calibration.supported_model_steps || throw(ArgumentError(
+        "model_step_hours=$model_steps is outside the point/conformal calibration support " *
+        "{$(join(calibration.supported_model_steps, ','))}",
     ))
     return nothing
 end
@@ -3287,8 +3347,9 @@ function issue_forecast(cfg::LiveVerifyConfig;
     # L1/DSCOVR solar wind is minute-cadence, so a multi-hour age means the uplink has stalled and the
     # forecast would be anchored to stale drivers (model steps silently balloon). The same failure occurs
     # when the Dst state freezes: the rollout advances from an old ring-current state without observational
-    # re-anchoring. The existing six-hour stale threshold is therefore a hard ceiling for both sources;
-    # Kyoto's routine shorter provisional lag remains admissible.
+    # re-anchoring. Solar wind retains its six-hour hard ceiling. Kyoto Dst may lag the issue-hour grid by
+    # at most one hourly step; this admits the routine provisional lag while keeping every rollout inside
+    # the point/conformal calibration support.
     sw_age_hours  = Dates.value(issue_time - latest_common_sw) / 3_600_000
     dst_age_hours = Dates.value(issue_time - latest_dst_time)  / 3_600_000
     if sw_age_hours > LIVE_MAX_SOLAR_WIND_AGE_HOURS
@@ -3297,10 +3358,13 @@ function issue_forecast(cfg::LiveVerifyConfig;
             "issue time (frozen/stalled L1 feed). Refusing to issue a forecast anchored to stale drivers."
         )
     end
-    if dst_age_hours > LIVE_MAX_DST_AGE_HOURS
+    dst_anchor_lag = (_floor_hour(issue_time) - latest_dst_time) / Hour(1)
+    if !isinteger(dst_anchor_lag) || !(0 <= dst_anchor_lag <= LIVE_MAX_DST_ANCHOR_LAG_STEPS)
         error(
-            "Kyoto Dst feed stale: latest state is $(round(dst_age_hours; digits=1)) h before the " *
-            "issue time. Refusing to issue a forecast from an unobserved ring-current rollout."
+            "Kyoto Dst anchor is $(round(dst_age_hours; digits=1)) h old and " *
+            "$(round(dst_anchor_lag; digits=2)) hourly grid steps behind the issue hour. " *
+            "At most $LIVE_MAX_DST_ANCHOR_LAG_STEPS lag step is calibrated; refusing an " *
+            "unsupported ring-current rollout."
         )
     end
     sw_age_hours > LIVE_WARN_SOLAR_WIND_AGE_HOURS && @warn(
@@ -3311,6 +3375,8 @@ function issue_forecast(cfg::LiveVerifyConfig;
     target_time = _next_hourly_target(issue_time, cfg.horizon_hours, latest_dst_time)
     @assert target_time > issue_time
     @assert target_time > latest_dst_time
+    model_steps = Int((target_time - latest_dst_time) / Hour(1))
+    cfg.model == :v2 && _assert_supported_model_step(calibration, model_steps)
 
     recent_start = latest_common_sw - Hour(1)
     # Data-coverage guard. The trailing solar-wind window backs both `recent`
@@ -3415,7 +3481,6 @@ function issue_forecast(cfg::LiveVerifyConfig;
         burton_full=burton_full_dst,
         obrien=obrien_dst,
     )
-    model_steps = Int((target_time - latest_dst_time) / Hour(1))
     wall_horizon = (target_time - issue_time) / Hour(1)
     memory_features = _live_v2_memory_features(
         plasma,

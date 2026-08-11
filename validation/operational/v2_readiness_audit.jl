@@ -445,7 +445,9 @@ function _v2_1_served_holdout_contract(summary::DataFrame, audit::DataFrame;
         :maximum_frozen_tail_continuity_error_nt,
         :maximum_interval_center_error_nt, :nominal_coverage,
         :pooled_promotion_floor, :served_pooled_coverage,
-        :served_pooled_gate_pass, :frozen_tail_pooled_coverage,
+        :served_pooled_gate_pass, :supported_model_steps,
+        :supported_model_step_count, :support_validation_complete,
+        :minimum_supported_step_coverage, :frozen_tail_pooled_coverage,
         :heldout_promotion_evidence,
     ]
     schema = all(c -> has_col(summary, c), summary_required) &&
@@ -453,7 +455,7 @@ function _v2_1_served_holdout_contract(summary::DataFrame, audit::DataFrame;
     schema || return (
         schema=false, identity=false, partition=false, causal=false,
         policy=false, hashes=false, geometry=false, summary_crc=false,
-        pooled_gate=false, diagnostics=false,
+        pooled_gate=false, support=false, diagnostics=false,
     )
 
     a = audit[1, :]
@@ -491,6 +493,7 @@ function _v2_1_served_holdout_contract(summary::DataFrame, audit::DataFrame;
     summary_crc = false
     pooled_gate = false
     diagnostics = false
+    support = false
     if length(overall_indices) == 1
         overall = summary[only(overall_indices), :]
         n = Int(overall.n_rows)
@@ -500,7 +503,6 @@ function _v2_1_served_holdout_contract(summary::DataFrame, audit::DataFrame;
                       0 <= frozen_hits <= n &&
                       Float64(overall.served_coverage) == hits / n &&
                       Float64(overall.frozen_tail_coverage) == frozen_hits / n &&
-                      sort(Int.(lead_rows.lead_h)) == EXPECTED_LEADS &&
                       sum(Int.(lead_rows.n_rows)) == n &&
                       sum(Int.(lead_rows.served_hits)) == hits &&
                       all(isfinite, Float64.(summary.served_rmse_nt)) &&
@@ -517,18 +519,32 @@ function _v2_1_served_holdout_contract(summary::DataFrame, audit::DataFrame;
                       Float64(overall.nominal_coverage) == V2_1_NOMINAL_COVERAGE &&
                       Float64(a.nominal_coverage) == V2_1_NOMINAL_COVERAGE
 
+        supported_steps = try
+            parse.(Int, split(String(a.supported_model_steps), ';'))
+        catch
+            Int[]
+        end
+        observed_steps = sort(Int.(lead_rows.lead_h))
+        support = !isempty(supported_steps) &&
+                  supported_steps == sort(unique(supported_steps)) &&
+                  supported_steps == observed_steps &&
+                  Int(a.supported_model_step_count) == length(supported_steps) &&
+                  Bool(a.support_validation_complete) &&
+                  isapprox(Float64(a.minimum_supported_step_coverage),
+                           minimum(Float64.(lead_rows.served_coverage));
+                           atol=1e-12, rtol=0.0)
+
         quiet = summary[cohorts .== "quiet", :]
         storm = summary[cohorts .== "storm", :]
         diagnostics = nrow(quiet) == 1 && nrow(storm) == 1 &&
                       Int(quiet.n_rows[1]) + Int(storm.n_rows[1]) == n &&
                       Int(quiet.served_hits[1]) + Int(storm.served_hits[1]) == hits &&
-                      sort(Int.(lead_rows.lead_h)) == EXPECTED_LEADS &&
                       nrow(regime_rows) == 3
     end
     return (
         schema=schema, identity=identity, partition=partition, causal=causal,
         policy=policy, hashes=hashes, geometry=geometry,
-        summary_crc=summary_crc, pooled_gate=pooled_gate,
+        summary_crc=summary_crc, pooled_gate=pooled_gate, support=support,
         diagnostics=diagnostics,
     )
 end
@@ -579,6 +595,9 @@ function audit_v2_1_served_holdout!(state::AuditState)
         (:pooled_gate, "complete-hour served-stack V2.1 pooled holdout coverage gate",
          "pooled static coverage meets the declared 0.85 promotion floor",
          "pooled static coverage is inconsistent or below the 0.85 promotion floor"),
+        (:support, "complete-hour served-stack V2.1 model-step support",
+         "every calibration-declared model step is present and scored",
+         "the holdout rows do not exactly cover the calibration-declared model-step support"),
         (:diagnostics, "complete-hour served-stack V2.1 diagnostic strata",
          "lead and quiet/storm strata partition the pooled holdout",
          "lead or quiet/storm diagnostic strata are incomplete"),
@@ -2061,6 +2080,8 @@ function selftest_readiness_audit()
         nominal_coverage=[V2_1_NOMINAL_COVERAGE],
         pooled_promotion_floor=[V2_1_CALIBRATION_COVERAGE_FLOOR],
         served_pooled_coverage=[0.9], served_pooled_gate_pass=[true],
+        supported_model_steps=["1;2;3;6"], supported_model_step_count=[4],
+        support_validation_complete=[true], minimum_supported_step_coverage=[0.9],
         frozen_tail_pooled_coverage=[35 / 40], heldout_promotion_evidence=[true],
     )
     holdout_contract = _v2_1_served_holdout_contract(
@@ -2077,6 +2098,14 @@ function selftest_readiness_audit()
         split_sha256=repeat("c", 64), omni_sha256=repeat("d", 64),
     )
     @assert !mutated_contract.summary_crc "lead-hit mutation should fail summary recomputation"
+    unsupported_audit = copy(holdout_audit)
+    unsupported_audit.supported_model_steps[1] = "1;2;3;4;6"
+    unsupported_contract = _v2_1_served_holdout_contract(
+        holdout_summary, unsupported_audit;
+        point_sha256=repeat("a", 64), conformal_sha256=repeat("b", 64),
+        split_sha256=repeat("c", 64), omni_sha256=repeat("d", 64),
+    )
+    @assert !unsupported_contract.support "missing declared model-step evidence should fail support validation"
     passed += 1
 
     mktempdir() do dir

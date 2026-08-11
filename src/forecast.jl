@@ -102,6 +102,7 @@ struct OperationalV2Calibration
     selector_weights::Vector{Float64}
     selected_component::Symbol
     guard_margin_nt::Float64
+    supported_model_steps::Vector{Int}
 
 
     function OperationalV2Calibration(feature_names::Vector{Symbol},
@@ -116,7 +117,8 @@ struct OperationalV2Calibration
                                       selector_half_width::Vector{Float64}=Float64[0.0],
                                       selector_weights::Union{Nothing,Vector{Float64}}=nothing,
                                       selected_component::Symbol=:v2,
-                                      guard_margin_nt::Real=0.0)
+                                      guard_margin_nt::Real=0.0,
+                                      supported_model_steps::Vector{Int}=Int[])
         n = length(feature_names)
         length(Set(feature_names)) == length(feature_names) ||
             throw(ArgumentError("feature_names must not contain duplicates"))
@@ -204,10 +206,16 @@ struct OperationalV2Calibration
         end
         isfinite(Float64(guard_margin_nt)) && Float64(guard_margin_nt) >= 0 ||
             throw(ArgumentError("guard_margin_nt must be finite and nonnegative"))
+        all(>(0), supported_model_steps) || throw(ArgumentError(
+            "supported_model_steps must contain only positive integers",
+        ))
+        length(unique(supported_model_steps)) == length(supported_model_steps) ||
+            throw(ArgumentError("supported_model_steps must not contain duplicates"))
+        steps = sort(copy(supported_model_steps))
         return new(feature_names, feature_mean, feature_scale, coefficients,
                    interval_scale, String(label), selector_names, selector_rmse,
                    selector_mae, selector_half_width, weights, selected_component,
-                   Float64(guard_margin_nt))
+                   Float64(guard_margin_nt), steps)
     end
 end
 
@@ -296,6 +304,7 @@ function default_operational_v2_calibration(;
         feature_names::Vector{Symbol}=copy(DEFAULT_OPERATIONAL_V2_FEATURES),
         interval_scale::Real=1.0,
         label::AbstractString="uncalibrated_v2",
+        supported_model_steps::Vector{Int}=Int[],
     )
     n = length(feature_names)
     return OperationalV2Calibration(
@@ -305,6 +314,7 @@ function default_operational_v2_calibration(;
         zeros(n + 1),
         Float64(interval_scale),
         label,
+        supported_model_steps=supported_model_steps,
     )
 end
 
@@ -895,6 +905,14 @@ function fit_operational_v2_calibration(df::DataFrame;
         interval_coverage,
         guard_margin_nt,
     )
+    supported_model_steps = if :model_step_hours in propertynames(clean)
+        raw_steps = Float64.(clean.model_step_hours)
+        all(x -> isfinite(x) && x > 0 && isinteger(x), raw_steps) ||
+            throw(ArgumentError("model_step_hours must contain positive integers"))
+        sort!(unique(Int.(raw_steps)))
+    else
+        Int[]
+    end
 
     return OperationalV2Calibration(
         feature_names,
@@ -909,6 +927,7 @@ function fit_operational_v2_calibration(df::DataFrame;
         selector_half_width=selector.selector_half_width,
         selected_component=selector.selected_component,
         guard_margin_nt=guard_margin_nt,
+        supported_model_steps=supported_model_steps,
     )
 end
 
@@ -1113,6 +1132,7 @@ function write_operational_v2_calibration(path::String,
     selector_mae = _join_floats(cal.selector_mae)
     selector_half_width = _join_floats(cal.selector_half_width)
     selector_weights = _join_floats(cal.selector_weights)
+    supported_model_steps = join(cal.supported_model_steps, ";")
     push!(rows, (
         feature="intercept",
         feature_mean=0.0,
@@ -1127,6 +1147,7 @@ function write_operational_v2_calibration(path::String,
         selector_mae_nt=selector_mae,
         selector_half_width_nt=selector_half_width,
         selector_weights=selector_weights,
+        supported_model_steps=supported_model_steps,
     ))
     for (j, name) in enumerate(cal.feature_names)
         push!(rows, (
@@ -1143,6 +1164,7 @@ function write_operational_v2_calibration(path::String,
             selector_mae_nt=selector_mae,
             selector_half_width_nt=selector_half_width,
             selector_weights=selector_weights,
+            supported_model_steps=supported_model_steps,
         ))
     end
     _write_selection_csv(path, rows)
@@ -1185,6 +1207,15 @@ function read_operational_v2_calibration(path::String)
         Symbol(String(df[1, :selected_component])) : :v2
     guard_margin_nt = String(:guard_margin_nt) in names(df) ?
         Float64(df[1, :guard_margin_nt]) : 0.0
+    supported_model_steps = if String(:supported_model_steps) in names(df)
+        values = String.(coalesce.(df.supported_model_steps, ""))
+        all(==(first(values)), values) || throw(ArgumentError(
+            "V2 calibration contains inconsistent supported_model_steps metadata: $path",
+        ))
+        isempty(first(values)) ? Int[] : parse.(Int, split(first(values), ";"))
+    else
+        Int[]
+    end
     return OperationalV2Calibration(
         collect(feature_names),
         collect(feature_mean),
@@ -1199,6 +1230,7 @@ function read_operational_v2_calibration(path::String)
         selector_weights=selector_weights === nothing ? nothing : collect(selector_weights),
         selected_component=selected_component,
         guard_margin_nt=guard_margin_nt,
+        supported_model_steps=collect(supported_model_steps),
     )
 end
 

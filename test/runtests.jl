@@ -815,6 +815,7 @@ using DataFrames
     include("test_prototype_refit.jl")
     include("test_v2_1_calibration.jl")
     include("test_v2_1_served_holdout.jl")
+    include("test_subhourly_validation.jl")
     include("test_v2_features_and_ensemble.jl")
     include("test_data_pipeline_cleaning.jl")
     include("test_validation_paths.jl")

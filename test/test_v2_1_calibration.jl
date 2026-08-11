@@ -21,7 +21,7 @@ include(joinpath(@__DIR__, "..", "validation", "operational", "v2_1_calibration.
         by_gsm=fill(2.0, length(times)),
     )
     dst = collect(-20.0:-1.0:-32.0)
-    horizons = [1, 2, 3, 6]
+    horizons = copy(OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS)
     table = build_v2_1_calibration_table(
         plasma, mag, times, dst; horizons=horizons,
     )
@@ -32,6 +32,7 @@ include(joinpath(@__DIR__, "..", "validation", "operational", "v2_1_calibration.
     @test all(table.operational_active_count .== 11)
     @test all(table.source_driver_end_utc .== table.issue_time_utc)
     @test all(table.target_time_utc .> table.issue_time_utc)
+    @test sort(unique(table.model_step_hours)) == OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS
     # Pin the two construction equations directly. Subtracting the rounded
     # endpoints can differ from 2.0 by a few ulps even when both endpoints are
     # exactly the values produced by the declared ±1 nT seed band.

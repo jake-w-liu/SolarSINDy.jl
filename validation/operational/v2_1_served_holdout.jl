@@ -89,7 +89,9 @@ function _v21_holdout_contract(path::AbstractString)
 end
 
 function _v21_assert_holdout_rows(rows::DataFrame, contract;
-                                  expected_version::AbstractString=OPERATIONAL_V2_1_MODEL_VERSION)
+                                  expected_version::AbstractString=OPERATIONAL_V2_1_MODEL_VERSION,
+                                  expected_steps::AbstractVector{<:Integer}=
+                                      OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS)
     required = [
         :issue_time_utc, :target_time_utc, :model_step_hours, :v2_split,
         :operational_core_version, :operational_candidate_count,
@@ -118,6 +120,13 @@ function _v21_assert_holdout_rows(rows::DataFrame, contract;
     issues = _v21_parse_datetime.(rows.issue_time_utc)
     targets = _v21_parse_datetime.(rows.target_time_utc)
     leads = Int.(rows.model_step_hours)
+    supported = sort!(unique(Int.(expected_steps)))
+    !isempty(supported) && all(>(0), supported) || error(
+        "served-holdout expected model-step support must contain positive integers",
+    )
+    sort!(unique(leads)) == supported || error(
+        "served-holdout model-step support does not match the issuable support",
+    )
     minimum(issues) == contract.minimum_issue || error(
         "served-holdout minimum issue does not match the split audit",
     )
@@ -249,12 +258,12 @@ function _selftest_v21_served_holdout()
         minimum_issue=t0 + Hour(7), maximum_issue=t0 + Hour(7),
         minimum_target=t0 + Hour(8), maximum_target=t0 + Hour(8),
     )
-    _v21_assert_holdout_rows(rows, contract)
+    _v21_assert_holdout_rows(rows, contract; expected_steps=[1])
     broken = copy(rows)
     broken.issue_time_utc[1] = t0 + Hour(6)
     rejected = false
     try
-        _v21_assert_holdout_rows(broken, contract)
+        _v21_assert_holdout_rows(broken, contract; expected_steps=[1])
     catch
         rejected = true
     end
@@ -288,6 +297,9 @@ function write_v21_served_holdout_report(path::AbstractString,
         println(io, "\nThe pooled floor is the deployment gate. Lead- and activity-stratified " *
                     "coverage is reported as a limitation diagnostic rather than silently " *
                     "promoted to a separate pass criterion.")
+        println(io, "\nEvery issuable model step ($(audit.supported_model_steps[1])) is present " *
+                    "in the chronological holdout; the minimum lead-specific coverage is " *
+                    @sprintf("%.3f", audit.minimum_supported_step_coverage[1]) * ".")
         println(io, "\nAudit identity: `$(audit.model_version[1])`, " *
                     "$(audit.candidate_count[1]) candidates / $(audit.active_count[1]) active terms.")
     end
@@ -329,7 +341,9 @@ function main_v21_served_holdout(; self_test_only::Bool=false)
     scored = CSV.read(source, DataFrame; select=selected)
     holdout = scored[String.(scored.v2_split) .== "holdout", :]
     sort!(holdout, [:issue_time_utc, :model_step_hours])
-    _v21_assert_holdout_rows(holdout, contract)
+    _v21_assert_holdout_rows(
+        holdout, contract; expected_steps=calibration.supported_model_steps,
+    )
 
     lookup = _driver_lookup_range(
         year(contract.minimum_issue) - 1, year(contract.maximum_target),
@@ -387,6 +401,13 @@ function main_v21_served_holdout(; self_test_only::Bool=false)
         "complete-hour served-stack V2.1 holdout coverage $(overall.served_coverage) is below " *
         "the $(V21_SERVED_HOLDOUT_FLOOR) promotion floor",
     )
+    lead_rows = summary[(summary.activity_regime .== "all") .&
+                        (summary.lead_h .> 0), :]
+    supported_steps = sort!(unique(Int.(calibration.supported_model_steps)))
+    sort!(Int.(lead_rows.lead_h)) == supported_steps || error(
+        "served-holdout summary omits an issuable model step",
+    )
+    minimum_step_coverage = minimum(Float64.(lead_rows.served_coverage))
     audit = DataFrame(
         model_version=[core.artifacts.version],
         candidate_count=[core.artifacts.candidate_count],
@@ -412,6 +433,10 @@ function main_v21_served_holdout(; self_test_only::Bool=false)
         pooled_promotion_floor=[V21_SERVED_HOLDOUT_FLOOR],
         served_pooled_coverage=[Float64(overall.served_coverage)],
         served_pooled_gate_pass=[Bool(overall.pooled_gate_pass)],
+        supported_model_steps=[join(supported_steps, ";")],
+        supported_model_step_count=[length(supported_steps)],
+        support_validation_complete=[true],
+        minimum_supported_step_coverage=[minimum_step_coverage],
         frozen_tail_pooled_coverage=[Float64(overall.frozen_tail_coverage)],
         heldout_promotion_evidence=[true],
     )

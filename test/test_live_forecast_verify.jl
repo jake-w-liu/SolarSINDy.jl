@@ -209,7 +209,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                 bz_gsm=fill(-4.0, length(sw_times)),
                 by_gsm=fill(1.0, length(sw_times)),
             )
-            latest_dst_time = issue_time - Hour(7)
+            latest_dst_time = floor(issue_time, Hour) - Hour(2)
             dst_times = collect((latest_dst_time - Hour(6)):Hour(1):latest_dst_time)
             dst_values = collect(range(-20.0, -44.0; length=length(dst_times)))
             cfg = LiveVerifyConfig(;
@@ -225,7 +225,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                 dst_fn=() -> (dst_times, dst_values),
             )
 
-            @test LIVE_MAX_DST_AGE_HOURS == 6.0
+            @test LIVE_MAX_DST_ANCHOR_LAG_STEPS == 1
             @test_throws ErrorException issue_forecast(
                 cfg; inputs, write_trajectory=false, verbose=false,
             )
@@ -501,6 +501,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                 zeros(nfeatures + 1),
                 1.0,
                 "operational_v2_1_sidecar_test",
+                supported_model_steps=copy(OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS),
             )
             write_operational_v2_calibration(point_path, point_cal)
             cfg = LiveVerifyConfig(; model=:v2, v2_calibration_path=point_path)
@@ -514,6 +515,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             point_sha = bytes2hex(sha256(read(point_path)))
             write_conformal_calibration(
                 sidecar_path, cal; point_calibration_sha256=point_sha,
+                supported_model_steps=join(point_cal.supported_model_steps, ";"),
             )
             loaded = _load_conformal_for_model(cfg)
             @test loaded.coverage == cal.coverage
@@ -526,8 +528,19 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                 vcat(0.25, point_cal.coefficients[2:end]),
                 point_cal.interval_scale,
                 point_cal.label,
+                supported_model_steps=copy(point_cal.supported_model_steps),
             )
             write_operational_v2_calibration(point_path, changed_point)
+            @test_throws ArgumentError _load_conformal_for_model(cfg)
+
+            # A byte-matched sidecar with a different discrete support contract
+            # is still incompatible and must fail closed.
+            write_operational_v2_calibration(point_path, point_cal)
+            point_sha = bytes2hex(sha256(read(point_path)))
+            write_conformal_calibration(
+                sidecar_path, cal; point_calibration_sha256=point_sha,
+                supported_model_steps="1;2;3;6",
+            )
             @test_throws ArgumentError _load_conformal_for_model(cfg)
 
             # A self-consistent historical V2.0 point/sidecar pair remains valid
@@ -1952,7 +1965,7 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         @test !_step_driver_fallback(plasma_ok[1:10, :], mag_ok[1:10, :], anchor)
     end
 
-    @testset "P1-3: multi-step v1 issuance is rejected; v1 h=1 and any v2 are allowed" begin
+    @testset "P1-3/C4-PKG-03: issuance remains within the calibrated product support" begin
         # Multi-step v1 loops step_forecast!, whose band is ~5× too narrow vs the
         # forecast_ahead propagation, so it must be refused at issuance.
         @test_throws ArgumentError _assert_issuable_model(:v1, 2)
@@ -1960,6 +1973,36 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         @test _assert_issuable_model(:v1, 1) === nothing    # single-step v1 is fine
         @test _assert_issuable_model(:v2, 6) === nothing    # v2 serves a conformal band
         @test _assert_issuable_model(:v2, 1) === nothing
+        @test_throws ArgumentError _assert_issuable_model(:v2, 4)
+        @test_throws ArgumentError _assert_issuable_model(:v2, 99)
+
+        supported = default_operational_v2_calibration(
+            supported_model_steps=copy(OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS),
+        )
+        for step in OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS
+            @test _assert_supported_model_step(supported, step) === nothing
+        end
+        @test_throws ArgumentError _assert_supported_model_step(supported, 0)
+        @test_throws ArgumentError _assert_supported_model_step(supported, 5)
+        @test_throws ArgumentError _assert_supported_model_step(supported, 8)
+        @test _supported_horizon_edges([1, 2, 3, 6]) ==
+              [0.0, 1.5, 2.5, 4.5, Inf]
+        @test _supported_horizon_edges(OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS) ==
+              [0.0, 1.5, 2.5, 3.5, 5.0, 6.5, Inf]
+        @test_throws ArgumentError _supported_horizon_edges(Int[])
+        @test_throws ArgumentError _supported_horizon_edges([0, 1])
+
+        issue = DateTime(2026, 8, 10, 12)
+        actual_steps = Int[]
+        for anchor_lag in 0:LIVE_MAX_DST_ANCHOR_LAG_STEPS,
+            product_horizon in V2_PRODUCT_HORIZONS
+            anchor = issue - Hour(anchor_lag)
+            target = _next_hourly_target(issue, product_horizon, anchor)
+            step = Int((target - anchor) / Hour(1))
+            @test step in OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS
+            push!(actual_steps, step)
+        end
+        @test sort(unique(actual_steps)) == OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS
     end
 
     @testset "V2 tail: regime-aware relaxation and finite interval shift" begin

@@ -216,6 +216,56 @@ using DataFrames
         @test isfinite(df.Dst_star[4])
     end
 
+    @testset "C4-PKG-01: causal filling is prefix invariant through long outages" begin
+        full = [1.0, NaN, NaN, NaN, NaN, 2.0]
+        prefix = copy(full[1:4])
+        SolarSINDy._ffill_short_gaps!(full, 3)
+        SolarSINDy._ffill_short_gaps!(prefix, 3)
+        @test isequal(full[1:4], prefix)
+        @test isequal(full, [1.0, 1.0, 1.0, 1.0, NaN, 2.0])
+
+        leading = [NaN, NaN, 3.0, NaN]
+        SolarSINDy._ffill_short_gaps!(leading, 3)
+        @test isequal(leading, [NaN, NaN, 3.0, 3.0])
+        unchanged = [1.0, NaN]
+        SolarSINDy._ffill_short_gaps!(unchanged, 0)
+        @test isequal(unchanged, [1.0, NaN])
+        @test_throws ArgumentError SolarSINDy._ffill_short_gaps!([1.0], -1)
+    end
+
+    @testset "C4-PKG-02: cleaning normalizes missing and mixed measured columns" begin
+        df = DataFrame(
+            datetime=[DateTime(2022, 1, 1) + Hour(i - 1) for i in 1:4],
+            V=Union{Missing,Int,Float64}[400, missing, Inf, 430.0],
+            Bz=Union{Missing,Float64}[-5.0, missing, -4.0, -3.0],
+            By=Union{Missing,Float64}[1.0, missing, 2.0, 3.0],
+            n=Union{Missing,Int}[5, missing, 6, 7],
+            Pdyn=Union{Missing,Float64}[missing, 2.0, Inf, 3.0],
+            T=Union{Missing,Int}[100_000, missing, 120_000, 130_000],
+            Dst=Union{Missing,Int}[-20, missing, -22, -23],
+            AE=Union{Missing,Int}[50, missing, 60, 70],
+            AL=Union{Missing,Int}[-30, missing, -40, -50],
+            AU=Union{Missing,Int}[20, missing, 30, 40],
+        )
+        add_original_observation_flags!(df)
+        clean_omni_data!(df; causal=true)
+        @test all(col -> eltype(df[!, col]) == Float64, SolarSINDy.OMNI_OBSERVATION_COLUMNS)
+        @test df.V == [400.0, 400.0, 400.0, 430.0]
+        @test isnan(df.Dst[2])
+        @test df.Dst_observed == [true, false, true, true]
+        @test df.V_observed == [true, false, false, true]
+        @test df.quality == [1, 0, 1, 1]
+
+        all_missing = DataFrame(
+            datetime=[DateTime(2022, 1, 1)],
+            V=[missing], Bz=[missing], By=[missing], n=[missing], Pdyn=[missing],
+            T=[missing], Dst=[missing], AE=[missing], AL=[missing], AU=[missing],
+        )
+        clean_omni_data!(all_missing; causal=true)
+        @test all(isnan(all_missing[1, col]) for col in SolarSINDy.OMNI_OBSERVATION_COLUMNS)
+        @test all_missing.quality == [0]
+    end
+
     @testset "A/B: build_storm_catalog finds storm window and assigns split" begin
         @test SolarSINDy._solar_cycle(Date(1964, 9, 30)) == 19
         @test SolarSINDy._solar_cycle(Date(1964, 10, 1)) == 20
