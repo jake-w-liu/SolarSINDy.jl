@@ -161,6 +161,27 @@ using Dates
         @test plasma_df.density == [5.0, 5.5]
         @test 123.0 ∉ plasma_df.speed        # the inactive ACE source never masquerades as primary
 
+        # NOAA's live RTSW endpoint occasionally serializes missing measurements as bare NaN
+        # rather than standard-JSON null. The transport must accept the feed, while the existing
+        # field guards drop a row whose required speed is non-finite and retain NaN only for the
+        # optional temperature field.
+        nonfinite_get(url; kwargs...) = (; status=200, body="""
+            [{"time_tag":"2026-01-01T00:00:00","active":true,"source":"SOLAR1",
+              "proton_speed":400.0,"proton_density":5.0,"proton_temperature":NaN},
+             {"time_tag":"2026-01-01T00:01:00","active":true,"source":"SOLAR1",
+              "proton_speed":NaN,"proton_density":6.0,"proton_temperature":500000},
+             {"time_tag":"2026-01-01T00:02:00","active":true,"source":"SOLAR1",
+              "proton_speed":410.0,"proton_density":5.5,"proton_temperature":510000}]
+            """)
+        nonfinite_df = fetch_swpc_plasma(;
+            http_get=nonfinite_get,
+            max_retries=1,
+            retry_delay_sec=0,
+        )
+        @test nonfinite_df.speed == [400.0, 410.0]
+        @test nonfinite_df.density == [5.0, 5.5]
+        @test isnan(nonfinite_df.temperature[1])
+
         function mag_get(url; kwargs...)
             return (; status=200, body="""
                 [{"time_tag":"2026-01-01T00:00:00","active":true,"source":"SOLAR1",

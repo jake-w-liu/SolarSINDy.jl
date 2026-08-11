@@ -2129,6 +2129,11 @@ function selftest_readiness_audit()
     @assert verdict(fail_state) == "FAIL"
     passed += 1
 
+    parsed = parse_args(["--api-url=http://127.0.0.1:18723/api/status"])
+    @assert parsed[3] isa String "--api-url must normalize its SubString slice to String"
+    @assert parsed[3] == "http://127.0.0.1:18723/api/status"
+    passed += 1
+
     println("readiness audit self-test PASS: $(passed) independent checks")
     return true
 end
@@ -2451,7 +2456,7 @@ function parse_args(args)
         elseif startswith(arg, "--report=")
             report = abspath(split(arg, "=", limit = 2)[2])
         elseif startswith(arg, "--api-url=")
-            api_url = split(arg, "=", limit = 2)[2]
+            api_url = String(split(arg, "=", limit = 2)[2])
         elseif startswith(arg, "--max-issue-age-hours=")
             max_issue_age_hours = parse(Float64, split(arg, "=", limit = 2)[2])
             max_issue_age_hours > 0 || error("--max-issue-age-hours must be positive")

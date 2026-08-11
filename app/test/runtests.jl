@@ -545,6 +545,24 @@ end
         wrow = _rtsw_latest(wind, [:proton_speed, :proton_density];
                             bounds = Dict(:proton_speed => (50.0, 5.0e3)))
         @test _rtsw_field(wrow, :proton_speed) == 461.0
+
+        # The live NOAA endpoint sometimes spells a missing measurement as bare NaN. The fetch
+        # boundary accepts it, and the physical-field selector skips that row for a finite one.
+        nonfinite_body = Vector{UInt8}(codeunits("""
+            [{"time_tag":"2026-07-13T02:41:00","active":true,
+              "proton_speed":NaN,"proton_density":3.0},
+             {"time_tag":"2026-07-13T02:40:00","active":true,
+              "proton_speed":461.0,"proton_density":2.7}]
+            """))
+        nonfinite = _swpc_get(
+            "/json/rtsw/rtsw_wind_1m.json";
+            http_get=(args...; kwargs...) -> (; body=nonfinite_body),
+        )
+        nonfinite_row = _rtsw_latest(
+            nonfinite, [:proton_speed, :proton_density];
+            bounds=Dict(:proton_speed => (50.0, 5.0e3)),
+        )
+        @test _rtsw_field(nonfinite_row, :proton_speed) == 461.0
     end
 
     @testset "latest_cycle keys on issue epoch, not solar-wind vintage (L1 stall)" begin

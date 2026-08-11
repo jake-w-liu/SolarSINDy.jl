@@ -94,7 +94,10 @@ function _fetch_swpc_json(url::String;
                 resp = http_get(u; connect_timeout=15, readtimeout=30)
                 status = getproperty(resp, :status)
                 status == 200 || error("HTTP status $status")
-                raw = JSON3.read(String(getproperty(resp, :body)))
+                # NOAA RTSW occasionally emits bare NaN tokens for missing measurements.
+                # JSON3 can parse that documented non-standard form; the field-level physical
+                # bounds below still reject every non-finite driver before it reaches a model.
+                raw = JSON3.read(String(getproperty(resp, :body)); allow_inf=true)
                 length(raw) >= 2 || error("response has no data rows")
                 return raw
             catch e

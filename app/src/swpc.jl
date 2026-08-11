@@ -66,11 +66,14 @@ function _source_freshness(timestamp, max_age_min::Real;
             stale = stale, invalid_future = future)
 end
 
-function _swpc_get(path; readtimeout=1, connect_timeout=1)
+function _swpc_get(path; readtimeout=1, connect_timeout=1,
+                   http_get::Function=HTTP.get)
     try
-        r = HTTP.get(SWPC_BASE * path; readtimeout=readtimeout,
+        r = http_get(SWPC_BASE * path; readtimeout=readtimeout,
                      connect_timeout=connect_timeout, retries=0, status_exception=true)
-        return JSON3.read(r.body)
+        # NOAA RTSW occasionally emits bare NaN tokens for missing measurements. Accept that
+        # non-standard spelling here; _rtsw_field/jnum still reject non-finite physical inputs.
+        return JSON3.read(r.body; allow_inf=true)
     catch e
         e isa InterruptException && rethrow()
         @warn "SWPC fetch failed" path exception=e

@@ -93,6 +93,7 @@ Physics and statistics:
 Industrial robustness:
 
 - RTSW endpoint migration from the retired array-of-arrays `*-1-day`/`*-7-day.json` products to the named-key `rtsw_{wind,mag}_1m.json` feeds, with active-source selection and physical-range validation
+- tolerant RTSW JSON decoding at both monitor and dashboard boundaries for NOAA's occasional bare `NaN` missing-value tokens; required non-finite or out-of-range physical fields remain rejected before forecasting or display
 - forecast-log read-modify-write under a shared lock with identity-based row relocation; scored-row dedup by (issue hour, target, model)
 - forecast cycles keyed on the UTC issue hour (not solar-wind vintage or Dst anchor), so a later cycle may legitimately reissue an overlapping target while same-cycle retries remain idempotent
 - staleness/expiry flags, health "stale" status, and a bounded-retry Kyoto Dst fetch
@@ -110,6 +111,7 @@ Industrial robustness:
 
 Dashboard and API:
 
+- documented `--api-url=...` readiness-audit invocations normalize command-line slices to `String`, so strict live-API certification reaches the audit instead of failing dispatch before any checks run
 - log-independent endpoints stay up when the forecast log is absent; internal errors no longer echo the log path
 - input-staleness demotion and served-pipeline capability labels surfaced to the front end
 - stale or unavailable status responses clear previously displayed metrics and WATCH state instead of leaving an obsolete forecast on screen
