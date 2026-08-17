@@ -2,7 +2,7 @@
 
 All notable changes to `SolarSINDy.jl` will be documented in this file.
 
-## [0.3.0] - 2026-08-17
+## [Unreleased] - 2026-08-17 (served-stack switch; version bump deferred)
 
 Served point center moves from the V2.1 operator to the fitted static V2.2 regime
 stack; the V2.3 analog driver continuation is integrated as a shadow forecast after

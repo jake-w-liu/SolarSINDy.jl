@@ -1,6 +1,6 @@
 entry_type,name,count,value
 build,utc,NaN,2026-08-17T07:58:58.721
-build,package_version,NaN,0.3.0
+build,package_version,NaN,0.2.1
 build,julia_version,NaN,1.12.6
 build,smoke,NaN,false
 source,tree,NaN,/Users/jake/EMPIRE/projects/ongoing/2026_045_v2_3_package/validation/output/operational/v2_3_test
