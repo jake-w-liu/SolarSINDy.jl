@@ -353,7 +353,7 @@ Two live-path details are load-bearing and are asserted by tests rather than ass
 | `test/test_live_forecast_verify.jl` | 852 assertions pass (includes the served-V2.4e testsets and the status matrix) |
 | `app/test/runtests.jl` | 1,035 assertions pass |
 | `test/test_serving_identity_oracles.jl` | 199 assertions pass |
-| `v2_readiness_audit.jl --self-test` | PASS, 37 independent checks |
+| `v2_readiness_audit.jl --self-test` | PASS, 38 independent checks |
 | `validation/operational/v2_4_serving_identity.jl` | PASS, max abs Δ = 0.0 nT over 753 anchors / 4,518 rows |
 | `examples/experiments.jl` | PASS (V2.1 deterministic smoke, including the V2.4 identity, depth-bin, deepening and depth-safe assertions) |
 | Scratch live cycle (`live_monitor.jl --once`) | 4 rows, all `v24_status=ok`, served identity `v2.4+sindy20x11+superlearner10floor+conformal`, `interval_source=v24_conformal_depth`, cell `active_deepening/shallow`, `v24_guard_applied=false`, `v24_projection_applied=false` and `v24_pred_dst_nt = v24_l1_center_dst_nt` on every row, `v24_history_hours=12`, manifest digest `057aec0d…`, `v2_2_status=ok` with both severity partners and both predecessor edges finite; four horizons issued in ≈ 14 s wall clock after the first-load archive rebuild |

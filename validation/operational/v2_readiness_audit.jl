@@ -2220,6 +2220,24 @@ function audit_historical_v2_0_live_log!(state::AuditState)
     end
 end
 
+"""
+    _identity_datetime_agrees(record_value, bundle_value) -> Bool
+
+Compare a training-window bound read from the identity record (a `DateTime` when CSV.read parsed
+it, text when hand-edited, `missing` when blank) with the bound reported by the loaded bundle
+(text or `DateTime`). Both are compared as instants when both parse; otherwise as text. Never
+coerces, so a malformed record is a finding rather than an exception.
+"""
+function _identity_datetime_agrees(record_value, bundle_value)
+    (ismissing(record_value) || ismissing(bundle_value)) && return false
+    parse_instant(x) = x isa DateTime ? x :
+        (try DateTime(strip(string(x))) catch; nothing end)
+    a = parse_instant(record_value)
+    b = parse_instant(bundle_value)
+    (a === nothing || b === nothing) && return strip(string(record_value)) == strip(string(bundle_value))
+    return a == b
+end
+
 function audit_v2_1_issue_identity!(state::AuditState;
                                     path::AbstractString = joinpath(LIVE_DIR,
                                                                     "v2_1_issue_identity.csv"))
@@ -2266,8 +2284,11 @@ function audit_v2_1_issue_identity!(state::AuditState;
         (value = r.served_bundle_fold_year;
          value isa Real && !(value isa Bool) &&
          isfinite(Float64(value)) && Int(round(Float64(value))) == Int(bundle_fold_year))
+    # CSV.read parses the ISO-8601 training bound into a `DateTime` (`String(::DateTime)` throws), a
+    # hand-edited record may carry text, and the loaded-bundle metric is stored as text; compare the
+    # two as instants when both parse, else as text, and never coerce.
     training_max_agrees = !ismissing(bundle_training_max) &&
-        String(coalesce(r.served_bundle_training_max_target_utc, "")) == String(bundle_training_max)
+        _identity_datetime_agrees(r.served_bundle_training_max_target_utc, bundle_training_max)
     structural = String(r.model_version) == EXPECTED_MODEL_VERSION &&
                  String(r.served_model_version) == EXPECTED_SUBHOURLY &&
                  String(r.served_fallback_model_version) == EXPECTED_SUBHOURLY_FALLBACK &&
@@ -3048,6 +3069,40 @@ function selftest_readiness_audit()
                         identity_state.checks) "an absent shadow manifest digest with no deployment digest must warn"
         end
         passed += 1
+    end
+
+    # With the served bundle loaded, the identity contract compares the record's fold year and
+    # training-window bound (which CSV.read parses into a `DateTime`) with the bundle's; that path
+    # must evaluate — the production audit once aborted here on `String(::DateTime)` — pass on the
+    # deployed record, and fail (not raise) on a record carrying another refit's provenance.
+    if isfile(joinpath(LIVE_DIR, "v2_1_issue_identity.csv")) && isdir(V2_4_DEPLOY_DIR)
+        loaded_state = AuditState()
+        audit_v2_4_bundle!(loaded_state)
+        if haskey(loaded_state.live_metrics, :served_bundle_training_max_target_utc)
+            audit_v2_1_issue_identity!(loaded_state)
+            @assert any(c -> c.name == "V2.1 issue identity contract", loaded_state.checks) "the identity contract must be evaluated with the bundle metrics populated"
+            @assert !any(c -> c.level == :fail && c.name == "V2.1 issue identity contract",
+                         loaded_state.checks) "the deployed identity record must agree with the loaded bundle's fold year and training bound"
+            mktempdir() do dir
+                identity = CSV.read(joinpath(LIVE_DIR, "v2_1_issue_identity.csv"), DataFrame)
+                identity[!, :served_bundle_training_max_target_utc] = ["2024-12-24T16:00:00"]
+                fixture = joinpath(dir, "v2_1_issue_identity.csv")
+                CSV.write(fixture, identity)
+                drift_state = AuditState()
+                for (k, v) in loaded_state.live_metrics
+                    startswith(String(k), "served_bundle_") && (drift_state.live_metrics[k] = v)
+                end
+                audit_v2_1_issue_identity!(drift_state; path = fixture)
+                @assert any(c -> c.level == :fail && c.name == "V2.1 issue identity contract",
+                            drift_state.checks) "a record carrying another refit's training bound must fail the identity contract, not raise"
+            end
+            @assert _identity_datetime_agrees(DateTime(2025, 12, 24, 16), "2025-12-24T16:00:00")
+            @assert _identity_datetime_agrees("2025-12-24T16:00", "2025-12-24T16:00:00")
+            @assert !_identity_datetime_agrees(DateTime(2025, 12, 24, 16), "2025-12-24T15:00:00")
+            @assert !_identity_datetime_agrees(missing, "2025-12-24T16:00:00")
+            @assert !_identity_datetime_agrees("not-a-date", "2025-12-24T16:00:00")
+            passed += 1
+        end
     end
 
     # An error layer that has never engaged after the warm-up window is a disclosure problem: the

@@ -692,12 +692,23 @@ columns within 1e-9 nT, all six model steps present, the deepening state and the
 exercised, all three regimes present, no row guarded, every published center equal to its stack
 center, and every half-width positive.
 
-`test/test_v2_readiness_selftest.jl` and `v2_readiness_audit.jl --self-test` (37 independent
+`test/test_v2_readiness_selftest.jl` and `v2_readiness_audit.jl --self-test` (38 independent
 checks) cover the audit's own fixtures under the three-label chain: a fully served window
 passes, a newest-cycle fallback fails whether or not the artifacts load here, both stages
 disclose separately, pre-stage cycles are excluded and disclosed, the four-day window's
 two-cycle failure rule holds, and the weakest-label reading resolves two- and three-stage
 cycles.
+
+Post-deployment fix (2026-08-18, first live readiness run on the merged main): the identity
+contract coerced the record's `served_bundle_training_max_target_utc` with `String(...)`, but
+CSV.read parses that ISO-8601 field into a `DateTime`, so the audit aborted with a
+`MethodError` before the verdict line whenever the served bundle had been loaded (the self-test
+never populated the bundle metrics, so its identity fixture short-circuited before the
+coercion). The comparison now goes through `_identity_datetime_agrees` (instants when both
+sides parse, text otherwise, never coerced), and a new self-test case loads the deployed bundle,
+evaluates the contract with the metrics populated (pass on the deployed record, fail — not raise
+— on a record carrying another refit's training bound) and unit-checks the helper; the old code
+fails that case with the original `MethodError` (mutation check run).
 
 Two added fixtures. A window whose newest cycle predates the served stage while its newest
 *staged* cycle fell back: the two readings give opposite verdicts there — deciding the rule on the
@@ -772,7 +783,7 @@ stopped being generated is a failure rather than a shorter loop.
 | `test/test_live_forecast_verify.jl` | 852 / 852 pass |
 | `app/test/runtests.jl` | 1,035 / 1,035 pass standalone, 1,036 / 1,036 inside the package suite |
 | `test/test_serving_identity_oracles.jl` | 199 / 199 pass |
-| `v2_readiness_audit.jl --self-test` | PASS, 37 independent checks |
+| `v2_readiness_audit.jl --self-test` | PASS, 38 independent checks |
 | `validation/operational/v2_4_serving_identity.jl` | PASS, max abs Δ = 0.0 nT on all fifteen columns over 753 anchors / 4,518 rows, rerun after the projection flag was added to the serving return |
 | `examples/experiments.jl` | PASS |
 | `Pkg.test()` | 282,144 / 282,144 pass, 0 failures, 14m22.7s |

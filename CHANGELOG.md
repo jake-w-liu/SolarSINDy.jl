@@ -13,6 +13,11 @@ carries no guard, and depth safety is taken at the alerting layer. The static st
 V2.1 operator remain the disclosed fallback chain; the V2.3 candidate remains a shadow
 forecast.
 
+Readiness fix after the first live run of the merged build: the identity contract compares the
+bundle's training-window bound as an instant instead of coercing a CSV-parsed `DateTime` with
+`String(...)` (which aborted the audit); the self-test now exercises the populated-bundle path
+(38 checks).
+
 Served product:
 
 - the served identity is `v2.4+sindy20x11+superlearner10floor+conformal`, and the
