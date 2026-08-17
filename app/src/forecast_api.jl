@@ -871,11 +871,12 @@ degradation shows up as rows that carry the fallback label or an unavailable sha
 as a missing log. Summarizing them here is what lets the health endpoint state which product is
 actually being served instead of only whether a file is fresh."""
 function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES)
-    empty_result = (cycles_considered=0, served_model_version=nothing, served_product=nothing,
-                    served_fallback_cycles=0, served_fallback_rate=nothing,
+    empty_result = (cycles_considered=0, pre_stage_cycles_excluded=0, served_model_version=nothing,
+                    served_product=nothing, served_fallback_cycles=0, served_fallback_rate=nothing,
                     newest_cycle_is_fallback=nothing, shadow_model_version=nothing,
-                    shadow_available_cycles=0, shadow_available_rate=nothing,
-                    shadow_e_layer_cycles=0, shadow_e_layer_rate=nothing)
+                    shadow_cycles_considered=0, shadow_available_cycles=0,
+                    shadow_available_rate=nothing, shadow_e_layer_cycles=0,
+                    shadow_e_layer_rate=nothing)
     nrow(df) == 0 && return empty_result
     hasproperty(df, :issue_time_utc_dt) || return empty_result
     hours = [issue === missing ? missing : floor(issue, Hour) for issue in df.issue_time_utc_dt]
@@ -883,6 +884,9 @@ function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES
     isempty(keys_present) && return empty_result
     window = keys_present[max(1, length(keys_present) - Int(cycles) + 1):end]
     fallback = 0
+    staged = 0
+    pre_stage = 0
+    shadow_staged = 0
     shadow_ok = 0
     e_layer = 0
     newest_fallback = nothing
@@ -895,32 +899,46 @@ function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES
         # `missing` in those columns for its earlier rows. `==` against `missing` is three-valued, so
         # `any` would return `missing` and the health summary would throw instead of reporting the
         # trailing window that spans the schema change.
-        is_fallback = any(label -> isequal(label, PREVIOUS_V2_SERVED_MODEL_VERSION) ||
-                                   !_is_accepted_served_model(label), labels)
-        is_fallback && (fallback += 1)
-        index == length(window) && (newest_fallback = is_fallback)
+        #
+        # Only cycles issued by the served-stack stage (they carry `v2_2_status`) enter the
+        # fallback rate; rows written before the stage existed are disclosed as excluded rather
+        # than counted as fallbacks, mirroring the readiness audit's transition rule.
+        cycle_staged = any(r -> _rowget(r, :v2_2_status) isa AbstractString, eachrow(rows))
+        if cycle_staged
+            staged += 1
+            is_fallback = any(label -> isequal(label, PREVIOUS_V2_SERVED_MODEL_VERSION) ||
+                                       !_is_accepted_served_model(label), labels)
+            is_fallback && (fallback += 1)
+            index == length(window) && (newest_fallback = is_fallback)
+        else
+            pre_stage += 1
+        end
         statuses = [_rowget(r, :v23_status) for r in eachrow(rows)]
-        any(st -> st isa AbstractString && startswith(st, "ok"), statuses) && (shadow_ok += 1)
-        applied = [_rowget(r, :v23_e_layer_applied) for r in eachrow(rows)]
-        any(flag -> flag === true || isequal(flag, 1), applied) && (e_layer += 1)
+        if any(st -> st isa AbstractString, statuses)
+            shadow_staged += 1
+            any(st -> st isa AbstractString && startswith(st, "ok"), statuses) && (shadow_ok += 1)
+            applied = [_rowget(r, :v23_e_layer_applied) for r in eachrow(rows)]
+            any(flag -> flag === true || isequal(flag, 1), applied) && (e_layer += 1)
+        end
         for label in (_rowget(r, :v23_shadow_model_version) for r in eachrow(rows))
             label isa AbstractString && push!(shadow_labels, String(label))
         end
     end
-    n = length(window)
     newest = df[coalesce.(hours .== last(keys_present), false), :]
     served_label = _cycle_served_model(newest)
-    return (cycles_considered=n,
+    return (cycles_considered=staged,
+            pre_stage_cycles_excluded=pre_stage,
             served_model_version=served_label,
             served_product=served_label === nothing ? nothing : served_product_name(served_label),
             served_fallback_cycles=fallback,
-            served_fallback_rate=round(fallback / n; digits=4),
+            served_fallback_rate=staged == 0 ? nothing : round(fallback / staged; digits=4),
             newest_cycle_is_fallback=newest_fallback,
             shadow_model_version=isempty(shadow_labels) ? nothing : first(sort(unique(shadow_labels))),
+            shadow_cycles_considered=shadow_staged,
             shadow_available_cycles=shadow_ok,
-            shadow_available_rate=round(shadow_ok / n; digits=4),
+            shadow_available_rate=shadow_staged == 0 ? nothing : round(shadow_ok / shadow_staged; digits=4),
             shadow_e_layer_cycles=e_layer,
-            shadow_e_layer_rate=round(e_layer / n; digits=4))
+            shadow_e_layer_rate=shadow_staged == 0 ? nothing : round(e_layer / shadow_staged; digits=4))
 end
 
 """Threat status: current observation and most negative edge among the latest 90% intervals."""

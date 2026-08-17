@@ -970,14 +970,26 @@ const V2_1_DRIVER_TOKEN =
         df = vcat(legacy, fresh; cols=:union)
         @test any(ismissing, df.v23_e_layer_applied)          # the schema change is in the window
         health = build_served_health(df)
-        @test health.cycles_considered == 24
+        # Cycles written before the served-stack stage existed carry no `v2_2_status`; they are
+        # disclosed as excluded, not counted as fallbacks, so the first day after a deployment onto
+        # an existing log does not read as a 20/24 fallback rate (same rule as the readiness audit).
+        @test health.cycles_considered == 4
+        @test health.pre_stage_cycles_excluded == 20
         @test health.served_model_version == CURRENT_V2_SERVED_MODEL_VERSION
         @test health.served_product == "V2.2"
-        @test health.served_fallback_cycles == 20
+        @test health.served_fallback_cycles == 0
+        @test health.served_fallback_rate == 0.0
         @test health.newest_cycle_is_fallback == false
+        @test health.shadow_cycles_considered == 4
         @test health.shadow_available_cycles == 4
+        @test health.shadow_available_rate == 1.0
         @test health.shadow_e_layer_cycles == 4
         @test health.shadow_model_version == V2_3_SHADOW_MODEL_VERSION
+        # Legacy-only window: nothing staged yet -> no rate, no exception.
+        legacy_only = build_served_health(legacy)
+        @test legacy_only.cycles_considered == 0
+        @test legacy_only.pre_stage_cycles_excluded == 20
+        @test legacy_only.served_fallback_rate === nothing
 
         # A row with no served label at all is a fallback cycle with no reportable identity, which is
         # what the endpoint must say; it is not a reason to drop the whole summary.
@@ -986,7 +998,7 @@ const V2_1_DRIVER_TOKEN =
             Vector{Union{Missing, String}}(unlabelled.sub_hourly_model_version)
         unlabelled.sub_hourly_model_version[end] = missing
         blind = build_served_health(unlabelled)
-        @test blind.served_fallback_cycles == 21
+        @test blind.served_fallback_cycles == 1
         @test blind.newest_cycle_is_fallback == true
         @test blind.served_model_version === nothing
         @test blind.served_product === nothing
