@@ -14,6 +14,24 @@
 
 using CSV, DataFrames, Dates, Statistics, JSON3
 
+# The depth-safe alerting center is defined once, in the package's dependency-free
+# `src/serving_depth_safe.jl`. This application runs in its own environment and cannot load the
+# package, so it includes that file: a second copy of the rule here is exactly how the published
+# severity would drift from the served contract. The container image copies the file next to the
+# application sources, hence the second candidate path.
+const _DEPTH_SAFE_CANDIDATES = (
+    normpath(joinpath(@__DIR__, "..", "..", "src", "serving_depth_safe.jl")),
+    normpath(joinpath(@__DIR__, "..", "src_shared", "serving_depth_safe.jl")),
+)
+let source = findfirst(isfile, collect(_DEPTH_SAFE_CANDIDATES))
+    source === nothing && error(
+        "the shared depth-safe-center definition was not found at any of " *
+        join(_DEPTH_SAFE_CANDIDATES, ", ") *
+        "; the dashboard refuses to publish a severity it cannot derive from the served contract",
+    )
+    include(_DEPTH_SAFE_CANDIDATES[source])
+end
+
 # ---- Dst storm-intensity threat scale --------------------------------------------------
 # Verified against the geomagnetic-storm literature: the widely adopted Dst classification
 # uses primary division points -50 / -100 / -200 nT, with an extended minor tier
@@ -21,9 +39,63 @@ using CSV, DataFrames, Dates, Statistics, JSON3
 const THREAT_LABELS = ("Quiet", "Minor storm", "Moderate storm", "Intense storm", "Extreme storm")
 const THREAT_BANDS_NT = (-30.0, -50.0, -100.0, -200.0)   # upper edge of levels 1..4
 const CURRENT_V2_MODEL_VERSION = "v2.1"
+# Served pipeline: the V2.1 operator followed by the fitted static regime stack over the six point
+# components. The V2.1-only label remains acceptable because a cycle whose stack stage could not act
+# is served by the V2.1 operator and says so; refusing that label would blank the dashboard during a
+# disclosed degradation instead of showing the forecast that was actually issued.
 const CURRENT_V2_SERVED_MODEL_VERSION =
+    "v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)"
+const PREVIOUS_V2_SERVED_MODEL_VERSION =
     "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+const ACCEPTED_V2_SERVED_MODEL_VERSIONS =
+    (CURRENT_V2_SERVED_MODEL_VERSION, PREVIOUS_V2_SERVED_MODEL_VERSION)
+# The V2.3 analog candidate is logged as a shadow forecast: its confirmatory scoring returned NO_GO,
+# so it never reaches the served center, the threat level or an alert.
+const V2_3_SHADOW_MODEL_VERSION =
+    "v2.3-shadow+sindy20x11+L1A+ADC(magnetic,K25)+T1rcal+LAT+E"
 const LIVE_SKILL_MIN_VERIFIED = 48
+
+# Reader-facing product name of a served-pipeline label: the label's leading version token, so the
+# dashboard and the API name the product the log actually recorded instead of a hardcoded version.
+function served_product_name(label)
+    label isa AbstractString || return "unknown"
+    token = first(split(String(label), "+"))
+    isempty(token) && return "unknown"
+    return startswith(token, "v") ? uppercase(token) : token
+end
+
+# Reader-facing driver-assumption sentence of a served row. The log records a machine token per row,
+# and a cycle whose stack stage could not act records the V2.1 token; reading the row is what keeps a
+# disclosed degradation from being described as the full stack pipeline.
+const _V2_2_DRIVER_TOKEN =
+    "ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_" *
+    "inertia_blend_then_state_inertia_then_extreme_inertia_guard_then_static_regime_stack"
+const _V2_1_DRIVER_TOKEN =
+    "ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_" *
+    "inertia_blend_then_state_inertia_then_extreme_inertia_guard"
+const _V2_1_DRIVER_SENTENCE =
+    "Ballistically propagated L1 forcing, then regime-aware relaxation beyond the measured L1 " *
+    "window, followed by a causal rate projection, validation-selected one-hour and " *
+    "state-conditioned inertia blends, and an extreme-Dst inertia guard"
+const _V2_2_DRIVER_SENTENCE =
+    _V2_1_DRIVER_SENTENCE * ", and a fitted static regime stack over the six point components"
+const _DRIVER_ASSUMPTION_SENTENCES = Dict(
+    _V2_2_DRIVER_TOKEN => _V2_2_DRIVER_SENTENCE,
+    _V2_1_DRIVER_TOKEN => _V2_1_DRIVER_SENTENCE,
+    "ballistically_propagated_l1_then_regime_aware_relaxation" =>
+        "Ballistically propagated L1 forcing, then regime-aware relaxation beyond the measured " *
+        "L1 window",
+)
+
+function driver_assumption_text(token)
+    token isa AbstractString || return "unrecorded"
+    key = String(token)
+    return get(_DRIVER_ASSUMPTION_SENTENCES, key, key)
+end
+
+"True for a served-pipeline label this build knows how to present."
+_is_accepted_served_model(value) =
+    value isa AbstractString && value in ACCEPTED_V2_SERVED_MODEL_VERSIONS
 
 """Return `(level, label)` for a finite Dst value in nT; non-finite input is unknown."""
 function dst_threat_level(dst::Real)
@@ -180,9 +252,43 @@ _rowget(row, name::Symbol) = hasproperty(row, name) ? getproperty(row, name) : m
 function _row_is_current_v2(row)
     model = _rowget(row, :model_version)
     served_model = _rowget(row, :sub_hourly_model_version)
-    return model isa AbstractString && served_model isa AbstractString &&
-           model == CURRENT_V2_MODEL_VERSION &&
-           served_model == CURRENT_V2_SERVED_MODEL_VERSION
+    return model isa AbstractString && model == CURRENT_V2_MODEL_VERSION &&
+           _is_accepted_served_model(served_model)
+end
+
+# Depth-safe alerting center. The static regime stack can blend toward persistence and therefore
+# report a shallower storm than the V2.1 operator it replaced; the published threat level is taken
+# against the deeper of the two so a conservative stack cannot lower a warning, while a deeper
+# stacked center still escalates one. Rows written before the stack stage existed carry no V2.1
+# column and fall back to the served center unchanged.
+#
+# The comparison itself is `v22_serving_depth_safe_center`, loaded from the shared definition the
+# package serves under, so the published severity and the packaged serving contract are one rule.
+function _severity_pred(row)
+    served = _v2_pred(row)
+    previous = _rowget(row, :v2_1_served_pred_dst_nt)
+    (served isa Real && !(served isa Bool)) || return served
+    (previous isa Real && !(previous isa Bool)) || return served
+    return v22_serving_depth_safe_center(Float64(served), Float64(previous))
+end
+
+# Depth-safe interval lower edge. The point level is taken on the depth-safe center, but a watch is
+# assessed on the band edge, so a stack that reports a shallower center than V2.1 would also shift
+# the band up and could drop a watch tier that the previous product raised on the same physics. The
+# band is therefore shifted down by exactly the amount the point was lowered, which is the same
+# depth-safe rule applied to the edge: `lb + min(0, v2_1_served - served)`.
+function _severity_ci05(row)
+    lower = _v2_ci05(row)
+    (lower isa Real && !(lower isa Bool)) || return lower
+    served = _v2_pred(row)
+    previous = _rowget(row, :v2_1_served_pred_dst_nt)
+    (served isa Real && !(served isa Bool)) || return lower
+    (previous isa Real && !(previous isa Bool)) || return lower
+    edge = Float64(lower)
+    isfinite(edge) || return lower
+    shift = v22_serving_depth_safe_center(Float64(served), Float64(previous)) - Float64(served)
+    isfinite(shift) || return lower
+    return edge + min(0.0, shift)
 end
 
 # Rows of the most recent forecast cycle, defined by ISSUE epoch (not driver vintage). When the
@@ -333,7 +439,12 @@ _prefer_metric(primary, fallback) = primary === nothing ? fallback : primary
 function _compute_calibration_summary(df::DataFrame)
     # Live interval method = source of the most recent issued forecast cycle.
     cyc = latest_cycle(df)
-    live_src = _valid_live_cycle(cyc) ? string(_common_cycle_field(cyc, :interval_source)) : "unknown"
+    valid_cycle = _valid_live_cycle(cyc)
+    live_src = valid_cycle ? string(_common_cycle_field(cyc, :interval_source)) : "unknown"
+    # Verified rows accumulate across served pipelines. Pooling them would present a record earned by
+    # the previous served label as the current product's record, so the count is broken out per label
+    # and the current label's own count is reported separately.
+    live_served = valid_cycle ? something(_cycle_served_model(cyc), "unknown") : "unknown"
 
     v = verified_rows(df)
     n = nrow(v)
@@ -358,6 +469,8 @@ function _compute_calibration_summary(df::DataFrame)
                       interval_target_coverage=0.90,
                       served_interval_coverage_scope="empirical_only",
                       current_interval_source=live_src, n_verified_current_source=0,
+                      current_served_model=live_served, n_verified_current_served_model=0,
+                      by_served_model=[],
                       deepest_obs_dst_nt=nothing, n_storm_verified=0, by_source=[])
     obs   = Float64.(v.observation_dst_nt)
     pred  = Float64.(_v2_pred.(eachrow(v)))
@@ -430,6 +543,21 @@ function _compute_calibration_summary(df::DataFrame)
     end
     n_live = count(product_srcs .== live_src)
 
+    served_labels = "sub_hourly_model_version" in names(v) ?
+        _src_label.(v.sub_hourly_model_version) : fill("unknown", n)
+    product_served = served_labels[product_mask]
+    by_served_model = NamedTuple[]
+    for label in sort(unique(product_served))
+        m = product_served .== label
+        push!(by_served_model,
+              (served_model_version=label, product=served_product_name(label), n=count(m),
+               coverage_90=round(mean(product_inside[m]); digits=3),
+               rmse_nt=(value = _stable_rmse_or_nothing(obs[product_mask][m],
+                                                       Float64.(pred[product_mask][m]));
+                        value === nothing ? nothing : jnum(round(value; digits=2)))))
+    end
+    n_live_served = count(product_served .== live_served)
+
     return (n_verified=product_n,
             coverage_90=product_cov,
             rmse_nt=product_rmse,
@@ -460,6 +588,9 @@ function _compute_calibration_summary(df::DataFrame)
             served_interval_coverage_scope="empirical_only",
             current_interval_source=live_src,
             n_verified_current_source=n_live,
+            current_served_model=live_served,
+            n_verified_current_served_model=n_live_served,
+            by_served_model=by_served_model,
             deepest_obs_dst_nt=jnum(round(minimum(obs[product_mask]); digits=1)),
             n_storm_verified=count(obs[product_mask] .< -50),
             by_source=by_source)
@@ -565,17 +696,52 @@ function _common_cycle_field(cyc::DataFrame, name::Symbol)
     return all(x -> isequal(x, value), values) ? value : nothing
 end
 
+"""Weakest served-pipeline label of a cycle, or `nothing` when a row carries an unknown label.
+
+The stack stage is loaded per issuance and can heal or fail between the horizons of one cycle, so the
+four rows may legitimately carry different accepted labels. Refusing such a cycle would blank the
+dashboard and suppress its alerts over a disclosed per-row degradation, so a cycle is accepted when
+every row carries an accepted label and the cycle is then reported under the weakest one: the label
+that describes the least-capable stage any of its horizons was served by."""
+function _cycle_served_model(cyc::DataFrame)
+    hasproperty(cyc, :sub_hourly_model_version) || return nothing
+    labels = [_rowget(r, :sub_hourly_model_version) for r in eachrow(cyc)]
+    isempty(labels) && return nothing
+    all(_is_accepted_served_model, labels) || return nothing
+    for candidate in reverse(ACCEPTED_V2_SERVED_MODEL_VERSIONS)
+        any(l -> isequal(l, candidate), labels) && return String(candidate)
+    end
+    return nothing
+end
+
+"""Driver-assumption token of the stage the cycle is reported under.
+
+A cycle whose stack stage healed or failed between horizons carries more than one token, so the
+common-field reading is empty and the payload would say the assumption was never recorded. The cycle
+is published under its weakest served label, so the assumption is read from the rows carrying that
+label: the sentence then describes the stage the reported product was actually served by."""
+function _cycle_driver_assumption(cyc::DataFrame)
+    hasproperty(cyc, :driver_assumption) || return nothing
+    common = _common_cycle_field(cyc, :driver_assumption)
+    common === nothing || return common
+    label = _cycle_served_model(cyc)
+    label === nothing && return nothing
+    mask = [isequal(_rowget(r, :sub_hourly_model_version), label) for r in eachrow(cyc)]
+    any(mask) || return nothing
+    return _common_cycle_field(cyc[mask, :], :driver_assumption)
+end
+
 """Validate one current forecast cycle as a complete, ordered, positive-lead trajectory."""
 function _valid_live_cycle(cyc::DataFrame)
     nrow(cyc) == length(LIVE_CYCLE_HORIZONS) || return false
     model = _common_cycle_field(cyc, :model_version)
-    served_model = _common_cycle_field(cyc, :sub_hourly_model_version)
+    served_model = _cycle_served_model(cyc)
     interval = _common_cycle_field(cyc, :interval_source)
     anchor = _common_cycle_field(cyc, :latest_dst_time_utc_dt)
     anchor_dst = jnum(_common_cycle_field(cyc, :latest_dst_nt))
     vintage = _common_cycle_field(cyc, :latest_solar_wind_utc_dt)
     model == CURRENT_V2_MODEL_VERSION || return false
-    served_model == CURRENT_V2_SERVED_MODEL_VERSION || return false
+    served_model === nothing && return false
     interval isa AbstractString && !isempty(strip(interval)) || return false
     anchor isa DateTime && anchor_dst !== nothing && vintage isa DateTime || return false
 
@@ -635,6 +801,15 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
                          pred_dst_nt=pred,
                          ci05_dst_nt=lo,
                          ci95_dst_nt=hi,
+                         # Alerting depth of this horizon and the V2.1 center it is taken against, so
+                         # an operator can see why a warning is deeper than the served center.
+                         severity_dst_nt=jnum(_severity_pred(r)),
+                         severity_ci05_dst_nt=jnum(_severity_ci05(r)),
+                         v2_1_served_pred_dst_nt=jnum(_rowget(r, :v2_1_served_pred_dst_nt)),
+                         served_model_version=(v = _rowget(r, :sub_hourly_model_version);
+                                               v isa AbstractString ? String(v) : nothing),
+                         v2_2_status=(v = _rowget(r, :v2_2_status);
+                                      v isa AbstractString ? String(v) : nothing),
                          frozen_tail_ablation_dst_nt=jnum(_audit_pred(r)),
                          audit_baseline_dst_nt=jnum(_audit_pred(r))))
     end
@@ -647,7 +822,8 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
             anchor_dst_time_utc=jdt(_common_cycle_field(cyc, :latest_dst_time_utc_dt)),
             interval_source=string(_common_cycle_field(cyc, :interval_source)),
             model_version=string(_common_cycle_field(cyc, :model_version)),
-            served_model_version=string(_common_cycle_field(cyc, :sub_hourly_model_version)),
+            served_model_version=string(_cycle_served_model(cyc)),
+            served_product=served_product_name(_cycle_served_model(cyc)),
             stale=stale.stale, expired=stale.expired, invalid_future=stale.invalid_future,
             age_hours=(stale.age_hours === nothing ? nothing : round(stale.age_hours; digits=2)),
             recent_observed=_recent_observed(df),
@@ -681,6 +857,70 @@ function build_storm_replay(log_path::AbstractString; evidence_dir=nothing)
         end
     end
     return (available=true, report_age_min=age, n_scored=n, storms=storms, report_markdown=md)
+end
+
+# Number of trailing issue cycles the served/shadow stage health is summarized over. One cycle per
+# hour, so this is a day of issuance: long enough that a single transient load failure is visible as a
+# rate rather than as a verdict, short enough that a healed deployment clears it within a day.
+const SERVED_HEALTH_CYCLES = 24
+
+"""Trailing served- and shadow-stage health of the log, grouped by issue hour.
+
+The served stack and the shadow deployment are both loaded per issuance and both fail closed, so a
+degradation shows up as rows that carry the fallback label or an unavailable shadow status rather than
+as a missing log. Summarizing them here is what lets the health endpoint state which product is
+actually being served instead of only whether a file is fresh."""
+function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES)
+    empty_result = (cycles_considered=0, served_model_version=nothing, served_product=nothing,
+                    served_fallback_cycles=0, served_fallback_rate=nothing,
+                    newest_cycle_is_fallback=nothing, shadow_model_version=nothing,
+                    shadow_available_cycles=0, shadow_available_rate=nothing,
+                    shadow_e_layer_cycles=0, shadow_e_layer_rate=nothing)
+    nrow(df) == 0 && return empty_result
+    hasproperty(df, :issue_time_utc_dt) || return empty_result
+    hours = [issue === missing ? missing : floor(issue, Hour) for issue in df.issue_time_utc_dt]
+    keys_present = sort(unique(collect(skipmissing(hours))))
+    isempty(keys_present) && return empty_result
+    window = keys_present[max(1, length(keys_present) - Int(cycles) + 1):end]
+    fallback = 0
+    shadow_ok = 0
+    e_layer = 0
+    newest_fallback = nothing
+    shadow_labels = String[]
+    for (index, hour) in enumerate(window)
+        rows = df[coalesce.(hours .== hour, false), :]
+        labels = [_rowget(r, :sub_hourly_model_version) for r in eachrow(rows)]
+        # Every predicate here is written with `isequal`/`isa` rather than `==`, because a log that
+        # was extended with the shadow columns while it was already being appended to carries
+        # `missing` in those columns for its earlier rows. `==` against `missing` is three-valued, so
+        # `any` would return `missing` and the health summary would throw instead of reporting the
+        # trailing window that spans the schema change.
+        is_fallback = any(label -> isequal(label, PREVIOUS_V2_SERVED_MODEL_VERSION) ||
+                                   !_is_accepted_served_model(label), labels)
+        is_fallback && (fallback += 1)
+        index == length(window) && (newest_fallback = is_fallback)
+        statuses = [_rowget(r, :v23_status) for r in eachrow(rows)]
+        any(st -> st isa AbstractString && startswith(st, "ok"), statuses) && (shadow_ok += 1)
+        applied = [_rowget(r, :v23_e_layer_applied) for r in eachrow(rows)]
+        any(flag -> flag === true || isequal(flag, 1), applied) && (e_layer += 1)
+        for label in (_rowget(r, :v23_shadow_model_version) for r in eachrow(rows))
+            label isa AbstractString && push!(shadow_labels, String(label))
+        end
+    end
+    n = length(window)
+    newest = df[coalesce.(hours .== last(keys_present), false), :]
+    served_label = _cycle_served_model(newest)
+    return (cycles_considered=n,
+            served_model_version=served_label,
+            served_product=served_label === nothing ? nothing : served_product_name(served_label),
+            served_fallback_cycles=fallback,
+            served_fallback_rate=round(fallback / n; digits=4),
+            newest_cycle_is_fallback=newest_fallback,
+            shadow_model_version=isempty(shadow_labels) ? nothing : first(sort(unique(shadow_labels))),
+            shadow_available_cycles=shadow_ok,
+            shadow_available_rate=round(shadow_ok / n; digits=4),
+            shadow_e_layer_cycles=e_layer,
+            shadow_e_layer_rate=round(e_layer / n; digits=4))
 end
 
 """Threat status: current observation and most negative edge among the latest 90% intervals."""
@@ -726,8 +966,12 @@ function build_status(df::DataFrame)
                 message="Latest forecast cycle has incomplete or invalid point/interval rows.",
                 calibration=cal)
     end
-    preds = [Float64(_v2_pred(r)) for r in eachrow(cyc)]
-    lbs = [Float64(_v2_ci05(r)) for r in eachrow(cyc)]
+    preds = [Float64(_severity_pred(r)) for r in eachrow(cyc)]
+    # Watch edge on the depth-safe center, not on the served band as issued: the stack can report a
+    # shallower center than the V2.1 operator it replaced, which shifts the whole band up, and a watch
+    # assessed on the shifted edge could drop a tier the previous product raised on the same physics.
+    # `_severity_ci05` lowers each edge by exactly the amount the point was lowered.
+    lbs = [Float64(_severity_ci05(r)) for r in eachrow(cyc)]
     point_min = minimum(preds)
     interval_lower_edge_min = minimum(lbs)
     lvl_pt, lbl_pt = dst_threat_level(point_min)
@@ -757,13 +1001,19 @@ function build_status(df::DataFrame)
                     worst_credible_dst_nt=interval_lower_edge_min,
                     basis="Dst storm-intensity scale (-30/-50/-100/-200 nT)"),
             lead_time=(forecast_horizon_hours=horizon_max,
-                       driver_assumption="Ballistically propagated L1 forcing, then regime-aware relaxation beyond the measured L1 window, followed by a causal rate projection, validation-selected one-hour and state-conditioned inertia blends, and an extreme-Dst inertia guard",
+                       driver_assumption=driver_assumption_text(
+                           _cycle_driver_assumption(cyc)),
                        physical_upstream_lead_min=[30, 60],
                        note="Genuine upstream lead for new severity is the L1 advection time (~30-60 min). " *
                             "Multi-day lead requires CME eruption/propagation models, not yet in this system."),
             calibration=cal,
             model_version=string(_common_cycle_field(cyc, :model_version)),
-            served_model_version=string(_common_cycle_field(cyc, :sub_hourly_model_version)))
+            served_model_version=string(_cycle_served_model(cyc)),
+            served_product=served_product_name(_cycle_served_model(cyc)),
+            served_model_versions=sort(unique(String[
+                String(v) for v in (_rowget(r, :sub_hourly_model_version) for r in eachrow(cyc))
+                if v isa AbstractString
+            ])))
 end
 
 function _build_history_uncached(df::DataFrame, hours::Real, reference_time::DateTime)

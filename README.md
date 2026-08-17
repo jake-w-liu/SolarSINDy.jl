@@ -53,9 +53,70 @@ The package is organized as two layers:
 
 ## Operational forecast status
 
-The dashboard and live monitor serve a single V2.1 forecast whose SINDy core is the
-same 20-candidate/11-active-term artifact used by the revised discovery paper. The
-former 21/10 product is labeled V2.0 and retained under `data/historical/v2_0/` and
+The dashboard and live monitor serve a single forecast whose SINDy core is the same
+20-candidate/11-active-term artifact used by the revised discovery paper. The served
+point center is the complete V2.1 operator (L1 look-ahead, regime-aware relaxation,
+rate projection and the three inertia guards) followed by the fitted **static V2.2
+regime stack**: a bounded, SINDy-dominant convex combination of six point components
+(served V2.1, frozen V2.1, persistence, Burton, Burton-full, O'Brien-McPherron)
+selected per model step and per causal issue-time regime. The served identity is
+
+```text
+v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)
+```
+
+The stack weights ship as `deploy/operational_v2_2_stack.csv` with their SHA-256 in
+`deploy/operational_v2_2_stack_manifest.csv`; the engine refuses to serve weights whose
+digest or label does not match the published fit and falls back to the V2.1 center,
+labeling the row with the V2.1 identity so the degradation is visible rather than silent.
+Each row also keeps `v2_1_served_pred_dst_nt`, the center the V2.1 operator produced, and
+`v2_2_status`, which records either `ok` or the exact reason the stack stage could not act.
+Both the published threat level and the interval lower edge that raises a watch are taken
+against the deeper of the two centers, so a conservative stack can neither lower a warning
+nor drop a watch tier.
+
+The **V2.3 analog driver continuation** is integrated as a shadow forecast only. Its
+single-shot confirmatory scoring on the 2020-2025 partition returned `NO_GO`
+(`validation/output/operational/v2_3_test/decision.csv`), so it never reaches the served
+center, the threat level or an alert. Each issued row records the shadow center and its
+provenance:
+
+```text
+v23_shadow_model_version  v2.3-shadow+sindy20x11+L1A+ADC(magnetic,K25)+T1rcal+LAT+E
+v23_manifest_sha256       digest of the shadow deployment's own manifest
+v23_status                ok | ok:e_layer_pending | unavailable:<reason>
+v23_analog_k              ensemble size actually retrieved
+v23_history_hours         hourly L1 driver means the analog key could draw on
+v23_raw_dst_nt            analog ensemble mean before the correction
+v23_center_dst_nt         center after the correction and the lead-aware blend
+v23_step1_center_dst_nt   one-hour pre-layer center of this anchor
+v23_shadow_pred_dst_nt    center after the capped error layer
+v23_e_layer_applied       whether six matured innovations were available
+```
+
+The error layer is defined against the one-hour pre-layer center, and the issued model
+steps are 2/3/4/7 h at a one-hour Kyoto anchor lag, so the one-hour center is recorded on
+every cycle whether or not one hour is an issued horizon. The innovation of anchor `a` is
+`Dst(a + 1 h)` minus that recorded center; until six have matured the layer is the identity
+and the row says `ok:e_layer_pending`.
+
+The shadow deployment lives in `deploy/v2_3_shadow/`, is rebuilt by
+`validation/operational/v2_3_build_deploy.jl --from-test`, and is verified on load: every
+file is checked against its SHA-256, and the 86,968-origin analog archive is rebuilt from
+the shipped hourly frame and compared with the origin count and feature standardisation the
+scoring run recorded.
+
+Two offline identity oracles keep the served and shadow paths equal to what was measured:
+
+```bash
+julia --project=. validation/operational/v2_2_served_identity.jl   # served static stack
+julia --project=. validation/operational/v2_3_serving_identity.jl  # V2.3 shadow center
+```
+
+The former reproduces the archived `static_v2_2_dst_nt` column on every scorable
+DEV/TEST row; the latter reproduces the scored `V2_3_final` centers at every model step.
+
+The former 21/10 product is labeled V2.0 and retained under `data/historical/v2_0/` and
 `deploy/historical/v2_0/` only for reproducible matched comparisons. The `v2` API
 alias resolves to V2.1; loading V2.0 requires an explicit version.
 
@@ -463,6 +524,8 @@ and regression baselines—rather than tautologies. Coverage includes:
 - OMNI parsing, fill-value replacement, cleaning, and storm-catalog extraction
 - realtime hourly aggregation and forecast initialization
 - live-log duplicate suppression, filesystem locking, and stale-lock recovery
+- served static-stack regime derivation, coupling gate, and archived-column identity
+- V2.3 shadow deployment provenance, analog retrieval, lead-aware blend, and error layer
 
 See the package test suites (`test/runtests.jl` and `app/test/runtests.jl`) for coverage,
 tolerances, and anti-false-test checks.

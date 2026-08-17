@@ -256,6 +256,16 @@ function make_handler(log_path::AbstractString)
                     cycle_state.stale || cycle_state.expired || cycle_state.invalid_future
                 )
                 outage = outage_state(log_path)
+                # Which product the log says is being served, and how often the served/shadow stages
+                # fell back over the trailing day. A fresh log that has silently reverted to the
+                # previous served pipeline is not a healthy deployment, so the identity and the
+                # fallback rate belong in the same payload as the freshness.
+                served = ok ? try
+                    build_served_health(get_log(log_path))
+                catch e
+                    e isa InterruptException && rethrow()
+                    nothing
+                end : nothing
                 # The daemon rewrites the log every cycle, so a file mtime older than the
                 # staleness window means it has stopped issuing — report "stale" (dashboard dot
                 # turns red). A recent file is still unhealthy when its latest issue hour lacks
@@ -271,6 +281,7 @@ function make_handler(log_path::AbstractString)
                                       log_age_min=age,
                                       cycle_complete=cycle_complete,
                                       outage=outage,
+                                      served=served,
                                       server_time_utc=string(now(UTC)) * "Z"))
             elseif startswith(path, "/api/")
                 return api_handler(path, uri.query === nothing ? "" : uri.query, log_path)

@@ -253,8 +253,32 @@ const CONFORMAL = read_conformal_calibration(
 
                 # Exact equality is required: both paths call the same V2.1
                 # driver admission, point step, correction, and safeguard kernels.
-                @test replay.served_v2_1_dst_nt == live.served_pred_dst_nt
+                # The V2.1 center is now the `v2_1_served_pred_dst_nt` continuity column, because
+                # `served_pred_dst_nt` carries the static-stack stage that runs on top of it.
+                @test replay.served_v2_1_dst_nt == live.v2_1_served_pred_dst_nt
                 @test replay.frozen_v2_1_dst_nt == live.v2_pred_dst_nt
+                # The stack stage is the only difference between the two served columns, and it must
+                # be the stack the log discloses rather than an unexplained divergence.
+                if live.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
+                    stack = load_v22_serving_stack(V2_2_DEFAULT_STACK_PATH)
+                    stacked = v22_serving_center(
+                        stack; model_steps=Int(live.model_step_hours),
+                        latest_dst=Float64(live.latest_dst_nt),
+                        dst_delta_1h_nt=Float64(live.dst_delta_1h_nt),
+                        vbsouth_mvm=Float64(live.VBsouth_mvm),
+                        served_v2_1=Float64(live.v2_1_served_pred_dst_nt),
+                        frozen_v2_1=Float64(live.v2_pred_dst_nt),
+                        persistence=Float64(live.persistence_dst_nt),
+                        burton=Float64(live.burton_dst_nt),
+                        burton_full=Float64(live.burton_full_dst_nt),
+                        obrien=Float64(live.obrien_dst_nt),
+                    )
+                    @test Float64(live.served_pred_dst_nt) ≈ stacked.center atol=1e-12
+                else
+                    @test live.sub_hourly_model_version == V2_SERVED_TAIL_VERSION
+                    @test Float64(live.served_pred_dst_nt) ==
+                          Float64(live.v2_1_served_pred_dst_nt)
+                end
                 @test replay.persistence_dst_nt == live.persistence_dst_nt
                 @test replay.burton_dst_nt == live.burton_dst_nt
                 @test replay.burton_full_dst_nt == live.burton_full_dst_nt

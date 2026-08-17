@@ -1,0 +1,7 @@
+entry_type,name,count,value
+sha256,operational_v2_2_stack.csv,5683.0,66e7347f71f5cdf407e85d4612702bb19c82dcbcd74d8c79526173f839472d7d
+stack,label,NaN,operational_v2_2_primary_sindy60_fit407598
+stack,supported_model_steps,NaN,1;2;3;4;6;7
+stack,sindy_mass_floor,0.6,
+stack,identity,NaN,v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)
+source,fitted_stack_path,NaN,/Users/jake/EMPIRE/projects/ongoing/2026_045_v2_2_package/validation/output/operational/v2_2_development/operational_v2_2_stack.csv

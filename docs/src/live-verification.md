@@ -112,10 +112,13 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --report=SolarSINDy.jl/var/monitor/live_comparison_report.md
 ```
 
-The headline comparison uses the same target rows for served V2.1, the V2.1
-frozen-tail ablation, SINDy v1, persistence, Burton, BurtonFull, and
-O'Brien--McPherron. The served V2.1 column is the product forecast. The
-frozen-tail and selector fields are audit evidence, not additional products.
+The headline comparison uses the same target rows for the served center, the
+V2.1 frozen-tail ablation, SINDy v1, persistence, Burton, BurtonFull, and
+O'Brien--McPherron. The served column is the product forecast; it is produced by
+the V2.1 operator followed by the fitted static regime stack over the six point
+components, and it falls back to the V2.1 operator alone, under the V2.1
+identity, whenever the stack stage cannot act. The frozen-tail and selector
+fields are audit evidence, not additional products.
 
 ## V2 Calibration
 
@@ -137,10 +140,14 @@ never used for selection or tuning. This calibration-stage score applies to the
 V2.1 frozen-tail center. It must not be reported as performance of the served
 stack after its center-changing tail and safeguards.
 
-The dashboard evaluates served V2.1 and every displayed comparator on one common
-target cohort. Live RMSE rankings remain provisional and receive no winner styling
-until at least 48 matched rows have matured. The served-center shift and bounded
-online update do not inherit the frozen-center distribution-free guarantee.
+The dashboard evaluates the served center and every displayed comparator on one
+common target cohort. Verified rows accumulate across served pipelines, so the
+dashboard also reports them per served label and states how many have matured
+under the current one: pooling them would present a record earned by the previous
+pipeline as the current product's record. Live RMSE rankings remain provisional
+and receive no winner styling until at least 48 matched rows have matured. The
+served-center shift and bounded online update do not inherit the frozen-center
+distribution-free guarantee.
 
 Deployment is decided by an acceptance gate evaluated on the validation rows: a
 v2 candidate is deployed only if it beats persistence and O'Brien--McPherron on
@@ -160,8 +167,14 @@ served fields add the validation-selected operational tail: forecast steps with
 sufficient upstream coverage use ballistically propagated L1 forcing; later
 hours use regime-aware Bz/By relaxation; causal rapid-deepening projection,
 one-hour inertia, state-conditioned inertia, and an extreme-Dst guard constrain
-known failure regimes. The dashboard displays this served V2.1 result as the
-single product forecast.
+known failure regimes. The fitted static regime stack then combines that center
+with the frozen V2.1 center, persistence and the three physical baselines, and the
+result is the single product forecast the dashboard displays. The published threat
+level and the interval lower edge that raises a watch are both taken on the deeper
+of the served center and the V2.1 center it replaced, so a stack that reports a
+shallower storm cannot lower a warning. The sub-hour line on the forecast chart is
+the V2.1 core trajectory, shown for shape only; the issued horizons are the served
+centers and can sit away from that line.
 
 The frozen package also includes a separate complete-hour served-stack holdout
 under `data/operational_validation/v2_1_served_holdout_*`. It applies the

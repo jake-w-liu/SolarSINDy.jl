@@ -37,10 +37,31 @@ function write_v2_1_issue_identity(path::AbstractString=V21_ISSUE_IDENTITY)
         "state-inertia operator drifted",
     )
 
+    # The served identity is the whole served pipeline, which now ends in the fitted static regime
+    # stack. Recording the V2.1 tail label here would under-report the product that produces the
+    # published center, so the identity row carries the served label together with the stack label and
+    # digest it is pinned to, and the shadow identity beside it.
+    stack_path = V2_2_DEFAULT_STACK_PATH
+    stack = load_v22_serving_stack(stack_path)
+    stack_sha256 = v22_serving_stack_sha256(stack_path)
+    stack_sha256 == V22_SERVED_STACK_SHA256 || error(
+        "deployed served stack digest $(stack_sha256) is not the published " *
+        "$(V22_SERVED_STACK_SHA256)",
+    )
+    shadow_dir = V2_3_DEFAULT_SHADOW_DIR
+    shadow_manifest_sha256 = isdir(shadow_dir) ?
+        (v23_serving_verify_manifest(shadow_dir);
+         v23_serving_file_sha256(joinpath(shadow_dir, "manifest.csv"))) : ""
+
     artifacts = core.artifacts
     out = DataFrame(
         model_version=[OPERATIONAL_V2_1_MODEL_VERSION],
-        served_model_version=[V2_SERVED_TAIL_VERSION],
+        served_model_version=[V2_2_SERVED_TAIL_VERSION],
+        served_fallback_model_version=[V2_SERVED_TAIL_VERSION],
+        served_stack_label=[stack.label],
+        served_stack_sha256=[stack_sha256],
+        shadow_model_version=[V2_3_SHADOW_TAIL_VERSION],
+        shadow_manifest_sha256=[shadow_manifest_sha256],
         candidate_count=[length(terms)],
         active_count=[count(!=(0.0), core.coefficients)],
         redundant_n_v2_present=["n*V^2" in terms],

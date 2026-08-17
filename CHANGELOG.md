@@ -2,6 +2,149 @@
 
 All notable changes to `SolarSINDy.jl` will be documented in this file.
 
+## [0.3.0] - 2026-08-17
+
+Served point center moves from the V2.1 operator to the fitted static V2.2 regime
+stack; the V2.3 analog driver continuation is integrated as a shadow forecast after
+its confirmatory scoring returned `NO_GO`.
+
+Served product:
+
+- the served point center is now the complete V2.1 operator followed by the fitted
+  static V2.2 regime stack over the six point components (served V2.1, frozen V2.1,
+  persistence, Burton, Burton-full, O'Brien-McPherron), selected per model step and
+  per causal issue-time regime; the served identity is
+  `v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)`
+- the stack weights ship as `deploy/operational_v2_2_stack.csv` with their SHA-256 and
+  fit label in `deploy/operational_v2_2_stack_manifest.csv`; the engine refuses weights
+  whose digest or label does not match the published fit, serves the V2.1 center instead
+  and labels the row with the V2.1 identity, so a degradation is disclosed rather than
+  silent
+- the regime is derived from issue-time state only, and the coupling input is the gated
+  proxy (`v22_serving_coupling_active`): rectified southward coupling counts only while
+  the wind drives and the ring current deepens, matching the archived definition the
+  stack was fitted under
+- every issued row keeps `v2_1_served_pred_dst_nt`, the center the V2.1 operator
+  produced, alongside the frozen-tail `improved_*` columns
+- the published threat level is taken against the deeper of the stacked and V2.1 centers,
+  so a stack that blends toward persistence cannot lower a warning while a deeper stacked
+  center still escalates one
+- `validation/operational/v2_2_served_identity.jl` reproduces the archived
+  `static_v2_2_dst_nt` column through the serving function on every scorable DEV/TEST row
+
+V2.3 analog driver continuation (shadow only):
+
+- the confirmatory single-shot scoring of the preregistered candidate
+  (`T1r_T1_magnetic_K25_Soff`) returned `NO_GO` on gates A1 and A2, so the candidate is
+  not served; it is computed on the live information set and logged as a shadow forecast
+  under `v2.3-shadow+sindy20x11+L1A+ADC(magnetic,K25)+T1rcal+LAT+E`
+- new log columns `v23_shadow_model_version`, `v23_status`, `v23_analog_k`,
+  `v23_raw_dst_nt`, `v23_center_dst_nt`, `v23_shadow_pred_dst_nt` and
+  `v23_e_layer_applied` record the center and why it was or was not available
+- `src/operational_v23_serving.jl` is the single implementation of the analog center:
+  the 18-feature issue-time key, the K-nearest archive retrieval, the per-member frozen-core
+  rollout, the analog-core refit of the V2.1 ridge correction, the lead-aware blend against
+  a recomputed frozen-tail center, and the capped per-step error layer
+- `deploy/v2_3_shadow/` is built by `validation/operational/v2_3_build_deploy.jl --from-test`
+  and verified on load: every file against its SHA-256, and the 86,968-origin analog archive
+  rebuilt from the shipped hourly frame against the origin count and feature standardisation
+  the scoring run recorded
+- `validation/operational/v2_3_serving_identity.jl` reproduces the scored `V2_3_final`
+  centers through the serving functions at every model step
+
+Compatibility:
+
+- the dashboard API, the live-cycle validity check and the readiness audit accept both the
+  stacked served identity and the V2.1 identity a disclosed fallback row carries
+- log-schema readers are unaffected: the new columns are appended and every existing column
+  keeps its meaning
+
+Serving-path corrections found by a post-integration audit of the same release:
+
+- the watch flag and its tier are now taken on the depth-safe center rather than on the
+  served band as issued. The band is shifted onto the served center, so a stack that
+  reported a shallower storm than the V2.1 operator also moved the band up and could lower
+  the outbound alert level on identical physics; the interval lower edge is now lowered by
+  exactly the amount the point was lowered
+- `v22_serving_depth_safe_center` has one definition, in the dependency-free
+  `src/serving_depth_safe.jl`, which the dashboard application includes rather than
+  restating; the container image ships that file beside the application sources
+- the V2.3 error layer can now engage live. The layer's innovation history is defined at a
+  one-hour model step, and production issues wall horizons 1/2/3/6 h at a one-hour anchor
+  lag, so no logged row ever carried a one-hour step and the layer was permanently the
+  identity. Every cycle now records `v23_step1_center_dst_nt`, the one-hour pre-layer
+  center of its anchor, and the innovation is `Dst(anchor + 1 h)` minus that center, taken
+  from the observed Kyoto series; the shared rule
+  `v23_serving_innovations_from_step1_centers` is used by the engine and by the identity
+  oracle, which checks the live rule against the scored history
+- a shadow row whose fitted layer could not act because the history is incomplete records
+  `v23_status = "ok:e_layer_pending"`; the `ok` prefix keeps it available while the
+  disclosure stays explicit
+- the readiness audit now fails closed on served- and shadow-stage health. It loads
+  `deploy/operational_v2_2_stack.csv` under its pinned digest and label, verifies
+  `deploy/v2_3_shadow/manifest.csv`, and measures the served fallback rate over a trailing
+  window of issue cycles. Shadow availability and the fraction of cycles that applied an
+  error layer are reported, and the served identity, shadow identity and fallback rate are
+  exposed by `/api/health`
+- `v2_readiness_audit.jl --self-test` exited 1 because its fixture payload kept an older
+  driver-assumption sentence; it is fixed and now runs inside the package test suite
+- `v2_1_issue_identity.jl` records the served identity, the stack label and digest, the
+  shadow identity and the shadow manifest digest; the audit requires the exact served
+  identity there and compares the API's served label with the newest logged cycle
+- an empty `SOLARSINDY_V2_2_STACK_SHA256` is refused instead of silently disabling the
+  digest pin. A staged run can accept it with `SOLARSINDY_ALLOW_UNPINNED_STACK=1`, in which
+  case the row carries a separate `...+unpinned` identity that neither the dashboard nor the
+  readiness audit accepts as the published product
+- the dashboard and API derive the product name from the served label instead of naming
+  V2.1, caption the 15-minute line as the V2.1 core trajectory shown for display, and
+  report verified rows per served label (`by_served_model`,
+  `n_verified_current_served_model`) so a record earned by the previous pipeline is not
+  presented as the current product's
+- `/api/forecast` exposes `severity_dst_nt`, `severity_ci05_dst_nt` and
+  `v2_1_served_pred_dst_nt` per horizon; `lead_time.driver_assumption` comes from the served
+  row, so a fallback cycle no longer describes a stage that did not run
+- a cycle whose rows carry different accepted served labels is accepted and reported under
+  the weakest label, instead of blanking the dashboard and suppressing its alerts
+- new log columns `v2_2_status` (per-row served-stage status), `v23_manifest_sha256`
+  (shadow deployment manifest digest) and `v23_history_hours` (hourly L1 depth the analog
+  key drew on)
+- error-layer artifacts named by `e_layers.json` must appear in the manifest's
+  digest-verified set, so a manifest with their digest rows removed is a load error rather
+  than an unverified load
+
+Deployment-boundary corrections, from an audit of the first day of the same release:
+
+- `/api/health` no longer drops its whole served block while the trailing window straddles
+  the shadow-schema change. Cycles issued before the shadow columns existed carry `missing`
+  in them, `missing == 1` is three-valued, and the health summary therefore raised and was
+  reported as no served identity at all during the first day of the deployment it exists to
+  report on
+- a cycle whose stack stage healed or failed between its horizons now publishes the driver
+  assumption of the stage it is reported under, taken from the rows carrying its weakest
+  served label. It previously reported the assumption as never recorded, which describes a
+  logging failure rather than the disclosed per-row degradation the log recorded, and the
+  readiness audit failed the payload for it
+- the served-stage fallback window counts only cycles issued by a build that carries the
+  stack stage, and discloses how many older cycles it excluded. Cycles that predate the
+  stage are not fallbacks of a stage that did not exist, and counting them reported a
+  deployment onto an existing log as a near-total served-stage failure. The window spans
+  four days, because a one-day window cannot resolve the one-percent target at all: one
+  fallback out of twenty-four cycles is already 4.2 percent. A fallback on the newest cycle
+  fails, and an over-target rate fails once two or more cycles in the window fell back; one
+  isolated older fallback is reported and passes. The shadow window follows the same
+  staged-cycle rule
+- the readiness audit has one definition of the newest cycle, keyed on the issue hour as the
+  dashboard API and the stage windows are. The vintage-keyed reading merged every issue that
+  shared a stalled L1 vintage into one cycle, so the served label compared against the
+  published payload could belong to a cycle the API never served
+- the newest cycle's served label is re-read with the rest of the dashboard comparison
+  snapshot after the API request, so a cycle boundary falling between the two is not
+  reported as a mislabelled product
+- the identity audit accepts the documented empty shadow manifest digest, which an absent
+  shadow deployment records and a CSV field reads back as missing
+- the shadow one-hour center's per-cycle cache key carries the issue-anchor drivers and the
+  memory features, both of which are recomputed from the L1 stream at every issuance
+
 ## [0.2.1] - 2026-08-08
 
 Correctness, robustness, and operational-readiness improvements.

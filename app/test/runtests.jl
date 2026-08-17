@@ -44,12 +44,14 @@ function live_cycle_fixture(issue::DateTime;
                             model="v2.1", served_model="v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia",
                             interval="aci", observations=missing,
                             served_pred=-25.0, served_lo=-35.0, served_hi=-15.0,
-                            audit_pred=served_pred, audit_lo=served_lo, audit_hi=served_hi)
+                            audit_pred=served_pred, audit_lo=served_lo, audit_hi=served_hi,
+                            v2_1_served_pred=nothing,
+                            driver_assumption=nothing, v2_2_status=nothing)
     requested = collect(LIVE_CYCLE_HORIZONS)
     targets = floor(issue, Hour) .+ Hour.(requested)
     lead = [(target - issue) / Millisecond(3_600_000) for target in targets]
     expand(x) = x isa AbstractVector ? collect(x) : fill(x, length(requested))
-    return DataFrame(
+    frame = DataFrame(
         issue_time_utc_dt=fill(issue, length(requested)),
         latest_solar_wind_utc_dt=fill(vintage, length(requested)),
         latest_dst_time_utc_dt=fill(anchor_time, length(requested)),
@@ -67,7 +69,26 @@ function live_cycle_fixture(issue::DateTime;
         model_version=fill(model, length(requested)),
         sub_hourly_model_version=fill(served_model, length(requested)),
     )
+    # The V2.1 continuity column exists only in the stacked-served schema; a fixture that omits it
+    # reproduces a pre-stack log, which must keep behaving exactly as before.
+    v2_1_served_pred === nothing ||
+        (frame[!, :v2_1_served_pred_dst_nt] = expand(v2_1_served_pred))
+    # The per-row driver assumption and served-stage status likewise exist only in the newer schema.
+    driver_assumption === nothing ||
+        (frame[!, :driver_assumption] = expand(driver_assumption))
+    v2_2_status === nothing || (frame[!, :v2_2_status] = expand(v2_2_status))
+    return frame
 end
+
+# The two machine tokens the engine writes for the served pipeline, and the reader-facing sentences
+# they must map to. Restated here rather than imported so the payload contract is checked against an
+# independent statement of it.
+const STACK_DRIVER_TOKEN =
+    "ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_" *
+    "inertia_blend_then_state_inertia_then_extreme_inertia_guard_then_static_regime_stack"
+const V2_1_DRIVER_TOKEN =
+    "ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_" *
+    "inertia_blend_then_state_inertia_then_extreme_inertia_guard"
 
 @testset verbose=true "operational app" begin
 
@@ -704,6 +725,307 @@ end
         df2 = live_cycle_fixture(fresh)
         st2 = build_status(df2)
         @test st2.available == true && st2.stale == false && st2.expired == false
+    end
+
+    @testset "served pipeline labels and depth-safe severity" begin
+        iss = now(UTC) - Minute(20)
+        # The stacked served label is the current product label; the V2.1 label remains acceptable
+        # because a cycle whose stack stage was disclosed as unavailable is served by V2.1.
+        for label in (CURRENT_V2_SERVED_MODEL_VERSION, PREVIOUS_V2_SERVED_MODEL_VERSION)
+            st = build_status(live_cycle_fixture(iss; served_model=label))
+            @test st.available == true
+            @test st.served_model_version == label
+        end
+        @test !build_status(live_cycle_fixture(iss; served_model="v2.9+made+up")).available
+        @test CURRENT_V2_SERVED_MODEL_VERSION ==
+              "v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)"
+        @test V2_3_SHADOW_MODEL_VERSION ==
+              "v2.3-shadow+sindy20x11+L1A+ADC(magnetic,K25)+T1rcal+LAT+E"
+
+        # Depth-safe severity: a shallower stacked center must not lower the published threat below
+        # what the V2.1 operator would have warned.
+        shallow = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+                                     served_pred=-40.0, served_lo=-50.0, served_hi=-30.0,
+                                     v2_1_served_pred=-120.0)
+        st_shallow = build_status(shallow)
+        @test st_shallow.threat.point_min_dst_nt == -120.0
+        @test st_shallow.threat.level == 3
+        # A deeper stacked center still escalates.
+        deep = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+                                  served_pred=-220.0, served_lo=-240.0, served_hi=-200.0,
+                                  v2_1_served_pred=-120.0)
+        @test build_status(deep).threat.point_min_dst_nt == -220.0
+        @test build_status(deep).threat.level == 4
+        # A pre-stack row without the V2.1 column keeps the served center as the severity input.
+        legacy = live_cycle_fixture(iss; served_model=PREVIOUS_V2_SERVED_MODEL_VERSION,
+                                    served_pred=-40.0, served_lo=-50.0, served_hi=-30.0)
+        @test build_status(legacy).threat.point_min_dst_nt == -40.0
+    end
+
+    @testset "the watch tier is taken on the depth-safe center, not the served band" begin
+        # Reproduces the escalation the stack stage could otherwise drop. Same physics, two products:
+        # the V2.1 operator warned at -95 nT with a [-105, -85] band, and the stack reports a shallower
+        # -88 nT with the band shifted up to [-98, -78]. The point tier is depth-safe already, but a
+        # watch taken on the shifted edge would fall from the intense tier to none, so the outbound
+        # alert level would drop below the previous product on identical inputs.
+        iss = now(UTC) - Minute(20)
+        prior = build_status(live_cycle_fixture(iss;
+            served_model=PREVIOUS_V2_SERVED_MODEL_VERSION,
+            served_pred=-95.0, served_lo=-105.0, served_hi=-85.0))
+        @test prior.threat.level == 2
+        @test prior.threat.watch == true
+        @test prior.threat.watch_level == 3
+        @test compute_alert_state(prior, nothing, nothing).level == 3
+
+        stacked = build_status(live_cycle_fixture(iss;
+            served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            served_pred=-88.0, served_lo=-98.0, served_hi=-78.0,
+            v2_1_served_pred=-95.0))
+        @test stacked.threat.level == 2
+        @test stacked.threat.watch == true
+        @test stacked.threat.watch_level == 3
+        # The edge is the served edge lowered by exactly the amount the point was lowered.
+        @test stacked.threat.interval_lower_edge_min_dst_nt == -105.0
+        @test compute_alert_state(stacked, nothing, nothing).level == 3
+        # The alert text quotes the same depth-safe edge it escalated on.
+        stacked_df = live_cycle_fixture(iss;
+            served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            served_pred=-88.0, served_lo=-98.0, served_hi=-78.0,
+            v2_1_served_pred=-95.0)
+        watch_alerts = [a for a in build_alerts(stacked_df, stacked).alerts if a.kind == "watch"]
+        @test length(watch_alerts) == 1
+        @test occursin("-105", watch_alerts[1].message)
+
+        # A deeper stacked center must not have its band pulled down: the shift is one-sided.
+        deeper = build_status(live_cycle_fixture(iss;
+            served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            served_pred=-120.0, served_lo=-130.0, served_hi=-110.0,
+            v2_1_served_pred=-95.0))
+        @test deeper.threat.interval_lower_edge_min_dst_nt == -130.0
+        # A pre-stack row without the continuity column keeps the served edge unchanged.
+        legacy = build_status(live_cycle_fixture(iss;
+            served_model=PREVIOUS_V2_SERVED_MODEL_VERSION,
+            served_pred=-88.0, served_lo=-98.0, served_hi=-78.0))
+        @test legacy.threat.interval_lower_edge_min_dst_nt == -98.0
+        @test legacy.threat.watch == false
+
+        # The severity rule is the package's own, loaded from the shared definition rather than
+        # restated here: a second copy in the app is exactly how the two could drift.
+        @test v22_serving_depth_safe_center(-88.0, -95.0) == -95.0
+        @test v22_serving_depth_safe_center(-120.0, -95.0) == -120.0
+        @test v22_serving_depth_safe_center(NaN, -95.0) == -95.0
+        @test v22_serving_depth_safe_center(-88.0, NaN) == -88.0
+        @test count(f -> isfile(f), _DEPTH_SAFE_CANDIDATES) >= 1
+        api_source = read(joinpath(APPSRC, "forecast_api.jl"), String)
+        @test !occursin("min(Float64(served), Float64(previous))", api_source)
+    end
+
+    @testset "the forecast payload exposes the alerting center per horizon" begin
+        iss = now(UTC) - Minute(20)
+        df = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+                                served_pred=-88.0, served_lo=-98.0, served_hi=-78.0,
+                                v2_1_served_pred=-95.0, v2_2_status="ok")
+        fc = build_forecast(df)
+        @test fc.available == true
+        @test fc.served_product == "V2.2"
+        for h in fc.horizons
+            @test h.pred_dst_nt == -88.0
+            @test h.severity_dst_nt == -95.0
+            @test h.severity_ci05_dst_nt == -105.0
+            @test h.v2_1_served_pred_dst_nt == -95.0
+            @test h.served_model_version == CURRENT_V2_SERVED_MODEL_VERSION
+            @test h.v2_2_status == "ok"
+        end
+    end
+
+    @testset "the product name and driver assumption come from the served row" begin
+        iss = now(UTC) - Minute(20)
+        stacked = build_status(live_cycle_fixture(iss;
+            served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            driver_assumption=STACK_DRIVER_TOKEN))
+        @test stacked.served_product == "V2.2"
+        @test occursin("static regime stack", stacked.lead_time.driver_assumption)
+        @test occursin("Ballistically propagated L1 forcing", stacked.lead_time.driver_assumption)
+
+        # A cycle whose stack stage could not act is served by the V2.1 operator, and the payload must
+        # describe that operator rather than a stage that did not run.
+        fell_back = build_status(live_cycle_fixture(iss;
+            served_model=PREVIOUS_V2_SERVED_MODEL_VERSION,
+            driver_assumption=V2_1_DRIVER_TOKEN,
+            v2_2_status="fallback_v2_1:stack_absent"))
+        @test fell_back.served_product == "V2.1"
+        @test !occursin("static regime stack", fell_back.lead_time.driver_assumption)
+        @test occursin("extreme-Dst inertia guard", fell_back.lead_time.driver_assumption)
+
+        # An unrecorded assumption is reported as unrecorded, not as the full pipeline.
+        silent = build_status(live_cycle_fixture(iss;
+            served_model=CURRENT_V2_SERVED_MODEL_VERSION))
+        @test silent.lead_time.driver_assumption == "unrecorded"
+
+        @test served_product_name("v2.1+sindy20x11+L1A") == "V2.1"
+        @test served_product_name(nothing) == "unknown"
+        app_source = read(joinpath(dirname(APPSRC), "public", "app.js"), String)
+        @test !occursin("Forecast: V2.1", app_source)
+        @test !occursin("Product forecast: V2.1.", app_source)
+        @test occursin("V2.1 core trajectory (display)", app_source)
+    end
+
+    @testset "a cycle whose stack stage healed mid-cycle stays available" begin
+        # The stack is loaded per issuance, so the four horizons of one cycle can legitimately carry
+        # different accepted labels. Refusing such a cycle would blank the dashboard and suppress its
+        # alerts over a per-row degradation that the log discloses, which reads as an all-clear.
+        iss = now(UTC) - Minute(20)
+        mixed = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+                                   served_pred=-95.0, served_lo=-105.0, served_hi=-85.0)
+        mixed.sub_hourly_model_version[2] = PREVIOUS_V2_SERVED_MODEL_VERSION
+        st = build_status(mixed)
+        @test st.available == true
+        # The cycle is reported under the weakest label any of its rows carries.
+        @test st.served_model_version == PREVIOUS_V2_SERVED_MODEL_VERSION
+        @test st.served_product == "V2.1"
+        @test length(st.served_model_versions) == 2
+        @test build_forecast(mixed).served_model_version == PREVIOUS_V2_SERVED_MODEL_VERSION
+        @test build_alerts(mixed, st).threat_level == st.threat.level
+        # A label this build does not know still fails closed, mixed in or not.
+        unknown = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION)
+        unknown.sub_hourly_model_version[3] = CURRENT_V2_SERVED_MODEL_VERSION * "+unpinned"
+        @test build_status(unknown).available == false
+        @test build_forecast(unknown).available == false
+    end
+
+    @testset "verified rows are counted per served pipeline" begin
+        # Verified rows accumulate across served pipelines. Presenting them pooled reports a record
+        # earned by the previous pipeline as the current product's record.
+        now0 = floor(now(UTC), Hour)
+        rows = DataFrame()
+        for (k, label) in enumerate(vcat(fill(PREVIOUS_V2_SERVED_MODEL_VERSION, 5),
+                                        fill(CURRENT_V2_SERVED_MODEL_VERSION, 3)))
+            frame = live_cycle_fixture(now0 - Hour(30 + k);
+                                       served_model=label, observations=-25.0 - k)
+            rows = isempty(rows) ? frame : vcat(rows, frame)
+        end
+        current = live_cycle_fixture(now(UTC) - Minute(20);
+                                    served_model=CURRENT_V2_SERVED_MODEL_VERSION)
+        df = vcat(rows, current; cols=:union)
+        cal = calibration_summary(df)
+        @test cal.current_served_model == CURRENT_V2_SERVED_MODEL_VERSION
+        by_label = Dict(b.served_model_version => b for b in cal.by_served_model)
+        @test length(by_label) == 2
+        @test by_label[PREVIOUS_V2_SERVED_MODEL_VERSION].n == 5 * length(LIVE_CYCLE_HORIZONS)
+        @test by_label[CURRENT_V2_SERVED_MODEL_VERSION].n == 3 * length(LIVE_CYCLE_HORIZONS)
+        @test by_label[CURRENT_V2_SERVED_MODEL_VERSION].product == "V2.2"
+        @test cal.n_verified_current_served_model ==
+              by_label[CURRENT_V2_SERVED_MODEL_VERSION].n
+        @test cal.n_verified_current_served_model < cal.n_verified
+        @test sum(b.n for b in cal.by_served_model) == cal.n_verified
+    end
+
+    @testset "the health endpoint states which product is served" begin
+        # A fresh log that has silently reverted to the previous served pipeline is not a healthy
+        # deployment, so the identity and the trailing fallback rate belong beside the freshness.
+        now0 = floor(now(UTC), Hour)
+        frames = DataFrame[]
+        for k in 1:6
+            label = k == 6 ? PREVIOUS_V2_SERVED_MODEL_VERSION : CURRENT_V2_SERVED_MODEL_VERSION
+            push!(frames, live_cycle_fixture(now0 - Hour(6 - k) - Minute(47);
+                                             served_model=label,
+                                             v2_2_status=k == 6 ? "fallback_v2_1:stack_absent" : "ok"))
+        end
+        df = reduce(vcat, frames)
+        df[!, :v23_status] = fill("ok:e_layer_pending", nrow(df))
+        df[!, :v23_e_layer_applied] = fill(false, nrow(df))
+        df[!, :v23_shadow_model_version] = fill(V2_3_SHADOW_MODEL_VERSION, nrow(df))
+        health = build_served_health(df)
+        @test health.cycles_considered == 6
+        @test health.served_model_version == PREVIOUS_V2_SERVED_MODEL_VERSION
+        @test health.served_product == "V2.1"
+        @test health.served_fallback_cycles == 1
+        @test health.served_fallback_rate == round(1 / 6; digits=4)
+        @test health.newest_cycle_is_fallback == true
+        # The shadow center is available even while its error layer is pending.
+        @test health.shadow_available_rate == 1.0
+        @test health.shadow_e_layer_rate == 0.0
+        @test health.shadow_model_version == V2_3_SHADOW_MODEL_VERSION
+        @test build_served_health(DataFrame()).cycles_considered == 0
+    end
+
+    @testset "health survives a trailing window that spans the shadow-schema change" begin
+        # A build carrying the shadow columns is deployed onto a log that is already being appended
+        # to, so for as long as the trailing window is, that window straddles the schema change and
+        # the earlier cycles carry no shadow columns at all. Those fields read back as `missing`, and
+        # `missing == 1` is three-valued: a predicate written that way makes `any` return `missing`,
+        # the health summary throws, and the endpoint reports no served identity at all during the
+        # first day of the deployment it is supposed to be reporting on.
+        now0 = floor(now(UTC), Hour)
+        legacy = reduce(vcat, [live_cycle_fixture(now0 - Hour(24 - k) - Minute(47);
+                                                  served_model=PREVIOUS_V2_SERVED_MODEL_VERSION)
+                               for k in 1:20])
+        fresh = reduce(vcat, [live_cycle_fixture(now0 - Hour(4 - k) - Minute(47);
+                                                 served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+                                                 v2_2_status="ok")
+                              for k in 1:4])
+        fresh[!, :v23_status] = fill("ok", nrow(fresh))
+        fresh[!, :v23_e_layer_applied] = fill(true, nrow(fresh))
+        fresh[!, :v23_shadow_model_version] = fill(V2_3_SHADOW_MODEL_VERSION, nrow(fresh))
+        df = vcat(legacy, fresh; cols=:union)
+        @test any(ismissing, df.v23_e_layer_applied)          # the schema change is in the window
+        health = build_served_health(df)
+        @test health.cycles_considered == 24
+        @test health.served_model_version == CURRENT_V2_SERVED_MODEL_VERSION
+        @test health.served_product == "V2.2"
+        @test health.served_fallback_cycles == 20
+        @test health.newest_cycle_is_fallback == false
+        @test health.shadow_available_cycles == 4
+        @test health.shadow_e_layer_cycles == 4
+        @test health.shadow_model_version == V2_3_SHADOW_MODEL_VERSION
+
+        # A row with no served label at all is a fallback cycle with no reportable identity, which is
+        # what the endpoint must say; it is not a reason to drop the whole summary.
+        unlabelled = copy(df)
+        unlabelled[!, :sub_hourly_model_version] =
+            Vector{Union{Missing, String}}(unlabelled.sub_hourly_model_version)
+        unlabelled.sub_hourly_model_version[end] = missing
+        blind = build_served_health(unlabelled)
+        @test blind.served_fallback_cycles == 21
+        @test blind.newest_cycle_is_fallback == true
+        @test blind.served_model_version === nothing
+        @test blind.served_product === nothing
+    end
+
+    @testset "a mid-cycle stage change still names the stage the cycle was served by" begin
+        # The four horizons of one cycle can carry different accepted labels and therefore different
+        # driver-assumption tokens. Reading the assumption as a common field of the cycle finds no
+        # single value and reports it as never recorded, which describes a logging failure rather than
+        # the disclosed per-row degradation the log actually recorded. The cycle is published under its
+        # weakest label, so the assumption must be the one that label was written with.
+        iss = now(UTC) - Minute(20)
+        mixed = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+                                   driver_assumption=STACK_DRIVER_TOKEN, v2_2_status="ok")
+        mixed.sub_hourly_model_version[2] = PREVIOUS_V2_SERVED_MODEL_VERSION
+        mixed.driver_assumption[2] = V2_1_DRIVER_TOKEN
+        mixed.v2_2_status[2] = "fallback_v2_1:stack_absent"
+        st = build_status(mixed)
+        @test st.available == true
+        @test st.served_model_version == PREVIOUS_V2_SERVED_MODEL_VERSION
+        @test st.lead_time.driver_assumption != "unrecorded"
+        @test !occursin("static regime stack", st.lead_time.driver_assumption)
+        @test occursin("extreme-Dst inertia guard", st.lead_time.driver_assumption)
+        @test occursin("Ballistically propagated L1 forcing", st.lead_time.driver_assumption)
+
+        # The reverse mix reports the same weakest stage, whichever horizon fell back.
+        other = live_cycle_fixture(iss; served_model=PREVIOUS_V2_SERVED_MODEL_VERSION,
+                                   driver_assumption=V2_1_DRIVER_TOKEN,
+                                   v2_2_status="fallback_v2_1:stack_absent")
+        other.sub_hourly_model_version[4] = CURRENT_V2_SERVED_MODEL_VERSION
+        other.driver_assumption[4] = STACK_DRIVER_TOKEN
+        other.v2_2_status[4] = "ok"
+        @test build_status(other).lead_time.driver_assumption ==
+              st.lead_time.driver_assumption
+
+        # A uniform stacked cycle still reports the stacked sentence.
+        whole = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+                                   driver_assumption=STACK_DRIVER_TOKEN)
+        @test occursin("static regime stack", build_status(whole).lead_time.driver_assumption)
     end
 
     @testset "served pipeline label exposed from sub_hourly_model_version" begin
@@ -1989,17 +2311,25 @@ esac
         @test occursin("A displayed 90% target interval extends to", js)
         @test occursin("interval_lower_edge_min_dst_nt", js)
         @test !occursin("? status.threat.level : 0", js)
-        for label in ("Forecast: V2.1 (", "Verified V2.1", "Product forecast: V2.1.",
-                      "V2.1 RMSE nT", "V2.1 verified forecasts",
+        # The product name is derived from the served label the log recorded, so no hardcoded version
+        # string may remain in the rendering path; the frozen-tail ablation keeps its V2.1 name because
+        # that comparator really is the V2.1 frozen-tail center.
+        for label in ("Forecast: \${productName(st)} (", "Verified issued",
+                      "Product forecast: \${product}.",
+                      "served RMSE nT", "verified forecasts",
+                      "V2.1 core trajectory (display)",
                       "V2.1 frozen-tail ablation", "SINDy v1", "Persistence",
                       "Burton full", "O'Brien–McPherron", "live_skill_mature",
-                      "matched point forecast (n=\${matchedN})", "no best method is highlighted")
+                      "matched point forecast (n=\${matchedN})", "no best method is highlighted",
+                      "by_served_model", "n_verified_current_served_model")
             @test occursin(label, js)
         end
         for retired_label in ("Forecast: V2 (", "name:\"Verified V2\"",
                               "V2 90% coverage", "V2 RMSE nT", "V2 verified",
                               "headline score", "(online, distribution-free)",
-                              "calibrated 90% interval")
+                              "calibrated 90% interval",
+                              "Forecast: V2.1 (", "Product forecast: V2.1.",
+                              "V2.1 RMSE nT", "V2.1 verified forecasts")
             @test !occursin(retired_label, js)
         end
         @test occursin("mature && v != null", js)

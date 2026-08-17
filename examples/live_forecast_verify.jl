@@ -596,6 +596,20 @@ const V2_SERVED_TAIL_VERSION = "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inerti
 const V1_SERVED_TAIL_VERSION = "v1+L1A+Bregime"
 const V2_DRIVER_ASSUMPTION = "ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_inertia_blend_then_state_inertia_then_extreme_inertia_guard"
 const V1_DRIVER_ASSUMPTION = "ballistically_propagated_l1_then_regime_aware_relaxation"
+# Served product: the whole V2.1 operator followed by the fitted static regime stack over the six
+# point components. `V2_SERVED_TAIL_VERSION` remains the label of a row whose stack stage could not
+# act, so the log never claims a stage that did not run.
+const V2_2_SERVED_TAIL_VERSION = V22_SERVED_IDENTITY
+const V2_2_DRIVER_ASSUMPTION = V22_SERVED_DRIVER_ASSUMPTION
+# A staged run may serve weights whose digest is not pinned. The center really is a stack center, so
+# the row keeps the stack driver assumption, but the identity must not claim the fitted stack the
+# published label names: this string is deliberately outside the accepted set of both the dashboard
+# and the readiness audit, so an unpinned configuration fails closed instead of passing as product.
+const V2_2_UNPINNED_SERVED_TAIL_VERSION = V22_SERVED_IDENTITY * "+unpinned"
+# Shadow product: the V2.3 analog-driver-continuation center. Its confirmatory scoring returned
+# NO_GO, so it is recorded beside the served center and never serves or alerts.
+const V2_3_SHADOW_TAIL_VERSION = V23_SERVING_SHADOW_IDENTITY
+const V2_3_SHADOW_DRIVER_ASSUMPTION = V23_SERVING_DRIVER_ASSUMPTION
 
 function _served_driver_assumption(model_version::AbstractString)
     model_version == OPERATIONAL_V2_1_MODEL_VERSION && return V2_DRIVER_ASSUMPTION
@@ -1662,6 +1676,498 @@ function _v2_calibration_features(cal, latest_dst::Real, drivers;
     return NamedTuple{Tuple(cal.feature_names)}(
         Tuple(Float64(getproperty(source, c)) for c in cal.feature_names),
     )
+end
+
+# ---- Served V2.2 static regime stack ---------------------------------------------------------
+# The served point center is the fitted static stack applied to the six point components this engine
+# already computes. The stack stage is the only thing that changes: the V2.1 operator still produces
+# `served_v2_1`, and its value stays in the log so the change is auditable row by row and so the
+# alerting severity can stay depth-safe against it.
+#
+# Loading is fail-closed and cached: an absent, tampered or relabelled weights file leaves the served
+# center at V2.1 and the row carries the V2.1 identity instead of claiming a stack it did not apply.
+
+const V2_2_DEFAULT_STACK_PATH =
+    normpath(joinpath(SOLARSINDY_PACKAGE_ROOT, "deploy", V22_SERVED_STACK_FILE))
+const V2_2_STACK_PATH_ENV = "SOLARSINDY_V2_2_STACK"
+const V2_2_STACK_SHA256_ENV = "SOLARSINDY_V2_2_STACK_SHA256"
+# An explicitly empty digest override removes the only check that ties the weights file to the fitted
+# stack the served identity names; the label check alone passes for any file that copies the label.
+# Serving under that configuration is therefore refused unless the operator states the intent, and
+# even then the row must not claim the pinned identity.
+const V2_2_ALLOW_UNPINNED_STACK_ENV = "SOLARSINDY_ALLOW_UNPINNED_STACK"
+const V2_2_STACK_OK_STATUS = "ok"
+const V2_2_STACK_OK_UNPINNED_STATUS = "ok_unpinned"
+
+# A failed load is remembered so the engine does not re-read a broken file every cycle, but it is
+# remembered for a bounded time: a weights file that is briefly absent during a redeploy must heal
+# without a daemon restart, while a persistently bad one must not be re-read every issuance.
+const V2_2_STACK_RETRY_SECONDS = 300.0
+const V2_3_SHADOW_RETRY_SECONDS = 3600.0
+
+const _V2_2_STACK_CACHE = Ref{Any}(nothing)
+const _V2_2_STACK_CACHE_KEY = Ref{String}("")
+const _V2_2_STACK_STATUS = Ref{String}("")
+const _V2_2_STACK_STATUS_TIME = Ref{Float64}(0.0)
+
+"Path of the served V2.2 stack weights; the environment override exists for tests and staging."
+function _v2_2_stack_path()
+    override = strip(get(ENV, V2_2_STACK_PATH_ENV, ""))
+    return isempty(override) ? V2_2_DEFAULT_STACK_PATH : abspath(String(override))
+end
+
+"Pinned digest the served weights must carry; an empty override removes the pin (see below)."
+_v2_2_stack_sha256() = strip(get(ENV, V2_2_STACK_SHA256_ENV, V22_SERVED_STACK_SHA256))
+
+"True when the operator has explicitly accepted serving weights whose digest is not pinned."
+_v2_2_allow_unpinned_stack() = strip(get(ENV, V2_2_ALLOW_UNPINNED_STACK_ENV, "")) == "1"
+
+"""
+    _v2_2_stack_acted(status) -> Bool
+
+Whether a `v2_2_status` records a stack stage that produced the served center. Both the pinned and
+the staged unpinned load serve a stack center; every other status is a disclosed fallback to the V2.1
+operator. Keeping the predicate in one place is what keeps the served center, the served identity and
+the logged status consistent row by row.
+"""
+_v2_2_stack_acted(status) = status isa AbstractString &&
+    (status == V2_2_STACK_OK_STATUS || status == V2_2_STACK_OK_UNPINNED_STATUS)
+
+"Drop the cached stack so a test (or a redeploy) can switch weights inside one process."
+function reset_v2_2_stack!()
+    _V2_2_STACK_CACHE[] = nothing
+    _V2_2_STACK_CACHE_KEY[] = ""
+    _V2_2_STACK_STATUS[] = ""
+    _V2_2_STACK_STATUS_TIME[] = 0.0
+    return nothing
+end
+
+"""
+    _v2_2_stack()
+
+Cached served V2.2 stack, or `nothing` with a status string when the weights cannot be served. A
+failed load is recorded so the engine does not re-read a broken file every cycle, and the status
+string is what the row's identity is derived from.
+"""
+function _v2_2_stack()
+    path = _v2_2_stack_path()
+    expected = _v2_2_stack_sha256()
+    unpinned = isempty(expected)
+    allow_unpinned = _v2_2_allow_unpinned_stack()
+    key = string(path, "|", expected, "|", allow_unpinned)
+    ok_status = unpinned ? V2_2_STACK_OK_UNPINNED_STATUS : V2_2_STACK_OK_STATUS
+    if _V2_2_STACK_CACHE_KEY[] != key
+        _V2_2_STACK_CACHE[] = nothing
+        _V2_2_STACK_STATUS[] = ""
+        _V2_2_STACK_STATUS_TIME[] = 0.0
+        _V2_2_STACK_CACHE_KEY[] = key
+    end
+    _V2_2_STACK_CACHE[] === nothing || return (stack=_V2_2_STACK_CACHE[], status=ok_status)
+    if !isempty(_V2_2_STACK_STATUS[])
+        time() - _V2_2_STACK_STATUS_TIME[] < V2_2_STACK_RETRY_SECONDS &&
+            return (stack=nothing, status=_V2_2_STACK_STATUS[])
+        _V2_2_STACK_STATUS[] = ""
+    end
+    remember(status) = (_V2_2_STACK_STATUS[] = status;
+                        _V2_2_STACK_STATUS_TIME[] = time();
+                        (stack=nothing, status=status))
+    # Refuse an unpinned configuration outright unless the operator has stated the intent. The label
+    # check alone cannot distinguish the fitted weights from an edited copy that keeps the label, so
+    # an accidental empty digest must not silently serve arbitrary weights under the pinned identity.
+    if unpinned && !allow_unpinned
+        @error(
+            "Served V2.2 stack digest pin is empty; refusing to serve unpinned weights and " *
+            "serving the V2.1 center. Set $(V2_2_ALLOW_UNPINNED_STACK_ENV)=1 only for a staged " *
+            "run, which is served under a separate unpinned identity.",
+            path,
+        )
+        return remember("fallback_v2_1:stack_unpinned")
+    end
+    if !isfile(path)
+        @warn "Served V2.2 stack weights are absent; serving the V2.1 center" path
+        return remember("fallback_v2_1:stack_absent")
+    end
+    try
+        stack = load_v22_serving_stack(path; expect_sha256=String(expected))
+        _V2_2_STACK_CACHE[] = stack
+        unpinned && @warn(
+            "Served V2.2 stack loaded without a digest pin; the row carries the unpinned identity " *
+            "and neither the dashboard nor the readiness audit accepts it as the published product.",
+            path,
+        )
+        return (stack=stack, status=ok_status)
+    catch e
+        e isa InterruptException && rethrow()
+        @error "Served V2.2 stack failed verification; serving the V2.1 center" path exception=(e, catch_backtrace())
+        return remember("fallback_v2_1:stack_invalid")
+    end
+end
+
+"""
+    _v2_2_served_center(; model_steps, latest_dst, features, served_v2_1, frozen_v2_1, baselines)
+
+Served V2.2 point center of the current issue, or a fallback record naming why the stack stage could
+not act. `features` supplies the issue-time rectified coupling and the one-hour Dst rate under the
+same neutral-fallback convention the replay used, so an interior Kyoto-Dst gap keeps the regime at
+its quiet default instead of inventing a deepening regime.
+"""
+function _v2_2_served_center(; model_steps::Integer, latest_dst::Real, features,
+                             served_v2_1::Real, frozen_v2_1, baselines)
+    unavailable(status) = (
+        status=status, center=missing, regime=missing, coupling_active_mvm=missing,
+        used_pooled_fallback=missing,
+    )
+    ismissing(frozen_v2_1) && return unavailable("fallback_v2_1:frozen_center_unavailable")
+    loaded = _v2_2_stack()
+    loaded.stack === nothing && return unavailable(loaded.status)
+    Int(model_steps) in loaded.stack.supported_model_steps ||
+        return unavailable("fallback_v2_1:unsupported_model_step")
+    try
+        result = v22_serving_center(
+            loaded.stack;
+            model_steps=Int(model_steps),
+            latest_dst=Float64(latest_dst),
+            dst_delta_1h_nt=Float64(features.dst_delta_1h_nt),
+            vbsouth_mvm=Float64(features.VBsouth_mvm),
+            served_v2_1=Float64(served_v2_1),
+            frozen_v2_1=Float64(frozen_v2_1),
+            persistence=Float64(baselines.persistence),
+            burton=Float64(baselines.burton),
+            burton_full=Float64(baselines.burton_full),
+            obrien=Float64(baselines.obrien),
+        )
+        isfinite(result.center) || return unavailable("fallback_v2_1:non_finite_center")
+        return (status=loaded.status, center=result.center, regime=String(result.regime),
+                coupling_active_mvm=result.coupling_active_mvm,
+                used_pooled_fallback=result.used_pooled_fallback)
+    catch e
+        e isa InterruptException && rethrow()
+        @error "Served V2.2 stack stage failed; serving the V2.1 center" exception=(e, catch_backtrace())
+        return unavailable("fallback_v2_1:stack_error")
+    end
+end
+
+# ---- V2.3 shadow center: analog driver continuation -------------------------------------------
+# The V2.3 candidate replaced the served relaxation tail with an ensemble of driver continuations
+# copied from the 2010-2019 solar-wind archive, an analog-core refit of the V2.1 ridge correction, a
+# lead-aware blend toward the frozen V2.1 center, and a capped per-step error layer. Its single-shot
+# confirmatory scoring returned NO_GO, so it is logged as a shadow forecast: never served, never used
+# for severity, but computed on the live information set so its live behaviour is observable.
+#
+# The center is formed by `SolarSINDy.v23_serving_*`, the same functions the offline identity oracle
+# drives with hourly archive inputs. The engine supplies only the two genuinely environment-specific
+# inputs: the ballistically propagated hourly driver means and the per-step L1 admission decision.
+
+const V2_3_DEFAULT_SHADOW_DIR =
+    normpath(joinpath(SOLARSINDY_PACKAGE_ROOT, "deploy", "v2_3_shadow"))
+const V2_3_SHADOW_DIR_ENV = "SOLARSINDY_V2_3_SHADOW_DIR"
+const V2_3_SHADOW_STATUS_OK = "ok"
+# The shadow center exists but the per-step error layer could not act because fewer than six matured
+# one-step innovations are on record yet. The row is available (the `ok` prefix is what availability
+# is counted on) and says which stage is still warming up, so an error layer that never engages is
+# visible instead of silently reading as a fully applied candidate.
+const V2_3_SHADOW_STATUS_E_LAYER_PENDING = "ok:e_layer_pending"
+
+const _V2_3_SHADOW_CACHE = Ref{Any}(nothing)
+const _V2_3_SHADOW_CACHE_DIR = Ref{String}("")
+const _V2_3_SHADOW_MANIFEST_SHA256 = Ref{String}("")
+const _V2_3_SHADOW_STATUS = Ref{String}("")
+const _V2_3_SHADOW_STATUS_TIME = Ref{Float64}(0.0)
+# One-hour pre-layer center of the current anchor, computed once per cycle and reused by every issued
+# horizon of that cycle: the four rows of one cycle share an anchor, so recomputing the analog
+# ensemble four times would only repeat work.
+const _V2_3_STEP1_CACHE = Ref{Any}(nothing)
+
+"Directory holding the V2.3 shadow deployment."
+function _v2_3_shadow_dir()
+    override = strip(get(ENV, V2_3_SHADOW_DIR_ENV, ""))
+    return isempty(override) ? V2_3_DEFAULT_SHADOW_DIR : abspath(String(override))
+end
+
+"Drop the cached shadow artifacts so a test (or a redeploy) can switch them inside one process."
+function reset_v2_3_shadow!()
+    _V2_3_SHADOW_CACHE[] = nothing
+    _V2_3_SHADOW_CACHE_DIR[] = ""
+    _V2_3_SHADOW_MANIFEST_SHA256[] = ""
+    _V2_3_SHADOW_STATUS[] = ""
+    _V2_3_SHADOW_STATUS_TIME[] = 0.0
+    _V2_3_STEP1_CACHE[] = nothing
+    return nothing
+end
+
+"""
+Cached, digest-verified V2.3 shadow artifacts, or `nothing` with the reason they are unavailable.
+
+The digest of the deployment's own manifest travels with the artifacts and is logged per row: the
+cache is keyed on the directory alone, and the shadow identity string is fixed at build time, so a
+redeployment of different artifacts into the same directory would otherwise be invisible in the log.
+"""
+function _v2_3_shadow_artifacts()
+    dir = _v2_3_shadow_dir()
+    if _V2_3_SHADOW_CACHE_DIR[] != dir
+        _V2_3_SHADOW_CACHE[] = nothing
+        _V2_3_SHADOW_MANIFEST_SHA256[] = ""
+        _V2_3_SHADOW_STATUS[] = ""
+        _V2_3_SHADOW_STATUS_TIME[] = 0.0
+        _V2_3_STEP1_CACHE[] = nothing
+        _V2_3_SHADOW_CACHE_DIR[] = dir
+    end
+    _V2_3_SHADOW_CACHE[] === nothing || return (artifacts=_V2_3_SHADOW_CACHE[],
+                                                status=V2_3_SHADOW_STATUS_OK,
+                                                manifest_sha256=_V2_3_SHADOW_MANIFEST_SHA256[])
+    if !isempty(_V2_3_SHADOW_STATUS[])
+        # Rebuilding the archive costs a full frame parse, so an unavailable deployment is retried on
+        # a long cool-down rather than on every issuance.
+        time() - _V2_3_SHADOW_STATUS_TIME[] < V2_3_SHADOW_RETRY_SECONDS &&
+            return (artifacts=nothing, status=_V2_3_SHADOW_STATUS[], manifest_sha256="")
+        _V2_3_SHADOW_STATUS[] = ""
+    end
+    remember(status) = (_V2_3_SHADOW_STATUS[] = status;
+                        _V2_3_SHADOW_STATUS_TIME[] = time();
+                        (artifacts=nothing, status=status, manifest_sha256=""))
+    isdir(dir) || return remember("unavailable:deployment_absent")
+    try
+        artifacts = load_v23_serving_artifacts(dir)
+        artifacts.identity == V23_SERVING_IDENTITY || error(
+            "the V2.3 deployment at $dir has identity $(artifacts.identity); the integrated " *
+            "candidate is $(V23_SERVING_IDENTITY)",
+        )
+        digest = v23_serving_file_sha256(joinpath(dir, "manifest.csv"))
+        _V2_3_SHADOW_CACHE[] = artifacts
+        _V2_3_SHADOW_MANIFEST_SHA256[] = digest
+        return (artifacts=artifacts, status=V2_3_SHADOW_STATUS_OK, manifest_sha256=digest)
+    catch e
+        e isa InterruptException && rethrow()
+        @error "V2.3 shadow deployment failed verification; no shadow center will be logged" dir exception=(e, catch_backtrace())
+        return remember("unavailable:deployment_invalid")
+    end
+end
+
+"""
+    _v2_3_driver_history(plasma, mag, latest_dst_time, recent, latest_common_sw; lags)
+
+At-Earth hourly driver means for the records tagged `anchor - 1 … anchor - lags`, built with the same
+ballistic mapping the served L1 look-ahead uses. Record `anchor - j` covers `[anchor - j, anchor - j + 1)`,
+which is the hour `_subhourly_driver_with_status` produces for step time `anchor - j + 1`. An hour with
+no measured L1 coverage is reported as `nothing` rather than as a relaxed or persisted driver, because
+an imputed analog key would silently change which archive origins are retrieved.
+"""
+function _v2_3_driver_history(plasma::DataFrame, mag::DataFrame, latest_dst_time::DateTime,
+                             recent, latest_common_sw::DateTime;
+                             lags::Int=V23_SOUTH_RUN_CAP_H)
+    history = Vector{Any}(undef, lags)
+    for lag in 1:lags
+        status = _subhourly_driver_with_status(
+            plasma, mag, latest_dst_time - Hour(lag - 1), recent, latest_common_sw,
+        )
+        history[lag] = status.l1_measured ? status.driver : nothing
+    end
+    return history
+end
+
+"""
+    _v2_3_step1_centers(log_path) -> Dict{DateTime,Float64}
+
+One-hour pre-layer V2.3 centers on record, keyed by the anchor hour they were computed for.
+
+Every cycle records `v23_step1_center_dst_nt` whether or not one hour is an issued product horizon,
+because the error layer's innovation history is defined at a one-hour model step while the issued
+horizons sit at the anchor lag plus the requested lead. Reading the column instead of filtering the
+log for one-hour rows is what makes the live layer able to engage at all.
+
+An anchor that appears in several cycles (a lagging Kyoto anchor is re-used by consecutive issue
+hours) keeps the most recent center, which is the one computed from the freshest information set.
+"""
+function _v2_3_step1_centers(log_path::AbstractString)
+    centers = Dict{DateTime,Float64}()
+    isfile(log_path) || return centers
+    path = String(log_path)
+    try
+        # Read under the same directory lock the appends take: an unlocked read can observe a torn
+        # append, and a torn row would either throw or contribute a wrong center.
+        return _with_forecast_log_lock(path) do
+            _recover_append_transaction!(path)
+            rows = CSV.Rows(path; strict=true, reusebuffer=true)
+            columns = Set(Symbol.(rows.names))
+            all(in(columns), (:latest_dst_time_utc, :v23_step1_center_dst_nt)) && for row in rows
+                center = getproperty(row, :v23_step1_center_dst_nt)
+                anchor = getproperty(row, :latest_dst_time_utc)
+                (ismissing(center) || ismissing(anchor)) && continue
+                value = _csv_float(center)
+                isfinite(value) || continue
+                centers[_parse_dt(anchor)] = value
+            end
+            return centers
+        end
+    catch e
+        e isa InterruptException && rethrow()
+        @warn "V2.3 one-hour centers unreadable; the shadow error layer keeps the identity" exception=(e, catch_backtrace())
+        return Dict{DateTime,Float64}()
+    end
+end
+
+"""
+    _v2_3_innovation_history(log_path, dst_times, dst_vals) -> Dict{DateTime,Float64}
+
+Matured one-step innovations of the V2.3 shadow center, keyed by the anchor hour they were issued
+from: `Dst(anchor + 1 h)` minus the logged one-hour pre-layer center of that anchor. The error layer
+is defined against the center *before* the layer acts, and the maturity test is the observed Kyoto
+series the issuance already holds, so an innovation enters only once its target hour is observed.
+
+`v23_serving_innovations_from_step1_centers` is the shared definition the offline identity oracle
+uses, so the live chain and the scored chain cannot diverge. An unreadable or schema-older log yields
+an empty history, which makes the layer the identity.
+"""
+function _v2_3_innovation_history(log_path::AbstractString, dst_times, dst_vals)
+    centers = _v2_3_step1_centers(log_path)
+    isempty(centers) && return Dict{DateTime,Float64}()
+    return v23_serving_innovations_from_step1_centers(centers, _dst_lookup(dst_times, dst_vals))
+end
+
+"""Content hash of a numeric named tuple, for use in a cache key.
+
+Both the field names and the field values enter the hash, so two named tuples that carry the same
+numbers under different names are distinct keys."""
+_v2_3_named_float_hash(nt::NamedTuple) = hash((keys(nt), map(Float64, values(nt))))
+
+"""
+    _v2_3_step1_center(artifacts; …) -> Float64
+
+One-hour pre-layer V2.3 center of the current anchor: the lead-aware blend at a one-hour model step,
+before the error layer acts. This is the quantity the candidate's error layer defines its innovation
+history against, and it exists whether or not one hour is an issued product horizon, so it has to be
+computed even when the issued horizons sit at two hours and beyond.
+
+The one-hour baseline panel is taken from the first rollout step, not from the row's target-step
+panel: the scored table's one-hour row carries one-hour baselines, and feeding a seven-hour panel into
+the one-hour correction features would define the innovation against a quantity the candidate was
+never scored on. Cached per anchor because every horizon of a cycle shares it.
+"""
+function _v2_3_step1_center(artifacts; analog_features, anchor_time::DateTime, latest_dst::Real,
+                            anchor_drivers, anchor_dst_star::Real, memory, step1_baselines,
+                            calibration, step_driver)
+    # Every input the one-hour center depends on enters the key, including the analog key itself:
+    # consecutive issue hours can share a lagging Kyoto anchor while a longer L1 history changes the
+    # retrieved analogs, and a cache keyed on the anchor alone would then serve a stale center. The
+    # issue-anchor drivers and the memory features are keyed for the same reason: both are recomputed
+    # from the L1 stream at every issuance and both enter the blend and the correction features, so a
+    # key that omitted them could return a center computed from an older minute of L1 data.
+    cache_key = (artifacts.dir, anchor_time, Float64(latest_dst), Float64(anchor_dst_star),
+                 Float64(step1_baselines.persistence), Float64(step1_baselines.burton),
+                 Float64(step1_baselines.burton_full), Float64(step1_baselines.obrien),
+                 hash(Float64.(collect(analog_features))),
+                 _v2_3_named_float_hash(anchor_drivers), _v2_3_named_float_hash(memory))
+    cached = _V2_3_STEP1_CACHE[]
+    cached !== nothing && cached[1] == cache_key && return cached[2]
+    ensemble = v23_serving_members(
+        artifacts, analog_features; anchor_time=anchor_time, issue_drv=anchor_drivers,
+        anchor_dst_star=Float64(anchor_dst_star), model_steps=1, step_driver=step_driver,
+    )
+    frozen = v23_serving_frozen_center(
+        artifacts; v2_1_calibration=calibration, issue_drv=anchor_drivers,
+        anchor_dst_star=Float64(anchor_dst_star), latest_dst=Float64(latest_dst),
+        memory=memory, baselines=step1_baselines, model_steps=1, anchor_time=anchor_time,
+    )
+    result = v23_serving_center(
+        artifacts; raw_reported=ensemble.raw_reported, latest_dst=Float64(latest_dst),
+        anchor_drivers=anchor_drivers, memory=memory, baselines=step1_baselines,
+        model_steps=1, frozen_v2_1=frozen.center, analog_features=analog_features,
+        anchor_time=anchor_time, innovations=nothing,
+    )
+    _V2_3_STEP1_CACHE[] = (cache_key, result.center)
+    return result.center
+end
+
+"""
+    _v2_3_shadow_center(; …) -> NamedTuple
+
+V2.3 shadow center of the current issue, or a status naming why the analog path could not produce
+one. Every failure is a status, never an exception: the shadow forecast must not be able to interrupt
+an issuance.
+
+The frozen V2.1 center of the lead-aware blend is recomputed here rather than taken from the logged
+`v2_pred_dst_nt`: the scored candidate blends against a rollout that holds the issue driver for every
+step, while the logged column admits L1-measured hours into the core rollout. Using the logged column
+would silently change the blend partner and break the identity with the scored artifact.
+"""
+function _v2_3_shadow_center(; plasma::DataFrame, mag::DataFrame, dst_times, dst_vals,
+                             latest_dst_time::DateTime, latest_dst::Real, anchor_drivers,
+                             anchor_dst_star::Real, recent, latest_common_sw::DateTime,
+                             model_steps::Integer, memory, baselines, step1_baselines,
+                             calibration, log_path::AbstractString)
+    unavailable(status; history_hours=missing) = (
+        status=status, analog_k=missing, raw=missing, center=missing, shadow=missing,
+        e_layer_applied=false, frozen_v2_1=missing, step1_center=missing,
+        history_hours=history_hours, manifest_sha256=missing,
+    )
+    Int(model_steps) in V23_SERVING_MODEL_STEPS ||
+        return unavailable("unavailable:unsupported_model_step")
+    calibration === nothing && return unavailable("unavailable:calibration_absent")
+    loaded = _v2_3_shadow_artifacts()
+    loaded.artifacts === nothing && return unavailable(loaded.status)
+    artifacts = loaded.artifacts
+    manifest_sha256 = loaded.manifest_sha256
+    dst_map = _dst_lookup(dst_times, dst_vals)
+    dst_previous = get(dst_map, latest_dst_time - Hour(1), NaN)
+    driver_hours = missing
+    try
+        history = _v2_3_driver_history(plasma, mag, latest_dst_time, recent, latest_common_sw)
+        # Hourly L1 coverage the analog key could draw on. The key needs its first
+        # `V23_HISTORY_LAGS_H` lags, so a short feed is a fail-closed `missing_driver_lagN`, and this
+        # count is what makes the distance to that boundary visible in the log.
+        driver_hours = count(record -> record !== nothing, history)
+        key = v23_serving_features(artifacts, latest_dst_time, history, latest_dst, dst_previous)
+        key.ok || return unavailable("unavailable:" * key.reason; history_hours=driver_hours)
+        step_driver = function (k::Int, last_known)
+            status = _subhourly_driver_with_status(
+                plasma, mag, latest_dst_time + Hour(k), recent, latest_common_sw,
+            )
+            return (driver=status.l1_measured ? status.driver : last_known,
+                    l1_measured=status.l1_measured)
+        end
+        step1_center = _v2_3_step1_center(
+            artifacts; analog_features=key.features, anchor_time=latest_dst_time,
+            latest_dst=latest_dst, anchor_drivers=anchor_drivers,
+            anchor_dst_star=anchor_dst_star, memory=memory, step1_baselines=step1_baselines,
+            calibration=calibration, step_driver=step_driver,
+        )
+        ensemble = v23_serving_members(
+            artifacts, key.features; anchor_time=latest_dst_time, issue_drv=anchor_drivers,
+            anchor_dst_star=Float64(anchor_dst_star), model_steps=Int(model_steps),
+            step_driver=step_driver,
+        )
+        frozen = v23_serving_frozen_center(
+            artifacts; v2_1_calibration=calibration, issue_drv=anchor_drivers,
+            anchor_dst_star=Float64(anchor_dst_star), latest_dst=Float64(latest_dst),
+            memory=memory, baselines=baselines, model_steps=Int(model_steps),
+            anchor_time=latest_dst_time,
+        )
+        innovation = v23_serving_innovation_lags(
+            latest_dst_time, _v2_3_innovation_history(log_path, dst_times, dst_vals),
+        )
+        center = v23_serving_center(
+            artifacts; raw_reported=ensemble.raw_reported, latest_dst=Float64(latest_dst),
+            anchor_drivers=anchor_drivers, memory=memory, baselines=baselines,
+            model_steps=Int(model_steps), frozen_v2_1=frozen.center,
+            analog_features=key.features, anchor_time=latest_dst_time,
+            innovations=innovation.ok ? innovation.values : nothing,
+        )
+        isfinite(center.final) ||
+            return unavailable("unavailable:non_finite_center"; history_hours=driver_hours)
+        # A step whose selected layer is the identity has nothing to wait for; a step that carries a
+        # fitted layer and could not act is warming up, and the row says so.
+        status = (center.e_layer != "identity" && !center.e_layer_applied) ?
+            V2_3_SHADOW_STATUS_E_LAYER_PENDING : V2_3_SHADOW_STATUS_OK
+        return (status=status, analog_k=ensemble.k, raw=ensemble.raw_reported,
+                center=center.center, shadow=center.final,
+                e_layer_applied=center.e_layer_applied, frozen_v2_1=frozen.center,
+                step1_center=step1_center, history_hours=driver_hours,
+                manifest_sha256=manifest_sha256)
+    catch e
+        e isa InterruptException && rethrow()
+        @error "V2.3 shadow center failed; the row carries no shadow forecast" exception=(e, catch_backtrace())
+        return unavailable("unavailable:shadow_error"; history_hours=driver_hours)
+    end
 end
 
 const _ANCHOR_FEATURE_DRIVER_BASIS = "anchor_aligned_ballistically_propagated_l1_hour"
@@ -3443,6 +3949,11 @@ function issue_forecast(cfg::LiveVerifyConfig;
     # rather than observed solar wind (silent before).
     n_steps_driver_fallback = 0
     step_time = latest_dst_time + Hour(1)
+    # One-hour baseline panel of this anchor, captured on the first rollout step. The V2.3 error
+    # layer's innovation history is defined at a one-hour model step, and its correction features read
+    # the baseline panel, so the one-hour center has to see one-hour baselines rather than the row's
+    # target-step panel.
+    step1_baselines = nothing
     while step_time <= target_time
         step_driver = _subhourly_driver_with_status(
             plasma, mag, step_time, recent, latest_common_sw,
@@ -3465,6 +3976,14 @@ function issue_forecast(cfg::LiveVerifyConfig;
         burton_full_star = baselines.burton_full
         baselines = _advance_baselines(obrien_star, drivers)
         obrien_star = baselines.obrien
+        if step1_baselines === nothing
+            step1_baselines = (
+                persistence=latest_dst,
+                burton=_dst_from_dst_star(burton_star, drivers.Pdyn),
+                burton_full=_dst_from_dst_star(burton_full_star, drivers.Pdyn),
+                obrien=_dst_from_dst_star(obrien_star, drivers.Pdyn),
+            )
+        end
         step_time += Hour(1)
     end
 
@@ -3623,6 +4142,57 @@ function issue_forecast(cfg::LiveVerifyConfig;
     # before its safeguards); v1 and non-finite fallback branches share the
     # same physical output bounds before the interval shift.
     sub_hourly_pred_dst = clamp(sub_hourly_pred_dst, -2000.0, 50.0)
+
+    # ---- Served stage: static V2.2 regime stack over the six point components ----
+    # The V2.1 center computed above is the stack's `served_v2_1` component and stays in the log as
+    # `v2_1_served_pred_dst_nt`, so the served center can be audited against the operator it replaced
+    # and the alerting severity can stay depth-safe against it.
+    v2_1_served_pred_dst = sub_hourly_pred_dst
+    v2_2_served = (status="fallback_v2_1:model_not_v2_1", center=missing, regime=missing,
+                   coupling_active_mvm=missing, used_pooled_fallback=missing)
+    if selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION
+        v2_2_served = _v2_2_served_center(
+            model_steps=model_steps, latest_dst=latest_dst, features=features,
+            served_v2_1=v2_1_served_pred_dst, frozen_v2_1=selected.v2_pred_dst,
+            baselines=baseline_predictions,
+        )
+        if _v2_2_stack_acted(v2_2_served.status)
+            sub_hourly_pred_dst = clamp(Float64(v2_2_served.center), -2000.0, 50.0)
+        end
+    end
+    served_tail_version = if selected.model_version != OPERATIONAL_V2_1_MODEL_VERSION
+        V1_SERVED_TAIL_VERSION
+    elseif v2_2_served.status == V2_2_STACK_OK_STATUS
+        V2_2_SERVED_TAIL_VERSION
+    elseif v2_2_served.status == V2_2_STACK_OK_UNPINNED_STATUS
+        V2_2_UNPINNED_SERVED_TAIL_VERSION
+    else
+        V2_SERVED_TAIL_VERSION
+    end
+    served_driver_assumption = if selected.model_version != OPERATIONAL_V2_1_MODEL_VERSION
+        V1_DRIVER_ASSUMPTION
+    elseif _v2_2_stack_acted(v2_2_served.status)
+        V2_2_DRIVER_ASSUMPTION
+    else
+        V2_DRIVER_ASSUMPTION
+    end
+
+    # ---- Shadow stage: V2.3 analog driver continuation (never served, never alerts) ----
+    v2_3_shadow = (status="unavailable:model_not_v2_1", analog_k=missing, raw=missing,
+                   center=missing, shadow=missing, e_layer_applied=false, frozen_v2_1=missing,
+                   step1_center=missing, history_hours=missing, manifest_sha256=missing)
+    if selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION
+        v2_3_shadow = _v2_3_shadow_center(
+            plasma=plasma, mag=mag, dst_times=dst_times, dst_vals=dst_vals,
+            latest_dst_time=latest_dst_time, latest_dst=latest_dst,
+            anchor_drivers=anchor_drivers, anchor_dst_star=anchor_dst_star, recent=recent,
+            latest_common_sw=latest_common_sw, model_steps=model_steps,
+            memory=memory_features, baselines=baseline_predictions,
+            step1_baselines=step1_baselines, calibration=calibration,
+            log_path=cfg.log_path,
+        )
+    end
+
     sub_hourly_ci05, sub_hourly_ci95 = _shift_interval_to_center(
         sub_hourly_pred_dst,
         reference_pred_dst,
@@ -3663,7 +4233,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
         horizon_hours=[wall_horizon],
         wall_clock_lead_hours=[wall_horizon],
         model_step_hours=[model_steps],
-        driver_assumption=[_served_driver_assumption(selected.model_version)],
+        driver_assumption=[served_driver_assumption],
         driver_data_gap=[driver_data_gap],
         dst_memory_fallback=[dst_memory_fallback],
         n_speed_finite_trailing_hour=[n_speed_finite],
@@ -3724,7 +4294,30 @@ function issue_forecast(cfg::LiveVerifyConfig;
         served_pred_dst_nt=[served_pred_dst],
         served_pred_dst_ci05_nt=[served_ci05_dst],
         served_pred_dst_ci95_nt=[served_ci95_dst],
-        sub_hourly_model_version=[selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION ? V2_SERVED_TAIL_VERSION : V1_SERVED_TAIL_VERSION],
+        # Continuity column: the V2.1 operator's own center, which is the stack's `served_v2_1`
+        # component and the depth-safe partner of the published severity.
+        v2_1_served_pred_dst_nt=[v2_1_served_pred_dst],
+        v2_2_regime=[v2_2_served.regime],
+        v2_2_coupling_active_mvm=[v2_2_served.coupling_active_mvm],
+        v2_2_pooled_fallback=[v2_2_served.used_pooled_fallback],
+        # Per-row served-stage status: `ok` when the stack produced this center, otherwise the exact
+        # reason the row fell back to the V2.1 operator. Without it the reason lives only in the
+        # daemon's console log and the readiness audit can only guess why a row was served by V2.1.
+        v2_2_status=[v2_2_served.status],
+        # Shadow columns: computed on the live information set, never served, never used for severity.
+        v23_shadow_model_version=[V2_3_SHADOW_TAIL_VERSION],
+        v23_manifest_sha256=[v2_3_shadow.manifest_sha256],
+        v23_status=[v2_3_shadow.status],
+        v23_analog_k=[v2_3_shadow.analog_k],
+        v23_history_hours=[v2_3_shadow.history_hours],
+        v23_raw_dst_nt=[v2_3_shadow.raw],
+        v23_center_dst_nt=[v2_3_shadow.center],
+        # One-hour pre-layer center of this anchor, recorded whether or not one hour is an issued
+        # horizon: it is the quantity the error layer's innovation history is defined against.
+        v23_step1_center_dst_nt=[v2_3_shadow.step1_center],
+        v23_shadow_pred_dst_nt=[v2_3_shadow.shadow],
+        v23_e_layer_applied=[v2_3_shadow.e_layer_applied],
+        sub_hourly_model_version=[served_tail_version],
         sub_hourly_pred_dst_nt=[sub_hourly_pred_dst],
         sub_hourly_pred_dst_ci05_nt=[sub_hourly_ci05],
         sub_hourly_pred_dst_ci95_nt=[sub_hourly_ci95],
@@ -3780,8 +4373,19 @@ function issue_forecast(cfg::LiveVerifyConfig;
     verbose && println("Lead time: $(round(wall_horizon; digits=3)) hr wall-clock, $model_steps model steps")
     verbose && println("Forecast Dst*: $(round(result.dst_predicted; digits=2)) nT")
     if verbose && selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION
+        println("Served pipeline: $served_tail_version")
         println(
-            "V2.1 Dst: $(round(served_pred_dst; digits=2)) nT; 90% CI " *
+            "V2.1 operator Dst: $(round(v2_1_served_pred_dst; digits=2)) nT" *
+            (_v2_2_stack_acted(v2_2_served.status) ?
+             "; stack regime=$(v2_2_served.regime)" : "; stack stage=$(v2_2_served.status)")
+        )
+        println(
+            "V2.3 shadow: status=$(v2_3_shadow.status)" *
+            (startswith(String(v2_3_shadow.status), V2_3_SHADOW_STATUS_OK) ?
+             ", Dst=$(round(Float64(v2_3_shadow.shadow); digits=2)) nT, K=$(v2_3_shadow.analog_k), layer=$(v2_3_shadow.e_layer_applied)" : "")
+        )
+        println(
+            "Served Dst: $(round(served_pred_dst; digits=2)) nT; 90% CI " *
             "[$(round(served_ci05_dst; digits=2)), $(round(served_ci95_dst; digits=2))]"
         )
         println(

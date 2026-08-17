@@ -1,0 +1,67 @@
+{
+    "family": "T1r",
+    "k": 25,
+    "e_layers": [
+        {
+            "layer": "E2",
+            "param": "(3, 128)",
+            "gain_nt": 0.11345220487065077
+        },
+        {
+            "layer": "E2",
+            "param": "(3, 128)",
+            "gain_nt": 0.016515321765941948
+        },
+        null,
+        null,
+        {
+            "layer": "E1",
+            "param": "1000.0",
+            "gain_nt": 0.003936446733220578
+        },
+        {
+            "layer": "E1",
+            "param": "1000.0",
+            "gain_nt": 0.005633427799399016
+        }
+    ],
+    "selection_trace_sha256": "7d56e56d369e69aa5ea267ca5107e1fa3c016a205cf14c08ee8072997831d0b0",
+    "selected_config": "T1r_T1_magnetic_K25_Soff",
+    "t1r_calibration_csv": "t1r_fit_all_dev_T1_magnetic_K25.csv",
+    "safeguards": false,
+    "params": {
+        "direct": false,
+        "weight_set": "magnetic",
+        "tail": "T1r",
+        "features": 26,
+        "correction": "refit_on_analog_raw_core",
+        "k": 25,
+        "ridge": 100,
+        "source_config": "T1_magnetic_K25",
+        "crossfit": "leave_one_block_out"
+    },
+    "oof_v2_3_lat_sha256": "8574666b12127d4d2dae9a123163de5e721b442ef425a1ceeadbd40f7c352c8c",
+    "plan": "dev",
+    "model_steps": [
+        1,
+        2,
+        3,
+        4,
+        6,
+        7
+    ],
+    "mean_rmse_steps_2_3_6_nt": 7.305000358797993,
+    "analog_config": "T1_magnetic_K25",
+    "code_sha256": "eb138facfb80a2a7cae443bab4bee55adc3715adeb6f262352ae78c0c709bf36",
+    "base_config": "T1r_T1_magnetic_K25",
+    "base_table_sha256": "9dcbe8f2be5e1dcb1ca314628d9d2f900ae7ec73a129dffc10b3fcfe0d3b700b",
+    "hourly_frame_sha256": "1bff81e2da08134fd06f71d0a2e5bcc830f3cd890cc0cebe7823e7b0c7bc9ac3",
+    "lat_weights": [
+        1,
+        1,
+        1,
+        1,
+        0.75,
+        0.75
+    ]
+}

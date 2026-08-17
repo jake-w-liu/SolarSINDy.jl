@@ -332,3 +332,348 @@ This layer performs no observational fit, skill scoring, live fetch, or
 serving action. Its synthetic verification establishes identity and causality
 mechanics only; it does not establish forecast accuracy or authorize V2.2
 promotion.
+
+## V2.3 integration and the served static-stack promotion
+
+### Development Ledger — served center and shadow center
+
+| Item | Record |
+|---|---|
+| Objective | Promote a served point center that is a fitted, hash-pinned regime stack over the six existing point components, and integrate the V2.3 analog driver continuation as a shadow forecast whose live center is provably the center that was scored. |
+| Contract | The served center is `operational_v22_predict` applied to the six live components, with the regime derived from issue-time state alone and the coupling input the gated proxy; the stack weights must match a pinned digest and fit label or the engine serves the V2.1 center and labels the row with the V2.1 identity. The shadow center is the V2.3 analog candidate: an 18-feature issue-time key, a K = 25 magnetic-weighted retrieval from the 86,968-origin 2010–2019 archive, one frozen-core rollout per member, the analog-core refit of the V2.1 ridge layer with no V2.1 safeguard, a lead-aware blend against a recomputed frozen-tail center, and a per-step error layer capped at 5 + 5h nT. The shadow center never reaches the served columns, the threat level, or an alert. |
+| Evidence | Stack weights `operational_v2_2_primary_sindy60_fit407598`, SHA-256 `66e7347f71f5cdf407e85d4612702bb19c82dcbcd74d8c79526173f839472d7d`. V2.3 artifacts from `validation/output/operational/v2_3_test/artifacts/` (confirmatory decision `NO_GO`, failing gates A1 and A2), the all-DEV T1r calibration, the lead-aware weights, and the causal hourly frame; every shipped file carries its digest in `deploy/v2_3_shadow/manifest.csv`. |
+| Independent oracles | (1) The archived `static_v2_2_dst_nt` column reproduced through the serving function on every scorable DEV/TEST row, with the coupling gate recomputed rather than read back. (2) The scored `V2_3_final` centers reproduced through the serving functions at every model step, with the frozen-tail blend partner recomputed and checked against the archived `frozen_v2_1_dst_nt` column. (3) Hand-rolled member rollouts, hand-computed stack cells, hand-computed lead-aware blends, and an independent restatement of the retrieval ordering in the unit tests. (4) Artifact corruption, missing-digest, wrong-origin-count, drifted-standardisation, and wrong-cap load failures. |
+| Test plan | `test/test_operational_v22_serving.jl` and `test/test_operational_v23_serving.jl` cover the serving contracts against independent expectations; `test/test_live_forecast_verify.jl` covers the issued row end to end, including both disclosed fallbacks; the two identity scripts cover the full-scale reproduction. |
+| Baseline verification | The served row keeps `v2_1_served_pred_dst_nt` (the V2.1 operator's own center) and the frozen-tail `improved_*` columns, so every served center can be audited against the operator it replaced. |
+| Data regeneration trigger | A change to the analog features, retrieval, kernel, correction, blend, or error layer invalidates `deploy/v2_3_shadow/`; rebuild it with `validation/operational/v2_3_build_deploy.jl --from-test` and rerun both identity scripts. |
+| Harness | `julia --project=. -e 'using Pkg; Pkg.test()'`; `julia --project=. examples/experiments.jl`; both identity scripts; the repository development-harness audit. |
+| Risk | The named risks are a component-definition mismatch between the live and archived component panels, an unpinned stack silently serving different weights, a shadow center drifting from the scored artifact, and the error layer's innovation history being taken against the wrong center. |
+
+### Archive membership is shipped, not derived
+
+The analog archive is the set of DEV base-table anchors whose issue-time features
+are complete and whose seven continuation records exist. That set is not a
+function of the shipped hourly frame: an origin is an archive member only if it
+was also a V2.1 calibration anchor, which additionally requires a
+quality-flagged, non-gap-filled L1 driver record at `t-1`. The causal hourly
+frame carries forward-filled drivers and no quality flag, so a frame-only rule
+admits 87,466 origins where the scoring run used 86,968.
+
+The deployment therefore ships the origin identities in `analog_origins.csv` and
+the loader re-derives everything else: it recomputes each origin's features from
+the shipped frame, re-checks the completeness and continuability rules, compares
+the origin count and bounds with the values the scoring run recorded, and
+recomputes the feature standardisation and compares it with the shipped table to
+1e-9. A deployment whose archive is not the scored archive fails at load rather
+than at the first served forecast.
+
+### The lead-aware blend partner is recomputed
+
+The scored candidate blends against a frozen-tail center: the deployed core
+rolled with the issue driver held for every step, corrected by the deployed V2.1
+ridge layer, with no safeguard. The live engine's own `v2_pred_dst_nt` is a
+different quantity — its core rollout admits L1-measured hours and freezes the
+trailing wind hour rather than the issue record beyond them. `v23_serving_frozen_center`
+recomputes the scored definition, and the identity oracle checks that
+recomputation against the archived `frozen_v2_1_dst_nt` column before the blend is
+trusted; the reproduction is exact (max |Δ| = 0 nT over 4,206 scored rows).
+
+### The error layer's innovation history is the pre-layer center
+
+The error layer regresses the observed-minus-forecast residual of the one-step
+center *before* the layer acts. The served log therefore records
+`v23_center_dst_nt`, the center after the correction and the blend, separately
+from `v23_shadow_pred_dst_nt`, the center after the layer. Taking the history
+against the post-layer value would feed the layer its own output and would not
+reproduce the scored centers. The layer is the identity whenever fewer than six
+matured innovations exist, which is the state of a fresh log.
+
+### The live error layer needs a one-hour center that is never an issued horizon
+
+The first live implementation built the history by filtering the log for rows at
+`model_step_hours == 1`. No such row exists in production: the requested wall
+horizons are 1/2/3/6 h and the Kyoto anchor lags the issue hour by one hour, so
+the issued model steps are 2/3/4/7 h. A census of the production hot log found
+148 rows at steps {2, 3, 4, 7} and none at step 1, so `v23_e_layer_applied` was
+false on every row while the shadow identity string still advertised the error
+layer. The logged shadow center was the lead-aware blend, which is a different
+model from the scored candidate.
+
+The chain is now built from a quantity that does not depend on which horizons are
+issued. Every cycle computes and logs `v23_step1_center_dst_nt`, the one-hour
+pre-layer center of its anchor, and the innovation of anchor `a` is
+`Dst(a + 1 h) - v23_step1_center(a)` taken from the observed Kyoto series the
+issuance already holds. Maturity is therefore a property of the observation
+series rather than of a verification pass, and no separate refresh step is needed
+before the layer can engage.
+
+Two details are load-bearing. First, the one-hour center must see the *one-hour*
+baseline panel: its correction features read the baseline panel, and the scored
+table's one-hour row carries one-hour baselines, so the engine captures the panel
+on the first rollout step instead of reusing the row's target-step panel. Second,
+the rule that turns logged centers into innovations lives in
+`v23_serving_innovations_from_step1_centers` and is called by both the engine and
+the offline identity oracle; the oracle asserts that the rule reproduces the
+history it builds from the scored table, which it does on 51,754 anchors with
+max |Δ| = 0 nT.
+
+A step whose selected layer is a fitted model but whose history is incomplete
+records `v23_status = "ok:e_layer_pending"`. The `ok` prefix is what availability
+is counted on, so the row is available while the disclosure stays explicit; a
+step whose selected layer is the identity by construction records plain `ok`.
+Readiness reports the fraction of trailing cycles that applied a layer and warns
+when it is still zero after eight cycles.
+
+### The depth-safe center governs the watch edge, not only the point level
+
+The published threat level is taken on `min(served, v2_1_served)`, so a stack
+that blends toward persistence cannot lower a warning. The watch flag, however,
+was assessed on the served band's lower edge, and the band is shifted onto the
+served center: a shallower stacked center moves the whole band up, so the same
+physics could produce a lower outbound alert level than the previous product did.
+The reproduction was a V2.1 center of -95 nT with a [-105, -85] nT band, which
+raises a watch into the intense tier and an alert level of 3, against a stacked
+center of -88 nT with a [-98, -78] nT band, which raised no watch and an alert
+level of 2.
+
+The edge is now taken on the depth-safe center as well:
+`lb_safe = served_ci05 + min(0, v2_1_served - served)`, which lowers the edge by
+exactly the amount the point was lowered and leaves a deeper stacked center's
+band untouched. The one-sided form matters: a symmetric shift would pull the band
+down for a deeper stacked center and manufacture watches.
+
+The comparison itself has a single definition. `v22_serving_depth_safe_center`
+now lives in `src/serving_depth_safe.jl`, a dependency-free file the package
+includes and the dashboard application includes as well: the application runs in
+its own environment and cannot load the package, and a second copy of the rule in
+the application is exactly how the published severity would drift from the served
+contract. The container image copies that file beside the application sources.
+
+### An unpinned served stack is refused rather than served under the pinned identity
+
+`SOLARSINDY_V2_2_STACK_SHA256` set to an empty string disabled the digest check
+while the label check remained, and the label check passes for any file that
+copies the published label — so an edited weights file was served under the
+pinned identity. The engine now refuses an empty digest override outright: the
+row is served by the V2.1 operator and records
+`v2_2_status = "fallback_v2_1:stack_unpinned"`. A staged run can still exercise
+the path with `SOLARSINDY_ALLOW_UNPINNED_STACK=1`, in which case the stack center
+is served under `V2_2_UNPINNED_SERVED_TAIL_VERSION`, a label that is deliberately
+outside the accepted set of both the dashboard and the readiness audit, so an
+unpinned production configuration fails closed instead of passing as the product.
+
+### Per-row served-stage status and shadow provenance
+
+The shadow stage had a per-row status while the served stage had none, so a
+fallback's reason lived only in the daemon's console log and readiness attributed
+every fallback to unavailable weights even though `stack_error`,
+`non_finite_center` and `unsupported_model_step` produce it too. The row now
+carries `v2_2_status`, and readiness counts it. Three further columns close
+provenance and depth gaps: `v23_manifest_sha256` records the digest of the shadow
+deployment's own manifest, because the artifact cache is keyed on the directory
+and the shadow identity is fixed at build time, so a redeployment into the same
+directory was previously invisible; `v23_history_hours` records how many hourly
+L1 driver means the analog key could draw on, which is the distance to the
+fail-closed `missing_driver_lagN` boundary; and `v23_step1_center_dst_nt` carries
+the one-hour center described above.
+
+The analog key's mandatory depth is seven lags, not twelve — the further five
+lags feed only the consecutive-southward run length and truncate exactly as they
+do at the start of the archive. At a one-hour anchor lag, seven lags reach back to
+the issue hour minus seven, plus the ballistic transit and the hourly averaging
+window: roughly nine and a half hours of upstream minute data. An eight-hour feed
+therefore fails closed with `missing_driver_lagN`, while a ten-hour feed supplies
+the mandatory lags and records a truncated run-length window. This is a
+correction to the earlier estimate that a ten-hour feed would fail the key.
+
+### Deliberate non-changes
+
+Two audit suggestions were not adopted, and the reasons are recorded so they are
+decisions rather than omissions.
+
+`V23_SERVING_REQUIRED_FILES` still lists only the seven files every deployment
+carries. Its documented contract is to be independent of which error layers were
+selected, and the artifact names are configuration-dependent (`e2_step1.bson` and
+`e1_step7.csv` exist only for this candidate), so adding them would make the list
+wrong for any other selection. The loader-side check is strictly stronger: it
+requires a verified digest row for every artifact *any* configuration names.
+
+The served adaptive-conformal residual stream is still keyed on
+`_aci_required_model_version`, which reads the row's `model_version` (`v2.1` for
+every served row) rather than the served label. Re-keying it would change the
+served band numerics of the transition period, and the direction of the current
+mixing is conservative: the pooled band over-covers by at most 1.3 pp. The mixed
+pool is disclosed as a known boundary instead.
+
+### The E-layer artifacts must be in the digest-verified set
+
+`V23_SERVING_REQUIRED_FILES` lists the seven files every deployment carries, but
+the E-layer models are named per step by `e_layers.json` rather than by that
+list, and the loader only checked that the named file existed. A manifest with
+the E-layer digest rows deleted therefore loaded and served those models
+unverified. The loader now requires every artifact named by the configuration to
+appear in the hashed set `v23_serving_verify_manifest` returned, so a trimmed
+manifest is a load error.
+
+### Known fidelity boundary of the served component panel
+
+The served center is the stack applied to the live engine's own six component
+values. Three of those components are constructed differently from the archived
+columns the stack was fitted on: the live core and baseline rollouts admit
+L1-measured hours, and the live frozen tail holds the trailing wind hour rather
+than the issue record. The static-stack identity oracle therefore establishes
+that the stack is *applied* correctly, not that the live component panel equals
+the archived one. This boundary is a property of serving a minute-cadence feed
+with weights fitted on an hourly archive; it is recorded here rather than
+asserted away, and closing it would require either fitting the stack on
+live-definition components or serving archive-definition components.
+
+## V2.3 comparator correction
+
+### What was wrong
+
+The direct-GBM comparator regressed the level `Dst(t+h)`. With the preregistered
+`nbins = 64` the boosted learner bins each feature at its training quantiles, and
+the `dst0` quantile ladder is set by the quiet hours that dominate the archive: its
+lowest boundary sits at −59.0 nT, so one bin holds every issue below that, from
+moderate storms to the deepest anchor in the record. A level fit therefore cannot
+separate a −230 nT issue from a −60 nT issue on the feature that matters most,
+and its deepest attainable prediction is close to the mean of that bin. On the
+2015 development block the archived comparator never predicted below −112.75 nT
+against a deepest observation of −234.0 nT, and it lost to persistence at one
+hour (out-of-fold RMSE 6.895 nT against 4.758 nT).
+
+### The fix
+
+The comparator now regresses the increment `Dst(t+h) - Dst(t)` and the reported
+center is the fitted increment plus the issue-time Dst. The binning limitation is
+unchanged, but it no longer binds the reachable level: the increment is the small,
+well-mixed quantity across the whole archive, and the level enters through the
+anchor that is added back. The preregistered grid is untouched — depth {4, 6},
+rounds {200, 400}, `eta = 0.05`, `min_weight = 64`, `nbins = 64`, fixed seed.
+`v23_direct_target` builds the target, `v23_direct_center` inverts it, and
+`v23_direct_check_anchor` fails closed unless the anchor is exactly the `dst0`
+column of the design matrix, because a persisted model can only be inverted with
+a quantity a loader reads from its own feature vector. The persisted artifact
+contract is unchanged in shape (`direct_gbm_step<h>.bson`) and now records what
+must be added back: `target = increment` and `target_anchor = latest_dst_nt`, in
+the configuration parameters, in the run manifests, and in `e_layers.json`.
+
+On the 2015 block, at identical rows (n = 8,739, no fallback):
+
+| step | comparator (increment) | comparator (archived level) | persistence | served V2.1 |
+|---|---|---|---|---|
+| 1 h | 4.328 | 6.895 | 4.758 | 4.525 |
+| 6 h | 12.024 | 12.519 | 13.552 | 13.330 |
+
+On the disturbed subset of that block (latest Dst ≤ −50 nT, n = 710) the
+increment comparator scores 7.258 nT at one hour against 7.986 nT for
+persistence, and 22.529 nT at six hours against 24.379 nT; its deepest one-hour
+prediction is −236.7 nT against the deepest observation of −234.0 nT. Editing the
+shared runner source changes `v23_code_signature`, so every persisted V2.3
+configuration is already invalidated for resume and no development artifact can
+be mixed across the two formulations.
+
+### The 2026-08-17 confirmatory artifacts predate this correction
+
+The confirmatory run archived on 2026-08-17, its `direct_gbm_step<h>.bson`
+models, its `e_layers.json`, and every TEST comparator number derived from them
+carry the level-target comparator. They are not re-scored by this change and must
+not be read as the corrected comparator; the B2 comparator rows of that run
+understate the comparator on disturbed anchors for the reason above. A corrected
+TEST number requires a fresh confirmatory run under the preregistered
+single-shot rule, and the code-drift guard on the development contract will
+demand a written reason before that run starts.
+
+## Deployment-boundary correctness: a log that spans its own schema change
+
+### Development Ledger — first-day-of-deployment behaviour
+
+| Item | Record |
+|---|---|
+| Objective | The served health endpoint, the readiness fallback and shadow windows, and the newest-cycle label comparison must behave correctly during the window in which the hot log contains both pre-stage and post-stage cycles |
+| Contract | A trailing window may contain cycles issued by an earlier build; those cycles carry `missing` in the columns that build did not write, and they carry the served label that build published |
+| Evidence | The hot log's own schema: the shadow and served-stage columns were appended to a file already being written, so the earlier rows read back as `missing`; the identity writer records an empty shadow digest when no shadow deployment is present |
+| Independent oracles | Fixture logs whose generations are known by construction, and mutation of each fix back to its previous form |
+| Test plan | Two application testsets on two-generation windows; seven audit self-test cases on staged/pre-stage windows, window policy, issue-hour cycle keying, snapshot refresh and the empty identity digest |
+| Data regeneration trigger | None: no served number, artifact or figure changes; the served center, the shadow center and both identity oracles are untouched |
+| Harness | `app/test/runtests.jl`, `test/test_v2_readiness_selftest.jl`, `v2_readiness_audit.jl --self-test`, `test/test_live_forecast_verify.jl`, `test/test_serving_identity_oracles.jl`, `test/test_operational_v23_serving.jl` |
+| Risk | The window policy is a readiness-verdict change and is documented as such; everything else restores intended behaviour |
+
+### Three-valued logic is the failure mode a mixed-generation log creates
+
+`missing == 1` is `missing`, not `false`, and `any` propagates it: a predicate
+written with `==` over a column that a previous build did not write makes `any`
+return `missing`, and the next `&&` raises. In the health summary that raise was
+caught by the endpoint and served as no served block at all, so the deployment's
+first day reported no served identity, no fallback rate and no shadow state —
+exactly the day those fields exist to cover. Every predicate over a log column is
+now written with `isequal` or `isa`, which are two-valued by construction. The
+same rule applies to the served label itself: a row with no label is a fallback
+cycle with no reportable identity, not an exception.
+
+### A cycle is published under one label, so it must be described by that label
+
+The stack stage is loaded per issuance and can heal or fail between the horizons
+of one cycle, so a cycle can legitimately carry more than one accepted label and
+more than one driver-assumption token. Reading the assumption as a common field of
+the cycle then finds no single value and reports it as never recorded, which
+describes a logging failure rather than the disclosed per-row degradation the log
+recorded — and readiness failed the payload for it. The assumption is now read
+from the rows carrying the cycle's weakest served label, which is the label the
+cycle is published under, so the sentence names the stage the reported product was
+actually served by.
+
+### A fallback rate needs a window that can express its target
+
+Two independent problems met in the same check. Cycles issued before the served
+stage existed carry the previous label and no served-stage status; counting them as
+fallbacks made the rate report the age of the log rather than the health of the
+deployment, and for a full window after a deployment onto an existing hot log that
+read as a near-total served-stage failure. And a one-day window cannot resolve a
+one-percent target at all: one fallback out of twenty-four cycles is 4.2 percent,
+so the target could only ever be met by a window containing no fallback, which
+makes any single redeploy a FAIL.
+
+The window now admits only cycles that carry a served-stage status, discloses how
+many older cycles it excluded, and spans four days. The verdict is stated on cycles
+rather than on the rate alone: a fallback on the newest staged cycle fails, because
+that is the cycle being served now, and an over-target rate fails once two or more
+cycles in the window fell back. One isolated older fallback is reported and passes.
+The shadow window follows the same staged-cycle rule, where a staged cycle is one
+that records a shadow status — an unavailable shadow path still counts against
+availability, while a shadow path that did not exist yet does not.
+
+### One definition of the newest cycle
+
+The audit had two. Stage health and the dashboard API key a cycle on its issue
+hour; the newest-cycle check keyed on the newest solar-wind vintage. Under a
+stalled L1 feed those disagree: several hourly issues share one vintage, so the
+vintage-keyed "newest cycle" pools rows from cycles the API never published, and
+the label compared against the payload can belong to a different cycle than the
+one served. The newest cycle is now the last issue-hour group, with the
+vintage-keyed reading kept only as the fallback for a log with no parseable issue
+time. The weakest-label rule lives in one function that both the log check and the
+post-request snapshot call.
+
+### The comparison snapshot is a snapshot
+
+The dashboard comparison re-reads the live log after the API request, because a
+cycle boundary can fall between the two. The newest cycle's served label is part
+of that comparison and is now re-read with the rest of it; a label left over from
+the pre-request read would report a mislabelled product on every boundary the audit
+happened to straddle. When the newest cycle's label is not one this build accepts,
+the stale label is cleared rather than kept, so the payload check warns that no
+comparable cycle was available instead of comparing against a cycle it never served.
+
+### Latent hardening: the shadow one-hour cache key
+
+The one-hour pre-layer center is cached per anchor and reused by every horizon of
+the cycle. Its key now also carries content hashes of the issue-anchor drivers and
+the memory features, both of which are recomputed from the L1 stream at each
+issuance and both of which enter the blend. This is hardening, not an observed
+defect: the analog-feature hash already in the key changes whenever the L1 stream
+advances, so no natural fixture separates the two, and the change is covered
+structurally by the key's arity and the hash helper's sensitivity. The served
+center and both identity oracles are unaffected — the cache belongs to the shadow
+path only.

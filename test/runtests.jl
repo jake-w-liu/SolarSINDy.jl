@@ -853,6 +853,20 @@ using DataFrames
     include("test_temerin_dst_archive_replay.jl")
     include("test_external_dst_snapshot_collector.jl")
     include("test_cli_smoke.jl")
+    include("test_operational_v23_gbm.jl")
+    include("test_v2_3_base_table.jl")
+    include("test_operational_v23_features.jl")
+    include("test_operational_v23_analog.jl")
+    include("test_v2_3_kernel.jl")
+    include("test_operational_v23_stats.jl")
+    include("test_v2_3_runners.jl")
+    include("test_v2_3_t1r.jl")
+    include("test_v2_3_select.jl")
+    include("test_v2_3_confirmatory.jl")
+    include("test_operational_v22_serving.jl")
+    include("test_operational_v23_serving.jl")
+    include("test_serving_identity_oracles.jl")
+    include("test_v2_readiness_selftest.jl")
 
     # Bundled operational dashboard (app/): golden-vector forecaster<->export contract,
     # traversal guard, physical regimes. Network-free (local models + mocks).

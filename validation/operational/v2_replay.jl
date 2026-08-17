@@ -31,6 +31,38 @@ function _extreme_inertia_guard(latest_dst::Real, h::Int;
     return isfinite(latest) && 0 < h <= max_h && latest <= Float64(threshold)
 end
 
+"""
+    _v2_admitted_driver(future, k, kΔ, last_known)
+
+L1 admission for a rollout step inside the issue-time transit window (k ≤ kΔ). `future(k)` returns
+the arrival-hour record tagged it+k-1 (the row covering at-Earth interval [it+k-1, it+k)). It is
+admitted only when that whole hour is L1-measured by issue time: the issue-time transit gate
+(k ≤ kΔ, enforced by the caller) AND the admitted record's own speed (k ≤ transit(fut.V)) guard
+against intra-hour acceleration (a shock arriving into slow wind). Otherwise the last known driver
+persists (freeze), exactly as for a missing in-window record.
+
+This is the single admission code path shared by the served V2.1 tail (`_v2_forecast`) and the
+V2.3 analog-ensemble kernel, so a candidate tail can differ from the product only after the
+L1-known window ends.
+"""
+@inline function _v2_admitted_driver(future, k::Int, kΔ::Int, last_known)
+    fut = future(k)
+    return (fut !== nothing && k <= _transit_hours(fut.V)) ? fut : last_known
+end
+
+"""
+    _v2_relaxed_tail_driver(last_known, k, kΔ, tau)
+
+Served V2.1 tail driver for a rollout step beyond the L1-known window: the magnetic components of
+the last admitted driver decay with the regime-aware timescale `tau` while speed and density are
+held. `tau = Inf` reproduces the frozen-tail ablation.
+"""
+@inline function _v2_relaxed_tail_driver(last_known, k::Int, kΔ::Int, tau)
+    relax = exp(-(k - kΔ) / tau)
+    return (V = last_known.V, Bz = last_known.Bz * relax, By = last_known.By * relax,
+            n = last_known.n, Pdyn = last_known.Pdyn)
+end
+
 "h-step operational forecast: A for k≤⌊Δ⌋, then REGIME-AWARE B relaxation of the last L1-known driver (τ longer
 when actively deepening). `rate` = recent dDst/dt at issue. force_frozen keeps the issue-time driver fixed."
 function _v2_forecast(lib, ξ0, anchor_dst_star, issue_drv, future, latest_dst, cal, h::Int, rate;
@@ -50,18 +82,10 @@ function _v2_forecast(lib, ξ0, anchor_dst_star, issue_drv, future, latest_dst, 
     fc = init_assimilation(lib, ξ0, Int[], anchor_dst_star)
     for k in 1:h
         if k <= kΔ
-            # `future(k)` returns the arrival-hour record tagged it+k-1 (the row covering at-Earth
-            # interval [it+k-1, it+k)). Admit it only when that whole hour is L1-measured by issue time:
-            # the issue-time transit gate (k<=kΔ) AND the admitted record's own speed (k<=transit(fut.V))
-            # guard against intra-hour acceleration (a shock arriving into slow wind). Otherwise persist
-            # the last known driver (freeze), exactly as for a missing in-window record.
-            fut = future(k)
-            drv_k = (fut !== nothing && k <= _transit_hours(fut.V)) ? fut : last_known
+            drv_k = _v2_admitted_driver(future, k, kΔ, last_known)
             last_known = drv_k
         else
-            relax = exp(-(k - kΔ) / tau)
-            drv_k = (V = last_known.V, Bz = last_known.Bz * relax, By = last_known.By * relax,
-                     n = last_known.n, Pdyn = last_known.Pdyn)
+            drv_k = _v2_relaxed_tail_driver(last_known, k, kΔ, tau)
         end
         final_drv = drv_k
         assimilation_predict!(fc, drv_k)

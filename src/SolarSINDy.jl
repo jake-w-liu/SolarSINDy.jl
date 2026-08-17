@@ -41,6 +41,12 @@ include("assimilation.jl")
 include("alarm.jl")
 include("realtime.jl")
 include("monitor.jl")
+include("operational_v23_features.jl")
+include("operational_v23_analog.jl")
+include("operational_v23_gbm.jl")
+include("operational_v22_serving.jl")
+include("operational_v23_stats.jl")
+include("operational_v23_serving.jl")
 
 export # Utils
        numerical_derivative, smooth_moving_average, pressure_correct_dst,
@@ -241,6 +247,45 @@ export # Utils
        fetch_swpc_plasma, fetch_swpc_mag, fetch_swpc_dst, fetch_realtime_solar_wind,
        recover_shadow_state, feed_deadman_tripped, DEFAULT_FEED_DEADMAN_THRESHOLD,
        # Monitor
-       run_monitor
+       run_monitor,
+       # Operational V2.3 analog-driver-continuation features
+       V23_FEATURE_NAMES, V23_FEATURE_COUNT, V23_HISTORY_LAGS_H,
+       V23_SOUTH_RUN_CAP_H, V23_MAGNETIC_WEIGHT_FEATURES, V23_WEIGHTS,
+       v23_weights, v23_feature_index, v23_feature_matrix,
+       v23_feature_stats, v23_standardize,
+       # Operational V2.3 analog retrieval and driver continuation
+       V23_ANALOG_EXCLUSION_HOURS, V23_ANALOG_MAX_STEP, V23_KNN_BLOCK,
+       V23_MEMBER_MIN_V_KMS, V23_MEMBER_MIN_N_CM3, V23_MEMBER_MAX_N_CM3,
+       v23_knn, v23_analog_origin_ok, v23_member_driver, v23_analog_member,
+       # Operational V2.3 boosted models (GDC, direct-GBM comparator, E2)
+       V23_GBM_EVOTREES_VERSION, V23_GBM_DEFAULT_SEED,
+       V23_DIRECT_DST_LAG_HOURS, V23_DIRECT_VBS_LAG_STEPS,
+       V23_DIRECT_EXTRA_FEATURE_NAMES, V23_DIRECT_FEATURE_COUNT,
+       v23_fit_gbm, v23_predict, v23_save, v23_load,
+       v23_direct_extra_features, v23_direct_feature_names,
+       v23_direct_features, v23_gdc_targets,
+       # Operational V2.3 confirmatory inference primitives
+       V23_BOOTSTRAP_BLOCK_HOURS, V23_BOOTSTRAP_REPLICATES, V23_BOOTSTRAP_SEED,
+       V23_BOOTSTRAP_ALPHA, V23_BOOTSTRAP_EPOCH, V23_CELL_LABELS,
+       V23_CELL_DEEP_DST_NT, V23_CELL_INTENSE_DST_NT, V23_CELL_INTENSE_RATE_NT_PER_H,
+       v23_block_bootstrap, v23_holm, v23_regime_cells,
+       # Operational V2.2 static-stack served product
+       V22_SERVED_STACK_LABEL, V22_SERVED_STACK_SHA256, V22_SERVED_STACK_FILE,
+       V22_SERVED_STACK_MANIFEST, V22_SERVED_IDENTITY, V22_SERVED_DRIVER_ASSUMPTION,
+       v22_serving_coupling_active, v22_serving_stack_sha256, v22_serving_stack_manifest_rows,
+       load_v22_serving_stack, v22_serving_center, v22_serving_depth_safe_center,
+       V22_SERVING_DEPTH_SAFE_FILE,
+       # Operational V2.3 shadow product
+       V23_SERVING_MODEL_STEPS, V23_SERVING_STEP_SLOT, V23_SERVING_IDENTITY,
+       V23_SERVING_SHADOW_IDENTITY, v23_serving_identity,
+       V23_SERVING_DRIVER_ASSUMPTION, V23_SERVING_E_INNOVATION_LAGS,
+       V23_SERVING_E_FEATURE_NAMES, V23_SERVING_STATS_ATOL, V23_SERVING_REQUIRED_FILES,
+       V23ServingArtifacts, V23ServingELayer, V23ServingRidge,
+       v23_serving_e_cap, v23_serving_transit_hours, v23_serving_file_sha256,
+       v23_serving_verify_manifest, v23_serving_frame_lookup, load_v23_serving_artifacts,
+       v23_serving_features, v23_serving_step_driver_from_frame, v23_serving_members,
+       v23_serving_calibration_features, v23_serving_t1r_features,
+       v23_serving_frozen_center, v23_serving_innovation_lags, v23_serving_center,
+       v23_serving_manifest_hashed_names, v23_serving_innovations_from_step1_centers
 
 end # module

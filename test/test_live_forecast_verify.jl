@@ -440,6 +440,464 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         end
     end
 
+    @testset "Served static stack and V2.3 shadow columns" begin
+        # Synthetic feed with a full day of minute-cadence L1 coverage: enough history for the twelve
+        # driver lags the analog key can consume, and enough forward coverage that the served tail
+        # exercises both the measured and the relaxed branch.
+        issue_time = DateTime(2026, 7, 15, 12, 30)
+        sw_times = collect((issue_time - Hour(24)):Minute(1):issue_time)
+        plasma = DataFrame(
+            time_tag=sw_times,
+            speed=[470.0 + 20.0 * sin(2π * k / 613) for k in eachindex(sw_times)],
+            density=[6.0 + 0.8 * sin(2π * k / 421) for k in eachindex(sw_times)],
+        )
+        mag = DataFrame(
+            time_tag=sw_times,
+            bz_gsm=[-6.0 + 3.0 * sin(2π * k / 517) for k in eachindex(sw_times)],
+            by_gsm=[1.5 * cos(2π * k / 379) for k in eachindex(sw_times)],
+        )
+        latest_dst_time = _floor_hour(issue_time) - Hour(1)
+        dst_times = collect((latest_dst_time - Hour(24)):Hour(1):latest_dst_time)
+        dst_values = collect(range(-30.0, -78.0; length=length(dst_times)))
+
+        function _issue_row(dir::AbstractString, name::AbstractString)
+            cfg = LiveVerifyConfig(;
+                model=:v2,
+                horizon_hours=6,
+                log_path=joinpath(dir, "$(name).csv"),
+                report_path=joinpath(dir, "$(name).md"),
+            )
+            inputs = prepare_issue_inputs(
+                cfg; issue_time,
+                plasma_fn=() -> plasma, mag_fn=() -> mag,
+                dst_fn=() -> (dst_times, dst_values),
+            )
+            redirect_stdout(devnull) do
+                issue_forecast(cfg; inputs, write_trajectory=false, verbose=false)
+            end
+            return CSV.read(cfg.log_path, DataFrame)[1, :]
+        end
+
+        @testset "stack stage serves the published identity" begin
+            mktempdir() do dir
+                # The shadow deployment is deliberately pointed away so this case isolates the served
+                # stage; the shadow path is exercised separately below.
+                row = withenv("SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent")) do
+                    reset_v2_2_stack!(); reset_v2_3_shadow!()
+                    _issue_row(dir, "served_stack")
+                end
+                reset_v2_3_shadow!()
+                @test row.model_version == "v2.1"
+                @test row.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
+                @test row.sub_hourly_model_version ==
+                      "v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)"
+                @test row.driver_assumption == V2_2_DRIVER_ASSUMPTION
+                @test row.v2_2_regime in ("quiet", "active_deepening", "recovery")
+                @test isfinite(row.v2_1_served_pred_dst_nt)
+                @test row.v2_2_pooled_fallback == false
+                # Independent recomputation: the served center is the stack cell applied to the six
+                # logged components, then projected.
+                stack = load_v22_serving_stack(V2_2_DEFAULT_STACK_PATH)
+                expected = v22_serving_center(
+                    stack; model_steps=Int(row.model_step_hours),
+                    latest_dst=Float64(row.latest_dst_nt),
+                    dst_delta_1h_nt=Float64(row.dst_delta_1h_nt),
+                    vbsouth_mvm=Float64(row.VBsouth_mvm),
+                    served_v2_1=Float64(row.v2_1_served_pred_dst_nt),
+                    frozen_v2_1=Float64(row.v2_pred_dst_nt),
+                    persistence=Float64(row.persistence_dst_nt),
+                    burton=Float64(row.burton_dst_nt),
+                    burton_full=Float64(row.burton_full_dst_nt),
+                    obrien=Float64(row.obrien_dst_nt),
+                )
+                @test Float64(row.served_pred_dst_nt) ≈ expected.center atol=1e-12
+                @test String(row.v2_2_regime) == String(expected.regime)
+                @test Float64(row.v2_2_coupling_active_mvm) == expected.coupling_active_mvm
+                # The coupling gate must be the archived gate, not the raw coupling.
+                @test Float64(row.v2_2_coupling_active_mvm) == v22_serving_coupling_active(
+                    Float64(row.VBsouth_mvm), Float64(row.dst_delta_1h_nt))
+                # The served band is shifted onto the served center, so the center stays inside it.
+                @test row.served_pred_dst_ci05_nt <= row.served_pred_dst_nt <=
+                      row.served_pred_dst_ci95_nt
+                # The shadow columns exist and disclose why no shadow center was produced.
+                @test row.v23_shadow_model_version == V2_3_SHADOW_TAIL_VERSION
+                @test startswith(String(row.v23_status), "unavailable:")
+                @test ismissing(row.v23_shadow_pred_dst_nt)
+                @test ismissing(row.v23_raw_dst_nt)
+                @test row.v23_e_layer_applied == false
+            end
+        end
+
+        @testset "artifact caches retry on a bounded cool-down" begin
+            # A weights file that is briefly absent during a redeploy must heal without a daemon
+            # restart, so the remembered failure has to expire.
+            @test V2_2_STACK_RETRY_SECONDS > 0.0
+            @test V2_3_SHADOW_RETRY_SECONDS >= V2_2_STACK_RETRY_SECONDS
+            mktempdir() do dir
+                staged = joinpath(dir, "operational_v2_2_stack.csv")
+                withenv("SOLARSINDY_V2_2_STACK" => staged) do
+                    reset_v2_2_stack!()
+                    absent = redirect_stderr(devnull) do
+                        _v2_2_stack()
+                    end
+                    @test absent.stack === nothing
+                    @test absent.status == "fallback_v2_1:stack_absent"
+                    cp(V2_2_DEFAULT_STACK_PATH, staged)
+                    # Inside the cool-down the remembered failure is reused, so the file is not re-read.
+                    @test _v2_2_stack().stack === nothing
+                    # Expiring the cool-down lets the now-present file load.
+                    _V2_2_STACK_STATUS_TIME[] -= 2 * V2_2_STACK_RETRY_SECONDS
+                    healed = _v2_2_stack()
+                    @test healed.status == "ok"
+                    @test healed.stack.label == V22_SERVED_STACK_LABEL
+                end
+                reset_v2_2_stack!()
+            end
+        end
+
+        @testset "absent stack weights fall back to the V2.1 center and say so" begin
+            mktempdir() do dir
+                row = withenv("SOLARSINDY_V2_2_STACK" => joinpath(dir, "no_such_stack.csv"),
+                              "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent")) do
+                    reset_v2_2_stack!(); reset_v2_3_shadow!()
+                    _issue_row(dir, "stack_absent")
+                end
+                reset_v2_2_stack!(); reset_v2_3_shadow!()
+                @test row.sub_hourly_model_version == V2_SERVED_TAIL_VERSION
+                @test row.driver_assumption == V2_DRIVER_ASSUMPTION
+                @test Float64(row.served_pred_dst_nt) == Float64(row.v2_1_served_pred_dst_nt)
+                @test ismissing(row.v2_2_regime)
+            end
+        end
+
+        @testset "tampered stack weights fall back rather than serve unpinned weights" begin
+            mktempdir() do dir
+                tampered = joinpath(dir, "operational_v2_2_stack.csv")
+                cp(V2_2_DEFAULT_STACK_PATH, tampered)
+                open(tampered, "a") do io
+                    write(io, "\n")
+                end
+                row = withenv("SOLARSINDY_V2_2_STACK" => tampered,
+                              "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent")) do
+                    reset_v2_2_stack!(); reset_v2_3_shadow!()
+                    redirect_stderr(devnull) do
+                        _issue_row(dir, "stack_tampered")
+                    end
+                end
+                reset_v2_2_stack!(); reset_v2_3_shadow!()
+                @test row.sub_hourly_model_version == V2_SERVED_TAIL_VERSION
+                @test Float64(row.served_pred_dst_nt) == Float64(row.v2_1_served_pred_dst_nt)
+            end
+        end
+
+        @testset "shadow center is logged and never served" begin
+            shadow_dir = normpath(joinpath(@__DIR__, "..", "deploy", "v2_3_shadow"))
+            if !isdir(shadow_dir)
+                @test_skip "deploy/v2_3_shadow is absent; run validation/operational/v2_3_build_deploy.jl"
+            else
+                mktempdir() do dir
+                    row = withenv("SOLARSINDY_V2_3_SHADOW_DIR" => shadow_dir) do
+                        reset_v2_2_stack!(); reset_v2_3_shadow!()
+                        _issue_row(dir, "shadow_ok")
+                    end
+                    # The one-hour pre-layer center is cached per anchor and reused by every horizon of
+                    # the cycle, so its key must carry every input the center depends on. The
+                    # issue-anchor drivers and the memory features are both recomputed from the L1
+                    # stream at each issuance and both enter the blend, so the key is read here before
+                    # the reset drops it.
+                    step1_key = _V2_3_STEP1_CACHE[] === nothing ? nothing : _V2_3_STEP1_CACHE[][1]
+                    reset_v2_3_shadow!()
+                    @test step1_key !== nothing
+                    @test length(step1_key) == 11
+                    @test step1_key[end - 1] isa UInt          # issue-anchor drivers
+                    @test step1_key[end] isa UInt              # memory features
+                    # The key entries are content hashes: different values, and the same values under
+                    # different names, are different keys; integer and float spellings are not.
+                    @test _v2_3_named_float_hash((V = 400.0, Bz = -5.0)) !=
+                          _v2_3_named_float_hash((V = 400.0, Bz = -5.5))
+                    @test _v2_3_named_float_hash((V = 400.0, Bz = -5.0)) !=
+                          _v2_3_named_float_hash((Bz = 400.0, V = -5.0))
+                    @test _v2_3_named_float_hash((V = 400, Bz = -5)) ==
+                          _v2_3_named_float_hash((V = 400.0, Bz = -5.0))
+                    # The step-7 layer is a fitted ridge, and a fresh log has no matured one-hour
+                    # innovation, so the row is available and says the layer is still pending.
+                    @test row.v23_status == V2_3_SHADOW_STATUS_E_LAYER_PENDING
+                    @test row.v23_analog_k == 25
+                    @test isfinite(row.v23_raw_dst_nt)
+                    @test isfinite(row.v23_center_dst_nt)
+                    @test isfinite(row.v23_shadow_pred_dst_nt)
+                    @test row.v23_shadow_model_version == V2_3_SHADOW_TAIL_VERSION
+                    # A fresh log has no matured one-step innovation, so the error layer must be the
+                    # identity and the shadow center must equal the pre-layer center.
+                    @test row.v23_e_layer_applied == false
+                    @test Float64(row.v23_shadow_pred_dst_nt) ==
+                          Float64(row.v23_center_dst_nt)
+                    # The shadow forecast must not reach the served center or the served label.
+                    @test row.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
+                    @test Float64(row.served_pred_dst_nt) != Float64(row.v23_shadow_pred_dst_nt)
+                    # The one-hour pre-layer center is recorded even though one hour is not an issued
+                    # horizon of this row: it is the quantity the error layer's history is defined on.
+                    @test isfinite(row.v23_step1_center_dst_nt)
+                    @test Float64(row.v23_step1_center_dst_nt) != Float64(row.v23_center_dst_nt)
+                    # Hourly L1 coverage the analog key drew on, and the shipped manifest digest, so a
+                    # short feed and a silent redeploy are both visible in the row.
+                    @test Int(row.v23_history_hours) == V23_SOUTH_RUN_CAP_H
+                    @test String(row.v23_manifest_sha256) ==
+                          v23_serving_file_sha256(joinpath(shadow_dir, "manifest.csv"))
+                    # A fresh log holds one anchor and no matured one-hour target, so the history is
+                    # empty and the step's fitted layer is still pending.
+                    @test isempty(_v2_3_innovation_history(joinpath(dir, "shadow_ok.csv"),
+                                                          dst_times, dst_values))
+                    @test row.v23_status == V2_3_SHADOW_STATUS_E_LAYER_PENDING
+                    @test startswith(String(row.v23_status), V2_3_SHADOW_STATUS_OK)
+                    # The one-hour centers are keyed by anchor and read back from the log.
+                    centers = _v2_3_step1_centers(joinpath(dir, "shadow_ok.csv"))
+                    @test collect(keys(centers)) == [latest_dst_time]
+                    @test centers[latest_dst_time] == Float64(row.v23_step1_center_dst_nt)
+                end
+            end
+        end
+
+        @testset "the live error layer engages once six one-hour innovations mature" begin
+            # This is the chain the deployed candidate's error layer needs. Production issues wall
+            # horizons 1/2/3/6 at an anchor lag of one hour, so its model steps are 2/3/4/7 and no
+            # logged row ever carries a one-hour step: an error layer keyed on one-hour *rows* can
+            # never engage. Eight consecutive anchors are issued here so the sixth-lag block of the
+            # last anchor is complete, and the steps that carry a fitted layer must then apply it while
+            # the steps whose selected layer is the identity must not.
+            #
+            # Maturity comes from the observed Dst series the issuance already holds, not from a
+            # verification pass, so the cycles are issue-only.
+            shadow_dir = normpath(joinpath(@__DIR__, "..", "deploy", "v2_3_shadow"))
+            if !isdir(shadow_dir)
+                @test_skip "deploy/v2_3_shadow is absent; run validation/operational/v2_3_build_deploy.jl"
+            else
+                mktempdir() do dir
+                    log_path = joinpath(dir, "chain.csv")
+                    base_issue = DateTime(2026, 7, 15, 6, 30)
+                    # Deterministic, smooth, storm-scale Dst so consecutive anchors share values at
+                    # overlapping hours and the innovations are neither constant nor degenerate.
+                    dst_at(t) = -35.0 - 25.0 * sin(2π * (Dates.value(t - DateTime(2026, 1, 1)) /
+                                                         3_600_000) / 29)
+                    feed_start = base_issue - Hour(40)
+                    feed_stop = base_issue + Hour(12)
+                    all_sw = collect(feed_start:Minute(1):feed_stop)
+                    full_plasma = DataFrame(
+                        time_tag=all_sw,
+                        speed=[470.0 + 25.0 * sin(2π * k / 613) for k in eachindex(all_sw)],
+                        density=[6.0 + 0.9 * sin(2π * k / 421) for k in eachindex(all_sw)],
+                    )
+                    full_mag = DataFrame(
+                        time_tag=all_sw,
+                        bz_gsm=[-6.0 + 3.0 * sin(2π * k / 517) for k in eachindex(all_sw)],
+                        by_gsm=[1.5 * cos(2π * k / 379) for k in eachindex(all_sw)],
+                    )
+                    reset_v2_2_stack!(); reset_v2_3_shadow!()
+                    anchors = DateTime[]
+                    withenv("SOLARSINDY_V2_3_SHADOW_DIR" => shadow_dir) do
+                        for cycle in 1:8
+                            issue = base_issue + Hour(cycle - 1)
+                            anchor = _floor_hour(issue) - Hour(1)
+                            push!(anchors, anchor)
+                            # Truncating the feed per cycle keeps each issuance causal: a later cycle's
+                            # upstream wind must not be visible to an earlier one.
+                            cycle_plasma = full_plasma[full_plasma.time_tag .<= issue, :]
+                            cycle_mag = full_mag[full_mag.time_tag .<= issue, :]
+                            cycle_dst_times = collect((anchor - Hour(24)):Hour(1):anchor)
+                            cycle_dst_values = dst_at.(cycle_dst_times)
+                            # The warm-up cycles only need to record their anchor's one-hour center;
+                            # the final cycle issues the full requested horizon set.
+                            horizons = cycle == 8 ? [1, 2, 3, 6] : [6]
+                            for h in horizons
+                                cfg = LiveVerifyConfig(;
+                                    model=:v2, horizon_hours=h, log_path=log_path,
+                                    report_path=joinpath(dir, "chain.md"),
+                                )
+                                inputs = prepare_issue_inputs(
+                                    cfg; issue_time=issue,
+                                    plasma_fn=() -> cycle_plasma, mag_fn=() -> cycle_mag,
+                                    dst_fn=() -> (cycle_dst_times, cycle_dst_values),
+                                )
+                                redirect_stdout(devnull) do
+                                    issue_forecast(cfg; inputs, write_trajectory=false,
+                                                   verbose=false)
+                                end
+                            end
+                        end
+                    end
+                    reset_v2_3_shadow!()
+                    log = CSV.read(log_path, DataFrame)
+                    @test nrow(log) == 7 + 4
+
+                    # The chain the layer consumes: one center per anchor, and six matured innovations
+                    # at the final anchor.
+                    final_anchor = last(anchors)
+                    final_dst_times = collect((final_anchor - Hour(24)):Hour(1):final_anchor)
+                    centers = _v2_3_step1_centers(log_path)
+                    @test length(centers) == 8
+                    @test all(a -> haskey(centers, a), anchors)
+                    history = _v2_3_innovation_history(log_path, final_dst_times,
+                                                       dst_at.(final_dst_times))
+                    block = v23_serving_innovation_lags(final_anchor, history)
+                    @test block.ok
+                    @test length(unique(block.values)) > 1
+                    # Independent recomputation of one lag from its two logged ingredients.
+                    lag1 = final_anchor - Hour(1)
+                    @test history[lag1] ≈ dst_at(lag1 + Hour(1)) - centers[lag1] atol=0
+
+                    logged_anchor = _parse_dt.(string.(log.latest_dst_time_utc))
+                    final = log[logged_anchor .== final_anchor, :]
+                    @test nrow(final) == 4
+                    by_step = Dict(Int(r.model_step_hours) => r for r in eachrow(final))
+                    @test sort(collect(keys(by_step))) == [2, 3, 4, 7]
+                    # Steps 2 and 7 carry a fitted layer; steps 3 and 4 are the identity by selection.
+                    for step in (2, 7)
+                        @test by_step[step].v23_e_layer_applied == true
+                        @test by_step[step].v23_status == "ok"
+                        @test Float64(by_step[step].v23_shadow_pred_dst_nt) !=
+                              Float64(by_step[step].v23_center_dst_nt)
+                    end
+                    for step in (3, 4)
+                        @test by_step[step].v23_e_layer_applied == false
+                        @test by_step[step].v23_status == "ok"
+                        @test Float64(by_step[step].v23_shadow_pred_dst_nt) ==
+                              Float64(by_step[step].v23_center_dst_nt)
+                    end
+                    # Every row of the cycle shares one anchor, hence one one-hour center.
+                    @test length(unique(Float64.(final.v23_step1_center_dst_nt))) == 1
+                    # The shadow center never reaches the served center or the served label.
+                    @test all(final.sub_hourly_model_version .== V2_2_SERVED_TAIL_VERSION)
+                    @test all(Float64.(final.served_pred_dst_nt) .!=
+                              Float64.(final.v23_shadow_pred_dst_nt))
+
+                    # An earlier cycle, whose sixth lag does not exist yet, must still be pending: the
+                    # layer must not engage on a partial block.
+                    early = log[logged_anchor .== first(anchors), :]
+                    @test all(early.v23_e_layer_applied .== false)
+                    @test all(early.v23_status .== V2_3_SHADOW_STATUS_E_LAYER_PENDING)
+                end
+            end
+        end
+
+        @testset "an unpinned stack digest is refused unless the operator accepts it" begin
+            # An empty digest override removes the only check that ties the weights to the fitted
+            # stack the served identity names, because the label check passes for any file carrying
+            # the label. The default must therefore be refusal, and an accepted unpinned load must not
+            # be published under the pinned identity.
+            mktempdir() do dir
+                staged = joinpath(dir, "operational_v2_2_stack.csv")
+                cp(V2_2_DEFAULT_STACK_PATH, staged)
+                chmod(staged, 0o644)
+                refused = withenv("SOLARSINDY_V2_2_STACK" => staged,
+                                  "SOLARSINDY_V2_2_STACK_SHA256" => "",
+                                  "SOLARSINDY_ALLOW_UNPINNED_STACK" => nothing,
+                                  "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent")) do
+                    reset_v2_2_stack!(); reset_v2_3_shadow!()
+                    redirect_stderr(devnull) do
+                        _issue_row(dir, "stack_unpinned_refused")
+                    end
+                end
+                @test String(refused.v2_2_status) == "fallback_v2_1:stack_unpinned"
+                @test refused.sub_hourly_model_version == V2_SERVED_TAIL_VERSION
+                @test Float64(refused.served_pred_dst_nt) ==
+                      Float64(refused.v2_1_served_pred_dst_nt)
+                @test ismissing(refused.v2_2_regime)
+
+                accepted = withenv("SOLARSINDY_V2_2_STACK" => staged,
+                                   "SOLARSINDY_V2_2_STACK_SHA256" => "",
+                                   "SOLARSINDY_ALLOW_UNPINNED_STACK" => "1",
+                                   "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent")) do
+                    reset_v2_2_stack!(); reset_v2_3_shadow!()
+                    redirect_stderr(devnull) do
+                        _issue_row(dir, "stack_unpinned_accepted")
+                    end
+                end
+                reset_v2_2_stack!(); reset_v2_3_shadow!()
+                @test String(accepted.v2_2_status) == V2_2_STACK_OK_UNPINNED_STATUS
+                # The center is a stack center, so the driver assumption is the stack assumption, but
+                # the identity must not claim the pinned product.
+                @test accepted.sub_hourly_model_version == V2_2_UNPINNED_SERVED_TAIL_VERSION
+                @test accepted.sub_hourly_model_version != V2_2_SERVED_TAIL_VERSION
+                @test accepted.driver_assumption == V2_2_DRIVER_ASSUMPTION
+                @test accepted.v2_2_regime in ("quiet", "active_deepening", "recovery")
+                @test Float64(accepted.served_pred_dst_nt) !=
+                      Float64(accepted.v2_1_served_pred_dst_nt)
+            end
+        end
+
+        @testset "a short L1 feed fails the analog key closed and records its depth" begin
+            # The analog key needs hourly at-Earth driver means for its seven mandatory lags, which at
+            # a one-hour anchor lag reach back to the issue hour minus seven plus the ballistic transit
+            # and the hourly averaging window: roughly nine and a half hours of upstream minute data.
+            # A feed that stops short of that must fail closed with a named missing lag rather than
+            # impute a key that silently retrieves different archive analogs, and the recorded coverage
+            # depth must show how far the feed actually reached.
+            shadow_dir = normpath(joinpath(@__DIR__, "..", "deploy", "v2_3_shadow"))
+            if !isdir(shadow_dir)
+                @test_skip "deploy/v2_3_shadow is absent; run validation/operational/v2_3_build_deploy.jl"
+            else
+                function _short_feed_row(dir::AbstractString, name::AbstractString, span::Hour)
+                    issue = DateTime(2026, 7, 15, 12, 30)
+                    feed_times = collect((issue - span):Minute(1):issue)
+                    feed_plasma = DataFrame(
+                        time_tag=feed_times,
+                        speed=[470.0 + 20.0 * sin(2π * k / 613) for k in eachindex(feed_times)],
+                        density=[6.0 + 0.8 * sin(2π * k / 421) for k in eachindex(feed_times)],
+                    )
+                    feed_mag = DataFrame(
+                        time_tag=feed_times,
+                        bz_gsm=[-6.0 + 3.0 * sin(2π * k / 517) for k in eachindex(feed_times)],
+                        by_gsm=[1.5 * cos(2π * k / 379) for k in eachindex(feed_times)],
+                    )
+                    feed_anchor = _floor_hour(issue) - Hour(1)
+                    feed_dst_times = collect((feed_anchor - Hour(24)):Hour(1):feed_anchor)
+                    feed_dst_values = collect(range(-30.0, -78.0;
+                                                   length=length(feed_dst_times)))
+                    cfg = LiveVerifyConfig(;
+                        model=:v2, horizon_hours=6, log_path=joinpath(dir, "$(name).csv"),
+                        report_path=joinpath(dir, "$(name).md"),
+                    )
+                    return withenv("SOLARSINDY_V2_3_SHADOW_DIR" => shadow_dir) do
+                        reset_v2_2_stack!(); reset_v2_3_shadow!()
+                        inputs = prepare_issue_inputs(
+                            cfg; issue_time=issue,
+                            plasma_fn=() -> feed_plasma, mag_fn=() -> feed_mag,
+                            dst_fn=() -> (feed_dst_times, feed_dst_values),
+                        )
+                        redirect_stdout(devnull) do
+                            issue_forecast(cfg; inputs, write_trajectory=false, verbose=false)
+                        end
+                        CSV.read(cfg.log_path, DataFrame)[1, :]
+                    end
+                end
+
+                mktempdir() do dir
+                    short = _short_feed_row(dir, "feed_8h", Hour(8))
+                    reset_v2_3_shadow!()
+                    @test startswith(String(short.v23_status), "unavailable:missing_driver_lag")
+                    @test ismissing(short.v23_shadow_pred_dst_nt)
+                    @test ismissing(short.v23_step1_center_dst_nt)
+                    # The recorded depth is short of the mandatory lags, which is why the key failed.
+                    @test Int(short.v23_history_hours) < V23_HISTORY_LAGS_H
+                    @test Int(short.v23_history_hours) < V23_SOUTH_RUN_CAP_H
+                    # A short shadow feed must not touch the served product.
+                    @test short.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
+                    @test isfinite(short.served_pred_dst_nt)
+
+                    # Just past the boundary the key is admissible again, and the recorded depth says
+                    # the run-length window is still truncated: a ten-hour feed supplies the mandatory
+                    # lags but not all twelve.
+                    boundary = _short_feed_row(dir, "feed_10h", Hour(10))
+                    reset_v2_3_shadow!()
+                    @test startswith(String(boundary.v23_status), V2_3_SHADOW_STATUS_OK)
+                    @test Int(boundary.v23_history_hours) >= V23_HISTORY_LAGS_H
+                    @test Int(boundary.v23_history_hours) < V23_SOUTH_RUN_CAP_H
+                    @test isfinite(boundary.v23_step1_center_dst_nt)
+                end
+            end
+        end
+    end
+
     @testset "Monitor cycle inputs are fetched once and keep one issue timestamp" begin
         issue_time = DateTime(2026, 7, 15, 12, 34, 56)
         plasma_calls = Ref(0)
