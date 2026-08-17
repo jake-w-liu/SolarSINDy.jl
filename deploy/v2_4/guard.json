@@ -1,0 +1,69 @@
+{
+    "depth_bin_moderate_nt_at_or_below": -30,
+    "l1_min_cell_rows": 48,
+    "expert_order": [
+        "served_v2_1",
+        "frozen_v2_1",
+        "t1r_analog",
+        "persistence",
+        "burton",
+        "burton_full",
+        "obrien",
+        "direct_gbm",
+        "climatology",
+        "static_v2_2"
+    ],
+    "served_stack": "L1e",
+    "conformal_coverage": 0.9,
+    "served_variant": "v2_4e",
+    "depth_bins": [
+        "shallow",
+        "moderate",
+        "deep"
+    ],
+    "l1_cell_fallback_chain": [
+        "regime_x_depth",
+        "regime_pooled",
+        "pooled"
+    ],
+    "climatology_tau_hours": 7.576947282167329,
+    "guard_applied": false,
+    "regimes": [
+        "pooled",
+        "quiet",
+        "active_deepening",
+        "recovery"
+    ],
+    "analog_k": 25,
+    "depth_bin_deep_nt_at_or_below": -70,
+    "dst_floor_nt": -2000,
+    "deepening_rate_nt_per_h_strict_below": -15,
+    "guard_reference": "none",
+    "sindy_family": [
+        "served_v2_1",
+        "frozen_v2_1",
+        "t1r_analog",
+        "static_v2_2"
+    ],
+    "pool_target_cutoff_utc": "2025-12-24T16:00:00",
+    "analog_weight_set": "magnetic",
+    "center_source": "ten_expert_stack_with_family_floor",
+    "residual_applied": false,
+    "dst_ceil_nt": 50,
+    "analog_safeguards": false,
+    "model_steps": [
+        1,
+        2,
+        3,
+        4,
+        6,
+        7
+    ],
+    "conformal_strata": "model_step_x_depth_bin_with_pooled_fallback",
+    "guard_disclosure": "the deepening-cell thresholds are recorded because every served row is labelled with them; depth safety of the published severity is taken as the deepest of this center, the static V2.2 stack and the V2.1 served center",
+    "deepening_depth_nt_at_or_below_with_active_coupling": -50,
+    "n_experts": 10,
+    "guard_rule": "no guard: the served center is the ten-expert stack center, and the static V2.2 stack enters that center as an expert rather than as a minimum on it",
+    "pool_target_embargo_hours": 168,
+    "sindy_family_floor": 0.6
+}

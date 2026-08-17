@@ -37,10 +37,11 @@ function write_v2_1_issue_identity(path::AbstractString=V21_ISSUE_IDENTITY)
         "state-inertia operator drifted",
     )
 
-    # The served identity is the whole served pipeline, which now ends in the fitted static regime
-    # stack. Recording the V2.1 tail label here would under-report the product that produces the
-    # published center, so the identity row carries the served label together with the stack label and
-    # digest it is pinned to, and the shadow identity beside it.
+    # The served identity is the whole served pipeline, which now ends in the V2.4e super-learner over
+    # the ten experts, the static regime stack among them. Recording an earlier stage's label
+    # here would under-report the product that produces the published center, so the identity row
+    # carries the served label together with the artifacts every stage of the fallback chain is pinned
+    # to: the V2.4 bundle manifest digest, the static stack label and digest, and the shadow identity.
     stack_path = V2_2_DEFAULT_STACK_PATH
     stack = load_v22_serving_stack(stack_path)
     stack_sha256 = v22_serving_stack_sha256(stack_path)
@@ -52,12 +53,24 @@ function write_v2_1_issue_identity(path::AbstractString=V21_ISSUE_IDENTITY)
     shadow_manifest_sha256 = isdir(shadow_dir) ?
         (v23_serving_verify_manifest(shadow_dir);
          v23_serving_file_sha256(joinpath(shadow_dir, "manifest.csv"))) : ""
+    # The V2.4 bundle is loaded the way the engine loads it, so an identity row is written only for a
+    # bundle that would actually serve: the digest recorded here is the manifest the loader verified.
+    served_bundle_dir = V2_4_DEFAULT_DEPLOY_DIR
+    served_bundle = load_v24_serving_artifacts(served_bundle_dir)
+    served_bundle.identity == V2_4_SERVED_TAIL_VERSION || error(
+        "deployed V2.4 bundle identity $(served_bundle.identity) is not the published " *
+        "$(V2_4_SERVED_TAIL_VERSION)",
+    )
 
     artifacts = core.artifacts
     out = DataFrame(
         model_version=[OPERATIONAL_V2_1_MODEL_VERSION],
-        served_model_version=[V2_2_SERVED_TAIL_VERSION],
+        served_model_version=[V2_4_SERVED_TAIL_VERSION],
         served_fallback_model_version=[V2_SERVED_TAIL_VERSION],
+        served_stack_model_version=[V2_2_SERVED_TAIL_VERSION],
+        served_bundle_manifest_sha256=[served_bundle.manifest_sha256],
+        served_bundle_fold_year=[served_bundle.fold_year],
+        served_bundle_training_max_target_utc=[string(served_bundle.training_max_target_utc)],
         served_stack_label=[stack.label],
         served_stack_sha256=[stack_sha256],
         shadow_model_version=[V2_3_SHADOW_TAIL_VERSION],

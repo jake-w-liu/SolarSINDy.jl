@@ -394,6 +394,9 @@ tampered and an absent stack artifact.
 
 Each added test fails under at least one plausible bug: reverting the watch edge to
 the served band (the stacked watch tier drops to 2 and the alert level to 2);
+reverting it to the served band shifted by the change in the centre, which is what
+the V2.4 integration first published (the narrow-conformal-band case drops the watch
+tier from 3 to 2 on the same physics the V2.1 operator warned on);
 making the edge shift two-sided (the deeper-center band assertion); restoring a
 second copy of the depth-safe comparison in the app (the source scan); keying the
 innovation history on one-hour *rows* again (the eight-cycle chain finds no history
@@ -540,3 +543,238 @@ on real data: the vintage-keyed reading pools eight rows spanning two issue cycl
 two different served labels, while the issue-hour reading returns the four rows of the
 cycle the API published and its stacked label. That disagreement is the spurious
 served-label FAIL the single definition removes.
+
+## V2.4e integration: the served super-learner
+
+### Coverage
+
+`test/test_operational_v24_serving.jl` (425 assertions) covers the served center. A
+synthetic bundle built by `test/v2_4_serving_fixture.jl` — a 720-hour frame with its analog
+archive and standardisation, a real 26-feature correction, six tiny boosted models on the real
+29-column design schema, a floor-satisfying ten-expert stack with resolved, regime-pooled and
+fully pooled cells, a complete conformal grid, the guard and selection records and a digest
+manifest — exercises the load path without the 138,715-origin archive. Checks: the published
+contract (identity, served variant and stack label, expert order, the four-member SINDy family
+and the static expert's slot in it, the floor, the deepening thresholds, the depth edges, and
+that the identity claims no guard stage); the depth bins at both edges including the non-finite
+case; the cell chain and the grid it must terminate in; the deepening cell at both edges of both
+of its conditions; the guard arithmetic in and out of a deepening cell and its one-sidedness;
+the depth-safe severity over one, two and three partners and its agreement with the deployed
+two-stage rule; cell resolution walking the chain from a resolved cell through a regime-pooled
+cell to the fully pooled one; the served center as a hand-rolled weighted sum over all ten
+experts, including a perturbation of the static expert alone that must move the center by
+exactly its own weight; the deployed bundle's guard switch read from `guard.json` and reported
+as inactive, with a deepening row served as the stack center itself; a second fixture bundle
+whose record enables the guard, served with it, so the retained code path is exercised rather
+than assumed dead; the four fail-closed input refusals (unsupported step, non-finite anchor Dst,
+non-finite static expert, non-finite or short expert panel); the climatology relaxation against
+its closed form and its monotonicity in lead; the direct design against `v23_direct_features` on
+the whole frame, against the analog key column by column, and its refusal when the two disagree;
+the increment inversion against a hand-rolled `predict + dst0`; every gap in the Dst ladder
+reported by the lag it is missing; the interval per stratum with the pooled fallback; and
+manifest verification as a digest check.
+
+Four additions closed test debt in this suite. The deepening cell's coupling branch is a strict
+`> 0`, and is now pinned against a `!= 0` reading with a negative and a `-1e-9` coupling on a
+deep, slowly recovering ring current, where the coupling term is the only thing deciding the
+cell. The pooled conformal stratum's fixture half-width was equal to the shallow bin's, so a row
+that resolved to the pooled stratum and a row that resolved to the shallow one returned the same
+number and the interval fallback was untestable; the pooled width is now distinct at every step
+and the fallback is asserted against both the pooled width and the shallow width it must not
+return, and against the resolved stratum's own depth label. The physical `clamp(., -2000, +50)` nT
+projection has its own test on a synthetic panel at the ceiling and at the floor, with the
+interval formed on the projected center, and with strictly interior panels asserted unflagged.
+The direct-GBM reader's manifest-digest gate is reached directly, with a hashed-name set that
+omits one model file: through a full load that defect is caught earlier by the manifest's
+required-artifact rule, so the gate would otherwise be a branch no test enters.
+
+Twenty-eight bundle defects are injected one at a time — sub-floor SINDy mass, non-unit mass, a
+negative weight, a missing pooled cell, a missing conformal bin, a zero half-width, a
+relabelled identity, a claimed residual layer, a drifted guard rate, a drifted depth edge, a
+permuted expert order, a permuted boosted design, a tampered file, an unlisted model, a
+drifted standardisation, a wrong origin count, an out-of-fold pool year at the fold year, a
+non-physical timescale, a served cell whose recorded expert set is the nine-expert one, a
+served cell whose recorded expert count is nine, a floor group that drops the static stack, a
+renamed served variant, a renamed stack variant, a guard enabled without its reference, a guard
+disabled while still naming one, a guard record with no switch at all, a whole stack table
+relabelled as the nine-expert fit, and conformal rows keyed on another variant's name — and each
+must fail to load. The nine Amendment A3 defects are additionally asserted to be present in the
+mutation list, and the list's length and uniqueness are asserted, so a silently dropped case is a
+failure rather than a smaller loop.
+
+Each defect is asserted against the message of the check it exists to exercise, through
+`V24_FIXTURE_EXPECTED_ERRORS`, and the suite asserts that every mutation has such an entry. The
+previous `@test_throws Exception` form passes whenever anything throws, and two defects were in
+fact being caught by a different check than the fixture documented, which left the documented
+check untested while the suite looked green: an unlisted direct-GBM model is refused by the
+manifest's required-artifact rule rather than by the reader's digest gate (now reached directly,
+above), and a renamed served variant is refused by the selection record rather than by the
+conformal keying the fixture comment described. `:conformal_variant_mismatch` — the conformal rows
+alone carrying another variant's name — was added so that keying is exercised on its own.
+
+`test/test_live_forecast_verify.jl` (852 assertions in that suite) adds the
+served-V2.4e testsets: the served identity, driver assumption and interval source; every new log
+column; the served center recomputed from the logged state through the serving function,
+including the frozen expert recomputed as the held-driver rollout, the assertion that
+substituting the logged core center moves the stack center, and the assertion that perturbing
+the static expert alone moves it too; the logged guard flag false and the published center equal
+to the logged stack center; the absent-bundle and tampered-bundle fallbacks to the static stack;
+the static-expert fallback to the V2.1 operator when the stack stage cannot act; a short L1 feed
+failing the analog key closed; a short Dst ladder failing the direct expert closed; the bounded
+retry cool-down healing a staged bundle; and the deployed `deploy/v2_4/` bundle serving a finite
+center with all three severity partners present. The V2.2 and V2.3 testsets point
+`SOLARSINDY_V2_4_DEPLOY_DIR` at a nonexistent path so each still isolates the stage it names.
+
+Three additions. The predecessor band edges are asserted per row: both are finite on a served row,
+both carry the same half-width (the band the pre-V2.4 machinery would have served either center
+under), that half-width differs from the served conformal half-width — which is the condition
+under which shifting the served edge under-warns — the stack column is `missing` on a row whose
+stack stage could not act, and on a row the stack or the V2.1 operator actually served the
+partner edge equals the published edge exactly, so the alerting minimum is idempotent by
+construction. The `v24_pred_dst_nt == v24_l1_center_dst_nt` invariant is asserted under
+`!v24_projection_applied`, and the flag is compared with the serving function's own
+`projection_applied` rather than assumed false.
+
+The third is a served-stage status matrix: every documented `v24_status` value with a reachable
+code path is produced by a code path in one testset. The early refusals — unsupported model step,
+absent calibration, unavailable and unpinned static expert, absent and invalid deployment, absent
+anchor Dst, absent previous Dst, and any exception inside the stage — are driven directly against
+the state a served row logged, because they are decided before any expert is formed; the two
+short-feed cases run end to end; and a single-step v1 issuance produces the row-level default.
+Three statuses are defence-in-depth branches that cannot fire under the deployed loader and are
+reported as such rather than faked: `fallback:non_finite_center` (a non-finite expert or
+combination is refused earlier and a conformal half-width must load positive and finite),
+`fallback:incomplete_analog_key`, and `fallback:incomplete_direct_design`. For the second, the
+suite enumerates every single-input defect of the analog key — absent anchor Dst, absent previous
+Dst, an absent driver record, each of the five driver channels non-finite, and a non-positive
+density, at three of the seven mandatory lags — and shows each landing on a *named* reason, which
+is what makes that branch unreachable rather than untested; a new rejection condition in the
+feature block would surface there.
+
+`app/test/runtests.jl` (1,035 assertions) covers the three-label chain and the three-partner
+severity: every accepted label publishes, the chain's order decides a mixed cycle's label at
+two and at three stages, the depth-safe center is held to the stack partner alone and to the
+V2.1 partner alone, the payload discloses
+`v24_status`/`v24_pred_dst_nt`/`v24_guard_applied`/`v24_projection_applied`/`v24_regime_cell`
+per horizon and reports `nothing` on a fallback row, the health window is keyed on `v24_status`
+and counts which stage it landed on, and the dashboard names the new pipeline stages.
+
+The watch edge has its own testset, on the case the shift rule gets wrong: a served center of
+-88 nT with a +-4 nT conformal band against a V2.1 operator that warned at -95 nT with a +-10 nT
+band. The shift rule publishes -99 nT and a watch tier of 2; the minimum over the logged
+predecessor edges publishes -105 nT and a tier of 3, which is the tier the operator raised on the
+same physics. The testset also pins the stack partner deciding on its own, a deeper served edge
+being published unchanged (so the rule is idempotent and never widens a band the product did not
+issue), a non-finite partner edge being dropped rather than propagated, the per-horizon
+disclosure of the published edge with its source and both partner edges, and a row written before
+those columns existed keeping the earlier shift rule and disclosing that it did.
+
+Two dashboard behaviours are executed rather than read. Both blocks of `app/public/app.js` are
+extracted verbatim between their own sentinels and run under `node`; the tests skip when no JS
+runtime is present. The capability block pins that an unrecognised stage token falls back to the raw
+label for the whole pipeline instead of being dropped from the list, and that a token resolving
+through `Object.prototype` (`toString`, `constructor`) is not presented as a capability. The
+severity-line block is run against a synthetic payload with a DOM stub and its rendered text
+asserted: the centre and edge appear as numbers (`severity centre -95 nT`, `watch edge -105 nT`),
+the stage that set the edge is named in reader-facing words, and a payload with no alerting values
+leaves the line empty and hidden rather than showing an em dash where a warning number belongs. That
+the element exists in the page and that the renderer is reached on both the populated and the empty
+path are asserted at the source level.
+
+`test/test_serving_identity_oracles.jl` (199 assertions) adds the V2.4 oracle's
+contracts: its declared base-table columns, its per-column report covering every expert — the
+static stack among them — and every stage, the absence of any residue of the earlier variant's
+column names, the raw pass-through semantics of its driver history (a record with non-positive
+density is passed through, not filtered, because the study's run-length and coupling-lag features
+read such a record's other fields), the depth of its Dst ladder, the determinism and storm
+coverage of its anchor sample, and the published artifact: every one of the fifteen reported
+columns within 1e-9 nT, all six model steps present, the deepening state and the deep cells
+exercised, all three regimes present, no row guarded, every published center equal to its stack
+center, and every half-width positive.
+
+`test/test_v2_readiness_selftest.jl` and `v2_readiness_audit.jl --self-test` (37 independent
+checks) cover the audit's own fixtures under the three-label chain: a fully served window
+passes, a newest-cycle fallback fails whether or not the artifacts load here, both stages
+disclose separately, pre-stage cycles are excluded and disclosed, the four-day window's
+two-cycle failure rule holds, and the weakest-label reading resolves two- and three-stage
+cycles.
+
+Two added fixtures. A window whose newest cycle predates the served stage while its newest
+*staged* cycle fell back: the two readings give opposite verdicts there — deciding the rule on the
+newest staged cycle fails the window, deciding it on the newest cycle withholds the verdict and
+the single isolated older fallback then passes on the window rules — so the fixture discriminates
+rather than decorating. Restoring the previous `last(fallback_flags)` reading fails it. And the
+bundle-identity tie: the deployed bundle's selection record and manifest build row both carry the
+published identity, a manifest with no build row reads as no identity, served rows publishing that
+identity pass, a served label that is not it fails, and a newest cycle with no served row or a log
+predating the status column warns rather than failing.
+
+### Independent expectations
+
+| Claim | Independent expectation |
+|---|---|
+| Served center is the fitted cell | Hand-rolled `sum(cell.weights .* experts)` over all ten experts from the parsed weight rows, and the full reproduction of the study's `v2_4e` column |
+| The static stack is an expert, not a discarded reference | Perturbing `static_v2_2` alone moves the center by exactly `w_static_v2_2` times the perturbation, in the unit suite and in the live suite |
+| The guard is off but not gone | The oracle asserts `raw_center == l1_center` on every row of a bundle recording no guard; a second fixture bundle that enables the guard reproduces `min(center, static)` in a deepening cell and the unguarded center outside one |
+| Interval endpoints | The study's `v2_4e_lo_nt` / `v2_4e_hi_nt` columns, and `center ± half_width` from the parsed stratum |
+| Direct-GBM design | `v23_direct_features` over the whole hourly frame, and the analog key column by column |
+| Direct-GBM center | `v23_predict(model, design) + design[dst0]`, and the study's `direct_gbm` column |
+| Climatology center | `Dst(t)·exp(−h/τ)` in closed form, and the study's `climatology` column |
+| T1r analog center | The study's `t1r_analog` column, with the ensemble raw core checked against `t1_analog_raw` |
+| Frozen V2.1 expert | `operational_core_forecast` under the held issue driver plus the deployed ridge correction, and the study's `frozen_v2_1` column |
+| Regime, depth bin, cell and deepening flag | The study's `regime`, `depth_bin`, `l1_cell_regime`, `l1_cell_depth` and `deepening_cell` columns, per row |
+| Gated coupling proxy | Recomputed from the row's `VBsouth_mvm` and one-hour rate, compared with the archived `coupling_active_mvm` |
+| Bundle fits are the study's fits | The study's persisted `v2_4_l1_weights.csv`, `v2_4_conformal.csv` and fold manifest, compared inside the builder before publication |
+| Depth-safe severity | The shared dependency-free definition, checked to reduce to the deployed two-stage rule |
+| Depth-safe watch edge | The predecessor's own edge, computed independently in the fixture as its center minus its own half-width, against which the shift rule is shown to under-warn by one storm tier |
+| The physical projection is a stage | A synthetic panel above the `+50` nT ceiling and below the `-2000` nT floor, with the unprojected combination computed by hand |
+| The bundle identity is the artifact's | The `selected.json` record and the manifest's `build/identity` row, and the served label of the newest cycle's rows |
+
+### Tolerances
+
+The identity claims use 1e-9 nT, the tolerance the base table and both earlier oracles use;
+the published run reports exactly 0.0 nT on all fifteen columns, so the tolerance is not
+load-bearing. The builder's agreement with the study uses 1e-12 and also reports exactly 0.0.
+Hand-rolled arithmetic in the unit suite uses `atol=1e-12`; the stack's unit-mass and
+SINDy-floor checks use 1e-9 in weight units, loose enough for the sum of ten doubles and tight
+enough to catch an edited weight; the rebuilt analog standardisation uses 1e-9 in feature
+units, which the injected 1e-3 drift exceeds by six orders of magnitude.
+
+### Anti-false-test checks
+
+The fixture bundle's weights sit exactly on the 0.60 floor, so a floor check written with the
+wrong inequality fails. The resolved `(active_deepening, deep)` cell carries different weights
+from the pooled cell, so a chain that silently took the pooled cell would change the center.
+The guard cases pair a deeper and a shallower reference in the same deepening cell on a bundle
+that enables the guard, so a guard written as `max` or applied unconditionally fails; the same
+inputs on the deployed bundle's switch must leave the center untouched, so a guard applied
+regardless of the bundle record fails too. The static expert's weight is non-zero in the fixture
+cells, so a loader that read the served weights from the nine-expert rows would change the
+center. The interval cases give each depth bin a
+different width, and the pooled stratum a fourth width distinct from all three, so a row served
+the pooled width fails and a pooled fallback that silently returned the shallow width fails too.
+The projection cases use strictly interior panels for the inert direction, because an
+exactly-boundary panel lands a hair outside the range under a unit mass held only to 1e-9 and the
+projection then legitimately acts — an "inert at the boundary" assertion would be a false test.
+The deepening cases pin the coupling comparison with a negative and a `-1e-9` coupling, so a
+`!= 0` reading fails. Every bundle defect is asserted against the message of its own check, so a
+defect caught by an unrelated check fails instead of passing as coverage. The direct-design test compares
+against the package function on the whole frame, so a mini frame that got a lag wrong fails
+rather than agreeing with itself. Each bundle mutation is injected alone and asserted to fail
+to load, and the mutation list's length, uniqueness and membership are asserted, so a case that
+stopped being generated is a failure rather than a shorter loop.
+
+### Full verification
+
+| Check | Result |
+|---|---|
+| `test/test_operational_v24_serving.jl` | 425 / 425 pass |
+| `test/test_live_forecast_verify.jl` | 852 / 852 pass |
+| `app/test/runtests.jl` | 1,035 / 1,035 pass standalone, 1,036 / 1,036 inside the package suite |
+| `test/test_serving_identity_oracles.jl` | 199 / 199 pass |
+| `v2_readiness_audit.jl --self-test` | PASS, 37 independent checks |
+| `validation/operational/v2_4_serving_identity.jl` | PASS, max abs Δ = 0.0 nT on all fifteen columns over 753 anchors / 4,518 rows, rerun after the projection flag was added to the serving return |
+| `examples/experiments.jl` | PASS |
+| `Pkg.test()` | 282,144 / 282,144 pass, 0 failures, 14m22.7s |
+| `dev-harness-audit.sh` | PASS 338, WARN 3, FAIL 0; the warnings are the pre-existing loose V2.2 tolerances and two absent paper directories |
+| Scratch live cycle (`live_monitor.jl --once`) | 4 rows, all `v24_status=ok`, `v24_guard_applied=false`, `v24_projection_applied=false`, `v24_pred_dst_nt = v24_l1_center_dst_nt`, `interval_source=v24_conformal_depth`, cell `active_deepening/shallow`, `v24_history_hours=12`, both predecessor edge columns finite and each equal to its stage's center less the lead's pre-V2.4 half-width |

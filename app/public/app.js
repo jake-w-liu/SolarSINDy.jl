@@ -70,7 +70,10 @@ function setError(msg) {
 // Human-readable capability list for a served-pipeline label (e.g. "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia").
 // Unknown tokens fall back to showing the raw label so a reduced/future pipeline is never
 // silently described with capabilities it does not have.
+// ---- pipeline-capability block (extracted verbatim and executed by the app test suite) ----
 const PIPELINE_CAPS = {
+  superlearner10floor: "ten-forecast fitted combination (SINDy-majority)",
+  conformal: "conformal interval",
   L1A: "L1 look-ahead",
   Bregime: "regime-aware tail",
   Rprojection: "rapid-deepening projection",
@@ -97,18 +100,29 @@ function productName(payload) {
   return token.startsWith("v") ? token.toUpperCase() : token;
 }
 
+// Version tokens carry no capability of their own; the product name is derived separately.
+const PIPELINE_VERSION_TOKENS = new Set(["v1", "v2", "v2.1", "v2.2", "v2.3", "v2.3-shadow", "v2.4"]);
+
 function pipelineCapabilities(label) {
   if (!label) return "";
-  const named = String(label).split("+")
-    .filter(p => p && p !== "v2" && p !== "v2.1" && p !== "v2.2" && p !== "v2.3" &&
-                 p !== "v2.3-shadow" && p !== "v1" && !p.startsWith("sindy"))
-    .map(p => {
-      if (PIPELINE_CAPS[p]) return PIPELINE_CAPS[p];
-      const hit = PIPELINE_CAPS_PREFIXED.find(([prefix]) => p.startsWith(prefix));
-      return hit ? hit[1] : null;
-    }).filter(Boolean);
+  const stages = String(label).split("+")
+    .filter(p => p && !PIPELINE_VERSION_TOKENS.has(p) && !p.startsWith("sindy"));
+  const named = [];
+  for (const p of stages) {
+    // hasOwnProperty, not a truthiness test on the lookup: a token such as `constructor` or
+    // `toString` resolves through Object.prototype and would otherwise be presented as a capability.
+    const direct = Object.prototype.hasOwnProperty.call(PIPELINE_CAPS, p) ? PIPELINE_CAPS[p] : null;
+    if (typeof direct === "string") { named.push(direct); continue; }
+    const hit = PIPELINE_CAPS_PREFIXED.find(([prefix]) => p.startsWith(prefix));
+    if (hit) { named.push(hit[1]); continue; }
+    // An unrecognised stage falls back to the raw label for the whole pipeline. Dropping the token and
+    // listing the rest would describe a reduced or future pipeline by the capabilities it happens to
+    // share with this build, which is the failure this fallback exists to prevent.
+    return String(label);
+  }
   return named.length ? named.join(", ") : String(label);
 }
+// ---- end pipeline-capability block ----
 
 function renderThreat(st) {
   const el = $("threat");
@@ -203,13 +217,58 @@ function forecastTrack(history, cutoffMs) {
   return { x: xs, y: xs.map(t => best.get(t).pred) };
 }
 
+// ---- severity-line block (extracted verbatim and executed by the app test suite) ----
+// Reader-facing name of the stage whose own band edge the watch is assessed on.
+const SEVERITY_EDGE_SOURCES = {
+  served: "the served forecast",
+  v2_2_stack: "the static regime stack",
+  v2_1_served: "the V2.1 operator",
+  legacy_center_shift: "the served band shifted onto the alerting center",
+};
+
+// The alerting center and watch edge, shown under the served forecast.
+//
+// The threat tier and the watch are taken on the deepest of the served value and the values every
+// stage this product replaced would have published, so they can legitimately be deeper than the served
+// center and band drawn above. Both numbers are therefore displayed: the alert text quotes the watch
+// edge, and a number an operator is alerted on that appears nowhere on the page is not auditable.
+function renderSeverityLine(horizons) {
+  const el = $("severity-line");
+  if (!el) return;
+  const rows = (horizons || []).filter(h => h && (h.severity_dst_nt != null || h.severity_ci05_dst_nt != null));
+  if (!rows.length) { el.textContent = ""; el.classList.add("hidden"); return; }
+  const centers = rows.map(h => h.severity_dst_nt).filter(v => v != null);
+  const edges = rows.map(h => h.severity_ci05_dst_nt).filter(v => v != null);
+  if (!centers.length && !edges.length) { el.textContent = ""; el.classList.add("hidden"); return; }
+  const deepest = rows.reduce((best, h) => {
+    if (h.severity_ci05_dst_nt == null) return best;
+    return best == null || h.severity_ci05_dst_nt < best.severity_ci05_dst_nt ? h : best;
+  }, null);
+  // Own-property lookup, for the same reason the capability list uses one: a source token that
+  // resolved through Object.prototype would be rendered as the stage that set a warning.
+  const token = deepest && deepest.severity_ci05_source ? String(deepest.severity_ci05_source) : null;
+  const named = token && Object.prototype.hasOwnProperty.call(SEVERITY_EDGE_SOURCES, token)
+    ? SEVERITY_EDGE_SOURCES[token] : null;
+  const source = token === null ? null : (named || token);
+  const centerText = centers.length ? `${fmt(Math.min(...centers), 0)} nT` : "—";
+  const edgeText = edges.length ? `${fmt(Math.min(...edges), 0)} nT` : "—";
+  el.classList.remove("hidden");
+  el.textContent = `Depth-safe alerting values across these horizons: severity centre ${centerText}, `
+    + `watch edge ${edgeText}${source ? ` (edge from ${source})` : ""}. `
+    + `These are the deepest of the served values and the values each earlier stage of the pipeline `
+    + `would have published, so a shallower or narrower served forecast cannot lower a warning an `
+    + `earlier stage would have raised. The threat tier and the watch are taken on them.`;
+}
+// ---- end severity-line block ----
+
 async function renderForecast(forecast, history, status) {
   if (!(await ensurePlotly())) { setError("Could not load the Plotly library (offline and no vendored copy)."); return; }
   history = history || { rows: [] };
   const cap = $("forecast-caption");
   $("interval-badge").textContent = forecast && forecast.interval_source ? `interval: ${forecast.interval_source}` : "—";
   if (!forecast || !forecast.horizons || forecast.horizons.length === 0) {
-    Plotly.purge("forecast-plot"); cap.textContent = "No active forecast cycle in the log yet."; return;
+    Plotly.purge("forecast-plot"); renderSeverityLine(null);
+    cap.textContent = "No active forecast cycle in the log yet."; return;
   }
   const H = forecast.horizons;
   const product = productName(forecast) || productName(status);
@@ -291,6 +350,8 @@ async function renderForecast(forecast, history, status) {
   // issued forecast; users can zoom manually without refresh forcing a narrow
   // forecast-window range.
   await Plotly.react("forecast-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
+
+  renderSeverityLine(H);
 
   const src = forecast.interval_source || "—";
   cap.innerHTML = `Dark markers: ${product} issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `

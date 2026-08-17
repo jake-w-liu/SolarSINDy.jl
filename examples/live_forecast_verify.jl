@@ -610,6 +610,13 @@ const V2_2_UNPINNED_SERVED_TAIL_VERSION = V22_SERVED_IDENTITY * "+unpinned"
 # NO_GO, so it is recorded beside the served center and never serves or alerts.
 const V2_3_SHADOW_TAIL_VERSION = V23_SERVING_SHADOW_IDENTITY
 const V2_3_SHADOW_DRIVER_ASSUMPTION = V23_SERVING_DRIVER_ASSUMPTION
+# Served product: the V2.4e ten-expert super-learner with the SINDy-family mass floor, which counts
+# the fixed static V2.2 stack among the family and takes it as an expert rather than as a minimum. The
+# stack label remains the label of a cycle whose V2.4 stage could not act, and the V2.1 label remains
+# the label of a cycle that also lost the stack, so the log always names the stage that actually
+# produced the center.
+const V2_4_SERVED_TAIL_VERSION = V24_SERVED_IDENTITY
+const V2_4_DRIVER_ASSUMPTION = V24_SERVED_DRIVER_ASSUMPTION
 
 function _served_driver_assumption(model_version::AbstractString)
     model_version == OPERATIONAL_V2_1_MODEL_VERSION && return V2_DRIVER_ASSUMPTION
@@ -2167,6 +2174,266 @@ function _v2_3_shadow_center(; plasma::DataFrame, mag::DataFrame, dst_times, dst
         e isa InterruptException && rethrow()
         @error "V2.3 shadow center failed; the row carries no shadow forecast" exception=(e, catch_backtrace())
         return unavailable("unavailable:shadow_error"; history_hours=driver_hours)
+    end
+end
+
+# ---- Served V2.4e center: ten-expert super-learner over the causal panel ----------------------
+# The served center is the V2.4e super-learner: a fitted non-negative combination of the ten causal
+# experts, with a 0.60 mass floor on the SINDy family, where the family counts the fixed static V2.2
+# stack because that product is itself a composition of the deployed SINDy operators. Seven experts are
+# the panel this engine already computes, the static stack among them; three are formed here from the
+# deployed bundle — the analog driver-continuation center under the bundle's own extended archive and
+# refit correction, the tuned direct increment-GBM on the live 29-column design, and the
+# climatology-relaxed persistence of the bundle's fitted recovery timescale. The point forecast carries
+# no guard; depth safety of the published severity is taken downstream against the static stack and the
+# V2.1 center.
+#
+# Loading and every stage of the center are fail-closed: an absent, tampered or unloadable bundle, an
+# incomplete issue-time key, an unavailable static-stack expert or a non-finite center all leave the
+# served center where the previous stage put it (the static V2.2 stack, and the V2.1 operator when the
+# stack could not act either) and record the exact reason in `v24_status`.
+#
+# The frozen V2.1 expert is recomputed here rather than taken from the logged `v2_pred_dst_nt`: the
+# study's `frozen_v2_1` column is a rollout that holds the issue driver for every step, while the
+# logged column admits L1-measured hours into the core rollout. Using the logged column would silently
+# hand the stack a different expert from the one its weights were fitted on.
+
+const V2_4_DEFAULT_DEPLOY_DIR = normpath(joinpath(SOLARSINDY_PACKAGE_ROOT, "deploy", "v2_4"))
+const V2_4_DEPLOY_DIR_ENV = "SOLARSINDY_V2_4_DEPLOY_DIR"
+const V2_4_STATUS_OK = "ok"
+# Rebuilding the bundle's analog archive costs a full frame parse, so an unavailable bundle is retried
+# on a long cool-down rather than on every issuance.
+const V2_4_RETRY_SECONDS = 3600.0
+const V2_4_INTERVAL_SOURCE = "v24_conformal_depth"
+
+const _V2_4_CACHE = Ref{Any}(nothing)
+const _V2_4_CACHE_DIR = Ref{String}("")
+const _V2_4_MANIFEST_SHA256 = Ref{String}("")
+const _V2_4_STATUS = Ref{String}("")
+const _V2_4_STATUS_TIME = Ref{Float64}(0.0)
+
+"Directory holding the deployed V2.4 bundle; the environment override exists for tests and staging."
+function _v2_4_deploy_dir()
+    override = strip(get(ENV, V2_4_DEPLOY_DIR_ENV, ""))
+    return isempty(override) ? V2_4_DEFAULT_DEPLOY_DIR : abspath(String(override))
+end
+
+"""
+    _v2_4_served_acted(status) -> Bool
+
+Whether a `v24_status` records a V2.4 stage that produced the served center. Every other status is a
+disclosed fallback to the static V2.2 stack or, when that stage could not act either, to the V2.1
+operator. Keeping the predicate in one place is what keeps the served center, the served identity and
+the logged status consistent row by row.
+"""
+_v2_4_served_acted(status) = status isa AbstractString && status == V2_4_STATUS_OK
+
+"Drop the cached bundle so a test (or a redeploy) can switch artifacts inside one process."
+function reset_v2_4_serving!()
+    _V2_4_CACHE[] = nothing
+    _V2_4_CACHE_DIR[] = ""
+    _V2_4_MANIFEST_SHA256[] = ""
+    _V2_4_STATUS[] = ""
+    _V2_4_STATUS_TIME[] = 0.0
+    return nothing
+end
+
+"""
+Cached, digest-verified V2.4 bundle, or `nothing` with the reason it is unavailable.
+
+The digest of the bundle's own manifest travels with the artifacts and is logged per row: the cache is
+keyed on the directory alone and the served identity is fixed at build time, so a redeployment of
+different artifacts into the same directory would otherwise be invisible in the log.
+"""
+function _v2_4_artifacts()
+    dir = _v2_4_deploy_dir()
+    if _V2_4_CACHE_DIR[] != dir
+        _V2_4_CACHE[] = nothing
+        _V2_4_MANIFEST_SHA256[] = ""
+        _V2_4_STATUS[] = ""
+        _V2_4_STATUS_TIME[] = 0.0
+        _V2_4_CACHE_DIR[] = dir
+    end
+    _V2_4_CACHE[] === nothing || return (artifacts=_V2_4_CACHE[], status=V2_4_STATUS_OK,
+                                        manifest_sha256=_V2_4_MANIFEST_SHA256[])
+    if !isempty(_V2_4_STATUS[])
+        time() - _V2_4_STATUS_TIME[] < V2_4_RETRY_SECONDS &&
+            return (artifacts=nothing, status=_V2_4_STATUS[], manifest_sha256="")
+        _V2_4_STATUS[] = ""
+    end
+    remember(status) = (_V2_4_STATUS[] = status;
+                        _V2_4_STATUS_TIME[] = time();
+                        (artifacts=nothing, status=status, manifest_sha256=""))
+    isdir(dir) || return remember("fallback:deployment_absent")
+    try
+        artifacts = load_v24_serving_artifacts(dir)
+        # The identity is compared against what the bundle records on disk, not against the loaded
+        # struct's `identity` field: that field is filled with the package constant by the type's own
+        # constructor, so comparing it with the same constant can never fail and would leave this line
+        # reading like a check while enforcing nothing. `load_v24_serving_artifacts` is the real gate;
+        # this restates it against the artifact so a loader change cannot silently drop it here.
+        recorded_identity = String(get(artifacts.selection, "identity", ""))
+        recorded_identity == V24_SERVED_IDENTITY || error(
+            "the V2.4 bundle at $dir records identity $(repr(recorded_identity)); the served " *
+            "product is $(V24_SERVED_IDENTITY)",
+        )
+        _V2_4_CACHE[] = artifacts
+        _V2_4_MANIFEST_SHA256[] = artifacts.manifest_sha256
+        return (artifacts=artifacts, status=V2_4_STATUS_OK,
+                manifest_sha256=artifacts.manifest_sha256)
+    catch e
+        e isa InterruptException && rethrow()
+        @error "V2.4 bundle failed verification; serving the static regime stack" dir exception=(e, catch_backtrace())
+        return remember("fallback:deployment_invalid")
+    end
+end
+
+"""
+    _v2_4_served_center(; …) -> NamedTuple
+
+Served V2.4e center of the current issue and model step, or a status naming why the stage could not
+act. Every failure is a status, never an exception: the served stage must fail back to the stack it
+replaced rather than interrupt an issuance.
+
+`static_v2_2` is the static-stack center of this row. Amendment A3 made it expert ten of the stack, so
+the stage cannot act without it; a cycle whose stack stage fell back therefore serves the V2.1 operator
+and says so.
+
+`static_pinned` records whether that center came from digest-pinned stack weights. An unpinned staged
+load is a different provenance question from an absent one: the number is finite, but nothing ties it
+to the fitted stack the super-learner's tenth weight was estimated against, so the combination would be
+formed over an expert the study never scored. Serving it would also publish those weights under the
+pinned V2.4 identity, erasing the separate unpinned label that exists precisely so a staged
+configuration cannot pass as the product. The stage therefore refuses and the row falls back to the
+unpinned stack center under the unpinned label.
+
+Every status this stage can record, which is the complete set `v24_status` ever holds:
+
+| status | meaning |
+|---|---|
+| `ok` | the row's served center is the V2.4e center |
+| `fallback:model_not_v2_1` | the issuance is not a V2.1 issuance, so the stage never runs |
+| `fallback:unsupported_model_step` | the requested model step is outside the fitted grid |
+| `fallback:calibration_absent` | no V2.1 point calibration, so expert E3's correction cannot be formed |
+| `fallback:static_expert_unavailable` | the static-stack center is missing, so expert ten is missing |
+| `fallback:static_expert_unpinned` | that center came from stack weights carrying no digest pin |
+| `fallback:deployment_absent` | the bundle directory is absent |
+| `fallback:deployment_invalid` | the bundle is present but fails verification |
+| `fallback:missing_anchor_dst` | the analog key has no observed Dst at the anchor hour |
+| `fallback:missing_previous_dst` | the analog key's one-hour Dst difference has no `t-1` observation, so the key's rate feature cannot be formed causally |
+| `fallback:missing_driver_lag<N>` | driver hour `N` of the analog key or the direct design has no measured L1 coverage |
+| `fallback:incomplete_analog_key` | the key is incomplete for a reason none of the named inputs accounts for |
+| `fallback:missing_dst_lag<N>` | the direct design's Dst ladder has no observation at lag `N` |
+| `fallback:incomplete_direct_design` | the design is incomplete for a reason none of its named inputs accounts for |
+| `fallback:non_finite_center` | the formed center or an interval endpoint is not finite |
+| `fallback:serving_error` | any exception inside the stage, which is caught rather than propagated |
+
+Three of these are defence-in-depth branches rather than reachable ones under the deployed loader, and
+the unit suite records which:
+
+- `fallback:non_finite_center` — `v24_serving_center` refuses a non-finite expert and a non-finite
+  combination, and the loader refuses a conformal stratum whose half-width is not positive and finite,
+  so a finite center with a non-finite endpoint cannot be produced;
+- `fallback:incomplete_analog_key` — the key's own defect finder tests the same five driver channels,
+  with the same positivity condition, that the feature block's usability predicate tests, and the
+  block's two remaining rejections are the anchor and previous Dst, so every rejection already has a
+  named reason;
+- `fallback:incomplete_direct_design` — the analog key is formed before the design and refuses the same
+  driver defects at the lags the design's own feature block reads.
+
+They are retained because each is the check that would catch a future stage, artifact or feature block
+that broke one of those guarantees, and each costs one comparison. `test_live_forecast_verify.jl`
+enumerates the single-input defects that would otherwise reach the second one, so a new rejection
+condition in the feature block surfaces there rather than as an unexplained status in the live log.
+"""
+function _v2_4_served_center(; plasma::DataFrame, mag::DataFrame, dst_times, dst_vals,
+                             latest_dst_time::DateTime, latest_dst::Real, anchor_drivers,
+                             anchor_dst_star::Real, recent, latest_common_sw::DateTime,
+                             model_steps::Integer, features, memory, baselines,
+                             served_v2_1::Real, static_v2_2, calibration,
+                             static_pinned::Bool=true)
+    unavailable(status; history_hours=missing) = (
+        status=status, center=missing, l1_center=missing, guard_applied=false,
+        projection_applied=false,
+        deepening_cell=missing, regime_cell=missing, regime=missing, depth_bin=missing,
+        used_pooled_fallback=missing, half_width_nt=missing, ci05=missing, ci95=missing,
+        t1r_analog=missing, t1r_raw=missing, direct_gbm=missing, climatology=missing,
+        frozen_v2_1=missing, history_hours=history_hours, manifest_sha256=missing,
+    )
+    Int(model_steps) in V24_SERVING_MODEL_STEPS ||
+        return unavailable("fallback:unsupported_model_step")
+    calibration === nothing && return unavailable("fallback:calibration_absent")
+    (static_v2_2 isa Real && isfinite(Float64(static_v2_2))) ||
+        return unavailable("fallback:static_expert_unavailable")
+    static_pinned || return unavailable("fallback:static_expert_unpinned")
+    loaded = _v2_4_artifacts()
+    loaded.artifacts === nothing && return unavailable(loaded.status)
+    artifacts = loaded.artifacts
+    driver_hours = missing
+    try
+        history = _v2_3_driver_history(plasma, mag, latest_dst_time, recent, latest_common_sw)
+        driver_hours = count(record -> record !== nothing, history)
+        dst_map = _dst_lookup(dst_times, dst_vals)
+        dst_previous = get(dst_map, latest_dst_time - Hour(1), NaN)
+        key = v24_serving_analog_features(artifacts, latest_dst_time, history, latest_dst,
+                                         dst_previous)
+        key.ok || return unavailable("fallback:" * key.reason; history_hours=driver_hours)
+        design = v24_serving_direct_features(artifacts, latest_dst_time, history, dst_map;
+                                            analog_features=key.features)
+        design.ok || return unavailable("fallback:" * design.reason; history_hours=driver_hours)
+        step_driver = function (k::Int, last_known)
+            status = _subhourly_driver_with_status(
+                plasma, mag, latest_dst_time + Hour(k), recent, latest_common_sw,
+            )
+            return (driver=status.l1_measured ? status.driver : last_known,
+                    l1_measured=status.l1_measured)
+        end
+        ensemble = v24_serving_analog_members(
+            artifacts, key.features; anchor_time=latest_dst_time, issue_drv=anchor_drivers,
+            anchor_dst_star=Float64(anchor_dst_star), model_steps=Int(model_steps),
+            step_driver=step_driver,
+        )
+        t1r = v24_serving_t1r_center(
+            artifacts; raw_reported=ensemble.raw_reported, latest_dst=Float64(latest_dst),
+            anchor_drivers=anchor_drivers, memory=memory, baselines=baselines,
+            model_steps=Int(model_steps), anchor_time=latest_dst_time,
+        )
+        frozen = v23_serving_frozen_center(
+            artifacts.analog; v2_1_calibration=calibration, issue_drv=anchor_drivers,
+            anchor_dst_star=Float64(anchor_dst_star), latest_dst=Float64(latest_dst),
+            memory=memory, baselines=baselines, model_steps=Int(model_steps),
+            anchor_time=latest_dst_time,
+        )
+        direct = v24_serving_direct_center(artifacts, design.features, Int(model_steps))
+        climatology = v24_serving_climatology_center(artifacts, Float64(latest_dst),
+                                                    Int(model_steps))
+        experts = (served_v2_1=Float64(served_v2_1), frozen_v2_1=frozen.center,
+                   t1r_analog=t1r.center, persistence=Float64(baselines.persistence),
+                   burton=Float64(baselines.burton), burton_full=Float64(baselines.burton_full),
+                   obrien=Float64(baselines.obrien), direct_gbm=direct,
+                   climatology=climatology, static_v2_2=Float64(static_v2_2))
+        result = v24_serving_center(
+            artifacts; model_steps=Int(model_steps), latest_dst=Float64(latest_dst),
+            dst_delta_1h_nt=Float64(features.dst_delta_1h_nt),
+            vbsouth_mvm=Float64(features.VBsouth_mvm), experts=experts,
+        )
+        (isfinite(result.center) && isfinite(result.ci05_nt) && isfinite(result.ci95_nt)) ||
+            return unavailable("fallback:non_finite_center"; history_hours=driver_hours)
+        return (status=V2_4_STATUS_OK, center=result.center, l1_center=result.l1_center,
+                guard_applied=result.guard_applied,
+                projection_applied=result.projection_applied,
+                deepening_cell=result.deepening_cell,
+                regime_cell=result.regime_cell, regime=String(result.regime),
+                depth_bin=String(result.depth_bin),
+                used_pooled_fallback=result.used_pooled_fallback,
+                half_width_nt=result.half_width_nt, ci05=result.ci05_nt, ci95=result.ci95_nt,
+                t1r_analog=t1r.center, t1r_raw=ensemble.raw_reported, direct_gbm=direct,
+                climatology=climatology, frozen_v2_1=frozen.center,
+                history_hours=driver_hours, manifest_sha256=loaded.manifest_sha256)
+    catch e
+        e isa InterruptException && rethrow()
+        @error "V2.4 served stage failed; serving the static regime stack" exception=(e, catch_backtrace())
+        return unavailable("fallback:serving_error"; history_hours=driver_hours)
     end
 end
 
@@ -4160,8 +4427,38 @@ function issue_forecast(cfg::LiveVerifyConfig;
             sub_hourly_pred_dst = clamp(Float64(v2_2_served.center), -2000.0, 50.0)
         end
     end
+    # Static-stack center of this row, kept as a continuity column now that the stack is no longer the
+    # served stage: it is expert ten of the V2.4 stack and the second partner of the depth-safe
+    # severity.
+    v2_2_stack_pred_dst = _v2_2_stack_acted(v2_2_served.status) ? sub_hourly_pred_dst : missing
+
+    # ---- Served stage: V2.4e super-learner over the ten experts, depth-safe at the alerting layer --
+    v2_4_served = (status="fallback:model_not_v2_1", center=missing, l1_center=missing,
+                   guard_applied=false, projection_applied=false,
+                   deepening_cell=missing, regime_cell=missing,
+                   regime=missing, depth_bin=missing, used_pooled_fallback=missing,
+                   half_width_nt=missing, ci05=missing, ci95=missing, t1r_analog=missing,
+                   t1r_raw=missing, direct_gbm=missing, climatology=missing,
+                   frozen_v2_1=missing, history_hours=missing, manifest_sha256=missing)
+    if selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION
+        v2_4_served = _v2_4_served_center(
+            plasma=plasma, mag=mag, dst_times=dst_times, dst_vals=dst_vals,
+            latest_dst_time=latest_dst_time, latest_dst=latest_dst,
+            anchor_drivers=anchor_drivers, anchor_dst_star=anchor_dst_star, recent=recent,
+            latest_common_sw=latest_common_sw, model_steps=model_steps, features=features,
+            memory=memory_features, baselines=baseline_predictions,
+            served_v2_1=v2_1_served_pred_dst, static_v2_2=v2_2_stack_pred_dst,
+            calibration=calibration,
+            static_pinned=(v2_2_served.status == V2_2_STACK_OK_STATUS),
+        )
+        if _v2_4_served_acted(v2_4_served.status)
+            sub_hourly_pred_dst = clamp(Float64(v2_4_served.center), -2000.0, 50.0)
+        end
+    end
     served_tail_version = if selected.model_version != OPERATIONAL_V2_1_MODEL_VERSION
         V1_SERVED_TAIL_VERSION
+    elseif _v2_4_served_acted(v2_4_served.status)
+        V2_4_SERVED_TAIL_VERSION
     elseif v2_2_served.status == V2_2_STACK_OK_STATUS
         V2_2_SERVED_TAIL_VERSION
     elseif v2_2_served.status == V2_2_STACK_OK_UNPINNED_STATUS
@@ -4171,6 +4468,8 @@ function issue_forecast(cfg::LiveVerifyConfig;
     end
     served_driver_assumption = if selected.model_version != OPERATIONAL_V2_1_MODEL_VERSION
         V1_DRIVER_ASSUMPTION
+    elseif _v2_4_served_acted(v2_4_served.status)
+        V2_4_DRIVER_ASSUMPTION
     elseif _v2_2_stack_acted(v2_2_served.status)
         V2_2_DRIVER_ASSUMPTION
     else
@@ -4214,6 +4513,31 @@ function issue_forecast(cfg::LiveVerifyConfig;
             _served_interval_with_source(
                 sub_hourly_ci05, sub_hourly_ci95, interval_source, served_aci,
             )
+    end
+    # Predecessor watch edges. The band above is the one the pre-V2.4 machinery produces — the frozen
+    # tail shifted onto the served center, or the adaptive band centered on it — and both are pure
+    # translations of a width that does not depend on the center. The lower edge each earlier stage
+    # would have published for this issue is therefore that width applied to that stage's own center,
+    # and it is logged so the published watch edge can be the deepest of the three rather than the
+    # served edge shifted by the change in the center. The V2.4e conformal band replaces the served
+    # band below and is narrower than this one in the shallow bins, which is exactly why the shift is
+    # not depth-safe.
+    predecessor_half_width_lo = Float64(sub_hourly_pred_dst) - Float64(sub_hourly_ci05)
+    partner_edge(center) = (center isa Real && isfinite(Float64(center)) &&
+                            isfinite(predecessor_half_width_lo)) ?
+        Float64(center) - predecessor_half_width_lo : missing
+    v2_1_served_ci05_dst = partner_edge(v2_1_served_pred_dst)
+    v2_2_stack_ci05_dst = partner_edge(v2_2_stack_pred_dst)
+    # A V2.4e row carries the band the study calibrated on this center: split-conformal half-widths
+    # stratified by model step and ring-current depth, whose coverage the rolling-origin gates scored.
+    # The shifted frozen-tail band and the adaptive band are calibrated on residuals of the centers
+    # they were pooled from, so transplanting either onto the super-learner center would publish an
+    # interval nothing has verified. The disclosure travels with the row in `interval_source`.
+    if _v2_4_served_acted(v2_4_served.status) && isfinite(Float64(v2_4_served.ci05)) &&
+       isfinite(Float64(v2_4_served.ci95))
+        sub_hourly_ci05 = Float64(v2_4_served.ci05)
+        sub_hourly_ci95 = Float64(v2_4_served.ci95)
+        served_interval_source = V2_4_INTERVAL_SOURCE
     end
 
     # ---- V2.1 product forecast = current frozen-tail center + operational tail.
@@ -4297,6 +4621,11 @@ function issue_forecast(cfg::LiveVerifyConfig;
         # Continuity column: the V2.1 operator's own center, which is the stack's `served_v2_1`
         # component and the depth-safe partner of the published severity.
         v2_1_served_pred_dst_nt=[v2_1_served_pred_dst],
+        # Continuity edge: the lower band edge the V2.1 operator would have published for this issue,
+        # under the band machinery it served with. The published watch edge is the deepest of the
+        # served edge and the predecessor edges, so this column is what keeps a narrower served band
+        # from lowering a watch tier the operator raised on the same physics.
+        v2_1_served_ci05_dst_nt=[v2_1_served_ci05_dst],
         v2_2_regime=[v2_2_served.regime],
         v2_2_coupling_active_mvm=[v2_2_served.coupling_active_mvm],
         v2_2_pooled_fallback=[v2_2_served.used_pooled_fallback],
@@ -4304,6 +4633,40 @@ function issue_forecast(cfg::LiveVerifyConfig;
         # reason the row fell back to the V2.1 operator. Without it the reason lives only in the
         # daemon's console log and the readiness audit can only guess why a row was served by V2.1.
         v2_2_status=[v2_2_served.status],
+        # Continuity column: the static-stack center of this row. It was the served center until the
+        # V2.4 stage was integrated and remains expert ten of the V2.4 stack and a depth-safe partner of
+        # the published severity, so it stays logged whether or not it is the center being served.
+        v2_2_stack_pred_dst_nt=[v2_2_stack_pred_dst],
+        # Continuity edge of the static stack, formed the same way as the V2.1 one and `missing` on a
+        # row whose stack stage could not act: a stage that published no center published no edge.
+        v2_2_stack_ci05_dst_nt=[v2_2_stack_ci05_dst],
+        # Served V2.4e columns: the super-learner center, the bundle's guard switch, the conformal
+        # band, the cell the weights came from, and the two experts no other column carries.
+        # `v24_status` is `ok` exactly when this row's served center is the V2.4e center; every other
+        # value names the stage that could not act and therefore why the row fell back to the stack or
+        # to the V2.1 operator. `v24_guard_applied` is `false` on every row of the deployed bundle,
+        # which records no point-forecast guard, and is logged so a later guarded bundle is visible.
+        # `v24_projection_applied` is the separate physical projection: the +50/-2000 nT clamp the
+        # served center is taken through. It is inert on every archived row of the study, but a real
+        # anchor above about +52 nT would move the center, and without the flag a projected center is
+        # indistinguishable from an unprojected one — which is also what makes the
+        # `v24_pred_dst_nt == v24_l1_center_dst_nt` invariant conditional rather than absolute.
+        v24_model_version=[V2_4_SERVED_TAIL_VERSION],
+        v24_status=[v2_4_served.status],
+        v24_manifest_sha256=[v2_4_served.manifest_sha256],
+        v24_l1_center_dst_nt=[v2_4_served.l1_center],
+        v24_guard_applied=[v2_4_served.guard_applied],
+        v24_projection_applied=[v2_4_served.projection_applied],
+        v24_pred_dst_nt=[v2_4_served.center],
+        v24_ci05_nt=[v2_4_served.ci05],
+        v24_ci95_nt=[v2_4_served.ci95],
+        v24_regime_cell=[v2_4_served.regime_cell],
+        v24_deepening_cell=[v2_4_served.deepening_cell],
+        v24_pooled_fallback=[v2_4_served.used_pooled_fallback],
+        v24_history_hours=[v2_4_served.history_hours],
+        v24_t1r_pred_dst_nt=[v2_4_served.t1r_analog],
+        direct_gbm_pred_dst_nt=[v2_4_served.direct_gbm],
+        climatology_pred_dst_nt=[v2_4_served.climatology],
         # Shadow columns: computed on the live information set, never served, never used for severity.
         v23_shadow_model_version=[V2_3_SHADOW_TAIL_VERSION],
         v23_manifest_sha256=[v2_3_shadow.manifest_sha256],
@@ -4377,7 +4740,16 @@ function issue_forecast(cfg::LiveVerifyConfig;
         println(
             "V2.1 operator Dst: $(round(v2_1_served_pred_dst; digits=2)) nT" *
             (_v2_2_stack_acted(v2_2_served.status) ?
-             "; stack regime=$(v2_2_served.regime)" : "; stack stage=$(v2_2_served.status)")
+             "; static stack Dst=$(round(Float64(v2_2_stack_pred_dst); digits=2)) nT" *
+             ", regime=$(v2_2_served.regime)" : "; stack stage=$(v2_2_served.status)")
+        )
+        println(
+            "V2.4e served stage: status=$(v2_4_served.status)" *
+            (_v2_4_served_acted(v2_4_served.status) ?
+             ", Dst=$(round(Float64(v2_4_served.center); digits=2)) nT" *
+             ", stack center=$(round(Float64(v2_4_served.l1_center); digits=2)) nT" *
+             ", cell=$(v2_4_served.regime_cell)" *
+             ", guard=$(v2_4_served.guard_applied)" : "")
         )
         println(
             "V2.3 shadow: status=$(v2_3_shadow.status)" *

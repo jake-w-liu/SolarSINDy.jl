@@ -63,11 +63,33 @@ function main()
     # The V2.3 analog candidate is a shadow forecast; its confirmatory decision was NO_GO.
     @assert V2_3_SHADOW_TAIL_VERSION ==
             "v2.3-shadow+sindy20x11+L1A+ADC(magnetic,K25)+T1rcal+LAT+E"
+    # Served pipeline: the V2.4e super-learner over the ten experts, the static stack among them.
+    @assert V2_4_SERVED_TAIL_VERSION ==
+            "v2.4+sindy20x11+superlearner10floor+conformal"
     @assert v22_serving_coupling_active(2.5, -4.0) == 2.5
     @assert v22_serving_coupling_active(2.5, 1.0) == 0.0
     @assert v22_serving_coupling_active(0.0, -4.0) == 0.0
     @assert v22_serving_depth_safe_center(-90.0, -120.0) == -120.0
     @assert v22_serving_depth_safe_center(-150.0, -120.0) == -150.0
+    # Published severity is the deepest of the served center and both continuity partners.
+    @assert v24_serving_depth_safe_center(-90.0, -120.0, -60.0) == -120.0
+    @assert v24_serving_depth_safe_center(-150.0, -120.0, -60.0) == -150.0
+    @assert v24_serving_depth_safe_center(-90.0, NaN, -95.0) == -95.0
+    # The published watch edge is the same rule on the edges themselves, so a narrower served band
+    # cannot lower a watch tier a predecessor's own edge would have raised.
+    @assert v24_serving_depth_safe_center(-92.0, -100.0, -105.0) == -105.0
+    @assert v24_serving_depth_safe_center(-160.0, -100.0, -105.0) == -160.0
+    @assert v24_serving_depth_safe_center(-92.0, NaN, -105.0) == -105.0
+    # Depth bins and the deepening cell of the V2.4 guard, on their closed-from-below edges.
+    @assert v24_serving_depth_bin(-29.9) === :shallow
+    @assert v24_serving_depth_bin(-30.0) === :moderate
+    @assert v24_serving_depth_bin(-70.0) === :deep
+    @assert v24_serving_deepening(-16.0, 0.0, 0.0)
+    @assert !v24_serving_deepening(-14.0, 0.0, 0.0)
+    @assert v24_serving_deepening(-1.0, 2.0, -50.0)
+    @assert !v24_serving_deepening(-1.0, 0.0, -50.0)
+    @assert v24_serving_guard(-80.0, -60.0, -20.0, 0.0, -10.0) == -80.0
+    @assert v24_serving_guard(-80.0, -60.0, -1.0, 0.0, -10.0) == -60.0
 
     println("SolarSINDy experiments: V2.1 deterministic smoke PASS")
     return true

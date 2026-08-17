@@ -677,3 +677,198 @@ advances, so no natural fixture separates the two, and the change is covered
 structurally by the key's arity and the hash helper's sensitivity. The served
 center and both identity oracles are unaffected — the cache belongs to the shadow
 path only.
+
+## V2.4e integration: the served super-learner and its fallback chain
+
+### Development Ledger — served V2.4e center
+
+| Item | Record |
+|---|---|
+| Objective | Serve the V2.4e center — an NNLS super-learner over ten causal experts, per (model step, regime, depth bin), 0.60 mass floor on a SINDy family that counts the static V2.2 stack — from a verified bundle, with the same number the rolling-origin study scored |
+| Contract | One implementation of the center, driven by the live engine and by the offline oracle; every expert either logged or recomputed from logged state; fail closed on an unverified bundle, an incomplete issue-time key, an absent static-stack expert or a non-finite center; the served band is the interval the study calibrated on this center; every stage that can move the reported center is logged, including the physical projection; the published severity **and the published watch edge** are never shallower than what either stage V2.4e replaces would have published |
+| Evidence | The rolling study's 12 folds and 623,184 scored rows; its persisted `v2_4_l1_weights.csv`, `v2_4_conformal.csv`, `v2_4_decision.csv`, `v2_4_serve_rule.csv`, fold manifests and `learn_year_*.csv`; the base table and hourly frame by SHA-256 |
+| Independent oracles | The builder's fold-2025 replica against the study's own fitted artifacts (weights, half-widths, timescale, boosted configurations, correction label); the offline identity oracle against every scored column at 1e-9 nT; hand-rolled weighted sums, guard arithmetic and interval endpoints in the unit suite; the package's own `v23_direct_features` as the reference construction of the live design block |
+| Test plan | `test/test_operational_v24_serving.jl` (arithmetic, cell chain, the configurable guard, the physical projection, interval and its pooled fallback, expert helpers, and one injected bundle defect at a time, each asserted against the message of the check it exercises); served-V2.4e testsets in `test/test_live_forecast_verify.jl`, including a matrix that produces every reachable `v24_status`; app payload/severity/watch-edge/health tests plus an executed extract of the dashboard's capability block; readiness self-test fixtures for the three-label chain, the unstaged newest cycle and the bundle-identity tie |
+| Baseline verification | The static-stack center and the V2.1 operator center stay logged per row; the static stack is both expert ten and a depth-safe severity partner, and the study's comparator set is the baseline the decision record scores |
+| Data regeneration trigger | A change to `src/operational_v24_serving.jl`, to the bundle builder, or to any expert path requires rebuilding `deploy/v2_4/` and rerunning the identity oracle before the served center may be trusted |
+| Harness | `julia --project=. -e 'using Pkg; Pkg.test()'`; `examples/experiments.jl`; `v2_readiness_audit.jl --self-test`; `validation/operational/v2_4_serving_identity.jl`; one scratch-directory live cycle |
+| Risk | Environment split between the hourly archive and the L1 feed — the live anchor is Kyoto provisional Dst and the study's is final OMNI Dst, which no offline check can bound; thread-count sensitivity of the boosted fits; a shallower candidate or a narrower band lowering a published warning; an unverified bundle serving silently; the analog key's run-length feature truncating silently under an L1 gap at lags 8–12 (visible as `v24_history_hours < 12`); the study's `SHADOW` verdict on the early era |
+
+### The two experts the live engine has to build, and why they are built that way
+
+Eight of the ten experts are quantities the engine already computes or the bundle already
+carries. Two are not, and both have a trap.
+
+The **frozen V2.1 expert** is a rollout that holds the issue driver for every step. The
+engine's own `v2_pred_dst_nt` is not that quantity: it admits L1-measured hours into the core
+rollout, which is the whole point of the served operator. Handing the stack the logged column
+would give it an expert whose weights were fitted on a different number. It is therefore
+recomputed through `v23_serving_frozen_center`, exactly as the V2.3 shadow path recomputes
+it, and the live test asserts the recomputed value differs from the logged column and that
+substituting the logged column moves the stack center.
+
+The **direct increment-GBM expert** needs the 29-column design the study fitted on: the 18
+analog features plus eight Dst lags (1–6, 12, 24 h) and three coupling lags. Restating those
+definitions in the engine is how the live design would drift from the fitted one, so the
+engine builds a 25-hour mini frame — Earth-arrival hourly means where L1 coverage exists,
+Kyoto Dst where it is observed — and calls the package's own `v23_direct_features` on it. The
+first 18 columns of the result must equal the analog key exactly; a disagreement means the
+two blocks saw different hourly means, and the expert is refused rather than served from an
+inconsistent state. The increment is inverted with the design's own `dst0`, not with the
+row's `latest_dst_nt`, because the model regresses `Dst(t+h) − Dst(t)` and only the design
+can say which `Dst(t)` it was fitted against.
+
+### Why the guard became an expert, and what took over depth safety
+
+The earlier candidate took the served center as `min(stack center, static V2.2 stack)` in a
+deepening cell. Independent verification of that run showed why that was the wrong shape: the
+weights are dominated by moderate rows and the deep cells are data-poor in the early folds, so
+the physics composition the static product already encodes was never recovered by the
+combination and had to be imposed afterwards — and imposing it still left bootstrap-supported
+losses in the deep cells. Amendment A3 puts the static stack into the combination as expert
+ten and counts it inside the mass floor, because that product is itself a composition of the
+deployed SINDy operators. The optimiser then uses it where it is best and adapts elsewhere,
+and the selected variant needs no guard on the point forecast.
+
+The static-stack center remains an input to the served center rather than a continuity
+column: a cycle whose stack stage cannot act cannot form the ten-expert combination at all.
+The stage fails closed to the V2.1 operator, `v24_status` says
+`fallback:static_expert_unavailable`, and the row carries the V2.1 label. This is why the
+chain is three stages deep rather than two.
+
+Depth safety did not disappear with the guard; it moved to the layer that publishes warnings.
+The severity is taken through `v24_serving_depth_safe_center` as the deepest of the V2.4e
+center, the static-stack center and the V2.1 center, so a combination that blends toward a
+shallower state cannot lower a warning either predecessor would have raised.
+
+The watch edge needs the same rule applied to the *edges*, not to the center. The first
+integration shifted the served edge down by the amount the point was lowered, which reads like
+the same statement and is not: the edge a predecessor would have published is its own center
+minus its own half-width, and the V2.4e half-width is not that half-width. So
+`served_ci05 + min(0, depth_safe − served)` lands at `deepest_partner_center − hw_V2.4`, not at
+`deepest_partner_center − hw_partner`. Whenever `hw_V2.4` is the smaller of the two the published
+edge is shallower than the predecessor's own — a whole storm tier, in the case the app suite now
+pins. The scratch live cycle shows the two widths differing at every issued lead (conformal
+shallow 4.86 / 8.01 / 10.02 / 13.09 nT at steps 1/2/3/6 against 4.78 / 7.11 / 8.69 / 10.89 nT from
+the shifted frozen tail), which is the point: a rule stated on the centers cannot reproduce an edge
+formed from a different width, in either direction.
+
+The engine therefore logs the predecessor edges. The band the pre-V2.4 machinery produces —
+the frozen tail shifted onto the served center, or the adaptive band centered on it — is in both
+cases a pure translation of a width that does not depend on the center (`_shift_interval_to_center`
+adds `lo − rc` to the new center; `_adaptive_conformal_step!` returns `point ± hw` with `hw` read
+from the residual history). The predecessor edge is that same width applied to that stage's own
+center, so it is derived arithmetically from the band already computed rather than by re-running
+the interval machinery. Re-running it would take the forecast-log lock, rebuild or reload the
+persisted live state and step the ACI stream once more per partner per row; that step happens to be
+non-mutating here only because the interval is requested with a non-finite observation, which is a
+property of the call site rather than of the function, and three calls per row would make the served
+band depend on it. The published edge is then `min(served_ci05, v2_2_stack_ci05, v2_1_served_ci05)`,
+which is idempotent, leaves a deeper served edge untouched, and drops a non-finite partner rather
+than propagating it — the same handling the center min uses, because it is the same function.
+A row written before those columns existed has no deeper edge on record, so it keeps the shift
+rule and the payload discloses `severity_ci05_source = "legacy_center_shift"`.
+
+The guard arithmetic itself is retained and is driven by the bundle's own
+`guard.json`: the loader reads `guard_applied` and `guard_reference`, refuses a bundle whose
+two fields disagree, and applies the guard only when the deployed artifact asks for it. That
+keeps a later guarded variant servable without a source change, and keeps the arithmetic under
+test either way.
+
+### Two stacks share one weight schema, so the served cells have to name their own
+
+The study fits and ships three stacks per fold — the unconstrained nine-expert `L1`, the
+floor-constrained nine-expert `L1a` and the floor-constrained ten-expert `L1e` — and writes
+them into one table whose weight columns cover the widest set. A nine-expert row therefore
+carries a hard zero in `w_static_v2_2` and is otherwise indistinguishable from a ten-expert row
+whose optimiser happened to put no mass there. Serving such a row would silently drop expert
+ten while every other check still passed: the weights are non-negative, they sum to one, and
+the three-member floor is satisfied.
+
+The bundle's rows therefore carry `expert_set` and `n_experts`, the fit's own record of what it
+was fitted on, and the loader requires the served variant's cells to name exactly the ten served
+experts in the served order. The bundle also records the floor group in `guard.json`, which the
+loader checks against `V24_SERVING_SINDY_FAMILY`, so a floor that no longer counts the static
+stack is refused rather than reinterpreted. The fixture injects both defects, plus a whole table
+relabelled as the nine-expert fit, and asserts each one fails to load.
+
+### A fold refit is the only honest way to build a deployable bundle
+
+No rolling fold's training window reaches the end of the data, so no fold's fits are the
+model a live engine should load. The builder therefore performs a "fold-2026" refit: the same
+analog archive rule, the same refit ridge correction, the same inner-validation choice and
+per-step boosted fit, the same climatology timescale, the same NNLS super-learner and the
+same conformal calibration, with the training window extended to the base table's own
+end-of-data embargo and the out-of-fold pool extended to every persisted fold. Reusing the
+code paths is not a convenience: a rebuilt fit produced by different code would not be the
+model the study scored, and there would be nothing to compare it against.
+
+Which is exactly what makes the fold-2025 replica valuable. Building the same bundle at the
+rolling fold-2025 window puts the builder against a fold the study did score, so its weights,
+half-widths, timescale, boosted configurations and correction label can be compared with the
+study's persisted artifacts. They agree to 0.0. That comparison is what licenses the claim
+that the fold-2026 bundle is the same model at a later window, and it is also what proves the
+`v24_direct_stage!` split (into selection, fit and prediction, so the builder can fit without
+a scored year) left the arithmetic alone.
+
+### Splitting a study file has a signature consequence
+
+`v24_fold_signature` hashes `v2_4_rolling.jl`, so refactoring that file makes every persisted
+fold read as stale even when the arithmetic is provably unchanged. That is the intended
+behaviour of a signature, and the escape hatch already exists: a re-run that means to reuse
+the folds passes `--reuse-stale-folds="<reason>"`, and the reason here is the fold-2025
+replica agreement recorded above. Without the flag the engine recomputes, which is the safe
+default and costs hours.
+
+### Boosted fits are only reproducible at a fixed thread count
+
+EvoTrees accumulates histogram sums in parallel, so a fit is bit-identical only at the thread
+count it was produced under. The study ran with 8 threads; the builder refuses any other
+count unless the operator passes `--allow-thread-drift`, and then records the deviation in
+both the manifest and `selected.json`. The identity oracle would catch a drifted fit as a
+non-zero deviation on `direct_gbm`, which is the check that makes the refusal verifiable
+rather than a claim.
+
+### The served band changed source, and that is a disclosure
+
+A V2.4e row carries the study's split-conformal half-widths for the V2.4e center, stratified
+by model step and depth bin. The shifted frozen-tail band and the adaptive band are
+calibrated on residuals of the centers they were pooled from; transplanting either onto the
+super-learner center would publish an interval nothing has verified. The study's G3 gate
+scored the conformal band on this center (pooled coverage 0.890, storm rows 0.823, ≤ −100 nT
+rows 0.76), so it is the band with evidence. The switch travels with the row in
+`interval_source`, and a fallback row keeps the previous machinery.
+
+That the band changed source is also why the watch edge cannot be the served edge shifted: the
+two bands are not the same width, so a rule stated on the center does not carry to the edge. The
+predecessor edges above exist because of this.
+
+### The physical projection is a stage, so it is logged
+
+`v24_serving_center` ends in `clamp(·, −2000, +50)` nT and returns `projection_applied` alongside
+`guard_applied`. Nothing about the arithmetic changed; what changed is that the reported center no
+longer disagrees silently with the combination it came from. The identity oracle asserts the
+projection inert on the compared anchors, which is a statement about those anchors and not about
+the projection: the study's window never approaches `+50` nT, but a real anchor Dst above roughly
+`+52` nT with a panel to match does, and the log had no column that would show it. The invariant
+`v24_pred_dst_nt == v24_l1_center_dst_nt` for an unguarded bundle is consequently asserted under
+`!v24_projection_applied` rather than unconditionally, and the unit suite exercises the clamp at
+both edges on a synthetic panel. The exactly-boundary case is deliberately not used as an
+"inert" case: a convex combination whose weights sum to unity only within the shipped tolerance
+lands a hair outside a boundary panel, and the projection then legitimately acts.
+
+### Identity checks have to read the artifact, not the constant
+
+`V24ServingArtifacts` is constructed with `identity = V24_SERVED_IDENTITY`, so
+`artifacts.identity == V24_SERVED_IDENTITY` is an identity of the source constant with itself. It
+appeared in both the engine's `_v2_4_artifacts()` and the readiness audit's `audit_v2_4_bundle!`,
+reading like a check and enforcing nothing. Both now read what the bundle records on disk — the
+`selected.json` identity, and in the audit also the manifest's `build/identity` row. The loader's
+own refusal (`load_v24_serving_artifacts` compares the selection record with the constant before
+anything else is parsed) is unchanged and remains the real gate; these are the restatements that
+survive a loader change.
+
+The remaining independent statement about which product is being served is the label the served
+rows carry, so `audit_served_bundle_identity!` compares the bundle's recorded identity with the
+`sub_hourly_model_version` of the newest cycle's rows whose `v24_status` is `ok`. Rows served by an
+earlier stage legitimately carry that stage's label and are excluded.

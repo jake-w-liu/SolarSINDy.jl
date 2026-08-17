@@ -47,6 +47,7 @@ include("operational_v23_gbm.jl")
 include("operational_v22_serving.jl")
 include("operational_v23_stats.jl")
 include("operational_v23_serving.jl")
+include("operational_v24_serving.jl")
 
 export # Utils
        numerical_derivative, smooth_moving_average, pressure_correct_dst,
@@ -286,6 +287,27 @@ export # Utils
        v23_serving_features, v23_serving_step_driver_from_frame, v23_serving_members,
        v23_serving_calibration_features, v23_serving_t1r_features,
        v23_serving_frozen_center, v23_serving_innovation_lags, v23_serving_center,
-       v23_serving_manifest_hashed_names, v23_serving_innovations_from_step1_centers
+       v23_serving_manifest_hashed_names, v23_serving_innovations_from_step1_centers,
+       v24_serving_depth_safe_center,
+       # Operational V2.4e served product
+       V24_SERVING_MODEL_STEPS, V24_SERVING_STEP_SLOT, V24_SERVED_IDENTITY,
+       V24_SERVED_VARIANT, V24_SERVING_STATIC_EXPERT, V24_SERVING_GUARD_REFERENCE,
+       V24_SERVING_GUARD_REFERENCE_NONE,
+       V24_SERVED_DRIVER_ASSUMPTION, V24_SERVING_EXPERTS, V24_SERVING_EXPERT_COUNT,
+       V24_SERVING_SINDY_FAMILY, V24_SERVING_SINDY_FLOOR, V24_SERVING_REGIMES,
+       V24_SERVING_POOLED, V24_SERVING_DEPTH_BINS, V24_SERVING_DEPTH_MODERATE_NT,
+       V24_SERVING_DEPTH_DEEP_NT, V24_SERVING_GUARD_RATE_NT_PER_H,
+       V24_SERVING_GUARD_DEPTH_NT, V24_SERVING_COVERAGE, V24_SERVING_DST_FLOOR_NT,
+       V24_SERVING_DST_CEIL_NT, V24_SERVING_STATS_ATOL, V24_SERVING_REQUIRED_FILES,
+       V24_SERVING_STACK_VARIANT, V24_SERVING_ANALOG_K, V24_SERVING_ANALOG_WEIGHT_SET,
+       V24_SERVING_ANALOG_IDENTITY, V24_SERVING_DRIVER_LAGS_H, V24_SERVING_DST_LAG_MAX_H,
+       V24ServingArtifacts, V24ServingCell, V24ServingStratum,
+       v24_serving_direct_file, v24_serving_depth_bin, v24_serving_cell_chain,
+       v24_serving_cell_grid, v24_serving_deepening, v24_serving_guard,
+       v24_serving_verify_manifest, v24_serving_manifest_hashed_names,
+       load_v24_serving_artifacts, v24_serving_analog_features, v24_serving_analog_members,
+       v24_serving_t1r_center, v24_serving_direct_frame, v24_serving_direct_features,
+       v24_serving_direct_center, v24_serving_climatology_center, v24_serving_cell,
+       v24_serving_interval, v24_serving_center
 
 end # module

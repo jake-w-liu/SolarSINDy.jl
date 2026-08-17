@@ -10,6 +10,9 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
 struct _InterruptingForecastText end
 Base.String(::_InterruptingForecastText) = throw(InterruptException())
 
+include(joinpath(@__DIR__, "v2_4_serving_fixture.jl"))
+using .V24ServingFixture
+
 @testset "Live Forecast Verification Workflow" begin
     @testset "OMNI replay windows preserve independent driver and Dst support" begin
         t0 = DateTime(2026, 1, 1)
@@ -441,6 +444,12 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
     end
 
     @testset "Served static stack and V2.3 shadow columns" begin
+        # The served stage is the V2.4 super-learner, and these cases isolate the stages *below* it:
+        # the static stack, its fallbacks and the shadow path. Pointing the bundle at a path that does
+        # not exist makes the V2.4 stage disclose `fallback:deployment_absent`, so the served center is
+        # the stack center and each case still tests the stage it names. The V2.4 stage has its own
+        # testset below, where the bundle is present.
+        absent_v2_4 = joinpath(mktempdir(), "no_v2_4_bundle")
         # Synthetic feed with a full day of minute-cadence L1 coverage: enough history for the twelve
         # driver lags the analog key can consume, and enough forward coverage that the served tail
         # exercises both the measured and the relaxed branch.
@@ -482,8 +491,9 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             mktempdir() do dir
                 # The shadow deployment is deliberately pointed away so this case isolates the served
                 # stage; the shadow path is exercised separately below.
-                row = withenv("SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent")) do
-                    reset_v2_2_stack!(); reset_v2_3_shadow!()
+                row = withenv("SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent"),
+                              "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
+                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
                     _issue_row(dir, "served_stack")
                 end
                 reset_v2_3_shadow!()
@@ -535,7 +545,8 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
             @test V2_3_SHADOW_RETRY_SECONDS >= V2_2_STACK_RETRY_SECONDS
             mktempdir() do dir
                 staged = joinpath(dir, "operational_v2_2_stack.csv")
-                withenv("SOLARSINDY_V2_2_STACK" => staged) do
+                withenv("SOLARSINDY_V2_2_STACK" => staged,
+                        "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
                     reset_v2_2_stack!()
                     absent = redirect_stderr(devnull) do
                         _v2_2_stack()
@@ -558,11 +569,12 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
         @testset "absent stack weights fall back to the V2.1 center and say so" begin
             mktempdir() do dir
                 row = withenv("SOLARSINDY_V2_2_STACK" => joinpath(dir, "no_such_stack.csv"),
-                              "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent")) do
-                    reset_v2_2_stack!(); reset_v2_3_shadow!()
+                              "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent"),
+                              "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
+                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
                     _issue_row(dir, "stack_absent")
                 end
-                reset_v2_2_stack!(); reset_v2_3_shadow!()
+                reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
                 @test row.sub_hourly_model_version == V2_SERVED_TAIL_VERSION
                 @test row.driver_assumption == V2_DRIVER_ASSUMPTION
                 @test Float64(row.served_pred_dst_nt) == Float64(row.v2_1_served_pred_dst_nt)
@@ -578,13 +590,14 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                     write(io, "\n")
                 end
                 row = withenv("SOLARSINDY_V2_2_STACK" => tampered,
-                              "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent")) do
-                    reset_v2_2_stack!(); reset_v2_3_shadow!()
+                              "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent"),
+                              "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
+                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
                     redirect_stderr(devnull) do
                         _issue_row(dir, "stack_tampered")
                     end
                 end
-                reset_v2_2_stack!(); reset_v2_3_shadow!()
+                reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
                 @test row.sub_hourly_model_version == V2_SERVED_TAIL_VERSION
                 @test Float64(row.served_pred_dst_nt) == Float64(row.v2_1_served_pred_dst_nt)
             end
@@ -596,8 +609,9 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                 @test_skip "deploy/v2_3_shadow is absent; run validation/operational/v2_3_build_deploy.jl"
             else
                 mktempdir() do dir
-                    row = withenv("SOLARSINDY_V2_3_SHADOW_DIR" => shadow_dir) do
-                        reset_v2_2_stack!(); reset_v2_3_shadow!()
+                    row = withenv("SOLARSINDY_V2_3_SHADOW_DIR" => shadow_dir,
+                                  "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
+                        reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
                         _issue_row(dir, "shadow_ok")
                     end
                     # The one-hour pre-layer center is cached per anchor and reused by every horizon of
@@ -692,9 +706,10 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                         bz_gsm=[-6.0 + 3.0 * sin(2π * k / 517) for k in eachindex(all_sw)],
                         by_gsm=[1.5 * cos(2π * k / 379) for k in eachindex(all_sw)],
                     )
-                    reset_v2_2_stack!(); reset_v2_3_shadow!()
+                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
                     anchors = DateTime[]
-                    withenv("SOLARSINDY_V2_3_SHADOW_DIR" => shadow_dir) do
+                    withenv("SOLARSINDY_V2_3_SHADOW_DIR" => shadow_dir,
+                            "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
                         for cycle in 1:8
                             issue = base_issue + Hour(cycle - 1)
                             anchor = _floor_hour(issue) - Hour(1)
@@ -791,8 +806,9 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                 refused = withenv("SOLARSINDY_V2_2_STACK" => staged,
                                   "SOLARSINDY_V2_2_STACK_SHA256" => "",
                                   "SOLARSINDY_ALLOW_UNPINNED_STACK" => nothing,
-                                  "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent")) do
-                    reset_v2_2_stack!(); reset_v2_3_shadow!()
+                                  "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent"),
+                                  "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
+                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
                     redirect_stderr(devnull) do
                         _issue_row(dir, "stack_unpinned_refused")
                     end
@@ -806,13 +822,14 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                 accepted = withenv("SOLARSINDY_V2_2_STACK" => staged,
                                    "SOLARSINDY_V2_2_STACK_SHA256" => "",
                                    "SOLARSINDY_ALLOW_UNPINNED_STACK" => "1",
-                                   "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent")) do
-                    reset_v2_2_stack!(); reset_v2_3_shadow!()
+                                   "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent"),
+                                   "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
+                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
                     redirect_stderr(devnull) do
                         _issue_row(dir, "stack_unpinned_accepted")
                     end
                 end
-                reset_v2_2_stack!(); reset_v2_3_shadow!()
+                reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
                 @test String(accepted.v2_2_status) == V2_2_STACK_OK_UNPINNED_STATUS
                 # The center is a stack center, so the driver assumption is the stack assumption, but
                 # the identity must not claim the pinned product.
@@ -822,6 +839,32 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                 @test accepted.v2_2_regime in ("quiet", "active_deepening", "recovery")
                 @test Float64(accepted.served_pred_dst_nt) !=
                       Float64(accepted.v2_1_served_pred_dst_nt)
+
+                # The static-stack center is expert ten of the V2.4 stack. Weights that carry no
+                # digest pin are not the fitted stack the super-learner was trained against, so the
+                # combination cannot be formed from them: a stage that served it anyway would publish
+                # unpinned weights under the pinned V2.4 identity, which is exactly the laundering the
+                # separate unpinned label exists to prevent.
+                bundle = build_v24_fixture_bundle(joinpath(dir, "v24_unpinned_bundle"))
+                laundered = withenv("SOLARSINDY_V2_2_STACK" => staged,
+                                    "SOLARSINDY_V2_2_STACK_SHA256" => "",
+                                    "SOLARSINDY_ALLOW_UNPINNED_STACK" => "1",
+                                    "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent"),
+                                    "SOLARSINDY_V2_4_DEPLOY_DIR" => bundle.dir) do
+                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
+                    redirect_stderr(devnull) do
+                        _issue_row(dir, "stack_unpinned_with_v24")
+                    end
+                end
+                reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
+                @test String(laundered.v2_2_status) == V2_2_STACK_OK_UNPINNED_STATUS
+                @test String(laundered.v24_status) == "fallback:static_expert_unpinned"
+                @test ismissing(laundered.v24_pred_dst_nt)
+                @test laundered.sub_hourly_model_version == V2_2_UNPINNED_SERVED_TAIL_VERSION
+                @test laundered.sub_hourly_model_version != V2_4_SERVED_TAIL_VERSION
+                @test laundered.driver_assumption == V2_2_DRIVER_ASSUMPTION
+                @test Float64(laundered.served_pred_dst_nt) ==
+                      Float64(laundered.v2_2_stack_pred_dst_nt)
             end
         end
 
@@ -857,8 +900,9 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                         model=:v2, horizon_hours=6, log_path=joinpath(dir, "$(name).csv"),
                         report_path=joinpath(dir, "$(name).md"),
                     )
-                    return withenv("SOLARSINDY_V2_3_SHADOW_DIR" => shadow_dir) do
-                        reset_v2_2_stack!(); reset_v2_3_shadow!()
+                    return withenv("SOLARSINDY_V2_3_SHADOW_DIR" => shadow_dir,
+                                   "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
+                        reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
                         inputs = prepare_issue_inputs(
                             cfg; issue_time=issue,
                             plasma_fn=() -> feed_plasma, mag_fn=() -> feed_mag,
@@ -893,6 +937,513 @@ Base.String(::_InterruptingForecastText) = throw(InterruptException())
                     @test Int(boundary.v23_history_hours) >= V23_HISTORY_LAGS_H
                     @test Int(boundary.v23_history_hours) < V23_SOUTH_RUN_CAP_H
                     @test isfinite(boundary.v23_step1_center_dst_nt)
+                end
+            end
+        end
+    end
+
+    @testset "Served V2.4e super-learner stage" begin
+        # The served stage is the V2.4e super-learner over the ten experts, the static V2.2 stack among
+        # them. These cases drive it on a synthetic bundle (the real bundle's numbers are the study's
+        # evidence, and the offline identity oracle is what ties this code to them) and then confirm
+        # that the deployed bundle serves at all.
+        #
+        # A day of minute-cadence L1 coverage and 24 h of hourly Dst are the minimum the stage needs:
+        # twelve driver lags for the analog key and the run-length window, and a Dst ladder that reaches
+        # `dst_lag24`.
+        issue_time = DateTime(2026, 7, 15, 12, 30)
+        sw_times = collect((issue_time - Hour(24)):Minute(1):issue_time)
+        plasma = DataFrame(
+            time_tag=sw_times,
+            speed=[470.0 + 20.0 * sin(2π * k / 613) for k in eachindex(sw_times)],
+            density=[6.0 + 0.8 * sin(2π * k / 421) for k in eachindex(sw_times)],
+        )
+        mag = DataFrame(
+            time_tag=sw_times,
+            bz_gsm=[-6.0 + 3.0 * sin(2π * k / 517) for k in eachindex(sw_times)],
+            by_gsm=[1.5 * cos(2π * k / 379) for k in eachindex(sw_times)],
+        )
+        latest_dst_time = _floor_hour(issue_time) - Hour(1)
+        dst_times = collect((latest_dst_time - Hour(24)):Hour(1):latest_dst_time)
+        dst_values = collect(range(-30.0, -78.0; length=length(dst_times)))
+        shadow_absent = joinpath(mktempdir(), "no_v2_3_shadow")
+
+        # One synthetic feed, shared by the end-to-end rows and by the served-stage status matrix, so
+        # both exercise the same information set.
+        function _v24_feed(; span::Period=Hour(24), dst_span::Period=Hour(24))
+            feed_times = collect((issue_time - span):Minute(1):issue_time)
+            feed_plasma = DataFrame(
+                time_tag=feed_times,
+                speed=[470.0 + 20.0 * sin(2π * k / 613) for k in eachindex(feed_times)],
+                density=[6.0 + 0.8 * sin(2π * k / 421) for k in eachindex(feed_times)],
+            )
+            feed_mag = DataFrame(
+                time_tag=feed_times,
+                bz_gsm=[-6.0 + 3.0 * sin(2π * k / 517) for k in eachindex(feed_times)],
+                by_gsm=[1.5 * cos(2π * k / 379) for k in eachindex(feed_times)],
+            )
+            feed_dst_times = collect((latest_dst_time - dst_span):Hour(1):latest_dst_time)
+            feed_dst_values = collect(range(-30.0, -78.0; length=length(feed_dst_times)))
+            return (plasma=feed_plasma, mag=feed_mag, dst_times=feed_dst_times,
+                    dst_values=feed_dst_values)
+        end
+
+        function _v24_row(dir::AbstractString, name::AbstractString; bundle_dir,
+                          stack_path=V2_2_DEFAULT_STACK_PATH, span::Period=Hour(24),
+                          dst_span::Period=Hour(24), model::Symbol=:v2, horizon::Int=6)
+            feed = _v24_feed(; span=span, dst_span=dst_span)
+            feed_plasma = feed.plasma
+            feed_mag = feed.mag
+            feed_dst_times = feed.dst_times
+            feed_dst_values = feed.dst_values
+            cfg = LiveVerifyConfig(;
+                model=model, horizon_hours=horizon, log_path=joinpath(dir, "$(name).csv"),
+                report_path=joinpath(dir, "$(name).md"),
+            )
+            return withenv("SOLARSINDY_V2_4_DEPLOY_DIR" => bundle_dir,
+                           "SOLARSINDY_V2_2_STACK" => stack_path,
+                           "SOLARSINDY_V2_3_SHADOW_DIR" => shadow_absent) do
+                reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
+                inputs = prepare_issue_inputs(
+                    cfg; issue_time,
+                    plasma_fn=() -> feed_plasma, mag_fn=() -> feed_mag,
+                    dst_fn=() -> (feed_dst_times, feed_dst_values),
+                )
+                row = redirect_stdout(devnull) do
+                    redirect_stderr(devnull) do
+                        issue_forecast(cfg; inputs, write_trajectory=false, verbose=false)
+                    end
+                    CSV.read(cfg.log_path, DataFrame)[1, :]
+                end
+                reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
+                return row
+            end
+        end
+
+        mktempdir() do root
+            fixture = build_v24_fixture_bundle(joinpath(root, "bundle"))
+            artifacts = load_v24_serving_artifacts(fixture.dir)
+            v2_1_calibration = read_operational_v2_calibration(
+                operational_calibration_artifacts(OPERATIONAL_V2_1_MODEL_VERSION).point_csv)
+
+            @testset "the super-learner serves the published identity" begin
+                row = _v24_row(root, "v24_served"; bundle_dir=fixture.dir)
+                @test row.model_version == "v2.1"
+                @test row.sub_hourly_model_version == V2_4_SERVED_TAIL_VERSION
+                @test row.sub_hourly_model_version ==
+                      "v2.4+sindy20x11+superlearner10floor+conformal"
+                @test row.driver_assumption == V2_4_DRIVER_ASSUMPTION
+                @test row.v24_status == "ok"
+                @test row.v24_model_version == V2_4_SERVED_TAIL_VERSION
+                @test row.v24_manifest_sha256 == artifacts.manifest_sha256
+                # Every stage of the fallback chain stays logged, which is what keeps the published
+                # severity depth-safe and the change auditable row by row.
+                @test isfinite(row.v2_1_served_pred_dst_nt)
+                @test isfinite(row.v2_2_stack_pred_dst_nt)
+                @test row.v2_2_status == "ok"
+                @test isfinite(row.v24_l1_center_dst_nt)
+                @test isfinite(row.v24_t1r_pred_dst_nt)
+                @test isfinite(row.direct_gbm_pred_dst_nt)
+                @test isfinite(row.climatology_pred_dst_nt)
+                @test Int(row.v24_history_hours) == V24_SERVING_DRIVER_LAGS_H
+                @test row.v24_regime_cell isa AbstractString
+                @test occursin("/", String(row.v24_regime_cell))
+                # The served center is the V2.4 center, not the stack center it replaced.
+                @test Float64(row.served_pred_dst_nt) == Float64(row.v24_pred_dst_nt)
+                @test Float64(row.served_pred_dst_nt) != Float64(row.v2_2_stack_pred_dst_nt)
+                # The served band is the study's conformal band for this center, disclosed as such.
+                @test row.interval_source == V2_4_INTERVAL_SOURCE
+                @test Float64(row.served_pred_dst_ci05_nt) == Float64(row.v24_ci05_nt)
+                @test Float64(row.served_pred_dst_ci95_nt) == Float64(row.v24_ci95_nt)
+                @test row.served_pred_dst_ci05_nt < row.served_pred_dst_nt <
+                      row.served_pred_dst_ci95_nt
+                # The physical projection is logged, not inferred: the +50/-2000 nT clamp can act on a
+                # real anchor state, and without this column a projected center would be
+                # indistinguishable from an unprojected one.
+                @test row.v24_projection_applied == false
+                # Each predecessor's own band edge is logged, because the published watch edge is the
+                # deepest of them and the served edge. Both partners carry the same half-width, which
+                # is the band the pre-V2.4 machinery would have served either center under.
+                @test isfinite(row.v2_1_served_ci05_dst_nt)
+                @test isfinite(row.v2_2_stack_ci05_dst_nt)
+                @test Float64(row.v2_1_served_pred_dst_nt) -
+                      Float64(row.v2_1_served_ci05_dst_nt) ≈
+                      Float64(row.v2_2_stack_pred_dst_nt) -
+                      Float64(row.v2_2_stack_ci05_dst_nt) atol=1e-12
+                @test Float64(row.v2_1_served_ci05_dst_nt) <
+                      Float64(row.v2_1_served_pred_dst_nt)
+                # The served conformal half-width is a different number from the band the predecessors
+                # served under, which is exactly why the watch edge cannot be the served edge shifted
+                # by the change in the center.
+                @test !isapprox(Float64(row.served_pred_dst_nt) -
+                                Float64(row.served_pred_dst_ci05_nt),
+                                Float64(row.v2_1_served_pred_dst_nt) -
+                                Float64(row.v2_1_served_ci05_dst_nt); atol=1e-9)
+                # Independent recomputation of the whole served stage from the logged state: the frozen
+                # expert is the held-driver rollout (recomputed here, as the engine recomputes it), the
+                # other experts are the logged panel — the static stack among them — and the cell and
+                # interval follow.
+                memory = (dst_delta_1h_nt=Float64(row.dst_delta_1h_nt),
+                          dst_delta_3h_nt=Float64(row.dst_delta_3h_nt),
+                          Bz_delta_1h_nt=Float64(row.Bz_delta_1h_nt),
+                          VBsouth_delta_1h_mvm=Float64(row.VBsouth_delta_1h_mvm),
+                          VBsouth_mean_3h_mvm=Float64(row.VBsouth_mean_3h_mvm),
+                          Bsouth_mean_3h_nt=Float64(row.Bsouth_mean_3h_nt))
+                drivers = (V=Float64(row.V_kms), Bz=Float64(row.Bz_nt), By=Float64(row.By_nt),
+                           n=Float64(row.n_cm3), Pdyn=Float64(row.Pdyn_npa))
+                baselines = (persistence=Float64(row.persistence_dst_nt),
+                             burton=Float64(row.burton_dst_nt),
+                             burton_full=Float64(row.burton_full_dst_nt),
+                             obrien=Float64(row.obrien_dst_nt))
+                frozen = v23_serving_frozen_center(
+                    artifacts.analog; v2_1_calibration=v2_1_calibration, issue_drv=drivers,
+                    anchor_dst_star=Float64(row.anchor_dst_star_nt),
+                    latest_dst=Float64(row.latest_dst_nt), memory=memory, baselines=baselines,
+                    model_steps=Int(row.model_step_hours),
+                    anchor_time=_parse_dt(row.latest_dst_time_utc),
+                )
+                experts = (served_v2_1=Float64(row.v2_1_served_pred_dst_nt),
+                           frozen_v2_1=frozen.center,
+                           t1r_analog=Float64(row.v24_t1r_pred_dst_nt),
+                           persistence=Float64(row.persistence_dst_nt),
+                           burton=Float64(row.burton_dst_nt),
+                           burton_full=Float64(row.burton_full_dst_nt),
+                           obrien=Float64(row.obrien_dst_nt),
+                           direct_gbm=Float64(row.direct_gbm_pred_dst_nt),
+                           climatology=Float64(row.climatology_pred_dst_nt),
+                           static_v2_2=Float64(row.v2_2_stack_pred_dst_nt))
+                expected = v24_serving_center(
+                    artifacts; model_steps=Int(row.model_step_hours),
+                    latest_dst=Float64(row.latest_dst_nt),
+                    dst_delta_1h_nt=Float64(row.dst_delta_1h_nt),
+                    vbsouth_mvm=Float64(row.VBsouth_mvm), experts=experts,
+                )
+                @test Float64(row.v24_l1_center_dst_nt) ≈ expected.l1_center atol=1e-12
+                @test Float64(row.v24_pred_dst_nt) ≈ expected.center atol=1e-12
+                @test Float64(row.v24_ci05_nt) ≈ expected.ci05_nt atol=1e-12
+                @test Float64(row.v24_ci95_nt) ≈ expected.ci95_nt atol=1e-12
+                @test row.v24_guard_applied == expected.guard_applied
+                @test row.v24_projection_applied == expected.projection_applied
+                # The deployed bundle carries no point-forecast guard, so the published center is the
+                # stack center itself — unless the physical projection acted, which is a separate
+                # stage and is logged separately. The invariant is therefore conditional on the
+                # projection flag rather than assumed unconditionally.
+                @test row.v24_guard_applied == false
+                if !row.v24_projection_applied
+                    @test Float64(row.v24_pred_dst_nt) ≈
+                          Float64(row.v24_l1_center_dst_nt) atol=1e-12
+                end
+                @test row.v24_deepening_cell == expected.deepening_cell
+                @test String(row.v24_regime_cell) == expected.regime_cell
+                @test row.v24_pooled_fallback == expected.used_pooled_fallback
+                # The frozen expert is the held-driver rollout, not the logged core center that admits
+                # L1-measured hours: substituting the logged column moves the stack center, which is
+                # exactly the mistake the recomputation above rules out.
+                @test frozen.center != Float64(row.v2_pred_dst_nt)
+                @test v24_serving_center(
+                    artifacts; model_steps=Int(row.model_step_hours),
+                    latest_dst=Float64(row.latest_dst_nt),
+                    dst_delta_1h_nt=Float64(row.dst_delta_1h_nt),
+                    vbsouth_mvm=Float64(row.VBsouth_mvm),
+                    experts=merge(experts, (frozen_v2_1=Float64(row.v2_pred_dst_nt),)),
+                ).l1_center != expected.l1_center
+                # The static stack is a weighted input of the served center: perturbing it alone must
+                # move the center, which is what distinguishes an expert from a discarded reference.
+                @test v24_serving_center(
+                    artifacts; model_steps=Int(row.model_step_hours),
+                    latest_dst=Float64(row.latest_dst_nt),
+                    dst_delta_1h_nt=Float64(row.dst_delta_1h_nt),
+                    vbsouth_mvm=Float64(row.VBsouth_mvm),
+                    experts=merge(experts,
+                                  (static_v2_2=Float64(row.v2_2_stack_pred_dst_nt) - 25.0,)),
+                ).l1_center != expected.l1_center
+                # The V2.3 shadow stays a shadow: it is neither the served center nor the served label.
+                @test row.v23_shadow_model_version == V2_3_SHADOW_TAIL_VERSION
+                @test startswith(String(row.v23_status), "unavailable:")
+            end
+
+            @testset "an absent bundle falls back to the static stack and says so" begin
+                row = _v24_row(root, "v24_absent"; bundle_dir=joinpath(root, "no_bundle"))
+                @test row.v24_status == "fallback:deployment_absent"
+                @test row.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
+                @test row.driver_assumption == V2_2_DRIVER_ASSUMPTION
+                @test Float64(row.served_pred_dst_nt) == Float64(row.v2_2_stack_pred_dst_nt)
+                @test ismissing(row.v24_pred_dst_nt)
+                @test ismissing(row.v24_ci05_nt)
+                @test row.v24_guard_applied == false
+                @test row.v24_projection_applied == false
+                @test row.interval_source != V2_4_INTERVAL_SOURCE
+                # The stack is the stage actually serving this row, so its logged edge must be the
+                # published edge itself: the depth-safe minimum is then idempotent by construction.
+                @test Float64(row.v2_2_stack_ci05_dst_nt) ≈
+                      Float64(row.served_pred_dst_ci05_nt) atol=1e-12
+            end
+
+            @testset "a tampered bundle is refused rather than served" begin
+                tampered = build_v24_fixture_bundle(joinpath(root, "tampered");
+                                                    mutate=:tampered_stack_file)
+                row = _v24_row(root, "v24_tampered"; bundle_dir=tampered.dir)
+                @test row.v24_status == "fallback:deployment_invalid"
+                @test row.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
+                @test Float64(row.served_pred_dst_nt) == Float64(row.v2_2_stack_pred_dst_nt)
+            end
+
+            @testset "without the static-stack expert the stage cannot act" begin
+                # The static-stack center is expert ten of the served stack, so a cycle whose stack
+                # stage fell back cannot form the combination at all and must serve the V2.1 operator
+                # rather than a center over an incomplete panel.
+                row = _v24_row(root, "v24_no_reference"; bundle_dir=fixture.dir,
+                               stack_path=joinpath(root, "no_such_stack.csv"))
+                @test row.v2_2_status == "fallback_v2_1:stack_absent"
+                @test ismissing(row.v2_2_stack_pred_dst_nt)
+                @test row.v24_status == "fallback:static_expert_unavailable"
+                @test row.sub_hourly_model_version == V2_SERVED_TAIL_VERSION
+                @test row.driver_assumption == V2_DRIVER_ASSUMPTION
+                @test Float64(row.served_pred_dst_nt) == Float64(row.v2_1_served_pred_dst_nt)
+                @test ismissing(row.v24_pred_dst_nt)
+                # A stage that could not act publishes no edge either, so its partner column is
+                # missing rather than carrying an edge nothing served.
+                @test ismissing(row.v2_2_stack_ci05_dst_nt)
+                @test Float64(row.v2_1_served_ci05_dst_nt) ≈
+                      Float64(row.served_pred_dst_ci05_nt) atol=1e-12
+            end
+
+            @testset "a short L1 feed fails the analog key closed" begin
+                row = _v24_row(root, "v24_short_feed"; bundle_dir=fixture.dir, span=Hour(4))
+                @test startswith(String(row.v24_status), "fallback:missing_driver_lag")
+                @test Int(row.v24_history_hours) < V23_HISTORY_LAGS_H
+                @test ismissing(row.v24_pred_dst_nt)
+                @test row.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
+                @test isfinite(row.served_pred_dst_nt)
+            end
+
+            @testset "a short Dst ladder fails the direct expert closed" begin
+                # The analog key needs twelve driver hours; the direct design additionally needs the Dst
+                # ladder back to `dst_lag24`. A feed that satisfies the first but not the second must
+                # name the missing lag instead of serving a stack with an imputed expert.
+                row = _v24_row(root, "v24_short_dst"; bundle_dir=fixture.dir, dst_span=Hour(12))
+                @test startswith(String(row.v24_status), "fallback:missing_dst_lag")
+                @test ismissing(row.v24_pred_dst_nt)
+                @test row.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
+                @test isfinite(row.served_pred_dst_nt)
+            end
+
+            @testset "every documented served-stage status is produced by a code path" begin
+                # `v24_status` is the only per-row account of why the published center is not the
+                # super-learner's, and the readiness audit, the dashboard payload and the fallback-rate
+                # window all read it. A status no test ever produces is a branch nobody has seen
+                # execute, so each documented value is reached here rather than assumed reachable.
+                #
+                # The early refusals need no valid physics — they are decided before any expert is
+                # formed — so they are driven directly with the state a served row logged.
+                good = _v24_row(root, "v24_status_base"; bundle_dir=fixture.dir)
+                feed = _v24_feed()
+                anchor_time = _parse_dt(good.latest_dst_time_utc)
+                drivers = (V=Float64(good.V_kms), Bz=Float64(good.Bz_nt), By=Float64(good.By_nt),
+                           n=Float64(good.n_cm3), Pdyn=Float64(good.Pdyn_npa))
+                memory = (dst_delta_1h_nt=Float64(good.dst_delta_1h_nt),
+                          dst_delta_3h_nt=Float64(good.dst_delta_3h_nt),
+                          Bz_delta_1h_nt=Float64(good.Bz_delta_1h_nt),
+                          VBsouth_delta_1h_mvm=Float64(good.VBsouth_delta_1h_mvm),
+                          VBsouth_mean_3h_mvm=Float64(good.VBsouth_mean_3h_mvm),
+                          Bsouth_mean_3h_nt=Float64(good.Bsouth_mean_3h_nt))
+                baselines = (persistence=Float64(good.persistence_dst_nt),
+                             burton=Float64(good.burton_dst_nt),
+                             burton_full=Float64(good.burton_full_dst_nt),
+                             obrien=Float64(good.obrien_dst_nt))
+                features = (dst_delta_1h_nt=Float64(good.dst_delta_1h_nt),
+                            VBsouth_mvm=Float64(good.VBsouth_mvm))
+                calibration = read_operational_v2_calibration(
+                    operational_calibration_artifacts(OPERATIONAL_V2_1_MODEL_VERSION).point_csv)
+                function _stage(; bundle_dir=fixture.dir, model_steps=Int(good.model_step_hours),
+                                calibration=calibration, static_v2_2=Float64(good.v2_2_stack_pred_dst_nt),
+                                static_pinned=true, latest_dst=Float64(good.latest_dst_nt),
+                                dst_times=feed.dst_times, dst_vals=feed.dst_values,
+                                recent=drivers)
+                    return withenv("SOLARSINDY_V2_4_DEPLOY_DIR" => bundle_dir) do
+                        reset_v2_4_serving!()
+                        result = redirect_stderr(devnull) do
+                            _v2_4_served_center(
+                                plasma=feed.plasma, mag=feed.mag, dst_times=dst_times,
+                                dst_vals=dst_vals, latest_dst_time=anchor_time,
+                                latest_dst=latest_dst, anchor_drivers=drivers,
+                                anchor_dst_star=Float64(good.anchor_dst_star_nt), recent=recent,
+                                latest_common_sw=_parse_dt(good.latest_solar_wind_utc),
+                                model_steps=model_steps, features=features, memory=memory,
+                                baselines=baselines,
+                                served_v2_1=Float64(good.v2_1_served_pred_dst_nt),
+                                static_v2_2=static_v2_2, calibration=calibration,
+                                static_pinned=static_pinned,
+                            )
+                        end
+                        reset_v2_4_serving!()
+                        return result
+                    end
+                end
+
+                produced = String[]
+                record(status) = (push!(produced, status); status)
+
+                @test record(String(_stage().status)) == "ok"
+                @test record(String(_stage(; model_steps=5).status)) ==
+                      "fallback:unsupported_model_step"
+                @test record(String(_stage(; calibration=nothing).status)) ==
+                      "fallback:calibration_absent"
+                @test record(String(_stage(; static_v2_2=missing).status)) ==
+                      "fallback:static_expert_unavailable"
+                @test record(String(_stage(; static_v2_2=NaN).status)) ==
+                      "fallback:static_expert_unavailable"
+                @test record(String(_stage(; static_pinned=false).status)) ==
+                      "fallback:static_expert_unpinned"
+                @test record(String(_stage(; bundle_dir=joinpath(root, "no_status_bundle")).status)) ==
+                      "fallback:deployment_absent"
+                broken = build_v24_fixture_bundle(joinpath(root, "status_invalid");
+                                                  mutate=:tampered_stack_file)
+                @test record(String(_stage(; bundle_dir=broken.dir).status)) ==
+                      "fallback:deployment_invalid"
+                # The analog key's own refusals, in the precedence the key reports them.
+                @test record(String(_stage(; latest_dst=NaN).status)) ==
+                      "fallback:missing_anchor_dst"
+                @test record(String(_stage(; dst_times=[anchor_time],
+                                           dst_vals=[Float64(good.latest_dst_nt)]).status)) ==
+                      "fallback:missing_previous_dst"
+                # Any exception inside the stage is a status, never a raised error: the served stage
+                # must never interrupt an issuance.
+                @test record(String(_stage(; recent=nothing).status)) == "fallback:serving_error"
+                # A short feed names the missing driver hour, and a short Dst ladder the missing lag.
+                @test startswith(record(String(_v24_row(root, "v24_status_driver";
+                                                        bundle_dir=fixture.dir,
+                                                        span=Hour(4)).v24_status)),
+                                 "fallback:missing_driver_lag")
+                @test startswith(record(String(_v24_row(root, "v24_status_dst";
+                                                        bundle_dir=fixture.dir,
+                                                        dst_span=Hour(12)).v24_status)),
+                                 "fallback:missing_dst_lag")
+                # A v1 issuance never runs the stage at all, which is the row-level default status. A
+                # v1 row is issued at a single step, which is the only lead a v1 band is defined at.
+                v1_row = _v24_row(root, "v24_status_v1"; bundle_dir=fixture.dir, model=:v1,
+                                  horizon=1)
+                @test v1_row.model_version != OPERATIONAL_V2_1_MODEL_VERSION
+                @test record(String(v1_row.v24_status)) == "fallback:model_not_v2_1"
+                @test ismissing(v1_row.v24_pred_dst_nt)
+
+                # `fallback:incomplete_analog_key` is the key's reason of last resort: it fires only if
+                # the feature block rejects an anchor for a reason none of the named inputs accounts
+                # for. Every single-input defect is enumerated here and every one lands on a named
+                # reason instead, which is what makes that reason unreachable rather than untested — the
+                # key's own defect finder and the feature block's usability predicate are the same
+                # condition on the same five channels. A new rejection condition in the feature block
+                # would make it reachable, and would show up here as a defect with no named reason.
+                usable = (V=drivers.V, Bz=drivers.Bz, By=drivers.By, n=drivers.n, Pdyn=drivers.Pdyn)
+                anchor_dst = Float64(good.latest_dst_nt)
+                key_reason(history, dst_anchor, dst_prev) =
+                    v24_serving_analog_features(artifacts, anchor_time, history, dst_anchor,
+                                               dst_prev).reason
+                complete_history = Any[usable for _ in 1:V24_SERVING_DRIVER_LAGS_H]
+                @test key_reason(complete_history, anchor_dst, anchor_dst - 1.0) == "ok"
+                @test key_reason(complete_history, NaN, anchor_dst - 1.0) == "missing_anchor_dst"
+                @test key_reason(complete_history, anchor_dst, NaN) == "missing_previous_dst"
+                for lag in (1, 4, V23_HISTORY_LAGS_H)
+                    holed = copy(complete_history)
+                    holed[lag] = nothing
+                    @test key_reason(holed, anchor_dst, anchor_dst - 1.0) ==
+                          "missing_driver_lag$(lag)"
+                    for defect in (:V, :Bz, :By, :n, :Pdyn)
+                        broken_history = copy(complete_history)
+                        broken_history[lag] = merge(usable, NamedTuple{(defect,)}((NaN,)))
+                        @test key_reason(broken_history, anchor_dst, anchor_dst - 1.0) ==
+                              "missing_driver_lag$(lag)"
+                    end
+                    nonpositive = copy(complete_history)
+                    nonpositive[lag] = merge(usable, (n=0.0,))
+                    @test key_reason(nonpositive, anchor_dst, anchor_dst - 1.0) ==
+                          "missing_driver_lag$(lag)"
+                end
+
+                # Every documented status with a reachable code path has now been produced here. Three
+                # remain defence-in-depth branches under the deployed loader, and are reported as such
+                # rather than faked: `fallback:non_finite_center` (a non-finite expert or combination is
+                # refused earlier and a conformal half-width must load positive and finite),
+                # `fallback:incomplete_analog_key` (shown above to be unreachable while the feature
+                # block's rejection condition is the key's own defect condition), and
+                # `fallback:incomplete_direct_design` (the analog key is formed first and refuses the
+                # same driver defects at the lags the design's own block reads).
+                documented = ["ok", "fallback:model_not_v2_1", "fallback:unsupported_model_step",
+                              "fallback:calibration_absent", "fallback:static_expert_unavailable",
+                              "fallback:static_expert_unpinned", "fallback:deployment_absent",
+                              "fallback:deployment_invalid", "fallback:missing_anchor_dst",
+                              "fallback:missing_previous_dst", "fallback:serving_error"]
+                for status in documented
+                    @test status in produced
+                end
+                @test any(s -> startswith(s, "fallback:missing_driver_lag"), produced)
+                @test any(s -> startswith(s, "fallback:missing_dst_lag"), produced)
+                for unreached in ("fallback:non_finite_center", "fallback:incomplete_analog_key",
+                                  "fallback:incomplete_direct_design")
+                    @test !_v2_4_served_acted(unreached)
+                end
+            end
+
+            @testset "bundle load failures are remembered for a bounded cool-down" begin
+                @test V2_4_RETRY_SECONDS > 0.0
+                staged = joinpath(root, "staged_bundle")
+                withenv("SOLARSINDY_V2_4_DEPLOY_DIR" => staged) do
+                    reset_v2_4_serving!()
+                    absent = redirect_stderr(devnull) do
+                        _v2_4_artifacts()
+                    end
+                    @test absent.artifacts === nothing
+                    @test absent.status == "fallback:deployment_absent"
+                    @test !_v2_4_served_acted(absent.status)
+                    cp(fixture.dir, staged)
+                    # Inside the cool-down the remembered failure is reused, so the bundle is not re-read.
+                    @test _v2_4_artifacts().artifacts === nothing
+                    _V2_4_STATUS_TIME[] -= 2 * V2_4_RETRY_SECONDS
+                    healed = _v2_4_artifacts()
+                    @test healed.status == "ok"
+                    @test _v2_4_served_acted(healed.status)
+                    @test healed.artifacts.identity == V24_SERVED_IDENTITY
+                    @test healed.manifest_sha256 == artifacts.manifest_sha256
+                end
+                reset_v2_4_serving!()
+            end
+        end
+
+        @testset "the deployed bundle serves the published product" begin
+            deploy_dir = normpath(joinpath(@__DIR__, "..", "deploy", "v2_4"))
+            if !isdir(deploy_dir)
+                @test_skip "deploy/v2_4 is absent; run validation/operational/v2_4_build_deploy.jl"
+            else
+                mktempdir() do dir
+                    row = _v24_row(dir, "v24_deployed"; bundle_dir=deploy_dir)
+                    @test row.v24_status == "ok"
+                    @test row.sub_hourly_model_version == V2_4_SERVED_TAIL_VERSION
+                    @test isfinite(row.v24_pred_dst_nt)
+                    @test isfinite(row.v24_l1_center_dst_nt)
+                    @test Float64(row.served_pred_dst_nt) == Float64(row.v24_pred_dst_nt)
+                    @test row.interval_source == V2_4_INTERVAL_SOURCE
+                    # The deployed bundle carries no point-forecast guard, so the published center is
+                    # the stack center itself even in a deepening cell — unless the physical
+                    # projection acted, which the row records separately.
+                    @test row.v24_guard_applied == false
+                    if !row.v24_projection_applied
+                        @test Float64(row.v24_pred_dst_nt) ≈
+                              Float64(row.v24_l1_center_dst_nt) atol=1e-12
+                    end
+                    # The published severity partners are all present, so the dashboard can take the
+                    # deepest of the three without a missing column silently dropping one.
+                    for column in (:v24_pred_dst_nt, :v2_2_stack_pred_dst_nt,
+                                   :v2_1_served_pred_dst_nt)
+                        @test isfinite(Float64(getproperty(row, column)))
+                    end
+                    # Depth safety now lives at the alerting layer: whatever the combination reports,
+                    # the severity center is no shallower than either stage it replaced.
+                    severity = v24_serving_depth_safe_center(
+                        Float64(row.v24_pred_dst_nt), Float64(row.v2_2_stack_pred_dst_nt),
+                        Float64(row.v2_1_served_pred_dst_nt),
+                    )
+                    @test severity <= Float64(row.v2_2_stack_pred_dst_nt) + 1e-12
+                    @test severity <= Float64(row.v2_1_served_pred_dst_nt) + 1e-12
                 end
             end
         end

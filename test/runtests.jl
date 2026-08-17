@@ -863,8 +863,11 @@ using DataFrames
     include("test_v2_3_t1r.jl")
     include("test_v2_3_select.jl")
     include("test_v2_3_confirmatory.jl")
+    include("test_v2_4_rolling.jl")
+    include("test_v2_4_learn.jl")
     include("test_operational_v22_serving.jl")
     include("test_operational_v23_serving.jl")
+    include("test_operational_v24_serving.jl")
     include("test_serving_identity_oracles.jl")
     include("test_v2_readiness_selftest.jl")
 

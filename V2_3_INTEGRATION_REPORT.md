@@ -1,5 +1,11 @@
 # V2.3 Integration Report
 
+**Superseded as the served product on 2026-08-18.** The served point center is now the V2.4e
+super-learner; see `V2_4_INTEGRATION_REPORT.md`. Everything in this report still describes the
+static V2.2 regime stack — which remains the first fallback stage, expert ten of the V2.4
+combination and a depth-safe severity partner — and the V2.3 shadow forecast, which is
+unchanged.
+
 Scope: integrate the Operational V2.3 analog driver continuation into the live
 engine, and promote the served point center to the fitted static V2.2 regime
 stack. Governing decision: the single-shot confirmatory scoring of the

@@ -88,14 +88,18 @@ const REQUIRED_LIVE_COLS = [
 ]
 const EXPECTED_MODEL_VERSION = "v2.1"
 const EXPECTED_LEADS = [1, 2, 3, 6]
-# Served pipeline: the V2.1 operator followed by the fitted static regime stack. The V2.1-only label
-# stays acceptable for a cycle whose stack stage was disclosed as unavailable, so a documented
-# degradation is reported as such instead of failing the audit for a row that says what it did.
-const EXPECTED_SUBHOURLY =
+# Served pipeline: the V2.4e ten-expert super-learner with the SINDy-family mass floor, which counts
+# the fixed static regime stack among the family and takes it as an expert. The two earlier labels stay
+# acceptable for a cycle whose V2.4 or stack stage was disclosed as unavailable, so a documented
+# degradation is reported as such instead of failing the audit for a row that says what it did. The
+# order is strongest to weakest: a cycle is reported under the weakest label any of its rows carries.
+const EXPECTED_SUBHOURLY = "v2.4+sindy20x11+superlearner10floor+conformal"
+const EXPECTED_SUBHOURLY_STACK =
     "v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)"
 const EXPECTED_SUBHOURLY_FALLBACK =
     "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
-const ACCEPTED_SUBHOURLY = (EXPECTED_SUBHOURLY, EXPECTED_SUBHOURLY_FALLBACK)
+const ACCEPTED_SUBHOURLY = (EXPECTED_SUBHOURLY, EXPECTED_SUBHOURLY_STACK,
+                            EXPECTED_SUBHOURLY_FALLBACK)
 # The V2.3 analog candidate is a shadow forecast (confirmatory decision NO_GO): logged, never served.
 const EXPECTED_V2_3_SHADOW = "v2.3-shadow+sindy20x11+L1A+ADC(magnetic,K25)+T1rcal+LAT+E"
 # Deployed artifacts the served and shadow stages load. The audit loads them the same way the engine
@@ -105,6 +109,7 @@ const V2_2_STACK_ARTIFACT_PATH = joinpath(
     OPERATIONAL_PACKAGE_ROOT, "deploy", V22_SERVED_STACK_FILE,
 )
 const V2_3_SHADOW_DEPLOY_DIR = joinpath(OPERATIONAL_PACKAGE_ROOT, "deploy", "v2_3_shadow")
+const V2_4_DEPLOY_DIR = joinpath(OPERATIONAL_PACKAGE_ROOT, "deploy", "v2_4")
 # Trailing issue cycles the shadow-stage rates are measured over: one day of hourly issuance.
 const SERVED_STAGE_WINDOW_CYCLES = 24
 # Trailing issue cycles the served-stage fallback rate is measured over: four days of hourly
@@ -112,8 +117,15 @@ const SERVED_STAGE_WINDOW_CYCLES = 24
 # cycle out of twenty-four is already 4.2%, so the target could only ever be met by a window with no
 # fallback in it.
 const SERVED_FALLBACK_WINDOW_CYCLES = 96
-# Integration specification target for served-stage fallback. Above it the deployment is not serving
-# the product it claims often enough to be called ready.
+# Integration specification target for served-stage fallback: the rate the deployment is expected to
+# hold, reported on every run and recorded as `served_fallback_rate`.
+#
+# It is not the operative gate, and saying so is the honest reading. Against the four-day window below,
+# one fallback is 1.04% and two are 2.08%, so any window that reaches SERVED_FALLBACK_FAIL_CYCLES is
+# already over a 1% target; the rate condition can never be what decides such a window. Raising the
+# target to 2/96 to make it binding would move the failure threshold to three fallbacks and contradict
+# the stated two-cycle rule, so the target is kept at the specification value and the operative gates
+# are the newest-cycle rule and SERVED_FALLBACK_FAIL_CYCLES.
 const SERVED_FALLBACK_MAX_RATE = 0.01
 # Fallback cycles in the window that turn an over-target rate into a failure. One isolated fallback
 # in four days is a redeploy or a transient artifact read; two or more is a deployment that is not
@@ -1488,7 +1500,10 @@ function newest_cycle_served_label(df::DataFrame)
     has_col(rows, :sub_hourly_model_version) || return missing
     labels = String.(collect(skipmissing(rows.sub_hourly_model_version)))
     (isempty(labels) || !all(in(ACCEPTED_SUBHOURLY), labels)) && return missing
-    return all(==(EXPECTED_SUBHOURLY), labels) ? EXPECTED_SUBHOURLY : EXPECTED_SUBHOURLY_FALLBACK
+    for candidate in reverse(ACCEPTED_SUBHOURLY)
+        candidate in labels && return candidate
+    end
+    return missing
 end
 
 """Load the deployed served stack exactly as the live engine does: pinned digest and pinned label.
@@ -1527,6 +1542,113 @@ function audit_served_stack_artifact!(state::AuditState;
     end
 end
 
+"""Load the deployed V2.4 bundle exactly as the live engine does: manifest digests, rebuilt analog
+archive, stack-weight and conformal completeness, guard thresholds and served identity.
+
+Fail-closed by design. When this bundle cannot be loaded the engine reverts to the static regime stack,
+which is a disclosed degradation of the published product, so the audit must not pass on the mere
+existence of a log."""
+function audit_v2_4_bundle!(state::AuditState; dir::AbstractString = V2_4_DEPLOY_DIR)
+    if !isdir(dir)
+        fail!(state, "served V2.4 bundle",
+              "$(relpath(dir, REPO_ROOT)) is absent; the engine cannot serve the published product")
+        return (ok = false, sha256 = missing)
+    end
+    manifest = joinpath(dir, "manifest.csv")
+    if !isfile(manifest)
+        fail!(state, "served V2.4 bundle",
+              "$(relpath(dir, REPO_ROOT)) has no manifest.csv; its artifacts would load unverified")
+        return (ok = false, sha256 = missing, identity = missing)
+    end
+    try
+        artifacts = load_v24_serving_artifacts(dir)
+        # The identity is taken from the bundle's own records — the selection file and the manifest's
+        # build row — and compared with the published constant. The loaded struct's `identity` field is
+        # filled with that same constant by the type's constructor, so comparing the two would read
+        # like a check while being an identity of the source with itself.
+        recorded = String(get(artifacts.selection, "identity", ""))
+        recorded == EXPECTED_SUBHOURLY || error(
+            "the bundle's selection record names identity $(repr(recorded)); the published product " *
+            "is $(EXPECTED_SUBHOURLY)",
+        )
+        stamped = _v2_4_manifest_build_identity(artifacts.manifest)
+        stamped == EXPECTED_SUBHOURLY || error(
+            "the bundle manifest stamps identity $(repr(stamped)); the published product is " *
+            "$(EXPECTED_SUBHOURLY)",
+        )
+        state.live_metrics[:served_bundle_manifest_sha256] = artifacts.manifest_sha256
+        state.live_metrics[:served_bundle_fold_year] = artifacts.fold_year
+        state.live_metrics[:served_bundle_training_max_target_utc] =
+            string(artifacts.training_max_target_utc)
+        state.live_metrics[:served_bundle_cells] = length(artifacts.cells)
+        state.live_metrics[:served_bundle_origins] = length(artifacts.analog.origins)
+        state.live_metrics[:served_identity] = recorded
+        pass!(state, "served V2.4 bundle",
+              "identity $(recorded) recorded by the bundle's selection file and manifest, fold " *
+              "$(artifacts.fold_year) refit, training targets through " *
+              "$(artifacts.training_max_target_utc), $(length(artifacts.cells)) stack cells, " *
+              "$(length(artifacts.analog.origins)) analog origins, manifest digest " *
+              "$(artifacts.manifest_sha256)")
+        return (ok = true, sha256 = artifacts.manifest_sha256, identity = recorded)
+    catch err
+        fail!(state, "served V2.4 bundle",
+              "$(relpath(dir, REPO_ROOT)) fails verification: $(sprint(showerror, err))")
+        return (ok = false, sha256 = missing, identity = missing)
+    end
+end
+
+"""Identity the bundle manifest stamps on itself, or `""` when the manifest carries no build row.
+
+Read here rather than through the package's private manifest reader so the audit states the contract
+independently of the loader it is auditing."""
+function _v2_4_manifest_build_identity(manifest::DataFrame)
+    ("entry_type" in names(manifest) && "name" in names(manifest) &&
+     "value" in names(manifest)) || return ""
+    for row in eachrow(manifest)
+        (ismissing(row.entry_type) || String(row.entry_type) != "build") && continue
+        (ismissing(row.name) || String(row.name) != "identity") && continue
+        return ismissing(row.value) ? "" : String(row.value)
+    end
+    return ""
+end
+
+"""Tie the identity the bundle records on disk to the identity the newest served rows were published
+under.
+
+The bundle's own records and the served label are two independent statements about which product is
+being published, and only their agreement rules out a deployment whose artifacts say one thing while the
+daemon writes another. Rows served by an earlier stage of the chain legitimately carry that stage's
+label, so only the rows whose `v24_status` is `ok` are compared."""
+function audit_served_bundle_identity!(state::AuditState, df::DataFrame; bundle_identity)
+    label = "served V2.4 bundle identity"
+    ismissing(bundle_identity) && return
+    if !has_col(df, :v24_status) || !has_col(df, :sub_hourly_model_version)
+        warn!(state, label, "the live log predates the served-stage status column")
+        return
+    end
+    newest = newest_issue_cycle_rows(df)
+    served = String[String(r.sub_hourly_model_version) for r in eachrow(newest)
+                    if !ismissing(r.v24_status) && String(r.v24_status) == "ok" &&
+                       !ismissing(r.sub_hourly_model_version)]
+    if isempty(served)
+        warn!(state, label,
+              "no row of the newest cycle was served by the V2.4 stage, so no served label is on " *
+              "record to compare with the identity the deployed bundle records")
+        return
+    end
+    logged = sort(unique(served))
+    expected = String(bundle_identity)
+    if length(logged) == 1 && first(logged) == expected
+        pass!(state, label,
+              "the newest cycle's served rows publish $(expected), the identity the deployed " *
+              "bundle records")
+    else
+        fail!(state, label,
+              "the newest cycle's served rows publish $(join(logged, ", ")) while the deployed " *
+              "bundle records $(expected)")
+    end
+end
+
 """Verify the shadow deployment's manifest the way the engine does before it logs a shadow center."""
 function audit_v2_3_shadow_deployment!(state::AuditState;
                                       dir::AbstractString = V2_3_SHADOW_DEPLOY_DIR)
@@ -1557,16 +1679,59 @@ function audit_v2_3_shadow_deployment!(state::AuditState;
     end
 end
 
-"""True for a cycle that was issued by a build carrying the served-stage stack: at least one of its
-rows records a served-stage status.
+"""True for a cycle that was issued by a build carrying the current served stage: at least one of its
+rows records a V2.4 served-stage status.
 
-Cycles issued before the stack stage existed carry the previous served label and no status at all,
-which is not a fallback of the current stage but the absence of that stage. Counting them as
-fallbacks makes the fallback rate report the age of the log rather than the health of the
-deployment, and for the first four days after a deployment onto an existing log that reads as a
-near-total served-stage failure."""
+Cycles issued before the stage existed carry an earlier served label and no status at all, which is not
+a fallback of the current stage but the absence of that stage. Counting them as fallbacks makes the
+fallback rate report the age of the log rather than the health of the deployment, and for the first
+four days after a deployment onto an existing log that reads as a near-total served-stage failure."""
 _is_post_stage_cycle(cycle::DataFrame) =
-    has_col(cycle, :v2_2_status) && !isempty(collect(skipmissing(cycle.v2_2_status)))
+    has_col(cycle, :v24_status) && !isempty(collect(skipmissing(cycle.v24_status)))
+
+"""The bundle the daemon is actually serving is the bundle on disk.
+
+The engine loads `deploy/v2_4` once per process and caches it for the process lifetime, and the live
+monitor is a single long-running process. Replacing the artifacts under a running daemon therefore
+does not change what is served: the daemon keeps combining with the superseded weights until it is
+restarted. Every other V2.4 check reads the directory, so all of them would report the new bundle while
+every published row came from the old one.
+
+The per-row `v24_manifest_sha256` is the only evidence of which artifacts formed the center, so the
+check is made against it, and only on the newest cycle's served rows — older rows legitimately carry an
+earlier digest after a redeploy and restart, and a whole-log comparison would fail forever on a
+correctly applied one."""
+function audit_served_bundle_currency!(state::AuditState, df::DataFrame; bundle_sha256)
+    label = "served V2.4 bundle currency"
+    ismissing(bundle_sha256) && return
+    if !has_col(df, :v24_manifest_sha256) || !has_col(df, :v24_status)
+        warn!(state, label, "the live log predates the served-bundle digest column")
+        return
+    end
+    newest = newest_issue_cycle_rows(df)
+    served = [String(r.v24_manifest_sha256) for r in eachrow(newest)
+              if !ismissing(r.v24_status) && String(r.v24_status) == "ok" &&
+                 !ismissing(r.v24_manifest_sha256) && !isempty(String(r.v24_manifest_sha256))]
+    if isempty(served)
+        warn!(state, label,
+              "no row of the newest cycle was served by the V2.4 stage, so no served digest is on " *
+              "record to compare with the deployed bundle")
+        return
+    end
+    logged = sort(unique(served))
+    expected = String(bundle_sha256)
+    state.live_metrics[:served_logged_bundle_sha256] = first(logged)
+    if length(logged) == 1 && first(logged) == expected
+        pass!(state, label,
+              "the newest cycle was served by the deployed bundle (manifest digest $expected)")
+    else
+        fail!(state, label,
+              "the newest cycle was served under manifest digest $(join(logged, ", ")) but " *
+              "$(relpath(V2_4_DEPLOY_DIR, REPO_ROOT)) now carries $expected; the running engine " *
+              "caches its bundle for the process lifetime, so a redeployed bundle does not reach " *
+              "the published forecast until the monitor is restarted")
+    end
+end
 
 """Served-stage health over the trailing issue window: how often the published product was actually
 served, and why it was not.
@@ -1582,7 +1747,18 @@ one-day window cannot resolve a one-percent target: one fallback out of twenty-f
 so any single transient redeploy would fail the target by arithmetic. The failure rule is therefore
 stated on cycles rather than on the rate alone: a fallback on the newest cycle fails, because that is
 the cycle being served now, and an over-target rate fails once two or more cycles in the window fell
-back. One isolated older fallback passes and is reported."""
+back. One isolated older fallback passes and is reported.
+
+The newest-cycle rule is evaluated on the newest cycle in the window. When that cycle predates the
+served stage it carries no served-stage status and therefore no served-stage verdict: that is disclosed
+as its own check and the window rules decide alone, rather than the rule silently moving to an older
+cycle and being reported as the cycle being served now.
+
+`max_rate` is the integration specification's target and is reported, but with a four-day window it
+cannot be the binding condition: two fallbacks out of ninety-six cycles is already 2.1%, so any window
+reaching `fail_cycles` is over a 1% target by arithmetic. The operative gates are therefore the
+newest-cycle rule and `fail_cycles`; the rate is what the detail line states and what
+`served_fallback_rate` records."""
 function audit_served_stage_health!(state::AuditState, df::DataFrame;
                                    stack_available::Bool,
                                    window::Int = SERVED_FALLBACK_WINDOW_CYCLES,
@@ -1616,14 +1792,27 @@ function audit_served_stage_health!(state::AuditState, df::DataFrame;
     state.live_metrics[:served_fallback_window] = n
     state.live_metrics[:served_fallback_rate] = rate
     state.live_metrics[:served_pre_stage_cycles_excluded] = excluded
-    detail = @sprintf("%d/%d trailing staged cycles (%.2f%%) were not served by the static regime stack",
+    detail = @sprintf("%d/%d trailing staged cycles (%.2f%%) were not served by the V2.4 super-learner",
                       fallback_n, n, 100 * rate) * excluded_note
-    newest_fallback = last(fallback_flags)
-    if newest_fallback
+    # The newest-cycle rule is stated on the newest cycle, not on the newest staged one. They differ
+    # exactly when the newest cycle predates the served stage — a daemon running an older build — and
+    # reading `last(fallback_flags)` there would decide the rule on a cycle issued hours earlier while
+    # reporting it as the cycle being served now. An unstaged newest cycle has no served-stage verdict,
+    # so it is reported as such and the window rules below decide, which is also what the dashboard's
+    # `newest_cycle_is_fallback` does.
+    newest_cycle = last(trailing)
+    newest_staged = _is_post_stage_cycle(newest_cycle)
+    newest_fallback = newest_staged ? is_fallback(newest_cycle) : nothing
+    state.live_metrics[:served_newest_cycle_staged] = newest_staged
+    newest_staged ||
+        warn!(state, "served stage newest cycle",
+              "the newest issue cycle records no served-stage status, so it was issued by a build " *
+              "that predates the V2.4 stage; no newest-cycle served verdict is available")
+    if newest_fallback === true
         fail!(state, "served stage fallback rate",
-              detail * "; the newest staged cycle fell back" *
-              (stack_available ? " while the pinned stack artifact loads here" :
-                                 " and the pinned stack artifact is unavailable here"))
+              detail * "; the newest cycle fell back" *
+              (stack_available ? " while the deployed served artifacts load here" :
+                                 " and the deployed served artifacts are unavailable here"))
     elseif rate > max_rate && fallback_n >= fail_cycles
         fail!(state, "served stage fallback rate",
               detail * @sprintf("; the target is below %.1f%% and %d cycles in the window fell back",
@@ -1632,11 +1821,19 @@ function audit_served_stage_health!(state::AuditState, df::DataFrame;
         pass!(state, "served stage fallback rate", detail)
     end
 
-    if has_col(df, :v2_2_status)
-        statuses = String.(collect(skipmissing(df.v2_2_status)))
-        if isempty(statuses)
-            warn!(state, "served stage status disclosure", "no row records a served-stage status yet")
-        else
+    # Both stages of the fallback chain disclose per row: `v24_status` says whether the super-learner
+    # produced the center, `v2_2_status` says whether the stack could have. Reporting them separately is
+    # what makes the chain's degradation readable instead of collapsing to "not the product".
+    for (column, label, stage) in ((:v24_status, "served stage status disclosure",
+                                    "the V2.4 super-learner"),
+                                   (:v2_2_status, "served stack stage status disclosure",
+                                    "the static regime stack"))
+        if has_col(df, column)
+            statuses = String.(collect(skipmissing(getproperty(df, column))))
+            if isempty(statuses)
+                warn!(state, label, "no row records a status for $(stage) yet")
+                continue
+            end
             counts = Dict{String, Int}()
             for status in statuses
                 counts[status] = get(counts, status, 0) + 1
@@ -1644,14 +1841,12 @@ function audit_served_stage_health!(state::AuditState, df::DataFrame;
             ok_n = get(counts, "ok", 0)
             reasons = sort([k for k in keys(counts) if k != "ok"])
             summary = join(["$(k)=$(counts[k])" for k in reasons], ", ")
-            text = @sprintf("%d/%d rows served by the stack", ok_n, length(statuses))
+            text = @sprintf("%d/%d rows served by %s", ok_n, length(statuses), stage)
             isempty(reasons) || (text *= "; fallback reasons: " * summary)
-            ok_n == length(statuses) ? pass!(state, "served stage status disclosure", text) :
-                                       warn!(state, "served stage status disclosure", text)
+            ok_n == length(statuses) ? pass!(state, label, text) : warn!(state, label, text)
+        else
+            warn!(state, label, "the live log predates the per-row status column for $(stage)")
         end
-    else
-        warn!(state, "served stage status disclosure",
-              "the live log predates the per-row served-stage status column")
     end
 end
 
@@ -1769,6 +1964,7 @@ function audit_live_log!(state::AuditState)
     # Deployed-artifact checks run whether or not the hot log has rows: an absent or tampered stack is
     # a readiness failure even before the first cycle under it is issued.
     stack = audit_served_stack_artifact!(state)
+    bundle = audit_v2_4_bundle!(state)
     audit_v2_3_shadow_deployment!(state)
     df = read_csv_checked!(state, path, "live forecast log"; allow_zero=true)
     df === nothing && return
@@ -1801,17 +1997,23 @@ function audit_live_log!(state::AuditState)
         ismissing(newest_label) ||
             (state.live_metrics[:newest_cycle_served_label] = newest_label)
         if !all(recent_sub .== EXPECTED_SUBHOURLY)
-            reasons = has_col(recent, :v2_2_status) ?
-                sort(unique(String.(collect(skipmissing(recent.v2_2_status))))) : String[]
-            warn!(state, "newest served stack stage",
-                  "the newest cycle was served by the V2.1 operator without the static regime " *
-                  "stack" * (isempty(reasons) ? "" : "; per-row status: " * join(reasons, ", ")))
+            reasons = String[]
+            for column in (:v24_status, :v2_2_status)
+                has_col(recent, column) || continue
+                append!(reasons, String.(collect(skipmissing(getproperty(recent, column)))))
+            end
+            warn!(state, "newest served stage",
+                  "the newest cycle was served by an earlier stage than the V2.4 super-learner: " *
+                  join(unique(string.(recent_sub)), ", ") *
+                  (isempty(reasons) ? "" : "; per-row status: " * join(sort(unique(reasons)), ", ")))
         end
     else
         fail!(state, "newest V2 tail",
               "expected recent sub_hourly_model_version in $(join(ACCEPTED_SUBHOURLY, " | ")), got $(join(unique(string.(recent_sub)), ", "))")
     end
-    audit_served_stage_health!(state, df; stack_available = stack.ok)
+    audit_served_stage_health!(state, df; stack_available = stack.ok && bundle.ok)
+    audit_served_bundle_currency!(state, df; bundle_sha256 = bundle.sha256)
+    audit_served_bundle_identity!(state, df; bundle_identity = bundle.identity)
     audit_v2_3_shadow_disclosure!(state, df)
     audit_v2_3_shadow_health!(state, df)
 
@@ -1887,25 +2089,28 @@ function audit_live_log!(state::AuditState)
         # per label and the current label's own maturity is gated separately.
         if has_col(served, :sub_hourly_model_version)
             per_label = String[]
-            stack_n = 0
+            # Verified rows are reported per served label, and the *current* label's own count is
+            # what gates maturity: pooling the chain's stages would present a record earned by an
+            # earlier stage as the published product's record.
+            current_n = 0
             for label in sort(unique(String.(collect(skipmissing(served.sub_hourly_model_version)))))
                 rows = served[coalesce.(served.sub_hourly_model_version .== label, false), :]
                 label_rmse = rmse(rows.served_pred_dst_nt, rows.observation_dst_nt)
-                label == EXPECTED_SUBHOURLY && (stack_n = nrow(rows))
+                label == EXPECTED_SUBHOURLY && (current_n = nrow(rows))
                 push!(per_label, @sprintf("%s n=%d RMSE %.2f", label, nrow(rows), label_rmse))
                 state.live_metrics[Symbol("served_n_", label)] = nrow(rows)
                 state.live_metrics[Symbol("served_rmse_", label)] = label_rmse
             end
-            state.live_metrics[:served_n_current_label] = stack_n
+            state.live_metrics[:served_n_current_label] = current_n
             pass!(state, "served live RMSE by pipeline", join(per_label, "; "))
-            if stack_n < SERVED_LABEL_MIN_VERIFIED
+            if current_n < SERVED_LABEL_MIN_VERIFIED
                 warn!(state, "current served label live maturity",
-                      "the current served label has $(stack_n) verified rows; " *
+                      "the current served label has $(current_n) verified rows; " *
                       "$(SERVED_LABEL_MIN_VERIFIED) are required before its own live record is " *
                       "reportable, so pooled live skill still reflects the previous pipeline")
             else
                 pass!(state, "current served label live maturity",
-                      "the current served label has $(stack_n) verified rows")
+                      "the current served label has $(current_n) verified rows")
             end
         end
 
@@ -2021,6 +2226,8 @@ function audit_v2_1_issue_identity!(state::AuditState;
     df = read_csv_checked!(state, path, "V2.1 issue identity")
     df === nothing && return
     required = [:model_version, :served_model_version, :served_fallback_model_version,
+                :served_stack_model_version, :served_bundle_manifest_sha256,
+                :served_bundle_fold_year, :served_bundle_training_max_target_utc,
                 :served_stack_label, :served_stack_sha256,
                 :shadow_model_version, :shadow_manifest_sha256, :candidate_count,
                 :active_count, :redundant_n_v2_present, :pressure_term_active,
@@ -2045,9 +2252,34 @@ function audit_v2_1_issue_identity!(state::AuditState;
     # The identity artifact describes the deployed product, not one degraded cycle, so the served
     # label here must be exactly the published served identity: accepting the fallback label would let
     # a deployment whose stack stage cannot act certify itself as the published product.
+    # The bundle's own provenance is compared, not merely required to be present: the fold year and the
+    # training-window bound are what say which refit produced the served weights, and a record carrying
+    # a different refit's provenance under the deployed digest is exactly the drift this artifact exists
+    # to catch. Both are read from the bundle the audit loaded through the engine's own loader.
+    bundle_digest = get(state.live_metrics, :served_bundle_manifest_sha256, missing)
+    bundle_fold_year = get(state.live_metrics, :served_bundle_fold_year, missing)
+    bundle_training_max = get(state.live_metrics, :served_bundle_training_max_target_utc, missing)
+    # A truncated or hand-edited record reads back as `missing` or as text, so both fields are read as
+    # values and compared rather than coerced: a coercion failure would abort the audit before the
+    # verdict line instead of reporting the finding.
+    fold_year_agrees = !ismissing(bundle_fold_year) &&
+        (value = r.served_bundle_fold_year;
+         value isa Real && !(value isa Bool) &&
+         isfinite(Float64(value)) && Int(round(Float64(value))) == Int(bundle_fold_year))
+    training_max_agrees = !ismissing(bundle_training_max) &&
+        String(coalesce(r.served_bundle_training_max_target_utc, "")) == String(bundle_training_max)
     structural = String(r.model_version) == EXPECTED_MODEL_VERSION &&
                  String(r.served_model_version) == EXPECTED_SUBHOURLY &&
                  String(r.served_fallback_model_version) == EXPECTED_SUBHOURLY_FALLBACK &&
+                 String(r.served_stack_model_version) == EXPECTED_SUBHOURLY_STACK &&
+                 !ismissing(bundle_digest) &&
+                 # An empty CSV field reads back as `missing`, and a truncated or hand-edited identity
+                 # record is exactly the case this contract exists to catch. Coercing it directly would
+                 # turn that finding into an uncaught `MethodError` that aborts the audit before the
+                 # verdict line is printed, so it is read as a value and compared, as the shadow digest
+                 # below already is.
+                 String(coalesce(r.served_bundle_manifest_sha256, "")) == String(bundle_digest) &&
+                 fold_year_agrees && training_max_agrees &&
                  String(r.served_stack_label) == V22_SERVED_STACK_LABEL &&
                  String(r.served_stack_sha256) == V22_SERVED_STACK_SHA256 &&
                  String(r.shadow_model_version) == EXPECTED_V2_3_SHADOW &&
@@ -2279,12 +2511,24 @@ function audit_dashboard_payload!(state::AuditState, payload, api_url::AbstractS
                     occursin("one-hour", driver) &&
                     occursin("state-conditioned inertia", driver) &&
                     occursin("extreme-Dst inertia guard", driver)
-    if v2_1_operator && occursin("static regime stack", driver)
+    # The published sentence is derived from the served row, so it names the stage that produced the
+    # cycle. The V2.4 sentence describes the fitted combination, the forecasts it combines and its
+    # interval; the two earlier sentences describe the stack stage and the V2.1 operator, and a cycle
+    # served by either of them is a disclosed degradation (its rate is the served-stage check's
+    # business), not a wrong payload.
+    v2_4_stage = occursin("fitted combination of ten causal forecasts", driver) &&
+                 occursin("includes the static regime stack among the combined forecasts", driver) &&
+                 occursin("conformal interval", driver)
+    if v2_4_stage
         pass!(state, "dashboard API V2-tail assumption", driver)
+    elseif v2_1_operator && occursin("static regime stack", driver)
+        warn!(state, "dashboard API V2-tail assumption",
+              "the payload describes the static regime stack without the V2.4 super-learner, so the " *
+              "published cycle was served by the first fallback stage: $(driver)")
     elseif v2_1_operator
         warn!(state, "dashboard API V2-tail assumption",
-              "the payload describes the V2.1 operator without the static regime stack, so the " *
-              "published cycle was served by the fallback stage: $(driver)")
+              "the payload describes the V2.1 operator alone, so the published cycle lost both the " *
+              "V2.4 super-learner and the static regime stack: $(driver)")
     else
         fail!(state, "dashboard API V2-tail assumption", "unexpected driver_assumption=$(driver)")
     end
@@ -2402,8 +2646,13 @@ function selftest_readiness_audit()
     # The V2.1 operator sentence, and the served sentence that adds the static regime stack. The
     # served payload must carry the stack clause: this is exactly the published product's disclosure.
     v2_1_driver_sentence = "Ballistically propagated L1 forcing, then regime-aware relaxation beyond the measured L1 window, followed by a causal rate projection, validation-selected one-hour and state-conditioned inertia blends, and an extreme-Dst inertia guard"
-    served_driver_sentence = v2_1_driver_sentence *
+    stack_driver_sentence = v2_1_driver_sentence *
         ", and a fitted static regime stack over the six point components"
+    served_driver_sentence =
+        "Ballistically propagated L1 forcing through a fitted combination of ten causal forecasts, " *
+        "weighted per lead, activity regime and ring-current depth with a majority weight held by " *
+        "the SINDy family, which includes the static regime stack among the combined forecasts, " *
+        "with a conformal interval calibrated per lead and depth"
 
     good = Dict{String, Any}(
         "available" => true,
@@ -2450,6 +2699,24 @@ function selftest_readiness_audit()
                              now_utc = fixed_now)
     @assert count(c -> c.level == :fail, fallback_state.checks) == 0 "a disclosed fallback cycle must not fail the payload checks"
     @assert any(c -> c.level == :warn && c.name == "dashboard API V2-tail assumption", fallback_state.checks) "a fallback cycle must warn on the tail assumption"
+    passed += 1
+
+    # A cycle served by the first fallback stage describes the static regime stack. That is also a
+    # disclosed degradation: it must warn rather than fail, and it must not read as the V2.4 product.
+    stack_payload = deepcopy(good)
+    stack_payload["served_model_version"] = EXPECTED_SUBHOURLY_STACK
+    stack_payload["lead_time"]["driver_assumption"] = stack_driver_sentence
+    stack_state = AuditState()
+    stack_state.live_metrics[:served_n] = 3
+    stack_state.live_metrics[:served_rmse] = 1.234
+    stack_state.live_metrics[:baseline_rmse] = 2.345
+    stack_state.live_metrics[:newest_cycle_served_label] = EXPECTED_SUBHOURLY_STACK
+    audit_dashboard_payload!(stack_state, stack_payload, "selftest://stack-fallback";
+                             require_fresh = true,
+                             max_issue_age_hours = 3.0,
+                             now_utc = fixed_now)
+    @assert count(c -> c.level == :fail, stack_state.checks) == 0 "a disclosed stack-stage cycle must not fail the payload checks"
+    @assert any(c -> c.level == :warn && c.name == "dashboard API V2-tail assumption", stack_state.checks) "a stack-stage cycle must warn on the tail assumption"
     passed += 1
 
     # A payload that names a different served pipeline than the newest logged cycle is a mislabelled
@@ -2541,7 +2808,11 @@ function selftest_readiness_audit()
     # One row per requested horizon per cycle, which is what stage health is measured over. The
     # stage columns accept `missing`, which is what a cycle issued before the stage existed carries
     # once the log is extended with the new columns.
+    # `served` is the current stage's per-row status and is what decides whether a cycle is in the
+    # window at all; `statuses` is the stack stage's, one step down the fallback chain.
     function stage_fixture(labels::Vector{String}; statuses = fill("ok", length(labels)),
+                           served = [label == EXPECTED_SUBHOURLY ? "ok" :
+                                     "fallback:deployment_absent" for label in labels],
                            shadow = fill("ok", length(labels)),
                            e_layer = fill(false, length(labels)))
         rows = NamedTuple[]
@@ -2550,6 +2821,7 @@ function selftest_readiness_audit()
             for lead in EXPECTED_LEADS
                 push!(rows, (issue_time_utc = string(issue),
                              sub_hourly_model_version = label,
+                             v24_status = served[index],
                              v2_2_status = statuses[index],
                              v23_status = shadow[index],
                              v23_e_layer_applied = e_layer[index],
@@ -2564,14 +2836,40 @@ function selftest_readiness_audit()
     audit_served_stage_health!(healthy_state, healthy; stack_available = true)
     @assert any(c -> c.level == :pass && c.name == "served stage fallback rate", healthy_state.checks) "a fully stacked window must pass the fallback-rate check"
     @assert count(c -> c.level == :fail, healthy_state.checks) == 0 "a healthy served window must not fail"
+    @assert healthy_state.live_metrics[:served_newest_cycle_staged] === true "a staged newest cycle must be recorded as staged"
+    @assert !any(c -> c.name == "served stage newest cycle", healthy_state.checks) "a staged newest cycle needs no disclosure check"
+    passed += 1
+
+    # The newest-cycle rule is stated on the newest cycle, and the newest cycle here predates the
+    # served stage: a daemon running an older build. Deciding the rule on the newest STAGED cycle would
+    # read a fallback from hours earlier and report it as the cycle being served now, so the verdict is
+    # withheld and disclosed instead. The trailing window still decides on its own rules, which is what
+    # the dashboard's `newest_cycle_is_fallback` reports as `nothing` in the same situation.
+    unstaged_newest = stage_fixture(vcat(fill(EXPECTED_SUBHOURLY, 20),
+                                         [EXPECTED_SUBHOURLY_STACK],
+                                         fill(EXPECTED_SUBHOURLY_STACK, 3));
+                                    served = vcat(fill("ok", 20),
+                                                  ["fallback:deployment_absent"],
+                                                  fill(missing, 3)))
+    unstaged_state = AuditState()
+    audit_served_stage_health!(unstaged_state, unstaged_newest; stack_available = true)
+    @assert unstaged_state.live_metrics[:served_newest_cycle_staged] === false "an unstaged newest cycle must be recorded as unstaged"
+    @assert any(c -> c.level == :warn && c.name == "served stage newest cycle", unstaged_state.checks) "an unstaged newest cycle must be disclosed"
+    # The newest STAGED cycle in this window did fall back, so deciding the rule on it fails the
+    # window; deciding it on the newest cycle withholds the verdict and the single isolated older
+    # fallback then passes on the window rules. The two readings therefore give opposite verdicts here,
+    # which is what makes this fixture discriminating rather than decorative.
+    @assert any(c -> c.level == :pass && c.name == "served stage fallback rate", unstaged_state.checks) "an unstaged newest cycle must leave the window rules to decide"
+    @assert count(c -> c.level == :fail, unstaged_state.checks) == 0 "the newest-cycle rule must not be decided on an older staged cycle"
+    @assert unstaged_state.live_metrics[:served_fallback_window] == 21 "only staged cycles belong in the fallback window"
+    @assert unstaged_state.live_metrics[:served_pre_stage_cycles_excluded] == 3 "the excluded pre-stage count must be recorded"
     passed += 1
 
     # The newest cycle fell back while the pinned artifact loads: the artifact is not the problem, the
     # live stage is, and a WARN on the newest cycle alone would hide it behind a PASS verdict.
     newest_fallback = stage_fixture(vcat(fill(EXPECTED_SUBHOURLY, 23),
-                                        [EXPECTED_SUBHOURLY_FALLBACK]);
-                                    statuses = vcat(fill("ok", 23),
-                                                    ["fallback_v2_1:stack_absent"]))
+                                        [EXPECTED_SUBHOURLY_STACK]);
+                                    statuses = fill("ok", 24))
     newest_state = AuditState()
     audit_served_stage_health!(newest_state, newest_fallback; stack_available = true)
     @assert any(c -> c.level == :fail && c.name == "served stage fallback rate", newest_state.checks) "a newest-cycle fallback with a loadable artifact must fail"
@@ -2588,12 +2886,24 @@ function selftest_readiness_audit()
     @assert any(c -> c.level == :warn && c.name == "served stage status disclosure", newest_state.checks) "fallback rows must be disclosed with their recorded status"
     passed += 1
 
+    # Both stages of the chain disclose separately: a window whose super-learner fell back while the
+    # stack held must say so about the super-learner and pass on the stack.
+    @assert any(c -> c.level == :pass && c.name == "served stack stage status disclosure", newest_state.checks) "a stack stage that held must be reported as holding"
+    both_down = stage_fixture(vcat(fill(EXPECTED_SUBHOURLY, 23), [EXPECTED_SUBHOURLY_FALLBACK]);
+                              statuses = vcat(fill("ok", 23), ["fallback_v2_1:stack_absent"]))
+    both_state = AuditState()
+    audit_served_stage_health!(both_state, both_down; stack_available = true)
+    @assert any(c -> c.level == :fail && c.name == "served stage fallback rate", both_state.checks) "a newest cycle served by the V2.1 operator must fail"
+    @assert any(c -> c.level == :warn && c.name == "served stack stage status disclosure", both_state.checks) "a stack stage that also fell back must be disclosed"
+    passed += 1
+
     # Cycles issued before the served stage existed carry the previous label and no served-stage
     # status. They are not fallbacks of a stage that did not exist, so they leave the window and are
     # disclosed; counting them would report a fresh deployment onto an existing hot log as a
     # near-total served-stage failure for as long as the window is.
-    pre_stage = stage_fixture(vcat(fill(EXPECTED_SUBHOURLY_FALLBACK, 23), [EXPECTED_SUBHOURLY]);
-                              statuses = vcat(fill(missing, 23), ["ok"]),
+    pre_stage = stage_fixture(vcat(fill(EXPECTED_SUBHOURLY_STACK, 23), [EXPECTED_SUBHOURLY]);
+                              statuses = vcat(fill("ok", 23), ["ok"]),
+                              served = vcat(fill(missing, 23), ["ok"]),
                               shadow = vcat(fill(missing, 23), ["ok"]),
                               e_layer = vcat(fill(missing, 23), [true]))
     pre_stage_state = AuditState()
@@ -2616,21 +2926,18 @@ function selftest_readiness_audit()
 
     # An isolated older fallback in a four-day window is a redeploy: reported, not failed. Two of them
     # are a deployment that is not holding the product it publishes.
-    one_older = stage_fixture(vcat(fill(EXPECTED_SUBHOURLY, 40), [EXPECTED_SUBHOURLY_FALLBACK],
-                                   fill(EXPECTED_SUBHOURLY, 55));
-                              statuses = vcat(fill("ok", 40), ["fallback_v2_1:stack_absent"],
-                                              fill("ok", 55)))
+    one_older = stage_fixture(vcat(fill(EXPECTED_SUBHOURLY, 40), [EXPECTED_SUBHOURLY_STACK],
+                                   fill(EXPECTED_SUBHOURLY, 55)))
     one_older_state = AuditState()
     audit_served_stage_health!(one_older_state, one_older; stack_available = true)
     @assert any(c -> c.level == :pass && c.name == "served stage fallback rate", one_older_state.checks) "one isolated older fallback in a four-day window must pass"
     @assert one_older_state.live_metrics[:served_fallback_window] == 96 "the fallback window spans four days of hourly issuance"
     passed += 1
 
-    two_older = stage_fixture(vcat(fill(EXPECTED_SUBHOURLY, 40), [EXPECTED_SUBHOURLY_FALLBACK],
+    two_older = stage_fixture(vcat(fill(EXPECTED_SUBHOURLY, 40), [EXPECTED_SUBHOURLY_STACK],
                                    fill(EXPECTED_SUBHOURLY, 20), [EXPECTED_SUBHOURLY_FALLBACK],
                                    fill(EXPECTED_SUBHOURLY, 34));
-                              statuses = vcat(fill("ok", 40), ["fallback_v2_1:stack_absent"],
-                                              fill("ok", 20), ["fallback_v2_1:stack_absent"],
+                              statuses = vcat(fill("ok", 61), ["fallback_v2_1:stack_absent"],
                                               fill("ok", 34)))
     two_older_state = AuditState()
     audit_served_stage_health!(two_older_state, two_older; stack_available = true)
@@ -2658,6 +2965,21 @@ function selftest_readiness_audit()
         target_time_utc = [string(fixed_now + Hour(k)) for k in (1, 2)],
     )
     @assert newest_cycle_served_label(mixed_cycle) == EXPECTED_SUBHOURLY_FALLBACK "a mixed cycle is reported under its weakest label"
+    # With all three stages of the chain in one cycle the weakest still wins, and a cycle that lost
+    # only the super-learner is reported under the stack label rather than the published one.
+    three_stage = DataFrame(
+        issue_time_utc = fill(string(fixed_now), 3),
+        sub_hourly_model_version = [EXPECTED_SUBHOURLY, EXPECTED_SUBHOURLY_STACK,
+                                    EXPECTED_SUBHOURLY_FALLBACK],
+        target_time_utc = [string(fixed_now + Hour(k)) for k in (1, 2, 3)],
+    )
+    @assert newest_cycle_served_label(three_stage) == EXPECTED_SUBHOURLY_FALLBACK "the weakest of three stages is the published label"
+    stack_cycle = DataFrame(
+        issue_time_utc = fill(string(fixed_now), 2),
+        sub_hourly_model_version = [EXPECTED_SUBHOURLY, EXPECTED_SUBHOURLY_STACK],
+        target_time_utc = [string(fixed_now + Hour(k)) for k in (1, 2)],
+    )
+    @assert newest_cycle_served_label(stack_cycle) == EXPECTED_SUBHOURLY_STACK "a cycle that lost only the super-learner is reported under the stack label"
     unknown_cycle = DataFrame(
         issue_time_utc = fill(string(fixed_now), 2),
         sub_hourly_model_version = [EXPECTED_SUBHOURLY, EXPECTED_SUBHOURLY * "+unpinned"],
@@ -2771,6 +3093,117 @@ function selftest_readiness_audit()
         pinned = audit_served_stack_artifact!(pinned_state)
         @assert pinned.ok "the deployed stack artifact must load under its pinned digest and label"
         @assert String(pinned.sha256) == V22_SERVED_STACK_SHA256 "the deployed stack digest must be the published digest"
+        passed += 1
+    end
+
+    # The V2.4 bundle is the artifact the published center is formed from, so every way it can be
+    # unusable has to reach a FAIL rather than a WARN. The three failure branches need no bundle to
+    # construct, which is why they are exercised here rather than left to the unit suite.
+    mktempdir() do dir
+        absent_bundle = AuditState()
+        audit_v2_4_bundle!(absent_bundle; dir = joinpath(dir, "no_such_bundle"))
+        @assert any(c -> c.level == :fail && c.name == "served V2.4 bundle", absent_bundle.checks) "an absent V2.4 bundle must fail the readiness audit"
+        empty_dir = joinpath(dir, "no_manifest")
+        mkpath(empty_dir)
+        no_manifest = AuditState()
+        audit_v2_4_bundle!(no_manifest; dir = empty_dir)
+        @assert any(c -> c.level == :fail && c.name == "served V2.4 bundle", no_manifest.checks) "a V2.4 bundle without a manifest must fail the readiness audit"
+        bogus_dir = joinpath(dir, "bogus_manifest")
+        mkpath(bogus_dir)
+        write(joinpath(bogus_dir, "manifest.csv"),
+              "entry_type,name,count,value\nsha256,stack_weights.csv,1,deadbeef\n")
+        bogus = AuditState()
+        audit_v2_4_bundle!(bogus; dir = bogus_dir)
+        @assert any(c -> c.level == :fail && c.name == "served V2.4 bundle", bogus.checks) "a V2.4 bundle whose manifest does not verify must fail the readiness audit"
+        @assert !any(c -> c.level == :pass && c.name == "served V2.4 bundle", bogus.checks) "an unverifiable V2.4 bundle must not also record a pass"
+    end
+    passed += 1
+
+    if isdir(V2_4_DEPLOY_DIR)
+        deployed_state = AuditState()
+        deployed = audit_v2_4_bundle!(deployed_state)
+        @assert deployed.ok "the deployed V2.4 bundle must load through the engine's own loader"
+        @assert any(c -> c.level == :pass && c.name == "served V2.4 bundle", deployed_state.checks) "a loadable deployed bundle must pass"
+        @assert deployed_state.live_metrics[:served_bundle_manifest_sha256] == deployed.sha256 "the bundle audit must record the digest it verified"
+
+        # Bundle currency: the engine caches its bundle for the process lifetime, so the digest the
+        # rows were served under is the only evidence of what is actually being combined. A newest
+        # cycle served under a different digest is a daemon serving superseded artifacts, which every
+        # other check — all of which read the directory — reports as healthy.
+        function currency_fixture(digest; served = "ok")
+            rows = NamedTuple[]
+            issue = fixed_now - Hour(1)
+            for lead in EXPECTED_LEADS
+                push!(rows, (issue_time_utc = string(issue),
+                             sub_hourly_model_version = EXPECTED_SUBHOURLY,
+                             v24_status = served,
+                             v24_manifest_sha256 = digest,
+                             target_time_utc = string(issue + Hour(lead))))
+            end
+            return DataFrame(rows)
+        end
+        current_state = AuditState()
+        audit_served_bundle_currency!(current_state, currency_fixture(String(deployed.sha256));
+                                     bundle_sha256 = deployed.sha256)
+        @assert any(c -> c.level == :pass && c.name == "served V2.4 bundle currency", current_state.checks) "rows served under the deployed digest must pass the currency check"
+        stale_bundle = AuditState()
+        audit_served_bundle_currency!(stale_bundle, currency_fixture("0" ^ 64);
+                                     bundle_sha256 = deployed.sha256)
+        @assert any(c -> c.level == :fail && c.name == "served V2.4 bundle currency", stale_bundle.checks) "a newest cycle served under a superseded bundle digest must fail"
+        unserved = AuditState()
+        audit_served_bundle_currency!(unserved,
+                                     currency_fixture(String(deployed.sha256);
+                                                      served = "fallback:deployment_absent");
+                                     bundle_sha256 = deployed.sha256)
+        @assert any(c -> c.level == :warn && c.name == "served V2.4 bundle currency", unserved.checks) "a newest cycle with no served row must warn rather than fail or pass"
+        legacy = AuditState()
+        audit_served_bundle_currency!(legacy, DataFrame(issue_time_utc = [string(fixed_now)]);
+                                     bundle_sha256 = deployed.sha256)
+        @assert any(c -> c.level == :warn && c.name == "served V2.4 bundle currency", legacy.checks) "a log predating the digest column must warn rather than fail"
+        passed += 1
+
+        # The bundle records its identity on disk twice — in its selection file and in its manifest's
+        # build row — and both are compared with the published constant rather than with the loaded
+        # struct's own `identity` field, which the type fills from that constant and can never
+        # contradict it. The remaining independent statement is the label the served rows were
+        # published under, so the two are tied together here.
+        @assert deployed.identity == EXPECTED_SUBHOURLY "the deployed bundle must record the published identity on disk"
+        @assert _v2_4_manifest_build_identity(
+            CSV.read(joinpath(V2_4_DEPLOY_DIR, "manifest.csv"), DataFrame;
+                     types = Dict("entry_type" => String, "name" => String, "value" => String)),
+        ) == EXPECTED_SUBHOURLY "the deployed bundle manifest must stamp the published identity"
+        @assert _v2_4_manifest_build_identity(DataFrame(a = [1])) == "" "a manifest without a build row must read as no identity"
+        function identity_fixture(label; served = "ok")
+            rows = NamedTuple[]
+            issue = fixed_now - Hour(1)
+            for lead in EXPECTED_LEADS
+                push!(rows, (issue_time_utc = string(issue),
+                             sub_hourly_model_version = label,
+                             v24_status = served,
+                             target_time_utc = string(issue + Hour(lead))))
+            end
+            return DataFrame(rows)
+        end
+        identity_ok = AuditState()
+        audit_served_bundle_identity!(identity_ok, identity_fixture(EXPECTED_SUBHOURLY);
+                                     bundle_identity = deployed.identity)
+        @assert any(c -> c.level == :pass && c.name == "served V2.4 bundle identity", identity_ok.checks) "served rows publishing the bundle's recorded identity must pass"
+        identity_drift = AuditState()
+        audit_served_bundle_identity!(identity_drift,
+                                     identity_fixture(EXPECTED_SUBHOURLY * "+unpinned");
+                                     bundle_identity = deployed.identity)
+        @assert any(c -> c.level == :fail && c.name == "served V2.4 bundle identity", identity_drift.checks) "a served label that is not the bundle's recorded identity must fail"
+        identity_unserved = AuditState()
+        audit_served_bundle_identity!(identity_unserved,
+                                     identity_fixture(EXPECTED_SUBHOURLY_STACK;
+                                                      served = "fallback:deployment_absent");
+                                     bundle_identity = deployed.identity)
+        @assert any(c -> c.level == :warn && c.name == "served V2.4 bundle identity", identity_unserved.checks) "a newest cycle with no served row must warn rather than fail on the identity tie"
+        identity_legacy = AuditState()
+        audit_served_bundle_identity!(identity_legacy,
+                                     DataFrame(issue_time_utc = [string(fixed_now)]);
+                                     bundle_identity = deployed.identity)
+        @assert any(c -> c.level == :warn && c.name == "served V2.4 bundle identity", identity_legacy.checks) "a log predating the served-stage status column must warn rather than fail"
         passed += 1
     end
 

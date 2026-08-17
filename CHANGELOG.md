@@ -2,6 +2,117 @@
 
 All notable changes to `SolarSINDy.jl` will be documented in this file.
 
+## [Unreleased] - 2026-08-18 (served V2.4e super-learner; version bump deferred)
+
+Served point center moves from the static V2.2 regime stack to the **V2.4e super-learner**:
+a fitted non-negative combination of ten causal forecasts, weighted per model step, per
+causal issue-time regime and per ring-current depth bin with a 0.60 mass floor on the SINDy
+family. The static stack is one of the ten and counts inside that family, because it is
+itself a composition of the deployed SINDy operators; the served point forecast therefore
+carries no guard, and depth safety is taken at the alerting layer. The static stack and the
+V2.1 operator remain the disclosed fallback chain; the V2.3 candidate remains a shadow
+forecast.
+
+Served product:
+
+- the served identity is `v2.4+sindy20x11+superlearner10floor+conformal`, and the
+  fallback chain is V2.4e → static V2.2 stack → V2.1 operator, disclosed per row by
+  `v24_status` and `v2_2_status`
+- the ten experts are the served V2.1 center, the frozen-tail V2.1 center, an analog
+  driver-continuation center with the refit ridge correction, persistence, Burton,
+  Burton-full, O'Brien-McPherron, a tuned direct increment-GBM, climatology-relaxed
+  persistence and the fixed 2010-2017 static V2.2 stack; the served variant carries no
+  boosted residual layer, no innovation chain and no point-forecast guard
+- the guard code path is retained and configurable through the bundle's own `guard.json`, so
+  a later bundle whose selection returns a guarded variant is servable without a source
+  change; the deployed bundle records `guard_applied = false` and `guard_reference = none`,
+  and the loader refuses a bundle whose switch and reference disagree
+- the served band of a V2.4e row is the study's split-conformal interval for that center,
+  stratified by model step and depth bin, disclosed as `interval_source=v24_conformal_depth`;
+  a fallback row keeps the previous band machinery
+- the published threat level is taken against the deepest of the served center, the
+  static-stack center and the V2.1 center, and the watch edge against the deepest of the served
+  band edge and the edge each of those stages would have published for the same issue, so a
+  conservative candidate can neither lower a warning nor drop a watch tier either stage it
+  replaced would have raised
+- the deployable bundle ships as `deploy/v2_4/` (stack weights, six per-step boosted models,
+  the analog archive and its standardisation, the refit correction, the climatology
+  timescale, the conformal half-widths, the guard record, a digest manifest) and is built by
+  `validation/operational/v2_4_build_deploy.jl` from the rolling study's own code paths; the
+  builder additionally rebuilds the rolling fold-2025 fits and refuses to publish unless they
+  reproduce the study's persisted weights, half-widths, timescale, boosted configurations
+  and correction label
+- the bundle is verified on load: every file against its manifest digest, the analog archive
+  rebuilt from the shipped frame and compared with the recorded origin count and
+  standardisation, every stack cell for non-negativity, unit mass and the SINDy floor, the
+  conformal grid for completeness, the served cells' recorded expert set, and the guard record
+  against this build's own thresholds and its own guard switch
+- `validation/operational/v2_4_serving_identity.jl` reproduces every stage the study scored —
+  ten experts, the super-learner center, the published center and both interval endpoints —
+  against `learn_year_2025.csv` through a fold-2025 replica bundle
+- new log columns `v24_model_version`, `v24_status`, `v24_manifest_sha256`,
+  `v24_l1_center_dst_nt`, `v24_guard_applied`, `v24_projection_applied`, `v24_pred_dst_nt`,
+  `v24_ci05_nt`, `v24_ci95_nt`, `v24_regime_cell`, `v24_deepening_cell`,
+  `v24_pooled_fallback`, `v24_history_hours`, `v24_t1r_pred_dst_nt`,
+  `direct_gbm_pred_dst_nt`, `climatology_pred_dst_nt`, `v2_2_stack_pred_dst_nt`,
+  `v2_2_stack_ci05_dst_nt` and `v2_1_served_ci05_dst_nt`
+- `v24_projection_applied` records whether the physical `clamp(., -2000, +50)` nT projection
+  moved the reported center. It is inert on every anchor the study scored, but a real anchor Dst
+  above roughly `+52` nT would reach the ceiling, and an unlogged projection makes a clamped
+  center indistinguishable from an unclamped one; the
+  `v24_pred_dst_nt == v24_l1_center_dst_nt` identity of an unguarded bundle is therefore
+  asserted conditionally on the flag rather than unconditionally
+- `v2_2_stack_ci05_dst_nt` and `v2_1_served_ci05_dst_nt` are the lower band edges the static
+  stack and the V2.1 operator would each have published for the issue, formed from the band
+  machinery those stages served under; the stack column is `missing` on a row whose stack stage
+  could not act
+- `src/operational_v24_serving.jl` is the single implementation of the served center, driven
+  by both the live engine and the offline oracle; `src/serving_depth_safe.jl` gains the
+  multi-partner depth-safe rule the dashboard and the package now share
+- readiness fails closed on the bundle, keys its fallback-rate window on `v24_status`,
+  discloses both stages of the chain, and requires the issue-identity artifact to carry the
+  served label, the stack label, the bundle manifest digest and the bundle's fold year and
+  training-window bound
+
+Corrections to the served integration, after an independent audit of it:
+
+- the watch edge is now the minimum over the served edge and the logged predecessor edges. The
+  previous rule shifted the served edge down by the amount the point was lowered, which is not
+  band-safe: a V2.4e row carries the depth-stratified conformal half-width, which is not the width
+  the predecessor's band had, so the shifted edge lands at the deepest partner center less the
+  conformal half-width instead of at that partner's own edge — a storm tier shallower wherever the
+  conformal band is the narrower of the two. Rows written before the predecessor-edge columns
+  existed keep the shift rule and the payload discloses that they did
+- the readiness audit and the live engine compare the bundle identity recorded on disk — the
+  selection file and the manifest's build row — instead of the loaded struct's `identity` field,
+  which the type fills from the same constant the comparison used; a new readiness check ties that
+  recorded identity to the label the newest cycle's served rows were published under
+- the readiness newest-cycle failure rule is evaluated on the newest cycle rather than the newest
+  *staged* one, and an unstaged newest cycle is disclosed with no verdict, matching the docstring
+  and the dashboard payload
+- `served_bundle_fold_year` and `served_bundle_training_max_target_utc` were written by
+  `v2_1_issue_identity.jl` and read by nothing; both are now compared against the loaded bundle
+- the 1% served-stage fallback-rate target is documented as inoperative against a ninety-six-cycle
+  window (two fallbacks is 2.1%), so the operative gates are the newest-cycle rule and the
+  two-cycle threshold
+- the dashboard renders the depth-safe severity centre and watch edge under the served forecast
+  and names the stage the edge came from, so the numbers the alert text quotes are displayed; an
+  unrecognised pipeline stage token falls back to the raw label for the whole pipeline instead of
+  being dropped, and the capability lookup no longer resolves `Object.prototype` members
+- the twenty-seven bundle-defect fixtures now assert the message of the check each was written
+  for; two were being caught by a different check than documented, so the direct-GBM digest gate
+  is reached directly through its reader and a twenty-eighth defect
+  (`:conformal_variant_mismatch`) exercises the conformal keying. The pooled conformal stratum's
+  fixture width is now distinct from the shallow bin's, `v24_serving_deepening`'s strict
+  coupling comparison is pinned against a `!= 0` reading, the physical projection has its own
+  test, and every `v24_status` value with a reachable code path is produced by a test — the three
+  that are not are documented as defence-in-depth branches with the reason each is unreachable
+- disclosure: the rolling study's preregistered rule returned `SHADOW` (era 2014-2019 fails
+  two gates marginally); the operational serve rule of Amendment A3, evaluated against the
+  product actually being replaced, returned `SERVE_ELIGIBLE_PENDING_G4` on 2014-2025 and on
+  2020-2025 with 2014-2019 disclosed only, because the static stack is partly in sample
+  there. `V2_4_INTEGRATION_REPORT.md` records the full disclosure set.
+
 ## [Unreleased] - 2026-08-17 (served-stack switch; version bump deferred)
 
 Served point center moves from the V2.1 operator to the fitted static V2.2 regime

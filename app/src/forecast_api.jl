@@ -39,16 +39,24 @@ end
 const THREAT_LABELS = ("Quiet", "Minor storm", "Moderate storm", "Intense storm", "Extreme storm")
 const THREAT_BANDS_NT = (-30.0, -50.0, -100.0, -200.0)   # upper edge of levels 1..4
 const CURRENT_V2_MODEL_VERSION = "v2.1"
-# Served pipeline: the V2.1 operator followed by the fitted static regime stack over the six point
-# components. The V2.1-only label remains acceptable because a cycle whose stack stage could not act
-# is served by the V2.1 operator and says so; refusing that label would blank the dashboard during a
-# disclosed degradation instead of showing the forecast that was actually issued.
+# Served pipeline: the V2.4e ten-expert super-learner with the SINDy-family mass floor, which counts
+# the fixed static V2.2 stack among the family and takes it as an expert. The two earlier labels remain
+# acceptable
+# because the served stage falls back through them and says so per row: a cycle whose V2.4 stage could
+# not act is served by the static stack, and a cycle that also lost the stack is served by the V2.1
+# operator. Refusing those labels would blank the dashboard during a disclosed degradation instead of
+# showing the forecast that was actually issued.
 const CURRENT_V2_SERVED_MODEL_VERSION =
+    "v2.4+sindy20x11+superlearner10floor+conformal"
+const STACK_V2_SERVED_MODEL_VERSION =
     "v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)"
 const PREVIOUS_V2_SERVED_MODEL_VERSION =
     "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+# Ordered strongest to weakest: a cycle whose horizons were served by different stages is published
+# under the weakest label any of its rows carries, which is the stage that actually produced it.
 const ACCEPTED_V2_SERVED_MODEL_VERSIONS =
-    (CURRENT_V2_SERVED_MODEL_VERSION, PREVIOUS_V2_SERVED_MODEL_VERSION)
+    (CURRENT_V2_SERVED_MODEL_VERSION, STACK_V2_SERVED_MODEL_VERSION,
+     PREVIOUS_V2_SERVED_MODEL_VERSION)
 # The V2.3 analog candidate is logged as a shadow forecast: its confirmatory scoring returned NO_GO,
 # so it never reaches the served center, the threat level or an alert.
 const V2_3_SHADOW_MODEL_VERSION =
@@ -67,6 +75,9 @@ end
 # Reader-facing driver-assumption sentence of a served row. The log records a machine token per row,
 # and a cycle whose stack stage could not act records the V2.1 token; reading the row is what keeps a
 # disclosed degradation from being described as the full stack pipeline.
+const _V2_4_DRIVER_TOKEN =
+    "ballistically_propagated_l1_then_ten_expert_nnls_superlearner_with_sindy_family_floor_over_" *
+    "served_frozen_analog_and_the_static_regime_stack_then_depth_stratified_conformal_interval"
 const _V2_2_DRIVER_TOKEN =
     "ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_" *
     "inertia_blend_then_state_inertia_then_extreme_inertia_guard_then_static_regime_stack"
@@ -79,7 +90,13 @@ const _V2_1_DRIVER_SENTENCE =
     "state-conditioned inertia blends, and an extreme-Dst inertia guard"
 const _V2_2_DRIVER_SENTENCE =
     _V2_1_DRIVER_SENTENCE * ", and a fitted static regime stack over the six point components"
+const _V2_4_DRIVER_SENTENCE =
+    "Ballistically propagated L1 forcing through a fitted combination of ten causal forecasts, " *
+    "weighted per lead, activity regime and ring-current depth with a majority weight held by the " *
+    "SINDy family, which includes the static regime stack among the combined forecasts, with a " *
+    "conformal interval calibrated per lead and depth"
 const _DRIVER_ASSUMPTION_SENTENCES = Dict(
+    _V2_4_DRIVER_TOKEN => _V2_4_DRIVER_SENTENCE,
     _V2_2_DRIVER_TOKEN => _V2_2_DRIVER_SENTENCE,
     _V2_1_DRIVER_TOKEN => _V2_1_DRIVER_SENTENCE,
     "ballistically_propagated_l1_then_regime_aware_relaxation" =>
@@ -256,40 +273,82 @@ function _row_is_current_v2(row)
            _is_accepted_served_model(served_model)
 end
 
-# Depth-safe alerting center. The static regime stack can blend toward persistence and therefore
-# report a shallower storm than the V2.1 operator it replaced; the published threat level is taken
-# against the deeper of the two so a conservative stack cannot lower a warning, while a deeper
-# stacked center still escalates one. Rows written before the stack stage existed carry no V2.1
-# column and fall back to the served center unchanged.
+# Depth-safe alerting center. A fitted combination can blend toward persistence and therefore report a
+# shallower storm than the stages it replaced; the published threat level is taken against the deepest
+# of the served center, the static-stack center and the V2.1 operator center, so a conservative
+# candidate cannot lower a warning either predecessor would have raised, while a deeper candidate still
+# escalates one. Rows written before a stage existed carry no column for it and are simply skipped.
 #
-# The comparison itself is `v22_serving_depth_safe_center`, loaded from the shared definition the
+# The comparison itself is `v24_serving_depth_safe_center`, loaded from the shared definition the
 # package serves under, so the published severity and the packaged serving contract are one rule.
+_severity_partners(row) = (_rowget(row, :v2_2_stack_pred_dst_nt),
+                           _rowget(row, :v2_1_served_pred_dst_nt))
+
 function _severity_pred(row)
     served = _v2_pred(row)
-    previous = _rowget(row, :v2_1_served_pred_dst_nt)
     (served isa Real && !(served isa Bool)) || return served
-    (previous isa Real && !(previous isa Bool)) || return served
-    return v22_serving_depth_safe_center(Float64(served), Float64(previous))
+    partners = Float64[Float64(v) for v in _severity_partners(row)
+                       if v isa Real && !(v isa Bool)]
+    isempty(partners) && return served
+    return v24_serving_depth_safe_center(Float64(served), partners...)
 end
 
-# Depth-safe interval lower edge. The point level is taken on the depth-safe center, but a watch is
-# assessed on the band edge, so a stack that reports a shallower center than V2.1 would also shift
-# the band up and could drop a watch tier that the previous product raised on the same physics. The
-# band is therefore shifted down by exactly the amount the point was lowered, which is the same
-# depth-safe rule applied to the edge: `lb + min(0, v2_1_served - served)`.
-function _severity_ci05(row)
+# Predecessor watch edges of a row: the lower band edge the static-stack stage and the V2.1 operator
+# would each have published for this issue, in the same strongest-to-weakest order as the centers. The
+# engine forms them from the band machinery those stages served under and logs them per row.
+_severity_partner_edges(row) = (_rowget(row, :v2_2_stack_ci05_dst_nt),
+                                _rowget(row, :v2_1_served_ci05_dst_nt))
+
+# Names the payload uses for the stage whose own edge is published, aligned with the tuple above.
+const _SEVERITY_EDGE_PARTNERS = ("v2_2_stack", "v2_1_served")
+
+# Depth-safe interval lower edge, and the stage whose own edge it is.
+#
+# The point level is taken on the depth-safe center, but a watch is assessed on the band edge, so a
+# candidate that reports a shallower center than a stage it replaced could drop a watch tier that stage
+# raised on the same physics. The edge is therefore the deepest of the served edge and the edge each
+# predecessor would have published — the same minimum the center takes, applied to the edge itself.
+#
+# Shifting the served edge by the change in the center is not equivalent and is not depth-safe: the
+# edge a predecessor would have published is its own center minus its OWN half-width, and the served
+# half-width is a different number, so the shifted edge lands at the deepest partner center less the
+# served half-width. Wherever the served band is the narrower of the two that is a shallower edge than
+# the predecessor's own, by up to a whole storm tier. That shift is retained only for
+# rows written before the predecessor edges were logged, where nothing deeper is on record, and such a
+# row is disclosed as using the fallback rule.
+function _severity_ci05_with_source(row)
     lower = _v2_ci05(row)
-    (lower isa Real && !(lower isa Bool)) || return lower
-    served = _v2_pred(row)
-    previous = _rowget(row, :v2_1_served_pred_dst_nt)
-    (served isa Real && !(served isa Bool)) || return lower
-    (previous isa Real && !(previous isa Bool)) || return lower
+    (lower isa Real && !(lower isa Bool)) || return (lower, "unavailable")
     edge = Float64(lower)
-    isfinite(edge) || return lower
-    shift = v22_serving_depth_safe_center(Float64(served), Float64(previous)) - Float64(served)
-    isfinite(shift) || return lower
-    return edge + min(0.0, shift)
+    logged = Union{Nothing,Float64}[
+        (v isa Real && !(v isa Bool) && isfinite(Float64(v))) ? Float64(v) : nothing
+        for v in _severity_partner_edges(row)
+    ]
+    recorded = any(v -> v isa Real && !(v isa Bool), _severity_partner_edges(row))
+    if recorded
+        isfinite(edge) || return (lower, "served")
+        finite = Float64[v for v in logged if v !== nothing]
+        isempty(finite) && return (lower, "served")
+        value = v24_serving_depth_safe_center(edge, finite...)
+        value == edge && return (value, "served")
+        hit = findfirst(v -> v !== nothing && v == value, logged)
+        return (value, hit === nothing ? "served" : _SEVERITY_EDGE_PARTNERS[hit])
+    end
+    # Legacy row: no predecessor edge on record, so the earlier center-shift rule is kept unchanged.
+    served = _v2_pred(row)
+    (served isa Real && !(served isa Bool)) || return (lower, "served")
+    partners = Float64[Float64(v) for v in _severity_partners(row)
+                       if v isa Real && !(v isa Bool)]
+    isempty(partners) && return (lower, "served")
+    isfinite(edge) || return (lower, "served")
+    shift = v24_serving_depth_safe_center(Float64(served), partners...) - Float64(served)
+    isfinite(shift) || return (lower, "served")
+    shift < 0.0 || return (edge, "served")
+    return (edge + shift, "legacy_center_shift")
 end
+
+_severity_ci05(row) = first(_severity_ci05_with_source(row))
+_severity_ci05_source(row) = last(_severity_ci05_with_source(row))
 
 # Rows of the most recent forecast cycle, defined by ISSUE epoch (not driver vintage). When the
 # L1 feed stalls across issue boundaries, several hourly cycles share one latest_solar_wind_utc;
@@ -805,11 +864,32 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
                          # an operator can see why a warning is deeper than the served center.
                          severity_dst_nt=jnum(_severity_pred(r)),
                          severity_ci05_dst_nt=jnum(_severity_ci05(r)),
+                         # Which stage's own band edge the watch is assessed on: the served product,
+                         # one of the two predecessors, or the legacy center-shift rule for a row
+                         # written before the predecessor edges were logged.
+                         severity_ci05_source=_severity_ci05_source(r),
                          v2_1_served_pred_dst_nt=jnum(_rowget(r, :v2_1_served_pred_dst_nt)),
+                         v2_2_stack_pred_dst_nt=jnum(_rowget(r, :v2_2_stack_pred_dst_nt)),
+                         v2_1_served_ci05_dst_nt=jnum(_rowget(r, :v2_1_served_ci05_dst_nt)),
+                         v2_2_stack_ci05_dst_nt=jnum(_rowget(r, :v2_2_stack_ci05_dst_nt)),
                          served_model_version=(v = _rowget(r, :sub_hourly_model_version);
                                                v isa AbstractString ? String(v) : nothing),
                          v2_2_status=(v = _rowget(r, :v2_2_status);
                                       v isa AbstractString ? String(v) : nothing),
+                         # Per-row served-stage disclosure of the super-learner: `ok` when this
+                         # horizon's center is the V2.4e center, otherwise the reason it fell back.
+                         v24_status=(v = _rowget(r, :v24_status);
+                                     v isa AbstractString ? String(v) : nothing),
+                         v24_pred_dst_nt=jnum(_rowget(r, :v24_pred_dst_nt)),
+                         v24_guard_applied=(v = _rowget(r, :v24_guard_applied);
+                                            v isa Bool ? v : nothing),
+                         # The physical +50/-2000 nT projection of the served center. Separate from the
+                         # guard, and the reason the served center can differ from the combination's
+                         # own output on a row where no guard acted.
+                         v24_projection_applied=(v = _rowget(r, :v24_projection_applied);
+                                                 v isa Bool ? v : nothing),
+                         v24_regime_cell=(v = _rowget(r, :v24_regime_cell);
+                                          v isa AbstractString ? String(v) : nothing),
                          frozen_tail_ablation_dst_nt=jnum(_audit_pred(r)),
                          audit_baseline_dst_nt=jnum(_audit_pred(r))))
     end
@@ -873,7 +953,8 @@ actually being served instead of only whether a file is fresh."""
 function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES)
     empty_result = (cycles_considered=0, pre_stage_cycles_excluded=0, served_model_version=nothing,
                     served_product=nothing, served_fallback_cycles=0, served_fallback_rate=nothing,
-                    newest_cycle_is_fallback=nothing, shadow_model_version=nothing,
+                    newest_cycle_is_fallback=nothing, served_stack_cycles=0,
+                    served_v2_1_cycles=0, shadow_model_version=nothing,
                     shadow_cycles_considered=0, shadow_available_cycles=0,
                     shadow_available_rate=nothing, shadow_e_layer_cycles=0,
                     shadow_e_layer_rate=nothing)
@@ -886,6 +967,8 @@ function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES
     fallback = 0
     staged = 0
     pre_stage = 0
+    stack_served = 0
+    v2_1_served = 0
     shadow_staged = 0
     shadow_ok = 0
     e_layer = 0
@@ -900,15 +983,18 @@ function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES
         # `any` would return `missing` and the health summary would throw instead of reporting the
         # trailing window that spans the schema change.
         #
-        # Only cycles issued by the served-stack stage (they carry `v2_2_status`) enter the
+        # Only cycles issued by the current served stage (they carry `v24_status`) enter the
         # fallback rate; rows written before the stage existed are disclosed as excluded rather
         # than counted as fallbacks, mirroring the readiness audit's transition rule.
-        cycle_staged = any(r -> _rowget(r, :v2_2_status) isa AbstractString, eachrow(rows))
+        cycle_staged = any(r -> _rowget(r, :v24_status) isa AbstractString, eachrow(rows))
         if cycle_staged
             staged += 1
-            is_fallback = any(label -> isequal(label, PREVIOUS_V2_SERVED_MODEL_VERSION) ||
-                                       !_is_accepted_served_model(label), labels)
+            is_fallback = any(label -> !isequal(label, CURRENT_V2_SERVED_MODEL_VERSION), labels)
             is_fallback && (fallback += 1)
+            any(label -> isequal(label, STACK_V2_SERVED_MODEL_VERSION), labels) &&
+                (stack_served += 1)
+            any(label -> isequal(label, PREVIOUS_V2_SERVED_MODEL_VERSION), labels) &&
+                (v2_1_served += 1)
             index == length(window) && (newest_fallback = is_fallback)
         else
             pre_stage += 1
@@ -933,6 +1019,8 @@ function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES
             served_fallback_cycles=fallback,
             served_fallback_rate=staged == 0 ? nothing : round(fallback / staged; digits=4),
             newest_cycle_is_fallback=newest_fallback,
+            served_stack_cycles=stack_served,
+            served_v2_1_cycles=v2_1_served,
             shadow_model_version=isempty(shadow_labels) ? nothing : first(sort(unique(shadow_labels))),
             shadow_cycles_considered=shadow_staged,
             shadow_available_cycles=shadow_ok,
@@ -985,13 +1073,15 @@ function build_status(df::DataFrame)
                 calibration=cal)
     end
     preds = [Float64(_severity_pred(r)) for r in eachrow(cyc)]
-    # Watch edge on the depth-safe center, not on the served band as issued: the stack can report a
-    # shallower center than the V2.1 operator it replaced, which shifts the whole band up, and a watch
-    # assessed on the shifted edge could drop a tier the previous product raised on the same physics.
-    # `_severity_ci05` lowers each edge by exactly the amount the point was lowered.
-    lbs = [Float64(_severity_ci05(r)) for r in eachrow(cyc)]
+    # Watch edge on the depth-safe edge, not on the served band as issued: a candidate can report a
+    # shallower center and a narrower band than the stages it replaced, and a watch assessed on that
+    # band could drop a tier the previous product raised on the same physics. `_severity_ci05` takes
+    # the deepest of the served edge and each predecessor's own logged edge.
+    edges = [_severity_ci05_with_source(r) for r in eachrow(cyc)]
+    lbs = [Float64(first(e)) for e in edges]
     point_min = minimum(preds)
     interval_lower_edge_min = minimum(lbs)
+    interval_lower_edge_source = last(edges[argmin(lbs)])
     lvl_pt, lbl_pt = dst_threat_level(point_min)
     lvl_wc, lbl_wc = dst_threat_level(interval_lower_edge_min)
     # Reported threat level is the point-forecast level; a "watch" flag fires when the
@@ -1013,6 +1103,8 @@ function build_status(df::DataFrame)
                     watch_level=lvl_wc, watch_label=lbl_wc,
                     point_min_dst_nt=point_min,
                     interval_lower_edge_min_dst_nt=interval_lower_edge_min,
+                    # The stage whose own band edge the published watch edge came from.
+                    interval_lower_edge_source=interval_lower_edge_source,
                     # Deprecated value-equivalent aliases for already-loaded dashboards and API
                     # clients. New code and all visible labels use interval_lower_edge_min_dst_nt.
                     lower_bound_min_dst_nt=interval_lower_edge_min,

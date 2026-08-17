@@ -55,25 +55,93 @@ The package is organized as two layers:
 
 The dashboard and live monitor serve a single forecast whose SINDy core is the same
 20-candidate/11-active-term artifact used by the revised discovery paper. The served
-point center is the complete V2.1 operator (L1 look-ahead, regime-aware relaxation,
-rate projection and the three inertia guards) followed by the fitted **static V2.2
-regime stack**: a bounded, SINDy-dominant convex combination of six point components
-(served V2.1, frozen V2.1, persistence, Burton, Burton-full, O'Brien-McPherron)
-selected per model step and per causal issue-time regime. The served identity is
+point center is the **V2.4e super-learner**: a fitted non-negative combination of ten
+causal forecasts, weighted per model step, per causal issue-time regime and per
+ring-current depth bin, with a 0.60 mass floor on the SINDy family. The ten are the served
+V2.1 operator center, the frozen-tail V2.1 center, an analog driver-continuation center with
+the refit ridge correction, persistence, Burton, Burton-full, O'Brien-McPherron, a tuned
+direct increment-GBM, climatology-relaxed persistence, and the fixed 2010-2017 static V2.2
+regime stack. The static stack counts inside the SINDy family, because that product is itself
+a composition of the deployed SINDy operators, and giving the combination that column lets it
+recover the physics composition in the deep storm cells rather than having it imposed as a
+minimum afterwards. The served identity is
 
 ```text
-v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)
+v2.4+sindy20x11+superlearner10floor+conformal
 ```
 
-The stack weights ship as `deploy/operational_v2_2_stack.csv` with their SHA-256 in
-`deploy/operational_v2_2_stack_manifest.csv`; the engine refuses to serve weights whose
-digest or label does not match the published fit and falls back to the V2.1 center,
-labeling the row with the V2.1 identity so the degradation is visible rather than silent.
-Each row also keeps `v2_1_served_pred_dst_nt`, the center the V2.1 operator produced, and
-`v2_2_status`, which records either `ok` or the exact reason the stack stage could not act.
-Both the published threat level and the interval lower edge that raises a watch are taken
-against the deeper of the two centers, so a conservative stack can neither lower a warning
-nor drop a watch tier.
+Its evidence is a rolling-origin study over 2014-2025 in which every model is refitted
+inside every fold: V2.4e has the lowest pooled RMSE of the comparator set at every model
+step on the full window and on 2020-2025, and beats the static stack it replaces at every
+step with positive one-sided lower bounds and no bootstrap-supported storm-cell loss on
+those two scopes. The study's own preregistered rule returned `SHADOW` because the
+data-poor 2014-2019 folds fail two gates marginally; the operational serve rule, evaluated
+against the product actually being replaced, returned `SERVE_ELIGIBLE_PENDING_G4` on the
+full window and on 2020-2025, with 2014-2019 disclosed rather than decisive because the
+static stack is partly in sample there.
+
+The bundle ships as `deploy/v2_4/` — stack weights, per-step boosted models, the analog
+archive and its standardisation, the refit correction, the climatology timescale, the
+conformal half-widths, the guard record and a digest manifest — and is rebuilt by
+`validation/operational/v2_4_build_deploy.jl`. It is verified on load: every file against
+its SHA-256, the analog archive rebuilt from the shipped frame and compared with the origin
+count and standardisation the builder recorded, every stack cell for non-negativity, unit
+mass, the served expert set and the SINDy floor, the conformal grid for completeness, and
+the guard record against this build's own thresholds and its own guard switch. A bundle that
+fails any check does not load, and the row falls back down the chain instead of serving
+unverified artifacts.
+
+The served point forecast carries no guard: the static stack is one of the combined
+forecasts. Depth safety lives at the alerting layer instead, where the published severity and
+watch state are the deepest of the V2.4e center, the static-stack center and the V2.1 center,
+so a combination that blends toward a shallower state cannot lower a warning either
+predecessor would have raised. The guard code path is retained and is driven by the bundle's
+own `guard.json`, so a later bundle whose selection returns a guarded variant is servable
+without a source change.
+
+The served band of a V2.4e row is the study's split-conformal interval for that center,
+stratified by model step and depth bin, disclosed as `interval_source = v24_conformal_depth`.
+
+The **fallback chain is V2.4e → static V2.2 stack → V2.1 operator**, disclosed per row:
+
+```text
+v24_status            ok | fallback:<reason>       (super-learner stage)
+v2_2_status           ok | ok_unpinned | fallback_v2_1:<reason>   (stack stage)
+v24_pred_dst_nt       served V2.4e center, equal to v24_l1_center_dst_nt while no guard acts
+v24_ci05_nt/ci95_nt   conformal interval endpoints of that center
+v24_regime_cell       the (regime, depth) cell whose weights were used
+v24_guard_applied     whether a bundle-configured guard moved the center (false as deployed)
+v24_projection_applied   whether the physical +50/-2000 nT projection moved the center
+v2_2_stack_pred_dst_nt   static-stack center of the row (expert ten, and a severity partner)
+v2_1_served_pred_dst_nt  V2.1 operator center of the row
+v2_2_stack_ci05_dst_nt   lower band edge the stack stage would have published for this issue
+v2_1_served_ci05_dst_nt  lower band edge the V2.1 operator would have published
+direct_gbm_pred_dst_nt / climatology_pred_dst_nt / v24_t1r_pred_dst_nt
+                      the three experts no other column carries
+v24_manifest_sha256   digest of the bundle's own manifest
+```
+
+The static V2.2 regime stack — a bounded, SINDy-dominant convex combination of the six
+point components, selected per model step and per causal issue-time regime — remains the
+first fallback and the guard's reference. Its weights ship as
+`deploy/operational_v2_2_stack.csv` with their SHA-256 in
+`deploy/operational_v2_2_stack_manifest.csv`; the engine refuses weights whose digest or
+label does not match the published fit. Because the guard needs that center, a cycle whose
+stack stage cannot act serves the V2.1 operator rather than an unguarded candidate.
+
+The published threat level is taken against the deepest of the served center, the
+static-stack center and the V2.1 center. The interval lower edge that raises a watch is taken
+the same way, against the deepest of the served edge and the edge each of those stages would
+have published — not against the served edge shifted by the change in the center. The two are
+not the same statement: a V2.4e row carries the depth-stratified conformal half-width, which
+in the shallow bins is narrower than the shifted frozen-tail and adaptive bands the earlier
+stages served under, so a shifted edge can still sit a storm tier shallower than the
+predecessor's own. Both partner edges are therefore logged per row and the published edge is
+the minimum over them, which makes the rule idempotent and leaves a deeper served edge
+untouched. A row written before those columns existed falls back to the earlier shift rule and
+the payload discloses that it did. The API publishes the alerting center and edge as
+`severity_dst_nt` and `severity_ci05_dst_nt`, with `severity_ci05_source` naming the stage the
+edge came from, and the dashboard renders both under the served forecast.
 
 The **V2.3 analog driver continuation** is integrated as a shadow forecast only. Its
 single-shot confirmatory scoring on the 2020-2025 partition returned `NO_GO`
@@ -109,12 +177,28 @@ scoring run recorded.
 Two offline identity oracles keep the served and shadow paths equal to what was measured:
 
 ```bash
-julia --project=. validation/operational/v2_2_served_identity.jl   # served static stack
+julia --project=. validation/operational/v2_4_serving_identity.jl  # served V2.4e center
+julia --project=. validation/operational/v2_2_served_identity.jl   # static stack center
 julia --project=. validation/operational/v2_3_serving_identity.jl  # V2.3 shadow center
 ```
 
-The former reproduces the archived `static_v2_2_dst_nt` column on every scorable
-DEV/TEST row; the latter reproduces the scored `V2_3_final` centers at every model step.
+The first drives the serving functions with hourly archive inputs against a fold-2025
+replica of the deployment bundle and reproduces every stage the study scored — the ten
+experts, the super-learner center, the published center and both interval endpoints — to
+1e-9 nT. The second
+reproduces the archived `static_v2_2_dst_nt` column on every scorable DEV/TEST row; the
+third reproduces the scored `V2_3_final` centers at every model step.
+
+Operational readiness is audited by
+[`validation/operational/v2_readiness_audit.jl`](validation/operational/v2_readiness_audit.jl).
+Its served-stage window reports the fallback rate over four days of hourly issuance against
+the integration specification's 1% target, but the target is not the operative gate and the
+audit does not present it as one: two fallbacks in ninety-six cycles is already 2.1%, so any
+window that reaches the two-cycle failure threshold is over a 1% target by arithmetic. What
+fails the audit is a fallback on the newest cycle — the cycle being served now — or two or more
+fallbacks in the window; the rate is reported and recorded as `served_fallback_rate`. When the
+newest cycle predates the served stage it carries no served-stage verdict, which is disclosed as
+its own check rather than resolved against an older cycle.
 
 The former 21/10 product is labeled V2.0 and retained under `data/historical/v2_0/` and
 `deploy/historical/v2_0/` only for reproducible matched comparisons. The `v2` API
