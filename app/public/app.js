@@ -89,6 +89,17 @@ const PIPELINE_CAPS_PREFIXED = [
   ["staticstack(", "static regime stack"],
   ["ADC(", "analog driver continuation"],
 ];
+// ---- served-row label helper (executed by app/test) ----
+// Name of the pooled served row in the live-skill table. `${product} served` only when every
+// verified row matured under the current served label; otherwise the row is disclosed as a mixed
+// record of the pipelines that were served, with the count under the current label.
+function servedRowLabel(product, nUnderCurrent, nAll) {
+  const under = Number.isFinite(Number(nUnderCurrent)) ? Number(nUnderCurrent) : 0;
+  const all = Number.isFinite(Number(nAll)) ? Number(nAll) : 0;
+  if (all > 0 && under >= all) return `${product} served`;
+  return `served pipelines (mixed record; ${under} of ${all} rows under ${product})`;
+}
+// ---- end served-row label helper ----
 // Reader-facing product name of the served pipeline. Derived from the served label the log recorded
 // (the API also sends it as served_product), never hardcoded: during a disclosed stack-stage
 // degradation the product really is the previous one, and naming it otherwise would misreport it.
@@ -411,8 +422,16 @@ function renderCalib(status) {
   const minN = c.live_skill_min_verified != null ? c.live_skill_min_verified : 48;
   const mature = c.live_skill_mature === true && matchedN >= minN;
   const product = productName(status);
+  // ---- served-row label block (executed by app/test) ----
+  // Verified rows accumulate across served pipelines. Until every verified row matured under the
+  // current served label, the pooled served RMSE is a mixed-pipeline record and must not be
+  // presented under the current product's name alone.
+  const nServedLabel = c.n_verified_current_served_model != null ? c.n_verified_current_served_model : 0;
+  const nAllVerified = c.v2_n_verified != null && c.v2_n_verified > 0 ? c.v2_n_verified : c.n_verified;
+  const servedRowName = servedRowLabel(product, nServedLabel, nAllVerified);
+  // ---- end served-row label block ----
   const rows = [
-    [`${product} served`, c.v2_matched_rmse_nt],
+    [servedRowName, c.v2_matched_rmse_nt],
     ["V2.1 frozen-tail ablation", c.frozen_tail_ablation_matched_rmse_nt],
     ["SINDy v1", c.sindy_v1_matched_rmse_nt],
     ["Persistence", c.persistence_matched_rmse_nt],

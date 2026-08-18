@@ -345,6 +345,17 @@ function _complete_issuance_cycle(log_path::AbstractString, issue_time::DateTime
     isempty(issues) && return false
     floor(maximum(issues), Hour) == floor(issue_time, Hour) || return false
     source = _common_cycle_field(cycle, :interval_source)
+    # A V2.4e-served row publishes the study's split-conformal band under `V2_4_INTERVAL_SOURCE`
+    # whatever the batch's fallback interval policy is (the aci/static policy governs the shifted
+    # frozen-tail and adaptive bands of the fallback stages only). That source is therefore valid
+    # under either policy, but only on rows the V2.4 stage actually served: a cycle carrying the
+    # conformal source on rows whose V2.4 status is not `ok` is incoherent and stays incomplete.
+    # Without this clause every V2.4e cycle failed the aci-policy check, the issuance dead-man
+    # tripped after six cycles and the supervisor restarted the daemon (2026-08-17/18).
+    if source == V2_4_INTERVAL_SOURCE
+        hasproperty(cycle, :v24_status) || return false
+        return all(status -> _v2_4_served_acted(status), cycle.v24_status)
+    end
     interval_policy == :aci && return source == "aci"
     interval_policy == :static && return source != "aci"
     return true

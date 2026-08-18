@@ -1000,6 +1000,27 @@ end
         @test !L._complete_issuance_cycle(log_path, issue, :aci)
         L.CSV.write(log_path, cycle_rows[1:3, :])
         @test !L._complete_issuance_cycle(log_path, issue)
+        # A V2.4e-served cycle carries the study's conformal band whatever the batch's fallback
+        # interval policy is; it is complete under both policies, but only when every row's V2.4
+        # status is `ok`. Regression: every V2.4e cycle failed the aci-policy check, tripping the
+        # issuance dead-man after six cycles and restarting the daemon.
+        v24_rows = copy(cycle_rows)
+        v24_rows.interval_source .= L.V2_4_INTERVAL_SOURCE
+        v24_rows.v24_status = fill(L.V2_4_STATUS_OK, length(L.HORIZONS))
+        L.CSV.write(log_path, v24_rows)
+        @test L._complete_issuance_cycle(log_path, issue, :aci)
+        @test L._complete_issuance_cycle(log_path, issue, :static)
+        @test L._complete_issuance_cycle(log_path, issue)
+        mixed_rows = copy(v24_rows)
+        mixed_rows.v24_status[end] = "fallback:deployment_absent"
+        L.CSV.write(log_path, mixed_rows)
+        @test !L._complete_issuance_cycle(log_path, issue, :aci)
+        @test !L._complete_issuance_cycle(log_path, issue, :static)
+        no_status_rows = copy(cycle_rows)
+        no_status_rows.interval_source .= L.V2_4_INTERVAL_SOURCE
+        L.CSV.write(log_path, no_status_rows)
+        @test !L._complete_issuance_cycle(log_path, issue, :aci)
+        @test !L._complete_issuance_cycle(log_path, issue, :static)
     end
 
     # The issued record is a NamedTuple; the monitor counts the guarded call result and then

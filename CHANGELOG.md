@@ -18,6 +18,15 @@ bundle's training-window bound as an instant instead of coercing a CSV-parsed `D
 `String(...)` (which aborted the audit); the self-test now exercises the populated-bundle path
 (38 checks).
 
+Hotfix after the first production hours (2026-08-18): the live monitor's issuance-cycle
+validator required the batch interval source to be `aci` under the aci policy, but V2.4e rows
+publish the study's conformal band (`v24_conformal_depth`) whatever the fallback policy is, so
+every cycle was judged incomplete, the issuance dead-man tripped after six cycles and launchd
+restarted the daemon (three runs). The validator now accepts the conformal source under either
+policy when every row's `v24_status` is `ok` (mutation-checked regression tests); the live-skill
+table names the pooled served row a mixed-pipeline record until every verified row matured under
+the current served label.
+
 Served product:
 
 - the served identity is `v2.4+sindy20x11+superlearner10floor+conformal`, and the

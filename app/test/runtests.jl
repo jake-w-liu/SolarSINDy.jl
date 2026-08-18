@@ -2616,6 +2616,34 @@ esac
             @test occursin("edge from toString", rendered[3].text)
             @test !occursin("function", rendered[3].text)
         end
+        # The pooled served row of the live-skill table is a mixed-pipeline record until every
+        # verified row matured under the current served label; it must not carry the current
+        # product's name alone before then. Executed, not pattern-matched.
+        if node !== nothing
+            label_block = match(
+                r"// ---- served-row label helper[^\n]*\n(.*?)// ---- end served-row label helper ----"s,
+                js,
+            )
+            @test label_block !== nothing
+            @test occursin("const servedRowName = servedRowLabel(product, nServedLabel, nAllVerified);", js)
+            @test occursin("[servedRowName, c.v2_matched_rmse_nt]", js)
+            @test !occursin("[`\${product} served`, c.v2_matched_rmse_nt]", js)
+            label_probe = label_block.captures[1] * """
+            console.log(JSON.stringify([
+              servedRowLabel("V2.4", 0, 212),
+              servedRowLabel("V2.4", 47, 212),
+              servedRowLabel("V2.4", 212, 212),
+              servedRowLabel("V2.4", 250, 212),
+              servedRowLabel("V2.4", null, 212),
+            ]));
+            """
+            labels = JSON3.read(read(pipeline(ignorestatus(`$node -e $label_probe`)), String))
+            @test labels[1] == "served pipelines (mixed record; 0 of 212 rows under V2.4)"
+            @test labels[2] == "served pipelines (mixed record; 47 of 212 rows under V2.4)"
+            @test labels[3] == "V2.4 served"
+            @test labels[4] == "V2.4 served"
+            @test labels[5] == "served pipelines (mixed record; 0 of 212 rows under V2.4)"
+        end
         @test !occursin("? status.threat.level : 0", js)
         # The product name is derived from the served label the log recorded, so no hardcoded version
         # string may remain in the rendering path; the frozen-tail ablation keeps its V2.1 name because
