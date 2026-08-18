@@ -12,8 +12,9 @@
 #       experts, summing to one, fitted only on years strictly before the
 #       scored year (variant L1a adds the 0.60 SINDy-family floor);
 #   L2  a boosted residual on `observation - L1`, capped at +/-(10 + 5h) nT,
-#       with hyper-parameters selected on an inner validation window of the
-#       training pool;
+#       with hyper-parameters, model form and per-step acceptance selected on an
+#       inner validation window of the training pool that the inner training
+#       block clears by the same 168 h target embargo;
 #   L3  the depth-safe guard, which lets the residual deepen a forecast but
 #       never lift a deepening one;
 #   L4  split-conformal half-widths per step x activity at 0.90 coverage,
@@ -1451,30 +1452,51 @@ used whenever it leaves a training block of at least
 [`V24_INNER_MIN_TRAIN_MONTHS`](@ref) months and [`V24_INNER_MIN_ROWS`](@ref)
 rows on each side. Otherwise the split degrades to the last third of the pool by
 issue time, and the rule that was applied is returned so it can be persisted.
+
+The two halves are separated by the same [`V24_EMBARGO_HOURS`](@ref) target
+embargo that Amendment A3 puts between a fold's pool and the year it scores. A
+contiguous split would let the inner training block carry targets that mature
+after the inner validation window opens, so the hyper-parameter, joint-versus-
+per-step and per-step acceptance decisions would be taken with a sliver of the
+validation period's own outcome inside the fitting rows. The training half is
+therefore `v24_in_pool` against the inner cutoff — evaluated per row with that
+row's own model step, because the pool carries all six steps at once and a 7 h
+row matures six hours later than a 1 h row issued beside it. Rows falling in the
+gap belong to neither half and are counted in `n_embargoed`.
 """
 function v24_inner_split(rows::AbstractVector{Tuple{V24YearData,Int}})
     isempty(rows) && error("V2.4 inner split needs rows")
     issues = [data.issue[i] for (data, i) in rows]
     first_issue = minimum(issues)
     last_issue = maximum(issues)
+    # A candidate split is described entirely by where its validation window
+    # opens: validation is every row issued at or after the boundary, training is
+    # every row whose target clears the boundary by the embargo.
+    function halves(boundary::DateTime)
+        cutoff = boundary - Hour(V24_EMBARGO_HOURS)
+        train = Int[k for k in eachindex(rows)
+                    if v24_in_pool(rows[k][1], rows[k][2], cutoff)]
+        return (train=train, validate=findall(>=(boundary), issues), cutoff=cutoff)
+    end
+
     boundary = last_issue - Month(V24_INNER_VALIDATION_MONTHS)
     rule = "last_$(V24_INNER_VALIDATION_MONTHS)_months"
-    train = findall(<(boundary), issues)
-    validate = findall(>=(boundary), issues)
-    span_ok = !isempty(train) &&
-        maximum(issues[train]) >= first_issue + Month(V24_INNER_MIN_TRAIN_MONTHS)
-    if !(span_ok && length(train) >= V24_INNER_MIN_ROWS &&
-         length(validate) >= V24_INNER_MIN_ROWS)
+    half = halves(boundary)
+    span_ok = !isempty(half.train) &&
+        maximum(issues[half.train]) >= first_issue + Month(V24_INNER_MIN_TRAIN_MONTHS)
+    if !(span_ok && length(half.train) >= V24_INNER_MIN_ROWS &&
+         length(half.validate) >= V24_INNER_MIN_ROWS)
         span = Dates.value(last_issue - first_issue)
         boundary = first_issue + Millisecond(div(2 * span, 3))
         rule = "chronological_two_thirds"
-        train = findall(<(boundary), issues)
-        validate = findall(>=(boundary), issues)
+        half = halves(boundary)
     end
-    (isempty(train) || isempty(validate)) && error(
+    (isempty(half.train) || isempty(half.validate)) && error(
         "V2.4 inner split produced an empty half over $(length(rows)) rows",
     )
-    return (train=train, validate=validate, boundary=boundary, rule=rule,
+    return (train=half.train, validate=half.validate, boundary=boundary,
+            cutoff=half.cutoff, rule=rule,
+            n_embargoed=length(rows) - length(half.train) - length(half.validate),
             first_issue=first_issue, last_issue=last_issue)
 end
 
@@ -1491,6 +1513,12 @@ error of `observation - (L1 + capped residual)` on the inner-validation block.
 The joint form is kept when it is not worse, which is the tie-break the
 specification names. The winning configuration is then refitted on the whole
 pool.
+
+The inner-training block is embargoed against the inner-validation window by
+[`V24_EMBARGO_HOURS`](@ref) (see [`v24_inner_split`](@ref)), so no decision taken
+here — grid point, model form, or per-step acceptance — is informed by a target
+that matures inside the window it is scored on. The refit on the whole pool is
+unaffected: the pool is already embargoed against the fold year it will score.
 """
 function v24_fit_l2(pool_rows::AbstractVector{Tuple{V24YearData,Int}};
                     grid=V24_L2_GRID, seed::Integer=V24_SEED)
@@ -1623,6 +1651,7 @@ function v24_fit_l2(pool_rows::AbstractVector{Tuple{V24YearData,Int}};
             nrounds=best.nrounds, inner_rmse_nt=best.inner_rmse_nt, trace=trace,
             split=split, n_pool_rows=length(pool_rows),
             n_inner_train=length(split.train), n_inner_validate=length(split.validate),
+            n_inner_embargoed=split.n_embargoed,
             accepted=accepted, acceptance=acceptance,
             accepted_steps=[step for step in V24_STEPS if accepted[step]])
 end
@@ -3115,8 +3144,10 @@ function run_v2_4_learn(; years=V24_FOLD_YEARS, eras=V24_ERAS,
         if layer === nothing
             push!(l2_rows, (
                 fold_year=year, available=false, form="none", max_depth=0, nrounds=0,
-                inner_rule="none", inner_boundary="", n_pool_rows=length(pool_rows),
-                n_inner_train=0, n_inner_validate=0, inner_rmse_nt=NaN,
+                inner_rule="none", inner_boundary="", inner_target_cutoff_utc="",
+                n_pool_rows=length(pool_rows),
+                n_inner_train=0, n_inner_validate=0, n_inner_embargoed=0,
+                inner_rmse_nt=NaN,
                 joint_inner_rmse_nt=NaN, per_step_inner_rmse_nt=NaN, selected=true,
                 accepted_steps="",
             ))
@@ -3136,8 +3167,10 @@ function run_v2_4_learn(; years=V24_FOLD_YEARS, eras=V24_ERAS,
                     max_depth=row.max_depth, nrounds=row.nrounds,
                     inner_rule=layer.split.rule,
                     inner_boundary=string(layer.split.boundary),
+                    inner_target_cutoff_utc=string(layer.split.cutoff),
                     n_pool_rows=layer.n_pool_rows, n_inner_train=layer.n_inner_train,
                     n_inner_validate=layer.n_inner_validate,
+                    n_inner_embargoed=layer.n_inner_embargoed,
                     inner_rmse_nt=row.inner_rmse_nt,
                     joint_inner_rmse_nt=row.joint_inner_rmse_nt,
                     per_step_inner_rmse_nt=row.per_step_inner_rmse_nt,
@@ -3383,6 +3416,10 @@ function run_v2_4_learn(; years=V24_FOLD_YEARS, eras=V24_ERAS,
             join(String.(V24_EXPERTS_TEN), "|"))
     record!("protocol", "pool_target_embargo_hours", V24_EMBARGO_HOURS,
             "every out-of-fold pool fit; Amendment A3")
+    record!("protocol", "inner_target_embargo_hours", V24_EMBARGO_HOURS,
+            "L2 inner train/validate split, same target rule as the pool cutoff; " *
+            "per-fold cutoff and dropped-row count in v2_4_l2_selection.csv " *
+            "(inner_target_cutoff_utc, n_inner_embargoed)")
     record!("protocol", "serve_rule", length(V24_SERVE_RULE_ERAS),
             "deciding eras " * join(String.(V24_SERVE_RULE_ERAS), "|") *
             "; reference " * String(V24_SERVE_REFERENCE))
@@ -3407,7 +3444,8 @@ function run_v2_4_learn(; years=V24_FOLD_YEARS, eras=V24_ERAS,
             join(v24_l2_feature_names(), "|"))
     record!("protocol", "amendment", 3,
             "A3: out-of-fold pool fits target-embargoed by " *
-            string(V24_EMBARGO_HOURS) * " h; expert E10 = static_v2_2 (ten-expert stack " *
+            string(V24_EMBARGO_HOURS) * " h, the L2 inner train/validate split included; " *
+            "expert E10 = static_v2_2 (ten-expert stack " *
             "with the floor over served+frozen+t1r+static); variants v2_4e and v2_4f; " *
             "selection set " * join(String.(V24_SELECTABLE_VARIANTS), "|") * "; gates " *
             "evaluated for the served candidate and, separately, for every variant; " *

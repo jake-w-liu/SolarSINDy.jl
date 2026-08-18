@@ -518,7 +518,10 @@ end
     split = v24_inner_split(long_rows)
     @test split.rule == "last_$(V24_INNER_VALIDATION_MONTHS)_months"
     @test split.boundary == split.last_issue - Month(V24_INNER_VALIDATION_MONTHS)
-    @test length(split.train) + length(split.validate) == length(long_rows)
+    # The halves no longer partition the pool: the embargo of the testset below
+    # keeps a gap between them, and every row is in exactly one of the three.
+    @test length(split.train) + length(split.validate) + split.n_embargoed ==
+          length(long_rows)
     @test all(i -> long.issue[long_rows[i][2]] < split.boundary, split.train)
     @test all(i -> long.issue[long_rows[i][2]] >= split.boundary, split.validate)
     @test length(split.train) >= V24_INNER_MIN_ROWS
@@ -534,6 +537,94 @@ end
     @test maximum(short.issue[[short_rows[i][2] for i in short_split.train]]) <
           minimum(short.issue[[short_rows[i][2] for i in short_split.validate]])
     @test_throws ErrorException v24_inner_split(Tuple{V24YearData,Int}[])
+end
+
+@testset "the inner split embargoes its training block by 168 h, per row's own step" begin
+    # Amendment A3 puts a 168 h target embargo between a fold's out-of-fold pool
+    # and the year it scores. The same statement has to hold one level down: the
+    # inner split decides the residual's grid point, its joint-versus-per-step
+    # form and its per-step acceptance, so a contiguous split lets targets that
+    # mature after the validation window opens sit inside the fitting rows. The
+    # pool carries all six model steps at every issue hour, so the rule is a
+    # statement about `issue + step` evaluated per row, not about the issue hour.
+    #
+    # A contiguous split fails every assertion of the exact-count, kept/dropped
+    # and per-step blocks below: it reports no embargoed row, keeps the row whose
+    # target matures one hour into the window, and puts all six steps of one issue
+    # hour on the same side.
+    origin = DateTime(2016, 1, 1)
+    gap = sum(V24_EMBARGO_HOURS - 1 + step for step in V24_STEPS)
+
+    """
+    Hourly pool carrying every model step at every issue hour, with a lookup from
+    `(issue, step)` to the row index so single rows can be named by their target.
+    """
+    function stepped_pool(hours::Int)
+        issues = DateTime[]
+        steps = Int[]
+        index = Dict{Tuple{DateTime,Int},Int}()
+        for k in 0:(hours - 1), step in V24_STEPS
+            push!(issues, origin + Hour(k))
+            push!(steps, step)
+            index[(origin + Hour(k), step)] = length(issues)
+        end
+        year = tiny_year(2016, issues, steps, zeros(length(issues)))
+        rows = Tuple{V24YearData,Int}[(year, i) for i in 1:length(year)]
+        return (year=year, rows=rows, index=index)
+    end
+
+    "The three assertions that separate an embargoed split from a contiguous one."
+    function check_gap(pool, split)
+        year = pool.year
+        train = Set(split.train)
+        validate = Set(split.validate)
+        @test isempty(intersect(train, validate))
+        @test split.cutoff == split.boundary - Hour(V24_EMBARGO_HOURS)
+        @test all(k -> year.issue[k] + Hour(year.step[k]) <= split.cutoff, split.train)
+        @test all(k -> year.issue[k] >= split.boundary, split.validate)
+        dropped = setdiff(Set(eachindex(pool.rows)), union(train, validate))
+        @test length(dropped) == split.n_embargoed
+        @test split.n_embargoed == gap
+        @test all(k -> year.issue[k] < split.boundary &&
+                       year.issue[k] + Hour(year.step[k]) > split.cutoff, dropped)
+        # The pair a contiguous split gets wrong: the last row whose target lands
+        # exactly on the cutoff is kept, and the next issue hour at the same step
+        # is dropped although it is still issued long before the window opens.
+        for step in V24_STEPS
+            kept = pool.index[(split.cutoff - Hour(step), step)]
+            embargoed = pool.index[(split.cutoff - Hour(step) + Hour(1), step)]
+            @test kept in train
+            @test !(embargoed in train)
+            @test !(embargoed in validate)
+            @test year.issue[embargoed] < split.boundary
+        end
+        # One issue hour, six steps, two verdicts: the rule reads each row's own
+        # step, so a 1 h row three hours before the cutoff still trains while the
+        # 7 h row issued beside it does not.
+        probe = split.cutoff - Hour(3)
+        for step in V24_STEPS
+            row = pool.index[(probe, step)]
+            @test (row in train) == (step <= 3)
+            @test !(row in validate)
+        end
+        @test length(split.train) >= V24_INNER_MIN_ROWS
+        @test length(split.validate) >= V24_INNER_MIN_ROWS
+    end
+
+    # Plan rule: 20,000 hours leave the last 24 months as validation and still a
+    # training block above the row and span floors.
+    long = stepped_pool(20_000)
+    long_split = v24_inner_split(long.rows)
+    @test long_split.rule == "last_$(V24_INNER_VALIDATION_MONTHS)_months"
+    check_gap(long, long_split)
+
+    # Fallback rule: 9,001 hours span 9,000 h, so the two-thirds boundary lands on
+    # an exact hour and the same named rows can be checked there.
+    short = stepped_pool(9_001)
+    short_split = v24_inner_split(short.rows)
+    @test short_split.rule == "chronological_two_thirds"
+    @test short_split.boundary == origin + Hour(6_000)
+    check_gap(short, short_split)
 end
 
 @testset "the residual is accepted only at steps whose inner gain is positive" begin
@@ -584,6 +675,13 @@ end
     built = build(learnable)
     year = built.year
     layer = v24_fit_l2(built.rows; grid=((3, 60),))
+    # The layer carries its inner split's embargo forward, which is what the
+    # persisted selection table reports per fold.
+    @test layer.split.cutoff == layer.split.boundary - Hour(V24_EMBARGO_HOURS)
+    @test layer.n_inner_embargoed ==
+          sum(V24_EMBARGO_HOURS - 1 + step for step in V24_STEPS)
+    @test layer.n_inner_train + layer.n_inner_validate + layer.n_inner_embargoed ==
+          layer.n_pool_rows
     @test Set(layer.accepted_steps) == Set(learnable)
     for row in layer.acceptance
         @test row.accepted == (row.gain_nt > 0.0)
@@ -1743,6 +1841,24 @@ end
     @test all(l2[l2.fold_year .== 2016, :available])
     @test only(unique(l2[(l2.fold_year .== 2016) .& l2.selected, :inner_rule])) ==
           "chronological_two_thirds"
+    # Amendment A3 one level down: the inner split's own 168 h target cutoff and
+    # the row count it dropped are persisted, so the embargo is auditable per fold
+    # and not only a property of the code that produced the fold.
+    l2_2016 = l2[(l2.fold_year .== 2016) .& l2.selected, :]
+    boundary_2016 = DateTime(only(unique(string.(l2_2016.inner_boundary))))
+    cutoff_2016 = DateTime(only(unique(string.(l2_2016.inner_target_cutoff_utc))))
+    @test cutoff_2016 == boundary_2016 - Hour(V24_EMBARGO_HOURS)
+    # The fixture's pool years are 30-day blocks eleven months apart, so the
+    # two-thirds boundary falls in the empty gap between them and the embargo has
+    # nothing to drop. What the whole stage pins here is that the cutoff is
+    # persisted, that it sits 168 h before the boundary, and that the three row
+    # counts still partition the pool; the gap arithmetic itself is pinned on
+    # hourly pools in the inner-split testsets above.
+    @test only(unique(l2_2016.n_inner_embargoed)) == 0
+    @test only(unique(l2_2016.n_inner_train)) +
+          only(unique(l2_2016.n_inner_validate)) +
+          only(unique(l2_2016.n_inner_embargoed)) == only(unique(l2_2016.n_pool_rows))
+    @test all(l2[l2.fold_year .== 2014, :n_inner_embargoed] .== 0)
     # Amendment A1: acceptance is decided per step on the inner validation, and the
     # table says so for every fold and step.
     acceptance = CSV.read(joinpath(base_out, "v2_4_l2_acceptance.csv"), DataFrame)

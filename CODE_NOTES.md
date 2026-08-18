@@ -872,3 +872,45 @@ The remaining independent statement about which product is being served is the l
 rows carry, so `audit_served_bundle_identity!` compares the bundle's recorded identity with the
 `sub_hourly_model_version` of the newest cycle's rows whose `v24_status` is `ok`. Rows served by an
 earlier stage legitimately carry that stage's label and are excluded.
+
+### An inner selection split is a fold boundary too
+
+Amendment A3 put a 168 h target embargo between a fold's out-of-fold pool and the year that
+fold scores, and `v24_in_pool` enforced it everywhere the learning stage fits: the L1
+super-learner, the L2 residual, the conformal strata. It stopped at the fold boundary. Inside
+the pool, the L2 layer's own train/validate split — the last 24 months of the pool as
+validation, or the chronological two-thirds when the pool is too short — was contiguous, and
+that split is what decides the residual's grid point, its joint-versus-per-step form and its
+per-step acceptance. A 7 h target issued one hour before the validation window opens matures
+inside it, so those decisions were taken with a sliver of the window's own outcome in the
+fitting rows. It is the same leakage the pool cutoff removes, one level down, and a boundary
+that is worth enforcing between a pool and a scored year is worth enforcing between a fitting
+block and the window that scores it.
+
+`v24_inner_split` now derives its training half from `v24_in_pool` against an inner cutoff of
+`validation start - 168 h`, which is the fold rule with the validation start in place of the
+scored year. The predicate is evaluated per row with that row's own model step, because the
+pool carries all six steps at every issue hour: three hours before the cutoff the 1 h row still
+trains and the 7 h row issued beside it does not, and a split that used one nominal step for
+every row would put all six on the same side. Rows in the gap belong to neither half. The
+split returns its cutoff and the count it dropped, `v24_fit_l2` forwards them,
+`v2_4_l2_selection.csv` carries them per fold as `inner_target_cutoff_utc` and
+`n_inner_embargoed`, and the run manifest records `inner_target_embargo_hours` next to the pool
+row, so the rule is auditable from the artifacts rather than only from the code that wrote
+them.
+
+What the fix can and cannot move is worth stating precisely, because it bounds the re-run. The
+winning configuration is refitted on the whole pool, and the pool was already embargoed against
+the fold year, so the fitted residual model for a given configuration is unchanged; only the
+choice among configurations, the model form and the per-step acceptance can move. The served
+variant V2.4e carries no residual layer, and the deployment builder never enters this path — it
+fits L1 and the conformal strata and ships the direct-GBM expert models, not an L2 model — so
+the served product cannot move either. Run 6 confirms both statements empirically rather than
+by argument: every served-path column of every `learn_year_*.csv` is byte-identical to run 5,
+and so is the whole `v2_4_deploy/` bundle including its boosted model file, while three of
+seventy-two fold-by-step acceptance decisions and two of eleven fold grid points changed and
+the V2.4b/V2.4c pooled RMSE moved by at most 0.037 nT. No gate verdict moved for any variant;
+the per-variant gate table gains one row: V2.4b's 7 h loss to the static stack in the
+`latest <= -100` cell crosses the 0.50 nT allowance (+0.598 nT on 391 rows) and is therefore
+recorded, and it passes because its one-sided lower bound is -1.750 nT, so the loss is not
+bootstrap-supported.

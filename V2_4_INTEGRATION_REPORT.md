@@ -386,25 +386,101 @@ Two live-path details are load-bearing and are asserted by tests rather than ass
 ## Remaining risks
 
 These are properties of the deployment that the identity oracle cannot test, because they are
-differences between the live and offline information sets rather than differences in arithmetic. They
-are stated here rather than treated as covered.
+differences between the live and offline information sets rather than differences in arithmetic. Both
+have since been quantified against data in `RISK_CLOSURE_REPORT.md`, which carries the tables,
+methods and decision records summarised here.
 
 - **Provisional versus final Dst.** The live engine anchors on the Kyoto provisional/quicklook Dst
   available at issue; the study fitted and scored on final OMNI Dst. The same code path applied to the
   two series does not produce the same number, and the difference propagates into the anchor, the
   one-hour rate that selects the regime, the depth bin that selects the cell and the conformal
   stratum, the Dst ladder of the direct expert, and the analog key. The oracle is driven with archive
-  inputs precisely so it isolates the arithmetic, so it is silent on this by construction: no offline
-  check can bound it. Prospective accrual against the same feed the daemon reads is what measures it,
-  which is what makes the accrued live record — not the oracle — the arbiter of the served product's
-  skill. The revision history of the anchor also means an early cycle can be scored against a Dst
-  value that was later revised; the log records the anchor it used per row, so a revision is
-  reconstructable rather than silently absorbed.
+  inputs precisely so it isolates the arithmetic, so it is silent on this by construction. Direct
+  pairing is also still impossible: final OMNI Dst ends at 2026-03-04T19:00 and the live record begins
+  at 2026-06-06T01:00, so no provisional anchor the served path has used has a final counterpart, and
+  n = 0 rather than "few". What is measurable is the revision of the provisional product itself, and
+  three independent reconstructions from the monitor logs agree: mean +3.0 nT, median +3 nT, RMS
+  4.4 nT, 95th percentile 8 nT and a maximum of 17–22 nT, essentially complete one hour after the read
+  and signed so that the first published value is the more negative one. That is a lower bound on the
+  provisional-to-final step, because Kyoto's baseline corrections are not exposed by any local
+  archive. Driving the served functions over 2,411 anchors of 2025 with a ladder perturbed to that
+  distribution moves the V2.4e center by a median of 2.69 nT and a 95th percentile of 7.54 nT, at a
+  gain close to unity that decays with lead; the static V2.2 stack moves by 2.69 and 7.51 nT and the
+  V2.1 served center by 2.78 and 7.91 nT under the same perturbation, and V2.4e's extreme tail is the
+  smallest of the three at the calibrated amplitude and at twice and three times it. The exposure is
+  therefore real, roughly additive on the anchor error, and not specific to the super-learner: it is
+  the price of anchoring on Dst, which all three served stages pay. Under the calibrated
+  perturbations 4.5–5.4 % of rows change published severity tier and only 0.37–0.58 % change it
+  downward, because the revision's sign deepens rather than shallows the state. Prospective accrual
+  against the same feed the daemon reads remains what measures the provisional-to-final step, which
+  is what makes the
+  accrued live record — not the oracle — the arbiter of the served product's skill. The revision
+  history of the anchor also means an early cycle can be scored against a Dst value that was later
+  revised; the log records the anchor it used per row, so a revision is reconstructable rather than
+  silently absorbed.
 - **Truncated southward-run feature under an unmeasured L1 hour.** The analog key's mandatory driver
   history is seven hours, but its consecutive-southward run-length feature reads up to twelve and
   stops at the first hour with no record. An L1 gap at lags 8–12 therefore does not refuse the key: it
   truncates the run length, so a long southward interval can present as a shorter one and retrieve
   different archive analogs. This is inherited from the V2.3 analog path and is unchanged by this
-  integration. It is observable per row — `v24_history_hours` records how many of the twelve hourly
-  means the key could draw on, so `v24_status = ok` with `v24_history_hours < 12` marks a row whose
-  run-length feature may be truncated — and it is not currently quantified against the archive.
+  integration, and it is a live-only mode: the study's hourly frame is causally forward-filled and
+  carries no non-finite driver value and no missing hour in 140,256 records, so no scored anchor ever
+  had a truncated run. It is observable per row — `v24_history_hours` records how many of the twelve
+  hourly means the key could draw on, so `v24_status = ok` with `v24_history_hours < 12` marks a row
+  whose run-length feature may be truncated. It is now bounded rather than open. Every issued cycle
+  that logs the depth has recorded the full twelve hours (10 V2.4 cycles, 20 V2.3 cycles), and
+  reconstructing hourly L1 coverage from the per-cycle trailing-hour sample counts gives 3
+  under-covered hours in 644 and one anchor in 409 with a gap at lags 8–12. Simulating that gap at
+  each of lags 8, 9, 10 and 11 over 14,466 served rows moves the V2.4e center by a median of 0.000 nT
+  and a per-step 95th percentile of at most 0.213 nT, with a worst single row of 2.02 nT; conditioned
+  on the run actually truncating the 95th percentile is 0.788 nT. The analog expert itself moves about
+  three times as much (95th percentile 2.09 nT on exposed rows, worst 8.02 nT), and the ten-expert
+  combination damps it. No row changes regime, depth bin, stack cell or conformal half-width under any
+  gap, and the published severity tier changed on 9 of 57,864 rows, from only four `(anchor, step)`
+  pairs already within 0.26 nT of a band edge and every one an escalation. The preregistered hardening
+  threshold — a per-step 95th percentile above 0.5 nT or a median above 0.1 nT under a lag-8 gap — is
+  not reached, so the behaviour is unchanged and the bound is what is now on record.
+
+The study-side item that stood beside these two — the boosted-residual layer's inner
+train/validate split, which selected the residual's hyper-parameters, its model form and its
+per-step acceptance across a contiguous boundary because Amendment A3's 168 h target embargo
+had been applied at the fold boundary only — is closed and is no longer a remaining risk.
+`v24_inner_split` separates the two halves by the same embargo, evaluated per row with that
+row's own model step, and the persisted selection table now carries the inner cutoff and the
+dropped-row count per fold. The study was regenerated under the corrected rule (run 6). The
+served variant carries no residual layer and the fold-2026 builder never enters that path, so
+the correction cannot reach the served product, and the re-run demonstrates rather than asserts
+it: every V2.4a, V2.4a-floor, V2.4d, V2.4e and V2.4f center, every conformal endpoint and every
+comparator column of every fold table is byte-identical to the previous run, as are the gate,
+bootstrap, cell, stack-weight, selection, serve-rule and decision tables outside the two
+residual variants and the whole deployment bundle; the selection remains V2.4e, the study
+decision remains `SHADOW` and the operational serve rule remains
+`SERVE_ELIGIBLE_PENDING_G4` on ALL and E2. What moved is confined to V2.4b and V2.4c — three of
+seventy-two fold-by-step acceptance decisions, two of eleven fold grid points, pooled RMSE by at
+most 0.037 nT — and no gate verdict changed. The identity oracle was rerun against the
+regenerated fold-2025 table and reproduces every served stage at max abs Δ = 0.0 nT on all
+fifteen columns over 753 anchors and 4,518 rows.
+
+## Post-deployment incident and hotfix (2026-08-17 22:16Z → 2026-08-18 07:53Z)
+
+The first production run of this build issued and served every horizon of every cycle, but the
+live monitor's issuance-cycle validator (`_complete_issuance_cycle`) judged each cycle
+incomplete: under the aci batch policy it required the batch interval source to be `aci`,
+while V2.4e rows publish the study's conformal band as `v24_conformal_depth` whatever the
+fallback policy is. After six such cycles the issuance dead-man wrote `OUTAGE.md` and exited
+non-zero, launchd restarted the daemon (three runs), and the same six-cycle pattern repeated.
+Nothing in the test battery or the scratch single-cycle runs reached this path because a
+fresh monitor directory has no mature adaptive-interval history and selects the static
+policy, under which the check passed. The validator now accepts the conformal source under
+either policy exactly when every row's `v24_status` is `ok` (a cycle carrying that source on
+rows the V2.4 stage did not serve stays incomplete); the regression tests exercise both
+policies, the mixed-status case and the missing-column case, and the previous code fails
+three of them. The hotfix was merged, pushed and kickstarted at 07:53Z; the next cycle
+recorded "validate issued cycle ok" and the monitor removed `OUTAGE.md`. Since that restart
+the batch policy has resolved to `static` for the fallback bands (the served-center adaptive
+stream no longer updates from conformal-banded rows); V2.4e rows are unaffected and every
+row's `interval_source` discloses which band it carries.
+
+The live-skill table on the dashboard now names the pooled served row "served pipelines
+(mixed record; k of n rows under V2.4)" until every verified row matured under the current
+served label; the per-label breakdown table below it is unchanged.

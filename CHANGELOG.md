@@ -27,6 +27,18 @@ policy when every row's `v24_status` is `ok` (mutation-checked regression tests)
 table names the pooled served row a mixed-pipeline record until every verified row matured under
 the current served label.
 
+Evidence, not code: the two "inherent risk" items of the served path are now quantified in
+`RISK_CLOSURE_REPORT.md`, and no served arithmetic, artifact or test changed. Provisional Dst
+cannot be paired with final OMNI Dst at all (final ends 2026-03-04, the live record starts
+2026-06-06, n = 0), but the feed's own revision is measurable at mean +3.0 nT and RMS 4.4 nT;
+perturbing the ladder to that distribution over 2,411 anchors of 2025 moves the V2.4e center by a
+median 2.69 nT and 95th percentile 7.54 nT, against 2.69/7.51 nT for the static V2.2 stack and
+2.78/7.91 nT for the V2.1 served center, so the exposure is comparable to the stages V2.4e
+replaced rather than specific to it. An unmeasured L1 hour inside the analog key's twelve-hour
+run-length window moves the center by a per-step 95th percentile of at most 0.21 nT and a worst
+single row of 2.02 nT, never changes the regime, depth bin, stack cell or conformal width, and is
+below the preregistered fail-closed threshold, so the behaviour is unchanged.
+
 Served product:
 
 - the served identity is `v2.4+sindy20x11+superlearner10floor+conformal`, and the
@@ -126,6 +138,29 @@ Corrections to the served integration, after an independent audit of it:
   product actually being replaced, returned `SERVE_ELIGIBLE_PENDING_G4` on 2014-2025 and on
   2020-2025 with 2014-2019 disclosed only, because the static stack is partly in sample
   there. `V2_4_INTEGRATION_REPORT.md` records the full disclosure set.
+
+Study-side correction, with the served numbers unchanged:
+
+- the rolling study's boosted-residual layer selected its hyper-parameters, its
+  joint-versus-per-step form and its per-step acceptance on an inner train/validate split of
+  the out-of-fold pool that was contiguous: Amendment A3's 168 h target embargo was applied at
+  the fold boundary only, so a 7 h target issued one hour before the inner validation window
+  opened matured inside it. `v24_inner_split` now separates the two halves by the same embargo,
+  evaluated per row with that row's own model step, and `v2_4_l2_selection.csv` carries the
+  inner cutoff and the dropped-row count per fold (`inner_target_cutoff_utc`,
+  `n_inner_embargoed`, 947-1,031 rows in each fold that fits a layer) with the rule recorded
+  in the run manifest
+- the study was regenerated under the corrected rule (run 6, 24.6 min on eight threads). The
+  served variant carries no residual layer and the deployment builder never enters this path,
+  so nothing served moved and the re-run says so: every V2.4a, V2.4a-floor, V2.4d, V2.4e and
+  V2.4f center, every conformal endpoint, every comparator column and every gate, bootstrap,
+  cell, stack-weight, selection, serve-rule and decision row outside V2.4b/V2.4c is
+  byte-identical to the previous run, as is the whole deployment bundle. What moved is confined
+  to the residual variants: three of seventy-two fold-by-step acceptance decisions, two of
+  eleven fold grid points, V2.4b/V2.4c pooled RMSE by at most 0.037 nT, and no gate verdict
+- `validation/operational/v2_4_serving_identity.jl` was rerun against the regenerated
+  fold-2025 table and reproduces every served stage at max abs Δ = 0.0 nT on all fifteen
+  columns over 753 anchors and 4,518 rows
 
 ## [Unreleased] - 2026-08-17 (served-stack switch; version bump deferred)
 

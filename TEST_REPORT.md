@@ -789,3 +789,59 @@ stopped being generated is a failure rather than a shorter loop.
 | `Pkg.test()` | 282,144 / 282,144 pass, 0 failures, 14m22.7s |
 | `dev-harness-audit.sh` | PASS 338, WARN 3, FAIL 0; the warnings are the pre-existing loose V2.2 tolerances and two absent paper directories |
 | Scratch live cycle (`live_monitor.jl --once`) | 4 rows, all `v24_status=ok`, `v24_guard_applied=false`, `v24_projection_applied=false`, `v24_pred_dst_nt = v24_l1_center_dst_nt`, `interval_source=v24_conformal_depth`, cell `active_deepening/shallow`, `v24_history_hours=12`, both predecessor edge columns finite and each equal to its stage's center less the lead's pre-V2.4 half-width |
+
+## Study-side embargo of the L2 inner split
+
+### Coverage
+
+`test/test_v2_4_learn.jl` gains one testset, "the inner split embargoes its training block by
+168 h, per row's own step" (93 assertions), and three assertions inside the existing residual
+acceptance testset. Two hourly pools carrying all six model steps at every issue hour exercise
+both branches of `v24_inner_split`: 20,000 hours, long enough for the plan's last-24-months
+rule, and 9,001 hours, whose 9,000 h span makes the chronological two-thirds boundary land on
+an exact hour so single rows can be named by their target. Each is checked for the same six
+properties — the halves are disjoint, the cutoff is exactly 168 h before the validation start,
+every training row's `issue + step` clears the cutoff, every validation row is issued at or
+after the boundary, the rows in neither half are exactly those whose issue precedes the window
+while their target matures inside it, and their number equals the closed form
+`sum over steps of (167 + h)` = 1,025. Two named-row blocks follow: at each step the row whose
+target lands exactly on the cutoff is in the training half and the next issue hour at the same
+step is in neither half, and at one issue hour three hours before the cutoff the six steps
+split 3/3 between training and the gap. The acceptance testset additionally asserts that
+`v24_fit_l2` forwards the cutoff and the dropped count and that the three row counts partition
+the pool, and the whole-stage testset asserts that `v2_4_l2_selection.csv` persists
+`inner_target_cutoff_utc` 168 h before `inner_boundary` and that the persisted counts partition
+the pool.
+
+### Independent expectations
+
+The dropped-row count is a closed form derived from the geometry rather than from the
+implementation: at step `h` the gap holds the issues strictly between `cutoff - h` and the
+boundary, which is `V24_EMBARGO_HOURS - 1 + h` rows, so the pool-wide count is 1,025 for the
+six-step grid and is independent of pool length. The kept/dropped pair at each step is named by
+its target, not by its index, so it survives any change to the fixture's length or ordering.
+
+### Anti-false-test checks
+
+The testset was run against the previous contiguous split, restored for the purpose: it
+reports 22 failures, and the direct oracle on the acceptance testset's own 4,000-hour pool
+returns `n_embargoed = 0` against the expected 1,025, so the new assertions fail for the reason
+they were written for rather than passing on both implementations. The per-step block is what
+separates a per-row rule from a single-nominal-step rule: a split that embargoed every row by
+the same step would put all six steps of the probe hour on one side and fail. The whole-stage
+assertion is deliberately `== 0` rather than `> 0`, because the stage fixture's pool years are
+30-day blocks eleven months apart and the two-thirds boundary falls in the empty gap between
+them; asserting a positive count there would be a false test, so the gap arithmetic is pinned
+on the hourly pools and only the partition identity and the persisted cutoff are pinned on the
+stage.
+
+### Full verification
+
+| Check | Result |
+|---|---|
+| `test/test_v2_4_learn.jl` before the change | 259,863 / 259,863 pass over 35 testsets |
+| `test/test_v2_4_learn.jl` after the change | 259,963 / 259,963 pass over 36 testsets, 0 failures |
+| Mutation: contiguous inner split restored | 22 failures in the new testset; `n_embargoed` 0 against the expected 1,025 |
+| `validation/operational/v2_4_learn.jl` (run 6, 8 threads) | complete in 1,477.9 s wall / 1,465.5 s recorded, selection `v2_4e`, decision `SHADOW`, serve rule `SERVE_ELIGIBLE_PENDING_G4` on ALL and E2 — all identical to run 5 |
+| `validation/operational/v2_4_serving_identity.jl` (against the regenerated `learn_year_2025.csv`) | PASS, max abs Δ = 0.0 nT on all fifteen columns over 753 anchors / 4,518 rows |
+| `Pkg.test()` after the change | 282,260 / 282,260 pass, 0 failures, 33m24.1s; the whole-stage V2.4 testset contributes 137,183. The total is not comparable with the 282,144 recorded earlier in this file, which predates unrelated test additions elsewhere in the tree, and the wall time reflects a concurrent study re-run on the same machine |
