@@ -88,15 +88,39 @@ end
         @test !missing_history.ready
         @test missing_history.fallback_reason == :missing_history
 
+        # A record that exists but whose observation has not matured is a different operational
+        # state from a record that was never produced: only the first resolves by waiting. Both are
+        # not-ready, and the fallback reason has to tell them apart.
         delayed = copy(records)
         delayed[30] = _v22e_record(
             29,
             29.0;
             available_at=issue_time + Hour(1),
         )
-        @test operational_v22_matured_h1_history(
+        delayed_history = operational_v22_matured_h1_history(
             delayed, issue_time, V22E_HASH,
-        ).fallback_reason == :missing_history
+        )
+        @test !delayed_history.ready
+        @test delayed_history.fallback_reason == :observation_not_mature
+        @test delayed_history.fallback_reason != :missing_history
+        # An immature record at the very edge of the 24 h buffer is still classified as immature.
+        edge_delayed = copy(records)
+        edge_delayed[7] = _v22e_record(6, 6.0; available_at=issue_time + Hour(1))
+        @test operational_v22_matured_h1_history(
+            edge_delayed, issue_time, V22E_HASH,
+        ).fallback_reason == :observation_not_mature
+        # An immature record OUTSIDE the buffer must not relabel a genuinely complete history.
+        outside_delayed = copy(records)
+        outside_delayed[6] = _v22e_record(5, 5.0; available_at=issue_time + Hour(1))
+        @test operational_v22_matured_h1_history(
+            outside_delayed, issue_time, V22E_HASH,
+        ) == history
+        # And a record that is genuinely absent still reports the absence, not immaturity.
+        absent = [record for record in records
+                  if record.issued_at != issue_time - Hour(3)]
+        absent_history = operational_v22_matured_h1_history(absent, issue_time, V22E_HASH)
+        @test !absent_history.ready
+        @test absent_history.fallback_reason == :missing_history
 
         wrong_center = copy(records)
         wrong_center[30] = _v22e_record(29, 29.0; center_hash=V22E_OTHER_HASH)

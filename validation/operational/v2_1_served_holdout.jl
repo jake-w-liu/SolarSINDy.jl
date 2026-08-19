@@ -15,7 +15,7 @@ using Printf
 using SHA
 using Statistics
 
-include(joinpath(@__DIR__, "v2_replay.jl"))
+isdefined(@__MODULE__, :_selftest_v2) || include(joinpath(@__DIR__, "v2_replay.jl"))
 
 const V21_SERVED_HOLDOUT_SCORED = joinpath(
     OPERATIONAL_OUTPUT_DIR, "v2_1_served_holdout_scored.csv",

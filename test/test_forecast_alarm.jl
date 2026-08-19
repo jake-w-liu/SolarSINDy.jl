@@ -1,8 +1,15 @@
-# Tests for forecast.jl, alarm.jl, and untested baselines/sindy functions
+# Tests for forecast.jl, alarm.jl, and untested baselines/sindy functions.
+#
+# Every import the file needs is declared here, so the file runs on its own
+# (`julia --project=. test/test_forecast_alarm.jl`) as well as through `runtests.jl`.
 
+using Test
+using SolarSINDy
 using CSV
 using DataFrames
 using Dates
+using Random
+using Statistics
 
 @testset "Forecast Module" begin
 
@@ -106,6 +113,72 @@ using Dates
         widths = [r.dst_ci_95 - r.dst_ci_05 for r in fc]
         # Last width should exceed first width (uncertainty grows)
         @test widths[end] > widths[1]
+    end
+
+    @testset "A: ensemble percentile indices are the finite-sample 5/50/95 order statistics" begin
+        # `dst_ci_05` is the screen `use_worst_case` alarms fire on, and nothing pinned which order
+        # statistic it is: a 0.05 -> 0.06 edit moved the published lower bound by five members with no
+        # test noticing. The indices are asserted against hand-computed order statistics of a spread
+        # whose sorted values are known exactly.
+        lib = build_solar_wind_library()
+        n_t = length(lib)
+        const_idx = findfirst(==("1"), get_term_names(lib))
+        @test const_idx !== nothing
+        n_ens = 500
+        dt = 1.0
+        # Deep enough that no member reaches the +50 nT ceiling or the -2000 nT floor.
+        dst0 = -200.0
+
+        # Member i carries a constant derivative of exactly 0.25*i nT/h (i = 1..500), well inside the
+        # +/-200 nT/h clamp, so member i integrates to dst0 + 0.25*i and the sorted ensemble is known.
+        ξ = zeros(n_t)
+        ξ_ens = zeros(n_ens, n_t)
+        for i in 1:n_ens
+            ξ_ens[i, const_idx] = Float64(i) * 0.25   # 0.25 .. 125.0 nT/h, clamp never binds
+        end
+        expected = sort([dst0 + dt * Float64(i) * 0.25 for i in 1:n_ens])
+        @test all(v -> -2000.0 < v < 50.0, expected)   # neither physical bound binds
+        @test allunique(expected)                      # every order statistic is distinguishable
+
+        state = ForecastState(DateTime(2026, 1, 1), dst0, lib, ξ, ξ_ens, dt, ForecastResult[])
+        r = step_forecast!(state, DateTime(2026, 1, 1, 1), 400.0, 5.0, 0.0, 5.0, 2.0)
+        # ceil(0.05*500) = 25, ceil(0.50*500) = 250, ceil(0.95*500) = 475.
+        @test r.dst_ci_05 == expected[25]
+        @test r.dst_median == expected[250]
+        @test r.dst_ci_95 == expected[475]
+        # Neighbouring order statistics are distinct, so an off-by-one or a moved percentile fails.
+        @test r.dst_ci_05 != expected[24] && r.dst_ci_05 != expected[26]
+        @test r.dst_median != expected[249] && r.dst_median != expected[251]
+        @test r.dst_ci_95 != expected[474] && r.dst_ci_95 != expected[476]
+        # A 0.05 -> 0.06 edit would land on index 30; 0.95 -> 0.94 on 470; 0.50 -> 0.51 on 255.
+        @test r.dst_ci_05 != expected[30]
+        @test r.dst_ci_95 != expected[470]
+        @test r.dst_median != expected[255]
+
+        # `forecast_ahead` forms the same three indices on its own copy of the state, and the first
+        # step of a persistence rollout reproduces the single-step values exactly.
+        fresh = ForecastState(DateTime(2026, 1, 1), dst0, lib, ξ, ξ_ens, dt, ForecastResult[])
+        ahead = forecast_ahead(fresh, 400.0, 5.0, 0.0, 5.0, 2.0, 1)
+        @test length(ahead) == 1
+        @test ahead[1].dst_ci_05 == expected[25]
+        @test ahead[1].dst_median == expected[250]
+        @test ahead[1].dst_ci_95 == expected[475]
+        @test ahead[1].dst_ci_05 != expected[30]
+
+        # Ordering is enforced regardless of the ensemble size, including sizes where the three
+        # indices collide.
+        for m in (1, 2, 3, 19, 20, 21, 100)
+            small = zeros(m, n_t)
+            for i in 1:m
+                small[i, const_idx] = Float64(i)
+            end
+            want = sort([dst0 + dt * Float64(i) for i in 1:m])
+            st = ForecastState(DateTime(2026, 1, 1), dst0, lib, ξ, small, dt, ForecastResult[])
+            res = step_forecast!(st, DateTime(2026, 1, 1, 1), 400.0, 5.0, 0.0, 5.0, 2.0)
+            @test res.dst_ci_05 <= res.dst_median <= res.dst_ci_95
+            @test res.dst_ci_05 == want[clamp(ceil(Int, 0.05 * m), 1, clamp(ceil(Int, 0.50 * m), 1, m))]
+            @test res.dst_median == want[clamp(ceil(Int, 0.50 * m), 1, m)]
+        end
     end
 
     @testset "D: Edge cases — clamping bounds" begin

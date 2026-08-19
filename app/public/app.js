@@ -19,13 +19,62 @@ const intervalLowerEdge = (th) => th
   ? (th.interval_lower_edge_min_dst_nt ?? th.lower_bound_min_dst_nt ?? th.worst_credible_dst_nt)
   : null;
 
+// Markup-escape for text this page did not author. Panels are assembled as HTML strings, and the
+// strings that go into them come from a third-party feed (NOAA product identifiers, alert
+// summaries, the NOAA scale token, station codes) or from the forecast log (served labels, interval
+// sources, per-row statuses). Interpolating either directly puts whatever they contain into the
+// document; every such value passes through here first, so it is rendered as the text it is.
+const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const esc = (v) => (v === null || v === undefined)
+  ? "" : String(v).replace(/[&<>"']/g, (c) => ESCAPES[c]);
+
+// The same escape, for the strings handed to the plotting library as trace text, hover text and
+// legend names. Those are not plain text either: the library parses its own markup subset out of
+// them — anchors, styled spans, line breaks, emphasis — so a station name or a served label from
+// the feed is markup there exactly as it is in the document. Escaping the tag delimiters keeps the
+// library's parser from recognising a tag. The library resolves a small named-entity set (&mu; &amp;
+// &lt; &gt; and numeric references among them), so &amp;, &lt; and &gt; render back as themselves;
+// an entity outside that set would be shown literally, which no current field carries.
+const escPlot = esc;
+
+// Plotly is served from the same origin when a vendored copy is present. The page previously
+// carried this fallback as an inline onerror attribute, which the response's script-src policy
+// refuses; registering it here keeps the offline-first behaviour without inline script. This file
+// is loaded at the end of the document, so the vendored tag has already run or failed by now.
+(function plotlyFallback() {
+  if (window.Plotly || window.__plotlyFallbackStarted) return;
+  window.__plotlyFallbackStarted = true;
+  const s = document.createElement("script");
+  s.src = "https://cdn.plot.ly/plotly-2.35.2.min.js";
+  s.onerror = () => { window.__plotlyFailed = true; };
+  document.head.appendChild(s);
+})();
+
+// Base map of the network panel, served from this origin. A scattergeo does not carry its
+// coastlines, borders and subunit outlines in the plotting bundle: the library fetches a topojson
+// file for the requested scope and resolution at draw time, and its default source is the plotting
+// CDN. The response's connect-src policy admits this origin only, and an offline deployment could
+// not reach that CDN in any case, so the file is vendored beside the bundle and the library is
+// pointed at it. The name is the library's own: scope with spaces hyphenated, then the resolution.
+const TOPOJSON_URL = "/vendor/topojson/";
+
+// Applied once, before the first plot is drawn, because the setting is read when a geo subplot is
+// created and the fetched map is then cached under its name for the life of the page.
+function configurePlotly() {
+  if (!window.Plotly || window.__plotlyConfigured) return;
+  window.__plotlyConfigured = true;
+  Plotly.setPlotConfig({ topojsonURL: TOPOJSON_URL });
+}
+
 async function ensurePlotly() {
   for (let i = 0; i < 120; i++) {
-    if (window.Plotly) return true;
+    if (window.Plotly) { configurePlotly(); return true; }
     if (window.__plotlyFailed) return false;
     await sleep(80);
   }
-  return !!window.Plotly;
+  if (!window.Plotly) return false;
+  configurePlotly();
+  return true;
 }
 
 async function fetchJSON(path) {
@@ -100,6 +149,29 @@ function servedRowLabel(product, nUnderCurrent, nAll) {
   return `served pipelines (mixed record; ${under} of ${all} rows under ${product})`;
 }
 // ---- end served-row label helper ----
+// ---- interval-method label block (executed by app/test) ----
+// Reader-facing name of the interval method the published cycle was issued under. The super-learner
+// stage acts per horizon, so one cycle can carry more than one method by design; when none of them
+// is the one the cycle is reported under, the payload sends no single name and the set instead, and
+// the set is what is named. A cycle that cannot be published at all reports no method and no set,
+// and the panel shows an em dash rather than inventing one.
+function intervalMethodText(calibration) {
+  const c = calibration || {};
+  if (c.current_interval_source) return String(c.current_interval_source);
+  const set = (Array.isArray(c.current_interval_sources) ? c.current_interval_sources : [])
+    .filter(s => s !== null && s !== undefined && String(s) !== "").map(String);
+  if (set.length === 0) return "—";
+  if (set.length === 1) return set[0];
+  return set.slice(0, -1).join(", ") + " and " + set[set.length - 1];
+}
+// True when the published cycle carries several methods and none of them is the reported one, so
+// the sentences around the name have to speak of methods rather than of a single source.
+function intervalMethodIsSet(calibration) {
+  const c = calibration || {};
+  if (c.current_interval_source) return false;
+  return Array.isArray(c.current_interval_sources) && c.current_interval_sources.length > 1;
+}
+// ---- end interval-method label block ----
 // Reader-facing product name of the served pipeline. Derived from the served label the log recorded
 // (the API also sends it as served_product), never hardcoded: during a disclosed stack-stage
 // degradation the product really is the previous one, and naming it otherwise would misreport it.
@@ -175,7 +247,7 @@ function renderThreat(st) {
     : "";
   $("model-line").textContent =
     `Forecast: ${productName(st)} (${served}${caps ? " · " + caps : ""}) · `
-    + `live interval method: ${(st.calibration||{}).current_interval_source || "—"} · `
+    + `live interval method: ${intervalMethodText(st.calibration)} · `
     + `status generated ${relTime(st.generated_utc)} · latest solar wind ${relTime(st.latest_solar_wind_utc)}${staleNote}.`;
 }
 
@@ -272,7 +344,29 @@ function renderSeverityLine(horizons) {
 }
 // ---- end severity-line block ----
 
+// ---- superseded-cycle notice block (extracted verbatim and executed by the app test suite) ----
+// The forecast payload is served from the newest issue hour that produced a complete cycle. When
+// that is not the newest issue hour, the payload says so, and the panel has to say so too: the
+// chart shows a real, internally consistent forecast, and nothing in it reveals that the issuance
+// after it has not completed. The notice states the situation rather than warning about it — the
+// forecast is valid, its own issue time and age are the ones already displayed, and the panel
+// returns to the newest hour as soon as one completes.
+function renderSupersededNotice(forecast) {
+  const el = $("forecast-supersede");
+  if (!el) return;
+  if (!forecast || forecast.superseded_cycle_incomplete !== true) {
+    el.textContent = ""; el.classList.add("hidden"); return;
+  }
+  el.classList.remove("hidden");
+  el.textContent = "The most recent hourly issuance has not completed. Shown here is the most "
+    + "recent complete forecast cycle, carrying its own issue time and age; the panel moves to the "
+    + "newer issuance as soon as it completes.";
+}
+// ---- end superseded-cycle notice block ----
+
 async function renderForecast(forecast, history, status) {
+  // Before the plotting guard: the disclosure belongs on the panel whether or not the chart draws.
+  renderSupersededNotice(forecast);
   if (!(await ensurePlotly())) { setError("Could not load the Plotly library (offline and no vendored copy)."); return; }
   history = history || { rows: [] };
   const cap = $("forecast-caption");
@@ -344,14 +438,18 @@ async function renderForecast(forecast, history, status) {
   const useTraj = trajX.length && anchorT != null && anchorY != null;   // guard null anchor before prepending
   const fcx = useTraj ? [anchorT].concat(trajX) : px;
   const fcy = useTraj ? [anchorY].concat(trajY) : v2y;
-  const lineName = useTraj ? "V2.1 core trajectory (display)" : `${product} forecast`;
+  // The product name is read from the served label the log recorded, and legend names and hover
+  // templates are parsed for the plotting library's markup subset, so it is escaped for that sink
+  // exactly as it is for the caption below.
+  const plotProduct = escPlot(product);
+  const lineName = useTraj ? "V2.1 core trajectory (display)" : `${plotProduct} forecast`;
   // 15-min markers: medium blue, size 5 (matches the other series); distinguished from the hourly markers by
   // shade (medium vs dark) and size (5 vs 7). Zooming separates them, so no per-zoom resize.
   traces.push({ x: fcx, y: fcy, mode:"lines+markers", name:lineName,
     line:{color:WONG.fcst, width:2.2}, marker:{size:5, color:"#3f8fd0", line:{color:"#0b1020", width:0.5}},
     hovertemplate:`${lineName} %{y:.1f} nT<extra></extra>` });
   // markers at the issued hourly horizons (the scored targets): darker + larger to flag the scored points.
-  traces.push({ x: px, y: v2y, mode:"markers", name:`issued horizons (${product})`,
+  traces.push({ x: px, y: v2y, mode:"markers", name:`issued horizons (${plotProduct})`,
     marker:{size:7, color:"#004e7a", line:{color:"#cfe3f5", width:1}},
     hovertemplate:"issued %{y:.1f} nT<extra></extra>" });
 
@@ -365,10 +463,10 @@ async function renderForecast(forecast, history, status) {
   renderSeverityLine(H);
 
   const src = forecast.interval_source || "—";
-  cap.innerHTML = `Dark markers: ${product} issued <span data-reltime="${forecast.issue_time_utc}">${relTime(forecast.issue_time_utc)}</span> from solar wind through `
-    + `<span data-reltime="${forecast.latest_solar_wind_utc}">${relTime(forecast.latest_solar_wind_utc)}</span>. L1 look-ahead drives target hours already measured upstream; beyond the L1-known window, Bz/By relax toward quiet with a longer timescale during rapid Dst deepening. `
-    + `Solid blue: the V2.1 core trajectory at 15-min steps, shown for shape only; the issued horizons are the ${product} centers and can sit away from that line. `
-    + `Shaded: the 90% target interval (${src}); served-center coverage is assessed empirically and no distribution-free guarantee is claimed. A watch appears when a displayed interval's lower edge, taken on the alerting center, enters a stronger Dst range than the point forecast. `
+  cap.innerHTML = `Dark markers: ${esc(product)} issued <span data-reltime="${esc(forecast.issue_time_utc)}">${esc(relTime(forecast.issue_time_utc))}</span> from solar wind through `
+    + `<span data-reltime="${esc(forecast.latest_solar_wind_utc)}">${esc(relTime(forecast.latest_solar_wind_utc))}</span>. L1 look-ahead drives target hours already measured upstream; beyond the L1-known window, Bz/By relax toward quiet with a longer timescale during rapid Dst deepening. `
+    + `Solid blue: the V2.1 core trajectory at 15-min steps, shown for shape only; the issued horizons are the ${esc(product)} centers and can sit away from that line. `
+    + `Shaded: the 90% target interval (${esc(src)}); served-center coverage is assessed empirically and no distribution-free guarantee is claimed. A watch appears when a displayed interval's lower edge, taken on the alerting center, enters a stronger Dst range than the point forecast. `
     + `Dotted blue: previously issued forecasts for hours that now have observed Dst (orange). `
     + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Genuine new-disturbance lead is the L1 transit (~30–60 min).`;
 }
@@ -452,39 +550,41 @@ function renderCalib(status) {
     <table><thead><tr><th>matched point forecast (n=${matchedN})</th><th>RMSE [nT]</th></tr></thead><tbody>`;
   for (const [name, v] of rows) {
     const win = (mature && v != null && best != null && Math.abs(v-best) < 1e-9) ? ` class="win"` : "";
-    html += `<tr><td>${name}</td><td${win}>${bse(v)}</td></tr>`;
+    html += `<tr><td>${esc(name)}</td><td${win}>${bse(v)}</td></tr>`;
   }
   html += `</tbody></table>`;
 
   // Scope note: live served-center intervals are empirically evaluated. Their
   // center shift and bounded online update do not inherit the ideal theorem.
-  const liveSrc = c.current_interval_source || "—";
+  const liveSrc = intervalMethodText(c);
+  const liveSrcIsSet = intervalMethodIsSet(c);
+  const liveSrcNoun = liveSrcIsSet ? "these interval methods" : "the current interval source";
   const nLive = c.n_verified_current_source != null ? c.n_verified_current_source : 0;
   const remaining = Math.max(0, minN - matchedN);
   const targetNoun = matchedN === 1 ? "target" : "targets";
   const remainingNoun = remaining === 1 ? "row is" : "rows are";
   const nServed = c.n_verified_current_served_model != null ? c.n_verified_current_served_model : 0;
-  let note = `<strong>Product forecast: ${product}.</strong> The RMSE table uses only the ${matchedN} ${targetNoun} shared by every listed method. `;
+  let note = `<strong>Product forecast: ${esc(product)}.</strong> The RMSE table uses only the ${matchedN} ${targetNoun} shared by every listed method. `;
   note += `Verified rows accumulate across served pipelines, so they are counted per served label: `
     + `${nServed} ${nServed === 1 ? "row has" : "rows have"} matured under the current label out of ${v2N} in total. `;
   if (!mature) note += `<strong>Provisional live evidence:</strong> ${remaining} more matched ${remainingNoun} required before the ${minN}-row live-skill reporting threshold; no best method is highlighted. `;
   else note += `The ${minN}-row minimum reporting threshold is met; regime coverage still governs interpretation. `;
-  note += `Live intervals use <strong>${liveSrc}</strong> and target 90% coverage. The served-center shift and bounded online update do not retain a distribution-free coverage guarantee, so coverage is empirical. `;
-  if (nLive === 0) note += `No forecast from the current interval source has matured yet. `;
-  else note += `${nLive} verified ${nLive === 1 ? "forecast has" : "forecasts have"} matured from the current interval source. `;
+  note += `Live intervals use <strong>${esc(liveSrc)}</strong> and target 90% coverage. The served-center shift and bounded online update do not retain a distribution-free coverage guarantee, so coverage is empirical. `;
+  if (nLive === 0) note += `No forecast from ${liveSrcNoun} has matured yet. `;
+  else note += `${nLive} verified ${nLive === 1 ? "forecast has" : "forecasts have"} matured from ${liveSrcNoun}. `;
   if (c.deepest_obs_dst_nt != null) note += `This live period has been geomagnetically quiet — deepest observed Dst `
     + `${fmt(c.deepest_obs_dst_nt,0)} nT, ${c.n_storm_verified} ${c.n_storm_verified === 1 ? "storm hour" : "storm hours"} below −50 nT — so storm-time performance is not yet stress-tested.`;
   html += `<div class="note">${note}</div>`;
 
   if (c.by_served_model && c.by_served_model.length > 1) {
     html += `<table><thead><tr><th>served pipeline</th><th>n</th><th>empirical coverage</th><th>RMSE [nT]</th></tr></thead><tbody>`;
-    for (const b of c.by_served_model) html += `<tr><td>${b.product || b.served_model_version}</td><td>${b.n}</td><td>${fmt(b.coverage_90,3)}</td><td>${bse(b.rmse_nt)}</td></tr>`;
+    for (const b of c.by_served_model) html += `<tr><td>${esc(b.product || b.served_model_version)}</td><td>${esc(b.n)}</td><td>${fmt(b.coverage_90,3)}</td><td>${bse(b.rmse_nt)}</td></tr>`;
     html += `</tbody></table>`;
   }
 
   if (c.by_source && c.by_source.length > 1) {
     html += `<table><thead><tr><th>interval method</th><th>n</th><th>empirical coverage</th></tr></thead><tbody>`;
-    for (const b of c.by_source) html += `<tr><td>${b.source}</td><td>${b.n}</td><td>${fmt(b.coverage_90,3)}</td></tr>`;
+    for (const b of c.by_source) html += `<tr><td>${esc(b.source)}</td><td>${esc(b.n)}</td><td>${fmt(b.coverage_90,3)}</td></tr>`;
     html += `</tbody></table>`;
   }
   el.innerHTML = html;
@@ -514,7 +614,7 @@ function renderUpstream(status) {
   // southward is not alarming, so do not color it like a storm.
   const bzStyle = (bz != null && bz < -10) ? "color:var(--t2)" : "";
   const stat = (v, k, unit = "", style = "") =>
-    `<div class="ustat"><span class="v" style="${style}">${v == null ? "—" : v}${unit}</span><span class="k">${k}</span></div>`;
+    `<div class="ustat"><span class="v" style="${style}">${v == null ? "—" : esc(v)}${unit}</span><span class="k">${k}</span></div>`;
   stats.innerHTML =
     stat(fmt(sw.speed_kms, 0), "L1 wind", " km/s") +
     stat(fmt(bz, 1), "Bz GSM", " nT", bzStyle) +
@@ -526,12 +626,12 @@ function renderUpstream(status) {
   const al = up.alerts || [];
   alertsEl.innerHTML = al.length
     ? `<div class="alabel">Recent SWPC alerts</div>` + al.slice(0, 4).map(a =>
-        `<div class="arow"><span class="apid">${a.product_id || ""}</span><span class="atime">${relTime(a.issue_utc)}</span><span class="asum">${a.summary || ""}</span></div>`).join("")
+        `<div class="arow"><span class="apid">${esc(a.product_id || "")}</span><span class="atime">${esc(relTime(a.issue_utc))}</span><span class="asum">${esc(a.summary || "")}</span></div>`).join("")
     : "";
 
-  let c = `L1 solar wind <span data-reltime="${sw.mag_time_utc}">${relTime(sw.mag_time_utc)}</span> (DSCOVR, ~30–60 min upstream of Earth). `;
-  if (elevated) c += `<strong style="color:var(--t2)">Elevated:</strong> ${us.reasons.join("; ")}.`;
-  else c += `Quiet by NOAA scales (G${g}, Kp ${fmt(kp, 1)}); strong southward Bz or high wind speed would raise this.`;
+  let c = `L1 solar wind <span data-reltime="${esc(sw.mag_time_utc)}">${esc(relTime(sw.mag_time_utc))}</span> (DSCOVR, ~30–60 min upstream of Earth). `;
+  if (elevated) c += `<strong style="color:var(--t2)">Elevated:</strong> ${esc((us.reasons || []).join("; "))}.`;
+  else c += `Quiet by NOAA scales (G${esc(g)}, Kp ${fmt(kp, 1)}); strong southward Bz or high wind speed would raise this.`;
   cap.innerHTML = c;
 }
 
@@ -552,7 +652,7 @@ async function renderDbdt(dbdt) {
   const col = (lvl) => lvl == null ? "var(--ink-soft)" : TIER_COLORS[lvl];
   badge.textContent = ct.label; badge.style.color = col(ct.level);
   const stat = (v, k, unit, color) =>
-    `<div class="ustat"><span class="v" style="color:${color}">${v == null ? "—" : v}${unit}</span><span class="k">${k}</span></div>`;
+    `<div class="ustat"><span class="v" style="color:${color}">${v == null ? "—" : esc(v)}${unit}</span><span class="k">${k}</span></div>`;
   let statsHtml =
     stat(fmt(dbdt.current_dbdt, 1), "current dB/dt", " nT/min", col(ct.level)) +
     stat(fmt(dbdt.max30_dbdt, 1), "30-min max", " nT/min", col(mt.level));
@@ -568,9 +668,9 @@ async function renderDbdt(dbdt) {
     const exc = fc.exceedance.map(e => {
       const lvl = Math.min(PULK.indexOf(e.threshold) + 1, 4);
       const col = e.empirical_score >= 0.5 ? TIER_COLORS[lvl] : "var(--ink-mute)";
-      return `<span class="exc"><b style="color:${col}">${Math.round(e.empirical_score * 100)}%</b> &gt;${e.threshold}</span>`;
+      return `<span class="exc"><b style="color:${col}">${esc(Math.round(e.empirical_score * 100))}%</b> &gt;${esc(e.threshold)}</span>`;
     }).join("");
-    fcEl.innerHTML = `<span class="fc-label">forecast · next ${fc.horizon_min} min</span>`
+    fcEl.innerHTML = `<span class="fc-label">forecast · next ${esc(fc.horizon_min)} min</span>`
       + `<span class="fc-pt">${fmt(fc.point_dbdt, 1)} nT/min</span>`
       + `<span class="fc-ub">historical 90% upper estimate ≤ ${fmt(fc.ub90_dbdt, 1)}</span>`
       + `<span class="fc-exc">historical exceedance score: ${exc}</span>`
@@ -593,7 +693,7 @@ async function renderDbdt(dbdt) {
     layout.yaxis.title.text = "dB/dt [nT/min]"; layout.yaxis.range = [0, ymax]; layout.margin.t = 8;
     await Plotly.react("dbdt-plot", [{ x, y, mode:"lines", line:{ color:"#4ea1ff", width:2 }, fill:"tozeroy", fillcolor:"rgba(78,161,255,0.12)" }], layout, { displayModeBar:false, responsive:true });
   }
-  let capHtml = `Observed horizontal ground d<i>B</i>/d<i>t</i> = √(Δ<i>X</i>²+Δ<i>Y</i>²)/Δ<i>t</i>, with Δ<i>t</i> in minutes, at USGS ${dbdt.station}. The adjusted near-real-time product is provisional and can be revised during archival quality control. `
+  let capHtml = `Observed horizontal ground d<i>B</i>/d<i>t</i> = √(Δ<i>X</i>²+Δ<i>Y</i>²)/Δ<i>t</i>, with Δ<i>t</i> in minutes, at USGS ${esc(dbdt.station)}. The adjusted near-real-time product is provisional and can be revised during archival quality control. `
     + `Dotted lines are the four unit-converted Pulkkinen et al. (2013) threshold magnitudes (18/42/66/90 nT/min); this display does not reproduce that study's nonoverlapping 20-min validation protocol. `
     + `The plotted series is an observed <strong>nowcast</strong> and a GIC-hazard indicator, not a GIC measurement or grid-impact forecast.`;
   if (ge) capHtml += ` Estimated <i>E</i> uses a 1-D uniform reference ground (ρ = ${fmt(ge.rho_ohm_m, 0)} Ω·m); `
@@ -618,8 +718,8 @@ function renderPipeline(status, dbdt) {
   ];
   const tagClass = { live:"tag-live", research:"tag-research", future:"tag-future" };
   $("pipeline").innerHTML = stages.map(s =>
-    `<div class="stage"><div class="ic">${s.ic}</div><div class="nm">${s.nm}</div>`
-    + `<div class="ds">${s.ds}</div><span class="tag ${tagClass[s.tag]}">${s.tl}</span></div>`).join("");
+    `<div class="stage"><div class="ic">${esc(s.ic)}</div><div class="nm">${esc(s.nm)}</div>`
+    + `<div class="ds">${esc(s.ds)}</div><span class="tag ${tagClass[s.tag]}">${esc(s.tl)}</span></div>`).join("");
 }
 
 async function renderNetwork(net) {
@@ -637,11 +737,13 @@ async function renderNetwork(net) {
   const trace = {
     type: "scattergeo", mode: "markers+text",
     lon: S.map(s => s.lon), lat: S.map(s => s.lat),
-    text: S.map(s => s.station), textposition: "top center", textfont: { size: 9, color: "#9fb0cc" },
+    // Station codes and names come from the USGS feed; they are drawn through the plotting
+    // library's own markup parser, so they pass the plot escape first.
+    text: S.map(s => escPlot(s.station)), textposition: "top center", textfont: { size: 9, color: "#9fb0cc" },
     marker: { size: S.map(s => 10 + Math.min(s.max_dbdt, 60) / 3),
               color: S.map(s => TIER_COLORS[s.tier.level || 0]),
               line: { width: 1, color: "rgba(255,255,255,0.5)" }, opacity: 0.9 },
-    hovertext: S.map(s => `${s.name} (${s.station})<br>${s.max_dbdt} nT/min · ${s.tier.label}`),
+    hovertext: S.map(s => `${escPlot(s.name)} (${escPlot(s.station)})<br>${escPlot(s.max_dbdt)} nT/min · ${escPlot(s.tier.label)}`),
     hoverinfo: "text",
   };
   const layout = {

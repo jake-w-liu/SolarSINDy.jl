@@ -50,6 +50,23 @@ wd_log() {
   fi
 }
 
+# Numeric settings arrive from a rendered plist. A hand-copied template whose __WATCHDOG_STALE_SEC__
+# was never replaced would make `[ "$age" -gt "$STALE_SEC" ]` print "integer expression expected" and
+# evaluate false, silently disabling the freshness probe this job exists for — the worst outcome for
+# a watchdog. Report the bad value and keep watching on the documented default instead.
+for numeric_setting in STALE_SEC STREAM_MAX_BYTES; do
+  case "${!numeric_setting}" in
+    ''|*[!0-9]*)
+      bad="${!numeric_setting}"
+      case "$numeric_setting" in
+        STALE_SEC) STALE_SEC=7200; fallback=7200 ;;
+        STREAM_MAX_BYTES) STREAM_MAX_BYTES=2097152; fallback=2097152 ;;
+      esac
+      wd_log "config error: $numeric_setting='$bad' is not a whole number; using $fallback (replace every placeholder in the watchdog plist, or run deploy/install_launchd.sh)"
+      ;;
+  esac
+done
+
 # Size-bound the launchd console-capture files (monitor + dashboard) so no stream grows without
 # limit between restarts. O_APPEND makes in-place truncation safe (next append lands at offset 0).
 for f in "$LOGS_DIR"/*.out "$LOGS_DIR"/*.err; do

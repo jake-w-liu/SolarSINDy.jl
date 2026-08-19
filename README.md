@@ -269,7 +269,13 @@ with auto-restart and an out-of-process watchdog; systemd templates for Linux li
 [`deploy/`](deploy/)). Configuration is by environment variable — `SWM_PORT`,
 `SOLARSINDY_MONITOR_DIR`, `SWM_WEBHOOK_URL` for push alerts — or a gitignored
 `solarsindy.env` file in the clone root (template:
-[`deploy/solarsindy.env.example`](deploy/solarsindy.env.example)). The CLI keeps its
+[`deploy/solarsindy.env.example`](deploy/solarsindy.env.example)). A launchd job inherits
+nothing from an interactive shell, so `install-service` renders the allow-listed keys into
+each service's `EnvironmentVariables` block — the bind host and port, the webhook URL, the
+cadence and log-cap settings, and the served-artifact overrides — and names at install time
+any key that is set but reaches none of the selected services. Changing `solarsindy.env`
+after an install therefore requires re-running `install-service`; until then `status` reads
+the installed plist's port so it probes the port the service actually binds. The CLI keeps its
 pidfiles inside the instance state directory, serializes concurrent starts with a lock,
 refuses to start a second copy while the installed service mode is active, and never
 signals a process that is not running this clone's daemon entry point (so a recycled PID
@@ -405,8 +411,27 @@ Configuration is by environment variable:
   skipped instead of accumulating drift or producing catch-up bursts. Interval selection is also
   atomic across the four-row product: ACI is used only when its point and served residual streams
   are ready at every horizon; otherwise every row uses the static conformal fallback.
+  The cadence *phase* — the minute of the hour the daemon happens to run — therefore has an
+  observable consequence. The phase sets the Dst anchor lag (0 or 1 h), the lag sets the model-step
+  set ({1,2,3,6} at lag 0, {2,3,4,7} at lag 1), and the two step sets have independent residual
+  streams with independent maturities, so a restart at a different minute can flip the batch policy
+  between `aci` and `static` and change the fallback-row and frozen-tail band widths by roughly a
+  factor of four. The phase is anchored at process start, so a restart re-anchors it. Every
+  `:static` selection now records the anchor lag, the required step set, and each immature stream
+  with its verified-residual counts, so a flip is attributable from the daemon log alone.
 - `LIVE_MONITOR_MAX_LOG_ROWS` — maximum retained hot-log rows (default 50,000). Values below
-  four are rejected so retention cannot delete part of the latest product cycle.
+  four are rejected so retention cannot delete part of the latest product cycle. Pruned rows
+  are cold-archived first; when the hot log's columns differ from the newest archive segment's
+  header, the archive rolls to a new numbered segment instead of refusing, so a routine column
+  addition can no longer stall retention permanently. Only the newest segment is ever appended to,
+  so segment order is append order.
+- `LIVE_FUTURE_CLOCK_TOLERANCE_MIN` and `LIVE_MAX_FUTURE_CLOCK_SKEW_MIN` (defaults 2 and 15) —
+  the source-clock skew band. Post-issue feed samples never enter a forecast, so a feed a few
+  minutes ahead of the local clock is reported with its skew and excluded-sample count while
+  issuance continues on the causal remainder; beyond the sanity limit issuance fails closed.
+- A cycle's issuance depends on the L1 feeds; Kyoto verification, retention, the prospective
+  external Dst snapshot and the comparison report do not, and run on every cycle regardless of
+  whether forecasts were issued.
 
 ### macOS launchd service (production)
 
@@ -435,9 +460,12 @@ state, report, and outage artifacts remain in `var/monitor/`. Remove the service
 - **Historical V2.0 artifacts** — the former 21-candidate/10-active-term files are
   preserved under `data/historical/v2_0/`; their calibration is under
   `deploy/historical/v2_0/`. They are provenance inputs, never current defaults.
-- **Conformal interval sidecar** — the primary live interval is the adaptive-conformal band
-  derived from the verified log; the stratified sidecar is a cold-start/fallback interval.
-  Regenerate it from a verified log with
+- **Conformal interval sidecar** — since V2.4e the published interval on a served row is the
+  study's split-conformal depth band (`interval_source = v24_conformal_depth`), stratified by model
+  step and ring-current depth. The adaptive-conformal band applies to rows that fall back to an
+  earlier stage and to the frozen-tail columns; the batch policy behind those columns is recorded
+  per row in `frozen_tail_interval_source`. The stratified sidecar remains the cold-start/fallback
+  interval for the V2.1 operator. Regenerate it from a verified log with
   [`validation/make_operational_conformal_sidecar.jl`](validation/make_operational_conformal_sidecar.jl)
   (`SOLARSINDY_LIVE_LOG` / `SOLARSINDY_V2_CONFORMAL_SIDECAR` override the paths).
 - **One-minute OMNI HRO cache** — the sub-hourly component replays use NASA CDAWeb
@@ -614,13 +642,31 @@ and regression baselines—rather than tautologies. Coverage includes:
 See the package test suites (`test/runtests.jl` and `app/test/runtests.jl`) for coverage,
 tolerances, and anti-false-test checks.
 
+Six oracles read artifacts the offline validation scripts generate under `validation/output/`, which
+is deliberately untracked: the OMNI archive, the V2.3 base table and hourly frame, and the three
+served-identity tables. A clean clone cannot run them, so each registers itself in a ledger that the
+suite prints and pins — a green run states which real-data oracles it exercised and which it skipped.
+Setting `SOLARSINDY_REQUIRE_LOCAL_ARTIFACTS=1` turns any absence into a failure once the artifacts
+have been generated.
+
+`.github/workflows/ci.yml` runs the suite on a clean checkout on the declared minimum Julia and on
+the release the package is developed on, and builds the manual, so the clean-clone path stays
+exercised.
+
 ## Docs
 
 ```bash
+julia --project=SolarSINDy.jl/docs -e 'using Pkg; Pkg.instantiate()'
 julia --project=SolarSINDy.jl/docs -e 'include("SolarSINDy.jl/docs/make.jl")'
 ```
 
-Doc sources live in `docs/src/` (`index.md`, `api.md`, `examples.md`, `live-verification.md`).
+Doc sources live in `docs/src/`: the narrative pages (`index.md`, `examples.md`,
+`live-verification.md`, `ekf-v3-decision.md`) and the API reference, which reaches every exported
+binding through `@autodocs` blocks keyed on source file (`api.md`, `forecast-api.md`,
+`operational-api.md`, `operational-v24-api.md`, `operational-v22-research-api.md`,
+`operational-v23-api.md`). The build runs with `checkdocs = :exports`, `doctest = true` and
+`warnonly = false`, so a docstring that never reaches the manual fails it. Measured coverage and the
+remaining gaps are recorded in `DOCS_REPORT.md`.
 
 ## Notes
 

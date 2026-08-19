@@ -42,7 +42,7 @@ end
 function live_cycle_fixture(issue::DateTime;
                             vintage=issue, anchor_time=issue - Hour(1), latest_dst=-20.0,
                             model="v2.1", served_model="v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia",
-                            interval="aci", observations=missing,
+                            interval=nothing, observations=missing,
                             served_pred=-25.0, served_lo=-35.0, served_hi=-15.0,
                             audit_pred=served_pred, audit_lo=served_lo, audit_hi=served_hi,
                             v2_1_served_pred=nothing, v2_2_stack_pred=nothing,
@@ -54,6 +54,16 @@ function live_cycle_fixture(issue::DateTime;
     targets = floor(issue, Hour) .+ Hour.(requested)
     lead = [(target - issue) / Millisecond(3_600_000) for target in targets]
     expand(x) = x isa AbstractVector ? collect(x) : fill(x, length(requested))
+    # The engine sets `interval_source` to the depth-stratified conformal source inside the branch
+    # that also records `v24_status = "ok"` — the status is returned only after the center and both
+    # interval endpoints are finite — and leaves the batch policy's source on every other row. A
+    # fixture that does not state the sources therefore derives them from the statuses, so a cycle
+    # fixture is coherent the way the engine's own rows are. A test that needs an incoherent cycle
+    # states the sources explicitly.
+    statuses = v24_status === nothing ? nothing : expand(v24_status)
+    sources = interval !== nothing ? expand(interval) :
+              statuses === nothing ? fill("aci", length(requested)) :
+              [s isa AbstractString && s == "ok" ? "v24_conformal_depth" : "aci" for s in statuses]
     frame = DataFrame(
         issue_time_utc_dt=fill(issue, length(requested)),
         latest_solar_wind_utc_dt=fill(vintage, length(requested)),
@@ -68,9 +78,12 @@ function live_cycle_fixture(issue::DateTime;
         v2_pred_dst_nt=expand(audit_pred),
         v2_pred_dst_ci05_nt=expand(audit_lo),
         v2_pred_dst_ci95_nt=expand(audit_hi),
-        interval_source=fill(interval, length(requested)),
+        # The interval source and the served label are per-row fields: the super-learner stage acts
+        # per horizon, so one batch can issue horizons under different stages and disclose it row by
+        # row. Both accept a vector so a fixture can reproduce that cycle shape.
+        interval_source=sources,
         model_version=fill(model, length(requested)),
-        sub_hourly_model_version=fill(served_model, length(requested)),
+        sub_hourly_model_version=expand(served_model),
     )
     # The V2.1 continuity column exists only in the stacked-served schema; a fixture that omits it
     # reproduces a pre-stack log, which must keep behaving exactly as before.
@@ -91,7 +104,7 @@ function live_cycle_fixture(issue::DateTime;
     driver_assumption === nothing ||
         (frame[!, :driver_assumption] = expand(driver_assumption))
     v2_2_status === nothing || (frame[!, :v2_2_status] = expand(v2_2_status))
-    v24_status === nothing || (frame[!, :v24_status] = expand(v24_status))
+    statuses === nothing || (frame[!, :v24_status] = statuses)
     v24_pred === nothing || (frame[!, :v24_pred_dst_nt] = expand(v24_pred))
     v24_guard_applied === nothing ||
         (frame[!, :v24_guard_applied] = expand(v24_guard_applied))
@@ -100,6 +113,92 @@ function live_cycle_fixture(issue::DateTime;
     v24_regime_cell === nothing || (frame[!, :v24_regime_cell] = expand(v24_regime_cell))
     return frame
 end
+
+# Write a fixture cycle in the on-disk schema (raw ISO time columns, as the daemon appends them) so
+# a test can drive the log-backed path end to end — load, parse, cycle selection, status — instead
+# of handing an already-parsed frame to a builder.
+function write_cycle_csv(path::AbstractString, frame::DataFrame)
+    raw = copy(frame)
+    rename!(raw,
+        :issue_time_utc_dt => :issue_time_utc,
+        :latest_solar_wind_utc_dt => :latest_solar_wind_utc,
+        :latest_dst_time_utc_dt => :latest_dst_time_utc,
+        :target_time_utc_dt => :target_time_utc,
+    )
+    CSV.write(path, raw)
+    return path
+end
+
+# A log that exists but carries no forecast rows: the shape a truncation, a rotation, or a failed
+# rewrite leaves behind, and the one that used to be read as "no data yet".
+write_empty_log(path::AbstractString) =
+    (write(path, "issue_time_utc,target_time_utc\n"); path)
+
+# API payloads for the executed-render probe, written as the JSON the routes actually return.
+# `@@MARKER@@` stands in for the injected string at every place the page renders text it did not
+# author: the feed's alert identifier and summary, the NOAA scale token, the station code, and the
+# log-written interval source and served label.
+const RENDER_PROBE_PAYLOADS_JS = raw"""
+const MARKER = "@@MARKER@@";
+const PAYLOADS = {
+  "/api/health": { status: "ok", cycle_complete: true },
+  "/api/status": {
+    available: true, generated_utc: "@@ISSUE@@", forecast_issue_utc: "@@ISSUE@@",
+    latest_solar_wind_utc: "@@ISSUE@@", model_version: "v2.1",
+    served_model_version: "@@SERVED@@", served_product: "V2.4" + MARKER,
+    latest_observation: { dst_nt: -40.0, time_utc: "@@ISSUE@@" },
+    threat: { level: 2, label: "Moderate storm", watch: true, watch_level: 3,
+              watch_label: "Intense storm", point_min_dst_nt: -70.0,
+              interval_lower_edge_min_dst_nt: -105.0,
+              interval_lower_edge_source: "v2_1_served",
+              basis: "Dst storm-intensity scale (-30/-50/-100/-200 nT)" },
+    lead_time: { forecast_horizon_hours: 6.0, physical_upstream_lead_min: [30, 60],
+                 driver_assumption: "Ballistically propagated L1 forcing" },
+    calibration: { n_verified: 60, v2_n_verified: 60, v2_rmse_nt: 4.2, v2_coverage_90: 0.9,
+                   comparison_n_verified: 60, live_skill_min_verified: 48,
+                   live_skill_mature: true, current_interval_source: MARKER,
+                   current_interval_sources: [MARKER, "aci"],
+                   n_verified_current_source: 10, n_verified_current_served_model: 10,
+                   v2_matched_rmse_nt: 4.2, persistence_matched_rmse_nt: 6.1,
+                   by_source: [{ source: MARKER, n: 3, coverage_90: 0.9 },
+                               { source: "aci", n: 4, coverage_90: 0.88 }],
+                   by_served_model: [{ product: MARKER, n: 3, coverage_90: 0.9, rmse_nt: 4.0 },
+                                     { product: "V2.4", n: 4, coverage_90: 0.88, rmse_nt: 4.4 }] },
+    upstream: { available: true,
+                solar_wind: { available: true, speed_kms: 520.0, bz_gsm_nt: -12.0, bt_nt: 14.0,
+                              density_cm3: 6.0, mag_time_utc: "@@ISSUE@@" },
+                kp: { value: 6.0, time_utc: "@@ISSUE@@" },
+                scales: { G: "2" + MARKER, time_utc: "@@ISSUE@@" },
+                alerts: [{ product_id: MARKER, issue_utc: "@@ISSUE@@",
+                           summary: "geomagnetic storm " + MARKER }] },
+    upstream_status: { available: true, elevated: true,
+                       reasons: ["NOAA G" + MARKER + " geomagnetic storm"] },
+  },
+  "/api/forecast": {
+    available: true, issue_time_utc: "@@ISSUE@@", latest_solar_wind_utc: "@@ISSUE@@",
+    anchor_dst_nt: -40.0, anchor_dst_time_utc: "@@ISSUE@@", interval_source: MARKER,
+    interval_sources: [MARKER, "v24_conformal_depth"], superseded_cycle_incomplete: false,
+    served_product: "V2.4" + MARKER, served_model_version: "@@SERVED@@",
+    recent_observed: [{ target_utc: "@@ISSUE@@", observed_dst_nt: -40.0 }],
+    horizons: [{ target_utc: "2026-06-26T07:00:00Z", horizon_hours: 1.0, pred_dst_nt: -70.0,
+                 ci05_dst_nt: -95.0, ci95_dst_nt: -45.0, severity_dst_nt: -75.0,
+                 severity_ci05_dst_nt: -105.0, severity_ci05_source: "v2_1_served",
+                 interval_source: MARKER }],
+  },
+  "/api/history": { hours: 72, coverage_90: 0.9, rmse_nt: 4.2,
+                    rows: [{ target_utc: "@@ISSUE@@", observed_dst_nt: -40.0, pred_dst_nt: -42.0,
+                             ci05_dst_nt: -60.0, ci95_dst_nt: -20.0, horizon_hours: 1.0,
+                             inside_90ci: true }] },
+  "/api/dbdt": { available: true, station: MARKER, current_dbdt: 12.0, max30_dbdt: 20.0,
+                 current_tier: { level: 1, label: "elevated" },
+                 max30_tier: { level: 1, label: "elevated" },
+                 series: [{ t: "@@ISSUE@@", dbdt: 12.0 }],
+                 geoelectric: { max_vkm: 0.4, rho_ohm_m: 1000.0 }, forecast: null },
+  "/api/network": { n_stations: 1,
+                    stations: [{ station: MARKER, name: MARKER, lat: 40.0, lon: -100.0,
+                                 max_dbdt: 20.0, tier: { level: 1, label: "elevated" } }] },
+};
+"""
 
 # The two machine tokens the engine writes for the served pipeline, and the reader-facing sentences
 # they must map to. Restated here rather than imported so the payload contract is checked against an
@@ -128,12 +227,15 @@ const V2_1_DRIVER_TOKEN =
             @test fc !== nothing
             gp, gub, gexc, ẑ, s = golden_forecast(m, recent, V, Bz)
             # Explicit offline replay must match the independently recomputed export formula.
-            @test isapprox(fc.point_dbdt, round(max(gp, 0.0); digits=2); atol=0.02)
-            @test isapprox(fc.ub90_dbdt, round(max(gub, 0.0); digits=2); atol=0.05)
+            # The compared quantities are both rounded to the same decimal, so the tolerance is
+            # the rounding itself: an `atol` wider than that admits a real formula drift as
+            # agreement, which is the whole thing these vectors exist to catch.
+            @test isapprox(fc.point_dbdt, round(max(gp, 0.0); digits=2); atol=1e-9)
+            @test isapprox(fc.ub90_dbdt, round(max(gub, 0.0); digits=2); atol=1e-9)
             @test length(fc.exceedance) == length(gexc)
             for (k, e) in enumerate(fc.exceedance)
                 @test e.threshold == gexc[k][1]
-                @test isapprox(e.empirical_score, round(gexc[k][2]; digits=3); atol=0.01)
+                @test isapprox(e.empirical_score, round(gexc[k][2]; digits=3); atol=1e-9)
             end
             @test fc.station == station
             @test fc.horizon_min == 30
@@ -386,6 +488,50 @@ const V2_1_DRIVER_TOKEN =
         @test nrow(verified_rows(missing_anchor)) == 3
     end
 
+    @testset "bind settings reject an unrendered launchd placeholder" begin
+        # A hand-copied plist whose `__SWM_PORT__` was never replaced reached
+        # `parse(Int, "__SWM_PORT__")`, and launchd turned that ArgumentError into a sixty-second
+        # crash loop diagnosable only from a stack trace. The failure has to name the setting and
+        # the repair.
+        withenv("SWM_PORT" => nothing, "SWM_HOST" => nothing) do
+            @test port_from_env() == 8723
+            @test bind_setting_from_env("SWM_HOST", "127.0.0.1") == "127.0.0.1"
+        end
+        withenv("SWM_PORT" => "9311", "SWM_HOST" => " 0.0.0.0 ") do
+            @test port_from_env() == 9311
+            @test bind_setting_from_env("SWM_HOST", "127.0.0.1") == "0.0.0.0"
+        end
+        for (name, value) in (("SWM_PORT", "__SWM_PORT__"), ("SWM_HOST", "__SWM_HOST__"))
+            withenv(name => value) do
+                err = try
+                    name == "SWM_PORT" ? port_from_env() :
+                        bind_setting_from_env("SWM_HOST", "127.0.0.1")
+                    nothing
+                catch e
+                    e
+                end
+                @test err isa ErrorException
+                @test occursin(name, err.msg)
+                @test occursin("placeholder", err.msg)
+                @test occursin("install_launchd.sh", err.msg)
+            end
+        end
+        # A merely wrong value is still reported as a wrong value, not as a placeholder.
+        for bad in ("nine", "0", "70000", "")
+            withenv("SWM_PORT" => bad) do
+                err = try
+                    port_from_env()
+                    nothing
+                catch e
+                    e
+                end
+                @test err isa ErrorException
+                @test occursin("SWM_PORT", err.msg)
+                @test !occursin("placeholder", err.msg)
+            end
+        end
+    end
+
     @testset "static file serving is traversal-guarded" begin
         ok = serve_static("/index.html")
         @test ok.status == 200
@@ -555,7 +701,22 @@ const V2_1_DRIVER_TOKEN =
                                     station="FRD", offline_replay=true)
             @test extreme !== nothing
             @test extreme.reliable == false
-            @test (extreme.out_of_validated_range || extreme.saturated)
+            # Asserted separately, not as a disjunction: saturation is the expm1 cap being hit,
+            # while the range flag is the standardized features leaving the calibration support.
+            # Either one alone satisfied the pair, so the support bound itself was unpinned.
+            @test extreme.out_of_validated_range == true
+            @test extreme.saturated == true
+            # An absurd history trips both flags, so it cannot separate them. A sustained
+            # 14 nT/min history with ordinary drivers sits about 23 standard deviations outside the
+            # calibration support while the ridge output stays below the numerical cap: the support
+            # bound is then the only thing that can withhold confidence in the estimate, so a bound
+            # widened past that distance would publish this as a reliable 700 nT/min forecast.
+            outside = forecast_dbdt(fill(14.0, 30), 700.0, -15.0;
+                                    station="FRD", offline_replay=true)
+            @test outside !== nothing
+            @test outside.saturated == false
+            @test outside.out_of_validated_range == true
+            @test outside.reliable == false
         end
     end
 
@@ -724,6 +885,237 @@ const V2_1_DRIVER_TOKEN =
             @test !forecast.available && !haskey(forecast, :model_version)
             @test calibration_summary(cycle).current_interval_source == "unknown"
         end
+    end
+
+    @testset "a per-row-coherent cycle is served; an incoherent one is not" begin
+        issue = now(UTC) - Minute(10)
+        mixed_labels = [CURRENT_V2_SERVED_MODEL_VERSION, CURRENT_V2_SERVED_MODEL_VERSION,
+                        CURRENT_V2_SERVED_MODEL_VERSION, STACK_V2_SERVED_MODEL_VERSION]
+        mixed_status = ["ok", "ok", "ok", "fallback:serving_error"]
+        depth = "v24_conformal_depth"
+        mixed = live_cycle_fixture(issue; served_model=mixed_labels, v24_status=mixed_status,
+                                   interval=[depth, depth, depth, "conformal"],
+                                   served_pred=-60.0, served_lo=-80.0, served_hi=-40.0)
+        # Three horizons served by the super-learner, one disclosed as a stack fallback: the log is
+        # describing a stage that failed between the horizons of one batch, not an inconsistent
+        # cycle. Requiring one interval source across the four rows rejected exactly this shape and
+        # blanked every log-backed endpoint while the cycle itself was sound.
+        @test _valid_live_cycle(mixed)
+        st = build_status(mixed)
+        fc = build_forecast(mixed)
+        @test st.available && fc.available
+        @test st.superseded_cycle_incomplete == false
+        @test fc.superseded_cycle_incomplete == false
+        @test st.served_model_version == STACK_V2_SERVED_MODEL_VERSION   # weakest stage, as before
+        @test fc.interval_source == "conformal"        # the interval the reported stage issued
+        @test fc.interval_sources == ["conformal", depth]
+        @test [h.interval_source for h in fc.horizons] == [depth, depth, depth, "conformal"]
+        @test build_alerts(mixed, st).active == true   # alerts are produced, not suppressed
+
+        # Mutation guard: coherence is what is accepted, not variety. A row that claims the
+        # depth-stratified band while its own status records a fallback would publish an interval
+        # calibrated for a center it was not drawn around, and an acted row that disclaims it hides
+        # which band was served. Both stay invalid, as does a batch that used two policies at once.
+        incoherent = [
+            [depth, depth, depth, depth],              # the fallback row claims the V2.4e band
+            ["conformal", depth, depth, "conformal"],  # an acted row disclaims it
+            [depth, depth, "aci", "conformal"],        # two batch policies in one cycle
+        ]
+        incoherent_status = [mixed_status, mixed_status,
+                             ["ok", "ok", "fallback:serving_error", "fallback:serving_error"]]
+        for (sources, statuses) in zip(incoherent, incoherent_status)
+            bad = live_cycle_fixture(issue; served_model=mixed_labels, v24_status=statuses,
+                                     interval=sources)
+            @test !_valid_live_cycle(bad)
+            @test !build_status(bad).available
+            @test !build_forecast(bad).available
+        end
+    end
+
+    @testset "the live interval method names the cycle that is published" begin
+        # The calibration panel states the interval method the live product is issued under. It read
+        # that as one common field across the cycle's horizons and from the newest issue hour, and
+        # per-row disclosure invalidated both readings. A cycle whose super-learner stage acted on
+        # some horizons and not others carries two methods by design, so the common-field reading was
+        # empty and the panel published the method as the string "nothing"; and during the
+        # superseded-cycle fallback the newest issue hour is the incomplete one, so the panel called
+        # the method "unknown" while a complete forecast was on the page. Both readings must come
+        # from the cycle the payloads actually publish.
+        issue = now(UTC) - Minute(10)
+        depth = "v24_conformal_depth"
+        mixed_labels = [CURRENT_V2_SERVED_MODEL_VERSION, CURRENT_V2_SERVED_MODEL_VERSION,
+                        CURRENT_V2_SERVED_MODEL_VERSION, STACK_V2_SERVED_MODEL_VERSION]
+        mixed_status = ["ok", "ok", "ok", "fallback:serving_error"]
+        mixed_sources = [depth, depth, depth, "aci"]
+
+        # Three horizons under the depth-stratified conformal band and one under the batch policy.
+        # The cycle is published under its weakest served stage, so its interval method is the one
+        # that stage issued, and it must match the forecast payload exactly.
+        mixed = live_cycle_fixture(issue; served_model=mixed_labels, v24_status=mixed_status,
+                                   interval=mixed_sources,
+                                   served_pred=-60.0, served_lo=-80.0, served_hi=-40.0)
+        @test _valid_live_cycle(mixed)
+        mixed_fc = build_forecast(mixed)
+        mixed_cal = calibration_summary(mixed)
+        @test mixed_fc.available
+        @test mixed_cal.current_interval_source == "aci"
+        @test mixed_cal.current_interval_source == mixed_fc.interval_source
+        @test mixed_cal.current_interval_sources == ["aci", depth]
+        @test mixed_cal.current_interval_sources == mixed_fc.interval_sources
+        @test mixed_cal.current_served_model == mixed_fc.served_model_version
+        @test mixed_cal.current_served_model == STACK_V2_SERVED_MODEL_VERSION
+        # The two strings this panel used to publish for exactly this cycle.
+        @test mixed_cal.current_interval_source != "nothing"
+        @test mixed_cal.current_interval_source != "unknown"
+        # The status payload carries the same summary, so the header line reads the same method.
+        @test build_status(mixed).calibration.current_interval_source == "aci"
+
+        # A cycle whose reported stage itself served two methods: no single one describes it, so
+        # none is named and the set is what is published — the same set the forecast payload sends.
+        two_sources = live_cycle_fixture(issue; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+                                         v24_status=mixed_status, interval=mixed_sources,
+                                         served_pred=-60.0, served_lo=-80.0, served_hi=-40.0)
+        @test _valid_live_cycle(two_sources)
+        two_cal = calibration_summary(two_sources)
+        @test two_cal.current_interval_source === nothing
+        @test two_cal.current_interval_source === build_forecast(two_sources).interval_source
+        @test two_cal.current_interval_sources == ["aci", depth]
+
+        # Superseded-cycle fallback: the newest issue hour is incomplete and the payloads publish the
+        # newest complete one. The summary must describe that cycle, which has a method, rather than
+        # the incomplete hour, which has none.
+        previous = live_cycle_fixture(issue - Hour(1); v24_status="ok",
+                                      served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+                                      served_pred=-40.0, served_lo=-55.0, served_hi=-25.0)
+        partial = live_cycle_fixture(issue; v24_status="ok",
+                                     served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+                                     served_pred=-70.0, served_lo=-95.0, served_hi=-45.0)[1:2, :]
+        fallback = vcat(previous, partial)
+        @test !_valid_live_cycle(latest_cycle(fallback))
+        fallback_fc = build_forecast(fallback)
+        fallback_cal = calibration_summary(fallback)
+        @test fallback_fc.available && fallback_fc.superseded_cycle_incomplete == true
+        @test fallback_cal.current_interval_source == depth
+        @test fallback_cal.current_interval_source == fallback_fc.interval_source
+        @test fallback_cal.current_interval_sources == [depth]
+        @test fallback_cal.current_served_model == fallback_fc.served_model_version
+        @test fallback_cal.current_interval_source != "unknown"
+
+        # The count published beside the name counts the verified rows the name refers to: the
+        # reported method when the cycle has one, and any method it carries when it does not.
+        now0 = floor(now(UTC), Hour)
+        history = DataFrame()
+        for k in 1:3
+            frame = live_cycle_fixture(now0 - Hour(30 + k); v24_status="ok",
+                                       served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+                                       observations=-25.0 - k)
+            history = isempty(history) ? frame : vcat(history, frame; cols=:union)
+        end
+        for k in 4:5
+            history = vcat(history,
+                           live_cycle_fixture(now0 - Hour(30 + k); interval="aci",
+                                              served_model=PREVIOUS_V2_SERVED_MODEL_VERSION,
+                                              observations=-25.0 - k);
+                           cols=:union)
+        end
+        horizons = length(LIVE_CYCLE_HORIZONS)
+        reported_cal = calibration_summary(vcat(history, mixed; cols=:union))
+        @test reported_cal.n_verified == 5 * horizons
+        @test reported_cal.n_verified_current_source == 2 * horizons      # the "aci" rows only
+        set_cal = calibration_summary(vcat(history, two_sources; cols=:union))
+        @test set_cal.current_interval_source === nothing
+        @test set_cal.n_verified_current_source == 5 * horizons           # both methods it carries
+
+        # A cycle that cannot be published at all still reports neither a method nor a set: the two
+        # cases stay distinguishable, so "unknown" never stands in for a method that exists.
+        unpublishable = calibration_summary(mixed[1:2, :])
+        @test unpublishable.current_interval_source == "unknown"
+        @test isempty(unpublishable.current_interval_sources)
+    end
+
+    @testset "an incomplete newest cycle falls back to the newest complete one" begin
+        issue = now(UTC) - Minute(10)
+        previous = live_cycle_fixture(issue - Hour(1);
+                                      served_pred=-40.0, served_lo=-55.0, served_hi=-25.0)
+        previous_issue = jdt(maximum(previous.issue_time_utc_dt))
+        newest = live_cycle_fixture(issue; served_pred=-70.0, served_lo=-95.0, served_hi=-45.0)
+        # Every shape the engine can leave in the newest issue hour without the previous hour
+        # ceasing to be a complete, internally consistent product cycle.
+        broken = Dict{String,DataFrame}(
+            "partial write (2 of 4 horizons)" => newest[1:2, :],
+            "duplicate retry row" => vcat(newest, newest[end:end, :]),
+            "per-row anchor Dst" => (m = copy(newest); m[end, :latest_dst_nt] = -21.0; m),
+            "per-row anchor hour" => (m = copy(newest);
+                                      m[end, :latest_dst_time_utc_dt] = issue - Hour(2); m),
+            "per-row driver vintage" => (m = copy(newest);
+                                         m[end, :latest_solar_wind_utc_dt] = issue - Minute(3); m),
+        )
+        for (shape, newest_rows) in broken
+            @testset "$shape" begin
+                frame = vcat(previous, newest_rows)
+                @test !_valid_live_cycle(latest_cycle(frame))      # the newest hour is not a cycle
+                st = build_status(frame)
+                fc = build_forecast(frame)
+                @test st.available && fc.available                 # availability restored
+                @test st.superseded_cycle_incomplete == true       # incompleteness disclosed
+                @test fc.superseded_cycle_incomplete == true
+                @test st.forecast_issue_utc == previous_issue      # served with its true age
+                @test fc.issue_time_utc == previous_issue
+                @test st.age_hours > 1.0
+                @test all(h -> h.pred_dst_nt == -40.0, fc.horizons)   # the previous cycle's numbers
+                @test build_alerts(frame, st).active == true
+            end
+        end
+
+        # The disclosure reaches the health endpoint, and the newest issue hour is still reported as
+        # incomplete there, so the issuance dead-man that reads it still trips.
+        dir = mktempdir()
+        path = write_cycle_csv(joinpath(dir, "log.csv"), vcat(previous, newest[1:2, :]))
+        _LOG_CACHE[] = nothing
+        health = JSON3.read(String(
+            make_handler(path)(HTTP.Request("GET", "/api/health")).body))
+        @test health.cycle_complete == false
+        @test health.status == "incomplete"
+        @test health.superseded_cycle_incomplete == true
+        forecast = JSON3.read(String(
+            make_handler(path)(HTTP.Request("GET", "/api/forecast")).body))
+        @test forecast.available == true && forecast.superseded_cycle_incomplete == true
+        # `/api/status` is not driven here: it refreshes the third-party upstream snapshot, and the
+        # status payload over the same loaded log is what the route serves.
+        loaded = build_status(get_log(path))
+        @test loaded.available == true && loaded.superseded_cycle_incomplete == true
+        _LOG_CACHE[] = nothing
+        rm(dir; recursive=true, force=true)
+
+        # The fallback restores availability; it must never manufacture it. With nothing complete in
+        # the log, and with the newest complete cycle outside the freshness window, the endpoints
+        # degrade exactly as they did before the fallback existed.
+        only_broken = newest[1:2, :]
+        @test build_status(only_broken).available == false
+        @test build_forecast(only_broken).available == false
+        stale_fallback = vcat(live_cycle_fixture(now(UTC) - Hour(5)), only_broken)
+        stale_status = build_status(stale_fallback)
+        @test stale_status.available == false
+        @test stale_status.forecast_issue_utc == jdt(maximum(only_broken.issue_time_utc_dt))
+        @test build_forecast(stale_fallback).available == false
+    end
+
+    @testset "the served cycle's published numbers are the logged ones" begin
+        # The cycle-selection change alters WHICH cycle is published and WHETHER it is published. It
+        # must not touch a published value: every number below is the exact Float64 the log carries.
+        issue = now(UTC) - Minute(10)
+        plain = live_cycle_fixture(issue; served_pred=-33.25, served_lo=-47.125, served_hi=-19.5)
+        fc = build_forecast(plain)
+        @test fc.available && fc.superseded_cycle_incomplete == false
+        @test all(h -> h.pred_dst_nt === -33.25, fc.horizons)
+        @test all(h -> h.ci05_dst_nt === -47.125, fc.horizons)
+        @test all(h -> h.ci95_dst_nt === -19.5, fc.horizons)
+        @test all(h -> h.severity_dst_nt === -33.25, fc.horizons)
+        @test all(h -> h.severity_ci05_dst_nt === -47.125, fc.horizons)
+        st = build_status(plain)
+        @test st.threat.point_min_dst_nt === -33.25
+        @test st.threat.interval_lower_edge_min_dst_nt === -47.125
+        @test st.latest_observation.dst_nt === -20.0
     end
 
     @testset "staleness gate: expired cycle suppresses live status and alerts" begin
@@ -2643,13 +3035,99 @@ esac
             @test labels[3] == "V2.4 served"
             @test labels[4] == "V2.4 served"
             @test labels[5] == "served pipelines (mixed record; 0 of 212 rows under V2.4)"
+
+            # The superseded-cycle disclosure reaches all three payloads and was rendered nowhere:
+            # the panel showed a forecast as current with no indication that the newest issuance had
+            # not completed. It is a notice on the forecast panel and nowhere else, so it is checked
+            # where it is written and executed against the three payload shapes it can receive.
+            @test occursin("id=\"forecast-supersede\"", html)
+            @test occursin("renderSupersededNotice(forecast);", js)
+            @test count(occursin("forecast-supersede", line)
+                        for line in eachline(IOBuffer(js))) == 1
+            notice_block = match(
+                r"// ---- superseded-cycle notice block[^\n]*\n(.*?)// ---- end superseded-cycle notice block ----"s,
+                js,
+            )
+            @test notice_block !== nothing
+            notice_probe = """
+            const store = {};
+            const el = { textContent: "", classList: { add: c => { store[c] = true; },
+                                                       remove: c => { delete store[c]; } } };
+            const \$ = (id) => (id === "forecast-supersede" ? el : null);
+            """ * notice_block.captures[1] * """
+            const out = [];
+            const record = () => out.push({ text: el.textContent, hidden: store.hidden === true });
+            renderSupersededNotice({ available: true, superseded_cycle_incomplete: true });
+            record();
+            renderSupersededNotice({ available: true, superseded_cycle_incomplete: false });
+            record();
+            renderSupersededNotice({ available: false });
+            record();
+            renderSupersededNotice(null);
+            record();
+            console.log(JSON.stringify(out));
+            """
+            notice = JSON3.read(read(pipeline(ignorestatus(`$node -e $notice_probe`)), String))
+            # Stated, not alarming: the forecast on the panel is real and the situation is named.
+            @test occursin("most recent hourly issuance has not completed", notice[1].text)
+            @test occursin("most recent complete forecast cycle", notice[1].text)
+            @test !occursin("<", notice[1].text)
+            @test notice[1].hidden == false
+            # And it is absent, not merely emptied, whenever the newest issuance did complete or the
+            # payload does not say — a notice left standing would be its own false statement.
+            for index in 2:4
+                @test notice[index].text == ""
+                @test notice[index].hidden == true
+            end
+
+            # The interval method the panel names comes from the published cycle, which can carry
+            # more than one. Executed, because the failure the fix repairs was a rendered string.
+            method_block = match(
+                r"// ---- interval-method label block[^\n]*\n(.*?)// ---- end interval-method label block ----"s,
+                js,
+            )
+            @test method_block !== nothing
+            @test occursin("live interval method: \${intervalMethodText(st.calibration)}", js)
+            @test occursin("const liveSrc = intervalMethodText(c);", js)
+            @test !occursin("c.current_interval_source || \"—\"", js)
+            method_probe = method_block.captures[1] * """
+            console.log(JSON.stringify([
+              intervalMethodText({ current_interval_source: "v24_conformal_depth",
+                                   current_interval_sources: ["aci", "v24_conformal_depth"] }),
+              intervalMethodText({ current_interval_source: null,
+                                   current_interval_sources: ["aci", "v24_conformal_depth"] }),
+              intervalMethodText({ current_interval_source: null,
+                                   current_interval_sources: ["aci", "conformal", "v24_conformal_depth"] }),
+              intervalMethodText({ current_interval_source: "unknown", current_interval_sources: [] }),
+              intervalMethodText({ current_interval_source: null, current_interval_sources: [] }),
+              intervalMethodText({}),
+              intervalMethodText(null),
+              intervalMethodIsSet({ current_interval_source: null,
+                                    current_interval_sources: ["aci", "v24_conformal_depth"] }),
+              intervalMethodIsSet({ current_interval_source: "aci",
+                                    current_interval_sources: ["aci"] }),
+              intervalMethodIsSet({}),
+            ]));
+            """
+            methods = JSON3.read(read(pipeline(ignorestatus(`$node -e $method_probe`)), String))
+            @test methods[1] == "v24_conformal_depth"
+            @test methods[2] == "aci and v24_conformal_depth"
+            @test methods[3] == "aci, conformal and v24_conformal_depth"
+            @test methods[4] == "unknown"
+            # No published cycle and no set: an em dash, never the word "nothing" and never a method.
+            for index in 5:7
+                @test methods[index] == "—"
+            end
+            @test methods[8] == true
+            @test methods[9] == false
+            @test methods[10] == false
         end
         @test !occursin("? status.threat.level : 0", js)
         # The product name is derived from the served label the log recorded, so no hardcoded version
         # string may remain in the rendering path; the frozen-tail ablation keeps its V2.1 name because
         # that comparator really is the V2.1 frozen-tail center.
         for label in ("Forecast: \${productName(st)} (", "Verified issued",
-                      "Product forecast: \${product}.",
+                      "Product forecast: \${esc(product)}.",
                       "served RMSE nT", "verified forecasts",
                       "V2.1 core trajectory (display)",
                       "V2.1 frozen-tail ablation", "SINDy v1", "Persistence",
@@ -2771,6 +3249,119 @@ esac
         reset_notify!()
     end
 
+    @testset "an emptied forecast log after a delivered alert is an outage, not an all-clear" begin
+        # The status payload of a log that carries no rows at all — emptied, truncated, rotated
+        # away, or unreadable — has no cycle and therefore no issue time. Read on payload shape
+        # alone that is indistinguishable from a cold start, and the level collapse from a
+        # delivered alert to zero was delivered as "Space weather returned to quiet (all clear)":
+        # an explicit all-clear the physics never produced. The evaluation is driven through the
+        # loop body so the log load, the status build, the outage sentinel and the delivery
+        # decision are all exercised, with the upstream and ground layers held inert.
+        url = "https://h"
+        dir = mktempdir()
+        logf = joinpath(dir, "live_forecast_log.csv")
+        state_path = joinpath(dir, "alert_notify_state.json")
+        calls = Any[]
+        post = (u, h, b) -> (push!(calls, JSON3.read(b)); nothing)
+        evaluate(path; sp = state_path) = notify_cycle!(
+            path; url = url, state_path = sp, post_fn = post,
+            snapshot_fn = () -> nothing, dbdt_fn = () -> nothing,
+        )
+
+        # Quiet: both the center and the interval lower edge stay above the minor-storm edge, so
+        # neither the point level nor the watch tier raises the composed level.
+        quiet_cycle(issue) = live_cycle_fixture(issue; served_pred = -10.0, served_lo = -20.0,
+                                                served_hi = -2.0)
+
+        reset_notify!()
+        write_cycle_csv(logf, quiet_cycle(now(UTC) - Minute(20)))              # quiet, complete
+        _LOG_CACHE[] = nothing
+        quiet = evaluate(logf)
+        @test quiet.state.level == 0 && quiet.state.stale == false
+        @test quiet.result.fired == false && quiet.result.reason == "baseline set"
+
+        write_cycle_csv(logf, live_cycle_fixture(now(UTC) - Minute(15);
+                                                 served_pred = -70.0, served_lo = -90.0,
+                                                 served_hi = -55.0))
+        _LOG_CACHE[] = nothing
+        storm = evaluate(logf)
+        @test storm.state.level == 2 && storm.state.stale == false
+        @test storm.result.fired == true && storm.result.kind == "elevated"
+        @test length(calls) == 1
+
+        write_empty_log(logf)                                  # the daemon's output disappears
+        _LOG_CACHE[] = nothing
+        blind = evaluate(logf)
+        @test blind.state.stale == true                        # blind, not quiet
+        @test blind.result.fired == true && blind.result.kind == "stale_onset"
+        @test blind.result.kind != "allclear"
+        @test length(calls) == 2
+        @test !occursin("all clear", lowercase(calls[end].text))
+        @test occursin("stale", lowercase(calls[end].text))
+
+        # The marker is persisted, so a restart into the same outage still refuses the all-clear
+        # instead of re-reading the empty log as a deployment that has never served anything.
+        reset_notify!()
+        @test _SEEN_DATA[] == false
+        _LOG_CACHE[] = nothing
+        restarted = evaluate(logf)
+        @test _SEEN_DATA[] == true                             # restored from the state file
+        @test restarted.state.stale == true
+        @test restarted.result.fired == false                  # baseline restored at the stale state
+        @test length(calls) == 2
+        _LOG_CACHE[] = nothing
+        held = evaluate(logf)
+        @test held.result.fired == false && held.state.stale == true
+        @test length(calls) == 2
+
+        # An active outage sentinel forces the same verdict even while the log itself still looks
+        # fresh and complete: a dead or unloaded daemon is exactly what the live layers cannot see.
+        reset_notify!()
+        sentinel_dir = mktempdir()
+        sentinel_log = joinpath(sentinel_dir, "live_forecast_log.csv")
+        sentinel_state = joinpath(sentinel_dir, "alert_notify_state.json")
+        write_cycle_csv(sentinel_log, quiet_cycle(now(UTC) - Minute(20)))
+        _LOG_CACHE[] = nothing
+        empty!(calls)
+        fresh = evaluate(sentinel_log; sp = sentinel_state)
+        @test fresh.state.level == 0 && fresh.state.stale == false
+        @test fresh.result.reason == "baseline set"
+        write(joinpath(sentinel_dir, "OUTAGE.md"),
+              "# LIVE FORECAST ISSUANCE OUTAGE\n\nSource: daemon issuance dead-man\n" *
+              "Summary: no issuance for 6 cycles\n")
+        _LOG_CACHE[] = nothing
+        sentinel = evaluate(sentinel_log; sp = sentinel_state)
+        @test sentinel.state.stale == true
+        @test any(occursin("forecast monitor outage", r) for r in sentinel.state.reasons)
+        @test sentinel.result.fired == true && sentinel.result.kind == "stale_onset"
+        @test !occursin("all clear", lowercase(calls[end].text))
+
+        # Cold-start control: a deployment that has never served a cycle must still baseline
+        # silently, so a fresh install does not announce an outage before its first issuance.
+        reset_notify!()
+        cold_dir = mktempdir()
+        cold_log = write_empty_log(joinpath(cold_dir, "live_forecast_log.csv"))
+        cold_state = joinpath(cold_dir, "alert_notify_state.json")
+        empty!(calls)
+        _LOG_CACHE[] = nothing
+        cold = evaluate(cold_log; sp = cold_state)
+        @test cold.state.level == 0 && cold.state.stale == false
+        @test cold.result.fired == false && cold.result.reason == "baseline set"
+        @test isempty(calls)
+        _LOG_CACHE[] = nothing
+        cold_again = evaluate(cold_log; sp = cold_state)
+        @test cold_again.state.stale == false && cold_again.result.fired == false
+        @test isempty(calls)
+        # ... and the persisted marker stays down until data actually arrives.
+        @test JSON3.read(read(cold_state, String)).seen_data == false
+
+        reset_notify!()
+        _LOG_CACHE[] = nothing
+        rm(dir; recursive = true, force = true)
+        rm(sentinel_dir; recursive = true, force = true)
+        rm(cold_dir; recursive = true, force = true)
+    end
+
     @testset "live-layer escalation fires even while the forecast feed is stale" begin
         reset_notify!()
         calls = Any[]
@@ -2838,6 +3429,464 @@ esac
         rm(dir; recursive=true, force=true)
     end
 
+    @testset "the served-health window states its own bounds and span" begin
+        # The window is the last N issue hours PRESENT IN THE LOG. While issuance is unbroken that is
+        # a day; after an outage the same N hours can span days, and a rate over them was published
+        # as the trailing day's. The live log carries a real multi-day gap, so this is the shape the
+        # endpoint has to describe, not a hypothetical one.
+        now0 = floor(now(UTC), Hour)
+        stack = reduce(vcat, [live_cycle_fixture(now0 - Hour(161) + Hour(k) - Minute(47);
+                                                 served_model=STACK_V2_SERVED_MODEL_VERSION,
+                                                 v2_2_status="ok",
+                                                 v24_status="fallback:deployment_absent")
+                              for k in 0:19])
+        healthy = reduce(vcat, [live_cycle_fixture(now0 - Hour(4 - k) - Minute(47);
+                                                   served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+                                                   v2_2_status="ok", v24_status="ok")
+                                for k in 1:4])
+        df = vcat(stack, healthy)
+        health = build_served_health(df)
+        @test health.cycles_considered == 24
+        @test health.served_fallback_cycles == 20
+        @test health.served_fallback_rate == round(20 / 24; digits=4)
+        # The disclosure: 24 cycles, but 161 hours of them.
+        @test health.served_fallback_window_cycles == 24
+        @test health.window_span_hours == 161.0
+        # The 47-minute offset puts each issue in the previous hour, which is the hour the window
+        # keys on: the oldest cycle floors to now0-162 h and the newest to now0-1 h.
+        @test health.window_start_utc == jdt(now0 - Hour(162))
+        @test health.window_end_utc == jdt(now0 - Hour(1))
+        # ... and the trailing day of issuance, which is what "trailing day" can honestly mean here,
+        # is entirely healthy.
+        @test health.served_fallback_window_24h_cycles == 4
+        @test health.served_fallback_cycles_24h == 0
+        @test health.served_fallback_rate_24h == 0.0
+
+        # An unbroken day: the two rates agree and the span is the cycle count.
+        unbroken = reduce(vcat, [live_cycle_fixture(now0 - Hour(6 - k) - Minute(47);
+                                                     served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+                                                     v2_2_status="ok", v24_status="ok")
+                                 for k in 1:6])
+        steady = build_served_health(unbroken)
+        @test steady.window_span_hours == 5.0
+        @test steady.served_fallback_rate == 0.0
+        @test steady.served_fallback_rate_24h == 0.0
+        @test steady.served_fallback_window_24h_cycles == 6
+    end
+
+    @testset "alert text writes whole nanotesla, as the dashboard does" begin
+        # The webhook and the dashboard are read together, so the same depth must not appear as
+        # "-120.0 nT" in one and "-120" in the other.
+        iss = now(UTC) - Minute(10)
+        storm = live_cycle_fixture(iss; served_pred=-120.4, served_lo=-140.4, served_hi=-100.0)
+        alerts = build_alerts(storm)
+        @test alerts.active == true
+        forecast_alert = only(filter(a -> a.kind == "forecast", alerts.alerts))
+        @test occursin("-120 nT", forecast_alert.message)
+        @test !occursin("-120.0", forecast_alert.message)
+        @test !occursin(".0 nT", forecast_alert.message)
+
+        watch = live_cycle_fixture(iss; served_pred=-60.4, served_lo=-206.4, served_hi=-40.0)
+        watch_alerts = build_alerts(watch)
+        watch_alert = only(filter(a -> a.kind == "watch", watch_alerts.alerts))
+        @test occursin("-206 nT", watch_alert.message)
+        @test !occursin("-206.0", watch_alert.message)
+        # Ties round away from zero, matching the dashboard's fixed-decimal formatting.
+        @test _alert_depth_nt(-120.5) == "-121"
+        @test _alert_depth_nt(-119.5) == "-120"
+        @test _alert_depth_nt(-120.4) == "-120"
+
+        # Formatting an alerting depth is total. This runs inside the alert builder, so a depth it
+        # cannot write as a whole number must degrade to the number itself, never to an exception:
+        # a finite magnitude no machine integer can hold used to take `/api/alerts` and the webhook
+        # down, replacing an obviously wrong number with no alert payload at all.
+        @test _alert_depth_nt(-1.0e30) == "-1.0e30"
+        @test _alert_depth_nt(1.0e30) == "1.0e30"
+        @test _alert_depth_nt(NaN) == "NaN"
+        @test _alert_depth_nt(Inf) == "Inf"
+        @test _alert_depth_nt(-Inf) == "-Inf"
+        # The machine boundary itself: exactly representable converts, past it is written out.
+        @test _alert_depth_nt(Float64(typemin(Int))) == string(typemin(Int))
+        @test _alert_depth_nt(-9.3e18) == "-9.3e18"
+        @test _alert_depth_nt(9.3e18) == "9.3e18"
+
+        # ... and the route stays up on a cycle carrying such a depth, end to end from the log.
+        corrupt = live_cycle_fixture(iss; served_pred=-1.0e30, served_lo=-1.0e30,
+                                     served_hi=-1.0e29)
+        corrupt_alerts = build_alerts(corrupt)
+        @test corrupt_alerts.active == true
+        @test occursin("-1.0e30 nT",
+                       only(filter(a -> a.kind == "forecast", corrupt_alerts.alerts)).message)
+        dir = mktempdir()
+        path = write_cycle_csv(joinpath(dir, "log.csv"), corrupt)
+        _LOG_CACHE[] = nothing
+        response = make_handler(path)(HTTP.Request("GET", "/api/alerts"))
+        @test response.status == 200
+        served_alerts = JSON3.read(String(response.body))
+        @test served_alerts.active == true
+        @test occursin("-1.0e30 nT",
+                       only(filter(a -> a.kind == "forecast", served_alerts.alerts)).message)
+        _LOG_CACHE[] = nothing
+        rm(dir; recursive=true, force=true)
+    end
+
+    @testset "feed and log text reaches the page as text, not as markup" begin
+        # The panels are assembled as HTML strings from values this page did not author: NOAA
+        # product identifiers and alert summaries, the NOAA scale token, station codes, served
+        # labels and interval sources written into the forecast log. Source scans cannot tell an
+        # escaped interpolation from an unescaped one, so the shipped file is executed against a
+        # stub DOM and every assigned innerHTML is recorded. The payload below is the marker: it
+        # must never appear as markup in any sink, and it must appear escaped where it is rendered.
+        node = Sys.which("node")
+        if node === nothing
+            @test_skip "node is unavailable; the dashboard rendering test needs a JS runtime"
+        else
+            js = read(joinpath(@__DIR__, "..", "public", "app.js"), String)
+            marker = "<img src=x onerror=BOOM>"
+            escaped = "&lt;img src=x onerror=BOOM&gt;"
+            issue = "2026-06-26T06:00:00Z"
+            payloads = replace(RENDER_PROBE_PAYLOADS_JS, "@@MARKER@@" => marker,
+                               "@@SERVED@@" => CURRENT_V2_SERVED_MODEL_VERSION,
+                               "@@ISSUE@@" => issue)
+            prelude = raw"""
+            // Stub DOM: records every innerHTML and textContent assignment by element id, so the
+            // shipped renderers run unmodified and what they produce is the thing under test.
+            const SINKS = {}, TEXTS = {}, ERRORS = [];
+            const makeEl = (id) => {
+              const el = { id, _html: "", _text: "", className: "", style: {}, dataset: {},
+                           classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+                           querySelectorAll: () => [], appendChild() {} };
+              Object.defineProperty(el, "innerHTML", {
+                get: () => el._html,
+                set: (v) => { el._html = String(v); SINKS[id] = String(v); } });
+              Object.defineProperty(el, "textContent", {
+                get: () => el._text,
+                set: (v) => { el._text = String(v); TEXTS[id] = String(v); } });
+              return el;
+            };
+            const ELEMENTS = {};
+            const document = {
+              getElementById: (id) => ELEMENTS[id] || (ELEMENTS[id] = makeEl(id)),
+              querySelectorAll: () => [],
+              createElement: () => ({ onerror: null }),
+              head: { appendChild() {} },
+              addEventListener() {},
+            };
+            // The plotting library is a markup sink too: it parses its own tag subset out of trace
+            // text, hover text and legend names. The stub records what each plot was handed, so the
+            // strings that reach that parser are checked as the values passed, not as source.
+            const PLOTS = {}, CONFIGS = [];
+            const Plotly = { react: async (id, traces, layout) => { PLOTS[id] = { traces, layout }; },
+                             purge: () => {},
+                             setPlotConfig: (config) => { CONFIGS.push(config); } };
+            const window = { Plotly, __plotlyFailed: false };
+            const console = { error: (...a) => ERRORS.push(a.map(String).join(" ")),
+                              warn() {}, log() {} };
+            // Only short waits run; the refresh loop's own reschedule and the ticker never fire.
+            const setTimeout = (fn, ms) => { if ((ms || 0) < 1000) queueMicrotask(fn); return 0; };
+            const clearTimeout = () => {};
+            const setInterval = () => 0;
+            class AbortController { constructor() { this.signal = {}; } abort() {} }
+            """
+            probe_payloads = payloads * raw"""
+            const fetch = async (path) => ({ ok: true,
+                                             json: async () => PAYLOADS[String(path).split("?")[0]] });
+            """
+            postlude = raw"""
+            (async () => {
+              await refresh();
+              process.stdout.write(JSON.stringify({ sinks: SINKS, texts: TEXTS, errors: ERRORS,
+                                                    plots: PLOTS, configs: CONFIGS }));
+            })();
+            """
+            dir = mktempdir()
+            script = joinpath(dir, "render_probe.js")
+            write(script, prelude * probe_payloads * js * postlude)
+            out = read(pipeline(ignorestatus(`$node $script`)), String)
+            @test !isempty(out)
+            rendered = JSON3.read(out)
+            @test isempty(rendered.errors)          # every renderer completed against the payload
+
+            sinks = Dict(String(k) => String(v) for (k, v) in pairs(rendered.sinks))
+            # The renderers that assemble markup all ran: this is the executed coverage the suite
+            # previously had only as source scans.
+            for id in ("forecast-caption", "calib", "swpc-alerts", "upstream-caption",
+                       "upstream-stats", "dbdt-caption", "dbdt-stats", "pipeline",
+                       "history-caption", "network-caption")
+                @test haskey(sinks, id)
+            end
+            # Not one sink carries the payload as markup.
+            for (id, html) in sinks
+                @test !occursin(marker, html)
+                @test !occursin("<img", html)
+                @test !occursin("<script", html)
+            end
+            # ... and it is rendered, escaped, everywhere it belongs: the feed's alert record and
+            # scale token, the log's interval source and served label, the station code.
+            for id in ("swpc-alerts", "upstream-caption", "upstream-stats", "calib",
+                       "forecast-caption", "dbdt-caption")
+                @test occursin(escaped, sinks[id])
+            end
+            @test occursin(escaped, sinks["swpc-alerts"])
+            @test occursin("geomagnetic storm " * escaped, sinks["swpc-alerts"])
+            # Text assignments were never a markup sink and must stay plain text.
+            texts = Dict(String(k) => String(v) for (k, v) in pairs(rendered.texts))
+            @test occursin(marker, texts["interval-badge"])
+
+            # The plotting library is the page's other markup sink. Trace text, hover text and
+            # legend names are parsed for its own tag subset — anchors, styled spans, breaks — so
+            # the station codes and names the USGS feed supplies, and the served label the log
+            # writes, are markup there exactly as they are in the document. Every string the
+            # renderers handed the library is collected and checked as a group, so a new trace
+            # carrying feed text is covered by the same assertion.
+            plot_strings = String[]
+            for (_, plot) in pairs(rendered.plots)
+                for trace in plot.traces
+                    for field in (:name, :hovertemplate, :text, :hovertext)
+                        haskey(trace, field) || continue
+                        value = trace[field]
+                        if value isa JSON3.Array
+                            append!(plot_strings, String[String(v) for v in value])
+                        elseif value !== nothing
+                            push!(plot_strings, String(value))
+                        end
+                    end
+                end
+            end
+            @test !isempty(plot_strings)
+            for value in plot_strings
+                @test !occursin(marker, value)
+                @test !occursin("<img", value)
+                @test !occursin("<a ", value)
+                @test !occursin("<span", value)
+            end
+            # ... and the marker is present, escaped, in the sinks that carry feed and log text: the
+            # station labels drawn on the map, the hover records behind them, and the legend names
+            # taken from the served label.
+            network_trace = only(rendered.plots["network-plot"].traces)
+            @test all(occursin(escaped, String(v)) for v in network_trace.text)
+            @test all(occursin(escaped, String(v)) for v in network_trace.hovertext)
+            forecast_names = String[String(t.name) for t in rendered.plots["forecast-plot"].traces
+                                    if haskey(t, :name)]
+            @test any(name -> occursin(escaped, name), forecast_names)
+
+            # The base map is fetched from this origin, and the setting is applied once, before the
+            # first plot is drawn — the library reads it when a geo subplot is created.
+            @test length(rendered.configs) == 1
+            @test String(rendered.configs[1].topojsonURL) == "/vendor/topojson/"
+            rm(dir; recursive=true, force=true)
+        end
+    end
+
+    @testset "responses carry the content-security policy and refuse writes" begin
+        dir = mktempdir()
+        path = write_cycle_csv(joinpath(dir, "log.csv"), live_cycle_fixture(now(UTC) - Minute(10)))
+        _LOG_CACHE[] = nothing
+        handler = make_handler(path)
+        header(response, name) = HTTP.header(response, name, "")
+        # The dashboard document and a JSON route: the policy travels with every response, so an
+        # injected string cannot reach a script source, an object embed, or a framing context even
+        # if an escaping sink were ever missed.
+        for request in (HTTP.Request("GET", "/"), HTTP.Request("GET", "/api/health"),
+                        HTTP.Request("GET", "/api/forecast"), HTTP.Request("GET", "/app.js"))
+            response = handler(request)
+            @test response.status == 200
+            policy = header(response, "Content-Security-Policy")
+            @test occursin("default-src 'self'", policy)
+            @test occursin("object-src 'none'", policy)
+            @test occursin("frame-ancestors 'none'", policy)
+            @test occursin("connect-src 'self'", policy)
+            @test header(response, "X-Content-Type-Options") == "nosniff"
+            @test header(response, "Referrer-Policy") == "no-referrer"
+        end
+        # The page must not need inline script under that policy: the plotting fallback was an
+        # inline onerror attribute and is now registered from the same-origin bundle.
+        html = read(joinpath(@__DIR__, "..", "public", "index.html"), String)
+        @test !occursin("onerror=", html)
+        @test !occursin(r"<script(?![^>]*\ssrc=)", html)
+        js = read(joinpath(@__DIR__, "..", "public", "app.js"), String)
+        @test occursin("cdn.plot.ly", js)          # the documented offline fallback still exists
+        @test occursin("cdn.plot.ly", CONTENT_SECURITY_POLICY)   # and the policy admits exactly it
+        # The plot toolbar's PNG export renders the chart into a blob URL and loads it as an image
+        # before the browser saves it, so a policy that admits only 'self' and data: makes the
+        # download fail with the library's own notice and nothing else. The bundle is the evidence:
+        # it creates the object URL and assigns it to an image source.
+        vendor = joinpath(@__DIR__, "..", "public", "vendor", "plotly.min.js")
+        if isfile(vendor)
+            bundle = read(vendor, String)
+            @test occursin("createObjectURL", bundle)
+        end
+        img = only(filter(d -> startswith(d, "img-src"), strip.(split(CONTENT_SECURITY_POLICY, ";"))))
+        @test "blob:" in split(img)[2:end]
+        @test occursin("displayModeBar", js)
+
+        # A traversal rejection is a response too, and carries the same policy.
+        forbidden = handler(HTTP.Request("GET", "/../secret.txt"))
+        @test forbidden.status == 403
+        @test occursin("default-src 'self'", header(forbidden, "Content-Security-Policy"))
+
+        # This server publishes a log it does not own and holds no state a request can change. The
+        # method was ignored, so a write verb was answered with the GET body and a 200.
+        for method in ("POST", "PUT", "DELETE", "PATCH", "OPTIONS")
+            response = handler(HTTP.Request(method, "/api/status"))
+            @test response.status == 405
+            @test header(response, "Allow") == "GET, HEAD"
+            @test occursin("default-src 'self'", header(response, "Content-Security-Policy"))
+        end
+        @test handler(HTTP.Request("HEAD", "/api/health")).status == 200
+        _LOG_CACHE[] = nothing
+        rm(dir; recursive=true, force=true)
+    end
+
+    @testset "the network base map is fetched from an origin the policy admits" begin
+        # `connect-src` governs one request the page does not write itself. A scattergeo has no
+        # coastlines, borders or subunit outlines of its own: the plotting library fetches a topojson
+        # file for the requested scope and resolution when the subplot is created, and its built-in
+        # source is the plotting CDN. Closing `connect-src` to this origin without redirecting that
+        # fetch leaves the network panel's markers floating over an empty frame, and nothing in the
+        # page or in the policy says so. Everything below is derived — from the shipped page and, for
+        # the parts that are the library's own behaviour, from the shipped bundle — so a bundle
+        # upgrade or a panel change that moves the base map cannot pass this silently.
+        public_dir = normpath(joinpath(@__DIR__, "..", "public"))
+        js = read(joinpath(public_dir, "app.js"), String)
+
+        directives = strip.(split(CONTENT_SECURITY_POLICY, ";"))
+        connect = only(filter(d -> startswith(d, "connect-src"), directives))
+        sources = split(connect)[2:end]
+
+        # The page names exactly one base-map source, and it is a path on this origin.
+        url_match = match(r"const TOPOJSON_URL = \"([^\"]+)\";", js)
+        @test url_match !== nothing
+        topojson_url = url_match.captures[1]
+        @test startswith(topojson_url, "/") && !startswith(topojson_url, "//")
+        @test endswith(topojson_url, "/")
+        @test occursin("Plotly.setPlotConfig({ topojsonURL: TOPOJSON_URL });", js)
+        # A same-origin path is admitted by 'self' and by nothing else in the directive, so the
+        # directive has to carry it. An absolute URL here would have to name its own origin.
+        @test "'self'" in sources
+
+        # The map the panel needs, named by the library's own rule from the geo request the panel
+        # actually makes. A panel that changes scope or resolution needs a different file.
+        geo = match(r"geo:\s*\{\s*scope:\s*\"([^\"]+)\",\s*resolution:\s*(\d+)", js)
+        @test geo !== nothing
+        map_name = replace(geo.captures[1], " " => "-") * "_" * geo.captures[2] * "m"
+        @test map_name == "north-america_50m"
+        asset = joinpath(public_dir, splitpath(lstrip(topojson_url, '/'))...,
+                         map_name * ".json")
+        @test isfile(asset)
+        topology = JSON3.read(read(asset, String))
+        @test topology.type == "Topology"
+        for layer in ("coastlines", "countries", "subunits", "land")
+            @test haskey(topology.objects, Symbol(layer))
+        end
+        # It is served, as an asset of a whitelisted type, through the same guarded static route.
+        served = serve_static(topojson_url * map_name * ".json")
+        @test served.status == 200
+        @test HTTP.header(served, "Content-Type", "") == "application/json; charset=utf-8"
+        @test length(served.body) == filesize(asset)
+
+        # Keyed to the shipped bundle: the default source the override exists to replace, and the
+        # rule that turns the panel's geo request into that filename, are read from the bundle's own
+        # bytes. The bundle is vendored, not versioned, so a checkout without it checks the rest.
+        bundle = joinpath(public_dir, "vendor", "plotly.min.js")
+        if !isfile(bundle)
+            @test_skip "the plotting bundle is not vendored here; the base-map pairing is bundle-keyed"
+        else
+            bundle_source = read(bundle, String)
+            default = match(r"topojsonURL:\{valType:\"string\",noBlank:!0,dflt:\"([^\"]+)\"\}",
+                            bundle_source)
+            @test default !== nothing
+            default_url = default.captures[1]
+            # The default really is cross-origin — this is why the override is not optional …
+            @test startswith(default_url, "http")
+            default_origin = match(r"^https?://[^/]+", default_url).match
+            # … and the policy does not admit it as a fetch destination, so leaving the default in
+            # place would block the map rather than merely route it off-origin.
+            @test !any(source -> occursin(default_origin, source), sources)
+            # The filename rule and the path rule, verbatim from the bundle: `map_name` above is
+            # computed by exactly these two, so a bundle that changes either fails here.
+            @test occursin(
+                "getTopojsonName=function(t){return[t.scope.replace(/ /g,\"-\"),\"_\"," *
+                "t.resolution.toString(),\"m\"].join(\"\")}", bundle_source)
+            @test occursin("getTopojsonPath=function(t,e){return t+e+\".json\"}", bundle_source)
+            # The bundle is the version the page's own CDN fallback names, so the vendored copy and
+            # the fallback cannot drift apart into two different libraries.
+            version = match(r"plotly\.js v([0-9]+\.[0-9]+\.[0-9]+)", bundle_source)
+            @test version !== nothing
+            @test occursin("cdn.plot.ly/plotly-" * version.captures[1] * ".min.js", js)
+        end
+    end
+
+    @testset "an unreadable log is parsed once and reported as unreadable" begin
+        dir = mktempdir()
+        path = joinpath(dir, "live_forecast_log.csv")
+        write_cycle_csv(path, live_cycle_fixture(now(UTC) - Minute(20)))
+        _LOG_CACHE[] = nothing
+        _LOG_PARSE_FAILURE[] = nothing
+        @test nrow(get_log(path)) == length(LIVE_CYCLE_HORIZONS)
+        @test log_parse_state(path).readable == true
+
+        # New bytes the loader rejects. Serving the last good frame is right; re-running the parse
+        # that produced the failure on every subsequent request is not — at the monitor's row cap
+        # that is a multi-second parse, serialized behind the load lock, for as long as the
+        # unreadable file sits there.
+        sleep(0.05)
+        write(path, "issue_time_utc,target_time_utc\n\"unterminated,2026-01-01T00:00:00\n")
+        attempts = Ref(0)
+        counting = p -> (attempts[] += 1; error("synthetic parse failure"))
+        served = @test_logs (:warn, r"serving cached copy") match_mode = :any get_log(
+            path; loader=counting)
+        @test nrow(served) == length(LIVE_CYCLE_HORIZONS)      # the last good frame is served
+        @test attempts[] == 1
+        for _ in 1:5
+            @test nrow(get_log(path; loader=counting)) == length(LIVE_CYCLE_HORIZONS)
+        end
+        @test attempts[] == 1                                  # the failing parse ran exactly once
+        failed = log_parse_state(path)
+        @test failed.readable == false
+        @test failed.serving_cached_copy == true
+        @test failed.error_type == "ErrorException"            # the type only, never the message
+        @test failed.error_age_min !== nothing && failed.error_age_min >= 0.0
+
+        # The negative cache is keyed on the file identity, never on the path, so repaired bytes are
+        # read immediately rather than inheriting the failure.
+        sleep(0.05)
+        write_cycle_csv(path, live_cycle_fixture(now(UTC) - Minute(10)))
+        @test nrow(get_log(path)) == length(LIVE_CYCLE_HORIZONS)
+        @test log_parse_state(path).readable == true
+        @test attempts[] == 1
+
+        # Health is computed from the cached frame plus the file's mtime, so an unreadable log used
+        # to report status "ok", a complete cycle and a zero-minute age — the mtime of the very file
+        # that was rejected. The missing-log case was already honest; this one was not.
+        corrupt = joinpath(dir, "corrupt.csv")
+        write_cycle_csv(corrupt, live_cycle_fixture(now(UTC) - Minute(20)))
+        _LOG_CACHE[] = nothing
+        _LOG_PARSE_FAILURE[] = nothing
+        health(p) = JSON3.read(String(
+            make_handler(p)(HTTP.Request("GET", "/api/health")).body))
+        before = health(corrupt)
+        @test before.status == "ok" && before.log_readable == true
+        @test before.cycle_complete == true && before.log_parse_error_age_min === nothing
+
+        sleep(0.05)
+        write(corrupt, "issue_time_utc,target_time_utc\n\"unterminated,2026-01-01T00:00:00\n")
+        during = health(corrupt)
+        @test during.status == "unreadable"
+        @test during.log_readable == false
+        @test during.cycle_complete == false            # the newest issuance cannot be verified
+        @test during.serving_cached_log_copy == true
+        @test during.log_parse_error_age_min !== nothing
+
+        sleep(0.05)
+        write_cycle_csv(corrupt, live_cycle_fixture(now(UTC) - Minute(15)))
+        after = health(corrupt)
+        @test after.status == "ok" && after.log_readable == true && after.cycle_complete == true
+        _LOG_CACHE[] = nothing
+        _LOG_PARSE_FAILURE[] = nothing
+        rm(dir; recursive=true, force=true)
+    end
+
     @testset "non-finite Dst threat is unknown" begin
         @test dst_threat_level(NaN) == (nothing, "Unknown")
         @test dst_threat_level(Inf) == (nothing, "Unknown")
@@ -2845,5 +3894,49 @@ esac
         @test jnum(true) === nothing
         @test jnum(false) === nothing
         @test jnum(big(10)^10_000) === nothing
+    end
+
+    @testset "the Dst threat scale is pinned at its band edges" begin
+        # The published storm class is a step function of one number, and only its non-finite
+        # inputs were asserted. Kyoto Dst is integer-valued, so the edges are hit constantly: a
+        # one-character inclusivity change moves an exact -30 nT forecast from "Minor storm" to
+        # "Quiet" — a whole tier of the alert an operator acts on — with the suite still green.
+        # Each edge belongs to the storm side, and the value just above it does not.
+        @test dst_threat_level(-29.999) == (0, "Quiet")
+        @test dst_threat_level(-30.0) == (1, "Minor storm")
+        @test dst_threat_level(-30.001) == (1, "Minor storm")
+        @test dst_threat_level(-49.999) == (1, "Minor storm")
+        @test dst_threat_level(-50.0) == (2, "Moderate storm")
+        @test dst_threat_level(-50.001) == (2, "Moderate storm")
+        @test dst_threat_level(-99.999) == (2, "Moderate storm")
+        @test dst_threat_level(-100.0) == (3, "Intense storm")
+        @test dst_threat_level(-100.001) == (3, "Intense storm")
+        @test dst_threat_level(-199.999) == (3, "Intense storm")
+        @test dst_threat_level(-200.0) == (4, "Extreme storm")
+        @test dst_threat_level(-200.001) == (4, "Extreme storm")
+        @test dst_threat_level(0.0) == (0, "Quiet")
+        @test dst_threat_level(25.0) == (0, "Quiet")
+        # The band edges the scale is defined by, read from the published constants rather than
+        # restated, so the table above cannot drift away from the thresholds it is testing.
+        @test THREAT_BANDS_NT == (-30.0, -50.0, -100.0, -200.0)
+        for (index, edge) in enumerate(THREAT_BANDS_NT)
+            @test dst_threat_level(edge) == (index, THREAT_LABELS[index + 1])
+            @test dst_threat_level(nextfloat(edge)) == (index - 1, THREAT_LABELS[index])
+        end
+
+        # ... and the published status carries the same rule: a cycle whose depth-safe center sits
+        # exactly on an edge is reported at the storm tier, not below it.
+        iss = now(UTC) - Minute(10)
+        edge_cycle = build_status(live_cycle_fixture(iss; served_pred=-50.0, served_lo=-60.0,
+                                                     served_hi=-40.0))
+        @test edge_cycle.available == true
+        @test edge_cycle.threat.point_min_dst_nt === -50.0
+        @test edge_cycle.threat.level == 2 && edge_cycle.threat.label == "Moderate storm"
+        # The watch tier is taken on the same scale, so an interval edge exactly on -100 nT is an
+        # intense-storm watch above a moderate-storm point forecast.
+        watch_cycle = build_status(live_cycle_fixture(iss; served_pred=-60.0, served_lo=-100.0,
+                                                      served_hi=-40.0))
+        @test watch_cycle.threat.level == 2
+        @test watch_cycle.threat.watch == true && watch_cycle.threat.watch_level == 3
     end
 end

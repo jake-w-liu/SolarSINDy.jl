@@ -87,17 +87,24 @@ In-place cleaning of raw OMNI2 DataFrame:
    keep `quality` = 1. Every raw row is retained so the strict hourly
    contiguity that `build_storm_catalog` and the derivative/smoothing stencils
    require is preserved.
-2. Fill short gaps (≤3 hours) in the measured columns
+2. Fill part of every gap in the measured columns, with a branch-dependent rule
+   (see below): the non-causal branch fills only gaps of at most three hours,
+   whereas the causal branch fills the first three hours of a gap of *any*
+   length and leaves the remainder missing.
 3. Compute derived quantities: Bs, θ_c, proton-only Pdyn, Dst*
 
 Short-gap filling depends on `causal`:
 - `causal=false` (default, offline/training preprocessing): centered linear
-  interpolation, which uses the post-gap bound.
+  interpolation of gaps at most three hours long that are bounded by finite
+  values on *both* sides, which uses the post-gap bound. Longer gaps, and gaps
+  touching either end of the record, are left untouched.
 - `causal=true` (replay/serving inputs): carry the last observation forward for
-  at most three consecutive hours. No decision depends on the eventual outage
-  length or a post-gap value, so every cleaned prefix is identical to the same
-  prefix cleaned in isolation. `Dst` is never causally filled (a missing
-  target/anchor Dst is left NaN rather than persisted).
+  at most three consecutive hours into a gap of any length; hours four onward of
+  a longer outage stay missing and therefore carry `quality` = 0. No decision
+  depends on the eventual outage length or a post-gap value, so every cleaned
+  prefix is identical to the same prefix cleaned in isolation. `Dst` is never
+  causally filled (a missing target/anchor Dst is left NaN rather than
+  persisted).
 
 Dynamic pressure is always recomputed proton-only (`1.6726e-6·n·V²`) via
 [`dynamic_pressure`](@ref); the OMNI word-29 alpha-inclusive pressure is not kept,

@@ -8,7 +8,7 @@ import SHA
 
 "Frozen issue offsets of the matured one-hour innovations used by V2.2-M3."
 const OPERATIONAL_V22_ERROR_LAGS_H = (1, 2, 3, 4, 6, 9, 12, 18, 24)
-const OPERATIONAL_V22_ERROR_SUPPORTED_MODEL_STEPS = (1, 2, 3, 4, 6, 7)
+const OPERATIONAL_V22_ERROR_SUPPORTED_MODEL_STEPS = OPERATIONAL_V22_MODEL_STEPS
 const OPERATIONAL_V22_ERROR_SCHEMA_VERSION = "operational_v2_2_m3_error_v1"
 const OPERATIONAL_V22_ERROR_PACKAGE_VERSION = "SolarSINDy-0.2.1"
 const OPERATIONAL_V22_ERROR_MAX_SPECTRAL_RADIUS = 0.98
@@ -141,11 +141,20 @@ function _operational_v22_error_fallback(
     )
 end
 
+"""
+Classify the 24 h innovation buffer visible at `issue_time` from an index of records.
+
+`immature_issues` names the issue hours a caller found inside the window but dropped because their
+observation had not matured by `issue_time`. Without it every such hour is indistinguishable from an
+hour that was never produced, and the fallback reports `:missing_history` for a record the caller is
+holding — the two are different operational states and only one of them resolves by waiting.
+"""
 function _operational_v22_error_history_from_index(
         record_at::AbstractDict{DateTime,OperationalV22H1Innovation},
         duplicate_issues::AbstractSet{DateTime},
         issue_time::DateTime,
-        center_hash::String)
+        center_hash::String;
+        immature_issues::AbstractSet{DateTime} = Set{DateTime}())
     any(issue_time - Hour(offset) in duplicate_issues
         for offset in 1:_OPERATIONAL_V22_ERROR_BUFFER_H) &&
         return _operational_v22_error_fallback(
@@ -155,7 +164,8 @@ function _operational_v22_error_history_from_index(
     for offset in 1:_OPERATIONAL_V22_ERROR_BUFFER_H
         issued_at = issue_time - Hour(offset)
         haskey(record_at, issued_at) || return _operational_v22_error_fallback(
-            issue_time, center_hash, :missing_history,
+            issue_time, center_hash,
+            issued_at in immature_issues ? :observation_not_mature : :missing_history,
         )
         record = record_at[issued_at]
         record.base_center_sha256 == center_hash ||
@@ -188,10 +198,16 @@ function operational_v22_matured_h1_history(
     )
     relevant = Dict{DateTime,OperationalV22H1Innovation}()
     duplicates = Set{DateTime}()
+    immature = Set{DateTime}()
     earliest = issue_time - Hour(_OPERATIONAL_V22_ERROR_BUFFER_H)
     for record in records
-        record.observation_available_at <= issue_time || continue
         earliest <= record.issued_at < issue_time || continue
+        # An in-window record whose observation has not matured is remembered rather than silently
+        # dropped, so the fallback can say which of the two states the buffer is in.
+        if record.observation_available_at > issue_time
+            push!(immature, record.issued_at)
+            continue
+        end
         if haskey(relevant, record.issued_at)
             push!(duplicates, record.issued_at)
         else
@@ -199,7 +215,7 @@ function operational_v22_matured_h1_history(
         end
     end
     return _operational_v22_error_history_from_index(
-        relevant, duplicates, issue_time, center_hash,
+        relevant, duplicates, issue_time, center_hash; immature_issues = immature,
     )
 end
 
@@ -449,7 +465,7 @@ function fit_operational_v22_error_state(
 end
 
 _operational_v22_error_cap(model_step_hours::Integer) =
-    5.0 + 5.0 * Int(model_step_hours)
+    operational_v22_correction_cap_nt(model_step_hours)
 
 "Predict a bounded correction; incomplete history returns the center unchanged."
 function operational_v22_error_state_predict(
@@ -542,7 +558,7 @@ function operational_v22_error_state_sha256(
             artifact.label,
             artifact.base_center_sha256,
             artifact.intercept_nt,
-            artifact.spectral_radius,
+            _operational_v22_hashable_spectral_radius(artifact.spectral_radius),
             artifact.stability_limit,
             artifact.ridge,
             artifact.fit_rows,
@@ -704,9 +720,10 @@ function read_operational_v22_error_state(path::AbstractString)
         _operational_v22_error_consistent(df, :spectral_radius),
         "artifact spectral radius",
     )
-    stored_radius == artifact.spectral_radius || throw(ArgumentError(
-        "V2.2-M3 error-state spectral radius is inconsistent",
-    ))
+    _operational_v22_spectral_radius_agrees(stored_radius, artifact.spectral_radius) ||
+        throw(ArgumentError(
+            "V2.2-M3 error-state spectral radius is inconsistent",
+        ))
     stored_limit = _operational_v22_error_float(
         _operational_v22_error_consistent(df, :stability_limit),
         "artifact stability limit",

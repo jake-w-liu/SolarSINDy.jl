@@ -33,13 +33,13 @@ using Statistics
 
 # `_v2_forecast`, `_driver_lookup_range`, `_transit_hours`, `_ffill!`, `OMNI`,
 # `OPERATIONAL_OUTPUT_DIR` and the live-forecast-verify replay helpers.
-include(joinpath(@__DIR__, "v2_replay.jl"))
+isdefined(@__MODULE__, :_selftest_v2) || include(joinpath(@__DIR__, "v2_replay.jl"))
 
 # `v2_1_calibration.jl` re-includes `examples/live_forecast_verify.jl`, which has
 # no include guard. Loading it into its own module keeps the replay chain above
 # byte-identical instead of redefining its types and constants.
 module V23CalibrationSource
-    include(joinpath(@__DIR__, "v2_1_calibration.jl"))
+    isdefined(@__MODULE__, :V21_CALIBRATION_TABLE) || include(joinpath(@__DIR__, "v2_1_calibration.jl"))
 end
 
 const V23_BASE_DIR = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_3_base")

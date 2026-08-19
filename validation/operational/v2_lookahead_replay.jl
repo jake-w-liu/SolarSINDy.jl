@@ -14,7 +14,7 @@
 #
 # Run from the package root: julia --project=. validation/operational/v2_lookahead_replay.jl
 
-include(joinpath(@__DIR__, "ekf_storm_replay.jl"))   # STORMS, LEADS, MAIN_RATE, _rmse, _ffill!, OMNI, _cell,
+isdefined(@__MODULE__, :STORMS) || include(joinpath(@__DIR__, "ekf_storm_replay.jl"))   # STORMS, LEADS, MAIN_RATE, _rmse, _ffill!, OMNI, _cell,
                                                      # paired_improvement, _shadow_library, _shadow_forecast
 
 const OUT_CSV_LA = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_lookahead_replay_scored.csv")

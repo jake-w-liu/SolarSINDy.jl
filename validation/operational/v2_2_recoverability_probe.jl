@@ -364,7 +364,7 @@ function _v22_recoverability_bootstrap(
     )
 end
 
-function main()
+function main_v2_2_recoverability_probe()
     table, features = _v22_recoverability_table()
     println(
         "diagnostic_only=true rows=$(nrow(table)) features=$(length(features)) " *
@@ -385,5 +385,5 @@ function main()
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    main()
+    main_v2_2_recoverability_probe()
 end

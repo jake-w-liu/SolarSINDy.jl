@@ -1,7 +1,14 @@
 # Core API
 
-Forecast issuance, alarms, calibration, and assimilation are documented in the
-[operational API](operational-api.md).
+Discovery, data preparation, baselines, metrics and utilities: the layer the forecasts are built
+from. Forecast issuance, alarms, intervals and assimilation are documented in
+[forecasting and alarms](forecast-api.md). The served operational path is documented in the
+[operational API](operational-api.md), the V2.2 research chain in the
+[V2.2 research chain](operational-v22-research-api.md), and the V2.3 study machinery in the
+[V2.3 study API](operational-v23-api.md).
+
+Each section renders every exported binding of the source file it names, so a new export appears here
+without an edit and cannot go missing from the manual.
 
 ## Module
 
@@ -9,87 +16,65 @@ Forecast issuance, alarms, calibration, and assimilation are documented in the
 SolarSINDy
 ```
 
-## Discovery
+## Utilities
+
+```@autodocs
+Modules = [SolarSINDy]
+Pages = ["utils.jl"]
+Private = false
+```
+
+## Candidate Libraries
+
+```@autodocs
+Modules = [SolarSINDy]
+Pages = ["library.jl"]
+Private = false
+```
+
+## Sparse Identification
+
+```@autodocs
+Modules = [SolarSINDy]
+Pages = ["sindy.jl"]
+Private = false
+```
+
+## Data Loading And Preparation
+
+```@autodocs
+Modules = [SolarSINDy]
+Pages = ["data.jl", "data_pipeline.jl", "data_cleaning.jl"]
+Private = false
+```
+
+`parse_omni2` is the exported name of the CSV parser; the docstring lives on the aliased function, so
+it is listed explicitly rather than through the section above.
 
 ```@docs
-CandidateLibrary
-build_solar_wind_library
-build_minimal_library
-evaluate_library
-get_term_names
-stlsq
-sindy_discover
-ensemble_sindy
-sindy_predict
-simulate_sindy
-sweep_lambda
-collinearity_diagnostics
+parse_omni2
+```
+
+## Storm Selection
+
+```@autodocs
+Modules = [SolarSINDy]
+Pages = ["storm_selection.jl"]
+Private = false
 ```
 
 ## Baselines
 
-```@docs
-burton_model
-burton_model_full
-newell_coupling
-obrien_mcpherron_model
-simulate_burton
-simulate_burton_full
-simulate_obrien
+```@autodocs
+Modules = [SolarSINDy]
+Pages = ["baselines.jl"]
+Private = false
 ```
 
-## Data And Storm Processing
+## Metrics And Performance Statistics
 
-```@docs
-SolarWindData
-StormEvent
-generate_synthetic_storm
-generate_multistorm_dataset
-prepare_sindy_data
-identify_storm_phases
-download_omni2
-prepare_omni_data
-extract_omni2_columns
-parse_omni2
-load_omni2_csv
-clean_omni_data!
-add_original_observation_flags!
-original_sindy_mask
-StormCatalogEntry
-build_storm_catalog
-extract_storm_data
-extract_all_storms
-save_storm_catalog
-load_storm_catalog
-```
-
-## Metrics
-
-```@docs
-rmse
-mae
-correlation
-skill_score
-prediction_efficiency
-metrics_summary
-wilcoxon_signed_rank_p
-paired_storm_statistics
-write_paired_storm_statistics
-holm_adjust
-write_holm_adjustment
-```
-
-## Utilities
-
-```@docs
-numerical_derivative
-smooth_moving_average
-pressure_correct_dst
-dynamic_pressure
-dst_to_dst_star
-dst_star_to_dst
-resolve_pdyn
-halfwave_rectify
-imf_clock_angle
-get_data_dir
+```@autodocs
+Modules = [SolarSINDy]
+Pages = ["metrics.jl", "performance_statistics.jl"]
+Private = false
 ```

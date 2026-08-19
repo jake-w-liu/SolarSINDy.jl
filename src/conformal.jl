@@ -445,6 +445,15 @@ function _conformal_stream_value(value::Real, label::AbstractString)
     return converted
 end
 
+# One ACI step's report. `covered` is `missing` exactly when the step carried no
+# observable residual (a gap): a gap is not a coverage verdict and must never be
+# pooled with real hits or misses. The field type is declared so both the gap and
+# the scored branch return the same concrete `NamedTuple` type.
+const AdaptiveConformalStep = @NamedTuple{
+    lo::Float64, hi::Float64, half_width::Float64,
+    covered::Union{Missing,Bool}, alpha::Float64,
+}
+
 function _adaptive_conformal_step!(ac::AdaptiveConformal, point::Float64,
                                    observed::Float64)
     level = clamp(1.0 - ac.alpha_t, 0.0, 1.0)
@@ -457,9 +466,11 @@ function _adaptive_conformal_step!(ac::AdaptiveConformal, point::Float64,
     isfinite(point) && isfinite(observed) && !isfinite(r) &&
         throw(ArgumentError("adaptive conformal residual exceeds the supported range"))
     # Gap step: a non-finite residual carries no coverage information. Report the
-    # interval from existing history but skip the history push and α_t update.
+    # interval from existing history but skip the history push and α_t update, and
+    # mark coverage `missing` rather than `false` so an unobservable step is never
+    # scored as a miss.
     if !isfinite(r)
-        return (lo=lo, hi=hi, half_width=hw, covered=false, alpha=ac.alpha_t)
+        return AdaptiveConformalStep((lo, hi, hw, missing, ac.alpha_t))
     end
     covered = r <= hw
     err = covered ? 0.0 : 1.0
@@ -467,7 +478,7 @@ function _adaptive_conformal_step!(ac::AdaptiveConformal, point::Float64,
     ac.alpha_t = clamp(ac.alpha_t + ac.gamma * (α_target - err), 0.0, 1.0)
     push!(ac.history, r)
     length(ac.history) > ac.window && popfirst!(ac.history)
-    return (lo=lo, hi=hi, half_width=hw, covered=covered, alpha=ac.alpha_t)
+    return AdaptiveConformalStep((lo, hi, hw, covered, ac.alpha_t))
 end
 
 """
@@ -481,7 +492,8 @@ before the observation enters the history.
 
 A non-finite `point` or `observed` value is treated as a missing step. The
 interval is still reported from the current finite history, but the residual is
-not pushed and `α_t` is not updated.
+not pushed, `α_t` is not updated, and `covered` is `missing` — a gap step is not
+a coverage verdict and must not be pooled with observed hits and misses.
 """
 function adaptive_conformal_step!(ac::AdaptiveConformal, point::Real, observed::Real)
     _validate_adaptive_conformal(ac)
@@ -497,6 +509,11 @@ Run ACI over a time-ordered stream. Returns `(lo, hi, covered, alpha,
 coverage)` where the per-step vectors span all steps and `coverage` is the
 realized coverage over post-warmup steps only (the operationally meaningful
 figure). Keyword arguments are forwarded to [`init_adaptive_conformal`](@ref).
+
+`covered` is `Vector{Union{Missing,Bool}}`: a step whose point or observation is
+non-finite carries no residual, so it is marked `missing` rather than `false`.
+Averaging the raw vector would score those unobservable steps as misses; use
+`mean(skipmissing(covered))`, or read `coverage`, which already excludes them.
 """
 function run_adaptive_conformal(points::AbstractVector{<:Real},
                                 observations::AbstractVector{<:Real}; kwargs...)
@@ -505,7 +522,7 @@ function run_adaptive_conformal(points::AbstractVector{<:Real},
     ac = init_adaptive_conformal(; kwargs...)
     n = length(points)
     lo = Vector{Float64}(undef, n); hi = Vector{Float64}(undef, n)
-    covered = Vector{Bool}(undef, n); alpha = Vector{Float64}(undef, n)
+    covered = Vector{Union{Missing,Bool}}(undef, n); alpha = Vector{Float64}(undef, n)
     post_hits = 0; post_total = 0
     for t in 1:n
         warm = length(ac.history) < ac.warmup
@@ -520,7 +537,7 @@ function run_adaptive_conformal(points::AbstractVector{<:Real},
         lo[t] = s.lo; hi[t] = s.hi; covered[t] = s.covered; alpha[t] = s.alpha
         if !warm && !gap
             post_total += 1
-            s.covered && (post_hits += 1)
+            s.covered === true && (post_hits += 1)
         end
     end
     coverage = post_total == 0 ? NaN : post_hits / post_total

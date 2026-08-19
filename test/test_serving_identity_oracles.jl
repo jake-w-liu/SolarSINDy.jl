@@ -25,6 +25,10 @@ include(normpath(joinpath(@__DIR__, "..", "validation", "operational",
 include(normpath(joinpath(@__DIR__, "..", "validation", "operational",
                           "v2_4_serving_identity.jl")))
 
+isdefined(Main, :LocalArtifactGate) ||
+    Base.include(Main, normpath(joinpath(@__DIR__, "local_artifact_gate.jl")))
+using Main.LocalArtifactGate: local_artifact_available
+
 const V22_IDENTITY_OUT = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_2_served_identity.csv")
 const V23_IDENTITY_OUT = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_3_serving_identity.csv")
 const V24_IDENTITY_OUT = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_4_serving_identity.csv")
@@ -202,7 +206,7 @@ const V24_IDENTITY_OUT = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_4_serving_identity
     end
 
     @testset "published oracle results" begin
-        if !isfile(V22_IDENTITY_OUT)
+        if !local_artifact_available("V2.2 served-identity table", V22_IDENTITY_OUT)
             @test_skip "run validation/operational/v2_2_served_identity.jl"
         else
             summary = CSV.read(V22_IDENTITY_OUT, DataFrame)
@@ -216,7 +220,7 @@ const V24_IDENTITY_OUT = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_4_serving_identity
             @test sort(parse.(Int, String.(steps.key))) == collect(V23_SERVING_MODEL_STEPS)
             @test all(Float64.(steps.max_abs_delta_nt) .<= V22_IDENTITY_TOL_NT)
         end
-        if !isfile(V23_IDENTITY_OUT)
+        if !local_artifact_available("V2.3 serving-identity table", V23_IDENTITY_OUT)
             @test_skip "run validation/operational/v2_3_serving_identity.jl"
         else
             rows = CSV.read(V23_IDENTITY_OUT, DataFrame)
@@ -231,7 +235,7 @@ const V24_IDENTITY_OUT = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_4_serving_identity
             @test all(abs.(layered.e_delta_nt) .<=
                       [v23_serving_e_cap(h) for h in layered.model_step_hours])
         end
-        if !isfile(V24_IDENTITY_OUT)
+        if !local_artifact_available("V2.4e serving-identity table", V24_IDENTITY_OUT)
             @test_skip "run validation/operational/v2_4_serving_identity.jl"
         else
             rows = CSV.read(V24_IDENTITY_OUT, DataFrame)

@@ -6,7 +6,7 @@ using SHA
 using SolarSINDy
 
 include(joinpath(@__DIR__, "paths.jl"))
-include(joinpath(OPERATIONAL_PACKAGE_ROOT, "examples", "live_forecast_verify.jl"))
+isdefined(@__MODULE__, :LiveVerifyConfig) || include(joinpath(OPERATIONAL_PACKAGE_ROOT, "examples", "live_forecast_verify.jl"))
 
 const V21_ISSUE_IDENTITY = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_1_issue_identity.csv")
 

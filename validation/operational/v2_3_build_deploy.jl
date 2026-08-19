@@ -38,7 +38,7 @@
 # and never uses it for severity. The decision gate below is therefore a completeness check (the
 # scoring finished and recorded a verdict), not a GO gate.
 
-include(joinpath(@__DIR__, "v2_3_common.jl"))
+isdefined(@__MODULE__, :V23Context) || include(joinpath(@__DIR__, "v2_3_common.jl"))
 
 "Deployment file names, in manifest order."
 const V23_DEPLOY_FRAME = "analog_frame_2010_2019.csv"

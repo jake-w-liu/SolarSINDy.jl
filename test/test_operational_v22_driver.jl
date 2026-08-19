@@ -264,4 +264,49 @@ end
             @test_throws ArgumentError write_operational_v22_driver(link, artifact)
         end
     end
+
+    @testset "S1: the stored spectral radius is compared within a reproducibility budget" begin
+        # `maximum(abs, eigvals(companion))` is LAPACK-path dependent in its last bits, so an exact
+        # `==` between the stored radius and the one the constructor recomputes refuses a perfectly
+        # good artifact on a different host or BLAS thread count. The comparison carries a budget,
+        # and the identity hashes a rounded radius so it stays portable across those hosts.
+        states, _, _ = _v22d_synthetic_states(rows=600)
+        artifact = fit_operational_v22_driver(
+            states; ridge=1.0e-5, threshold=1.0e-1, label="ulp",
+        )
+        @test artifact.spectral_radius > 0.0
+        mktempdir() do tmp
+            path = joinpath(tmp, "driver.csv")
+            write_operational_v22_driver(path, artifact)
+
+            # One ulp of drift in the recorded radius must still load, with the same identity.
+            nudged = CSV.read(path, DataFrame)
+            nudged.spectral_radius .= nextfloat(artifact.spectral_radius)
+            @test nudged.spectral_radius[1] != artifact.spectral_radius
+            nudged_path = joinpath(tmp, "nudged.csv")
+            CSV.write(nudged_path, nudged)
+            restored = read_operational_v22_driver(nudged_path)
+            @test operational_v22_driver_sha256(restored) ==
+                  operational_v22_driver_sha256(artifact)
+            @test operational_v22_driver_coefficients(restored) ==
+                  operational_v22_driver_coefficients(artifact)
+
+            # A radius that is wrong by more than the budget is still refused — the check is a
+            # budget, not a removal.
+            wrong = CSV.read(path, DataFrame)
+            wrong.spectral_radius .= artifact.spectral_radius * 1.001
+            wrong_path = joinpath(tmp, "wrong.csv")
+            CSV.write(wrong_path, wrong)
+            @test_throws ArgumentError read_operational_v22_driver(wrong_path)
+        end
+        # The rounded token is what the identity carries, and it is stable under ulp drift.
+        radius = artifact.spectral_radius
+        @test SolarSINDy._operational_v22_hashable_spectral_radius(radius) ==
+              SolarSINDy._operational_v22_hashable_spectral_radius(nextfloat(radius))
+        @test SolarSINDy._operational_v22_spectral_radius_agrees(radius, nextfloat(radius))
+        @test !SolarSINDy._operational_v22_spectral_radius_agrees(radius, radius * 1.001)
+        # And the stability gate itself is untouched: an unstable candidate is still refused.
+        @test SolarSINDy.OPERATIONAL_V22_SPECTRAL_RADIUS_RTOL <
+              SolarSINDy.OPERATIONAL_V22_DRIVER_STABILITY_TOLERANCE
+    end
 end

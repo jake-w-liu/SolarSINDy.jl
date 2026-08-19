@@ -28,7 +28,7 @@
 # rewrites that contract with the pre-Amendment selection; rerun
 # `v2_3_select.jl` after it.
 
-include(joinpath(@__DIR__, "v2_3_common.jl"))
+isdefined(@__MODULE__, :V23Context) || include(joinpath(@__DIR__, "v2_3_common.jl"))
 
 const V23_DEV_SELECTION_JSON = "selected_configuration.json"
 

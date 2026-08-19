@@ -217,6 +217,70 @@ end
               DateTime(2022, 5, 5, 1, 30)
     end
 
+    @testset "S9: the linear ephemeris-position branch is verified, not only accepted" begin
+        # Every fixture pair uses `position_method = "exact"`, so the linear branch of the position
+        # contract — the one a real interpolated ephemeris row takes — was never entered: its
+        # bracket rule and its interpolation-fraction check were unexecuted code.
+        issue = DateTime(2022, 5, 5, 2)
+        measurement = DateTime(2022, 5, 5, 0, 10)
+        lower = measurement - Minute(2)
+        upper = measurement + Minute(6)
+        exact_fraction = Dates.value(measurement - lower) / Dates.value(upper - lower)
+        @test exact_fraction == 0.25
+
+        linear = _v22a_rehash_pair(
+            _v22a_pair(measurement; issue=issue, delay_minutes=50.0, sequence=7),
+            (position_method="linear",
+             position_lower_time_utc=_v22a_utc(lower),
+             position_upper_time_utc=_v22a_utc(upper),
+             position_interpolation_fraction=exact_fraction),
+        )
+        queue = build_operational_v22_arrival_queue((linear,), issue)
+        @test only(queue.transported_pairs).arrival_time_utc == DateTime(2022, 5, 5, 1)
+
+        # A fraction that does not match the bracket is refused.
+        for bad_fraction in (0.0, 0.5, exact_fraction + 1e-6)
+            bad = _v22a_rehash_pair(linear, (position_interpolation_fraction=bad_fraction,))
+            @test_throws ArgumentError build_operational_v22_arrival_queue((bad,), issue)
+        end
+        # The linear branch requires a STRICT bracket on BOTH sides. Each half-open case below
+        # carries the fraction the loosened rule would compute, so only the strictness of the
+        # bracket test can refuse it: a `<` weakened to `<=` on either side lets it through.
+        touching_lower = _v22a_rehash_pair(
+            linear,
+            (position_lower_time_utc=_v22a_utc(measurement),
+             position_upper_time_utc=_v22a_utc(upper),
+             position_interpolation_fraction=0.0),
+        )
+        @test_throws ArgumentError build_operational_v22_arrival_queue((touching_lower,), issue)
+        touching_upper = _v22a_rehash_pair(
+            linear,
+            (position_lower_time_utc=_v22a_utc(lower),
+             position_upper_time_utc=_v22a_utc(measurement),
+             position_interpolation_fraction=1.0),
+        )
+        @test_throws ArgumentError build_operational_v22_arrival_queue((touching_upper,), issue)
+        # A fully degenerate bracket is refused too, even though the exact branch accepts that shape.
+        degenerate = _v22a_rehash_pair(
+            linear,
+            (position_lower_time_utc=_v22a_utc(measurement),
+             position_upper_time_utc=_v22a_utc(measurement),
+             position_interpolation_fraction=0.0),
+        )
+        @test_throws ArgumentError build_operational_v22_arrival_queue((degenerate,), issue)
+        # A bracket longer than one hour is refused on either branch.
+        too_wide = _v22a_rehash_pair(
+            linear,
+            (position_lower_time_utc=_v22a_utc(measurement - Minute(31)),
+             position_upper_time_utc=_v22a_utc(measurement + Minute(31)),
+             position_interpolation_fraction=0.5),
+        )
+        @test_throws ArgumentError build_operational_v22_arrival_queue((too_wide,), issue)
+        # And an unknown method is refused outright, so the two branches are the whole contract.
+        unknown = _v22a_rehash_pair(linear, (position_method="spline",))
+        @test_throws ArgumentError build_operational_v22_arrival_queue((unknown,), issue)
+    end
+
     @testset "bin medians and exact physical fallbacks" begin
         issue = DateTime(2022, 5, 5, 2)
         pairs = [

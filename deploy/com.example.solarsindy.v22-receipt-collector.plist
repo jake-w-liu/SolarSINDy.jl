@@ -10,6 +10,23 @@
 
   Starting capture requires SOLARSINDY_LOAD=1 explicitly. This job archives
   inputs only; it never issues forecasts.
+
+  Manual install: replace EVERY placeholder in the dict below with a literal
+  value, create __RECEIPT_LOG_DIR__, copy to ~/Library/LaunchAgents/, then
+  bootstrap with:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.solarsindy.v22-receipt-collector.plist
+
+  Complete placeholder list for this template — every one must be replaced:
+
+    __JULIA_BIN__        stable juliaup shim (~/.juliaup/bin/julia), not a
+                         version-pinned juliaup directory
+    __CLONE_DIR__        absolute path to the SolarSINDy.jl clone
+    __RECEIPT_DIR__      immutable receipt root (default __CLONE_DIR__/var/v2_2_l1_receipts)
+    __RECEIPT_LOG_DIR__  console-capture directory (default __CLONE_DIR__/var/v2_2_l1_logs)
+    EXTRA_ENV marker     the commented marker line inside EnvironmentVariables.
+                         This service reads no allow-listed solarsindy.env key,
+                         so the install script removes the line; a manual
+                         install deletes it too.
 -->
 <plist version="1.0">
 <dict>
@@ -33,6 +50,7 @@
   <dict>
     <key>JULIA_NUM_THREADS</key>
     <string>1</string>
+    <!-- __EXTRA_ENV__ -->
   </dict>
 
   <key>RunAtLoad</key>

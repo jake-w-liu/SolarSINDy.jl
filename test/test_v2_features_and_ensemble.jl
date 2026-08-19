@@ -483,3 +483,50 @@ end
         rejects(DataFrame(term=["Bs"], coefficient=[Inf]))
     end
 end
+
+@testset "V2-FEATURES-PARITY: every deployed calibration feature is produced by the builder" begin
+    # The deployed calibration's `feature` column is the authoritative list of
+    # served regressors. `add_operational_v2_features!` is the single producer.
+    # This pins the two together, replacing the standing feature-name constants
+    # that were unreferenced and had drifted from the served set.
+    cal_path = joinpath(@__DIR__, "..", "deploy", "operational_v2_calibration.csv")
+    @test isfile(cal_path)
+    served = Symbol.(CSV.read(cal_path, DataFrame).feature)
+    @test :intercept in served
+    regressors = filter(!=(:intercept), served)
+    @test !isempty(regressors)
+
+    t0 = DateTime(2024, 1, 1, 0)
+    rows = NamedTuple[]
+    for h in 0:11, L in (1, 2, 3, 6)
+        t = t0 + Hour(h)
+        push!(rows, (
+            issue_time_utc = string(t),
+            latest_dst_time_utc = string(t),
+            model_step_hours = Float64(L),
+            latest_dst_nt = -10.0 - 3.0 * h,
+            V_kms = 400.0 + 5.0 * h,
+            Bz_nt = -5.0 - 0.5 * h,
+            By_nt = 1.0,
+            n_cm3 = 5.0,
+            Pdyn_npa = 2.0,
+            pred_dst_nt = -12.0 - 3.0 * h,
+            persistence_dst_nt = -10.0 - 3.0 * h,
+            obrien_dst_nt = -11.0 - 3.0 * h,
+            burton_dst_nt = -13.0 - 3.0 * h,
+            burton_full_dst_nt = -14.0 - 3.0 * h,
+        ))
+    end
+    built = SolarSINDy.add_operational_v2_features!(DataFrame(rows))
+    produced = Set(Symbol.(names(built)))
+    missing_names = [f for f in regressors if !(f in produced)]
+    @test isempty(missing_names)
+    # Mutation sensitivity: the check must be able to fail. A name the builder
+    # does not produce is reported, so dropping a `_maybe_add_column!` call fires.
+    @test !(:not_a_produced_feature_nt in produced)
+    # Every served regressor must also be finite on a well-formed frame, so a
+    # column that exists only as an all-NaN placeholder cannot pass silently.
+    for f in regressors
+        @test all(isfinite, Float64.(built[!, f]))
+    end
+end

@@ -18,8 +18,8 @@
 
 using Dates, DataFrames, Statistics, Printf, CSV, Random
 include(joinpath(@__DIR__, "paths.jl"))
-include(joinpath(OPERATIONAL_PACKAGE_ROOT, "examples", "live_forecast_verify.jl"))  # replay_recent_table, _omni_replay_inputs, LiveVerifyConfig, _load_calibration_for_model
-include(joinpath(@__DIR__, "ekf_shadow.jl"))   # _shadow_library, _new_filter, _shadow_forecast, BOOT_YEAR0
+isdefined(@__MODULE__, :LiveVerifyConfig) || include(joinpath(OPERATIONAL_PACKAGE_ROOT, "examples", "live_forecast_verify.jl"))  # replay_recent_table, _omni_replay_inputs, LiveVerifyConfig, _load_calibration_for_model
+isdefined(@__MODULE__, :_shadow_library) || include(joinpath(@__DIR__, "ekf_shadow.jl"))   # _shadow_library, _new_filter, _shadow_forecast, BOOT_YEAR0
 
 const OMNI    = OPERATIONAL_OMNI
 const OUT_CSV = joinpath(OPERATIONAL_OUTPUT_DIR, "ekf_storm_replay_scored.csv")

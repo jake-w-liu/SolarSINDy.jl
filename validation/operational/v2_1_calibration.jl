@@ -14,7 +14,7 @@ using SHA
 using Statistics
 
 include(joinpath(@__DIR__, "paths.jl"))
-include(joinpath(OPERATIONAL_PACKAGE_ROOT, "examples", "live_forecast_verify.jl"))
+isdefined(@__MODULE__, :LiveVerifyConfig) || include(joinpath(OPERATIONAL_PACKAGE_ROOT, "examples", "live_forecast_verify.jl"))
 
 const V21_CALIBRATION_YEAR_START = 2010
 const V21_CALIBRATION_YEAR_END = 2022

@@ -397,7 +397,58 @@ function _finite_mean(v, default::Float64)
 end
 
 const LIVE_MIN_HOURLY_DRIVER_SAMPLES = SolarSINDy.MIN_HOURLY_DRIVER_SAMPLES
-const LIVE_FUTURE_CLOCK_TOLERANCE = Minute(2)
+# Source-clock skew band. Below the tolerance a future-dated feed sample is not even remarked on;
+# between the tolerance and the sanity limit it is reported and the post-issue samples are excluded
+# as non-causal; beyond the sanity limit the timestamps no longer describe the same clock as the
+# issue time and issuance fails closed. Both are env-overridable in whole minutes so an operator can
+# tighten (or, on a host with known drift, widen) the band without a code change.
+#
+# These are resolved at load time, so a malformed value must NOT abort the load: this file is the
+# engine behind the supervised daemon, and one typo in a launchd EnvironmentVariables entry would
+# otherwise turn every restart into a 60 s crash loop that issues nothing. A bad value is reported
+# and the documented default is used instead — the daemon keeps forecasting on the shipped band.
+# Install time is where a typo is fatal: `deploy/install_launchd.sh` rejects a non-numeric or
+# inconsistent pair before it can be written into a plist.
+const LIVE_FUTURE_CLOCK_TOLERANCE_DEFAULT_MIN = 2
+const LIVE_MAX_FUTURE_CLOCK_SKEW_DEFAULT_MIN = 15
+
+function _live_minutes_from_env(name::AbstractString, default::Int)
+    default >= 0 || throw(ArgumentError("default must be a nonnegative number of minutes"))
+    haskey(ENV, name) || return Minute(default)
+    raw = ENV[name]
+    parsed = tryparse(Int, strip(raw))
+    if parsed === nothing || parsed < 0
+        @warn "ignoring $name: expected a nonnegative whole number of minutes; " *
+              "continuing on the documented default" value=repr(raw) default_minutes=default
+        return Minute(default)
+    end
+    return Minute(parsed)
+end
+
+# Resolve the band as a pair: the sanity limit must not sit below the tolerance, or the "report and
+# exclude" band would be empty and a mildly future-dated sample would fail issuance closed. An
+# inconsistent pair falls back to BOTH documented defaults rather than widening the sanity limit to
+# match, because widening relaxes the fail-closed guard the operator never asked to relax.
+function _live_clock_skew_band()
+    tolerance = _live_minutes_from_env(
+        "LIVE_FUTURE_CLOCK_TOLERANCE_MIN", LIVE_FUTURE_CLOCK_TOLERANCE_DEFAULT_MIN,
+    )
+    limit = _live_minutes_from_env(
+        "LIVE_MAX_FUTURE_CLOCK_SKEW_MIN", LIVE_MAX_FUTURE_CLOCK_SKEW_DEFAULT_MIN,
+    )
+    if limit < tolerance
+        @warn "ignoring the configured source-clock skew band: " *
+              "LIVE_MAX_FUTURE_CLOCK_SKEW_MIN is below LIVE_FUTURE_CLOCK_TOLERANCE_MIN; " *
+              "continuing on the documented defaults" tolerance limit
+        return (tolerance=Minute(LIVE_FUTURE_CLOCK_TOLERANCE_DEFAULT_MIN),
+                limit=Minute(LIVE_MAX_FUTURE_CLOCK_SKEW_DEFAULT_MIN))
+    end
+    return (tolerance=tolerance, limit=limit)
+end
+
+const _LIVE_CLOCK_SKEW_BAND = _live_clock_skew_band()
+const LIVE_FUTURE_CLOCK_TOLERANCE = _LIVE_CLOCK_SKEW_BAND.tolerance
+const LIVE_MAX_FUTURE_CLOCK_SKEW = _LIVE_CLOCK_SKEW_BAND.limit
 const LIVE_MAX_SOLAR_WIND_AGE_HOURS = 6.0
 const LIVE_MAX_DST_ANCHOR_LAG_STEPS = 1
 const LIVE_WARN_SOLAR_WIND_AGE_HOURS = 2.0
@@ -904,17 +955,63 @@ function _subhour_trajectory(template::ForecastState,
     return pts
 end
 
-function _forecast_pidfile_has_local_live_owner(lock_path::AbstractString)
+# Does the lock pidfile still have a live local owner? Answering `true` short-circuits the
+# `trymkpidlock` call in `_with_forecast_log_lock`, which is the only place Pidfile's own staleness
+# rule can run — so this predicate must apply that rule itself, not just a liveness test. The
+# contract is exactly `!Pidfile.stale_pidfile(path, stale_age, refresh)` for a local live PID, and
+# `test_live_forecast_verify.jl` pins that as a differential oracle against the stdlib.
+#
+# `Pidfile.stale_pidfile` declares a refreshed lock stale once its mtime is older than
+# `5 * stale_age`, EVEN for a live PID, precisely because a PID can be recycled. Without the age
+# clause here, a lock left behind by a SIGKILLed daemon whose PID is later reused by an unrelated
+# long-lived process is reported as owned forever: every locked step (four issuances, refresh,
+# retention, the ACI query) then burns its full 30 s timeout and no restart can clear it.
+# `parse_pidfile` already returns the age, so this costs nothing extra.
+#
+# A FUTURE-dated pidfile (`age < -stale_age`, from a backwards clock step or a skewed filesystem) is
+# deliberately NOT treated as stale here, because the stdlib does not treat it as stale either: on
+# the pinned Julia, `stale_pidfile` only emits "filesystem time skew detected" for that case and
+# returns `false`, so the lock is never reclaimed by age. Reporting it stale would diverge from the
+# authority without clearing anything — `trymkpidlock` would still fail. What the short-circuit DOES
+# swallow is the stdlib's warning, which would leave the resulting wedge as a silent 30 s stall per
+# locked step, so this predicate raises the skew itself and the lock timeout reports the pidfile
+# state that caused it.
+function _forecast_pidfile_has_local_live_owner(lock_path::AbstractString;
+                                                stale_after_sec::Real=900.0)
     isfile(lock_path) && !islink(lock_path) || return false
     try
-        pid, hostname, _ = Pidfile.parse_pidfile(String(lock_path))
+        pid, hostname, age = Pidfile.parse_pidfile(String(lock_path))
         local_owner = isempty(hostname) || hostname == gethostname()
-        return local_owner && Pidfile.isvalidpid(hostname, pid)
+        (local_owner && Pidfile.isvalidpid(hostname, pid)) || return false
+        if age < -Float64(stale_after_sec)
+            @warn "forecast log lock is future-dated; neither Pidfile nor this mirror can " *
+                  "reclaim it by age until the clock catches up" lock_path age_sec=age maxlog=1
+        end
+        # stale_age == 0 disables Pidfile's staleness rule entirely; mirror that.
+        stale_after_sec > 0 || return true
+        return age <= 5 * Float64(stale_after_sec)
     catch error
         # A concurrent release can make the read fail. The subsequent exclusive
         # open remains the authority, so a transient read failure is not ownership.
         error isa IOError || error isa EOFError || rethrow()
         return false
+    end
+end
+
+# One-line pidfile state for the lock-timeout message, so a wedge names its cause (dead PID, foreign
+# host, future-dated mtime) instead of only the path.
+function _forecast_pidfile_diagnosis(lock_path::AbstractString)
+    isfile(lock_path) || return isdir(lock_path) ? "lock path is a directory" :
+                                (islink(lock_path) ? "lock path is a symlink" : "no pidfile present")
+    try
+        pid, hostname, age = Pidfile.parse_pidfile(String(lock_path))
+        owner = isempty(hostname) ? "this host" : hostname
+        skew = age < 0 ? "; mtime is $(round(-age; digits=1)) s in the FUTURE (clock skew)" : ""
+        return "pid=$(pid) host=$(owner) age=$(round(age; digits=1)) s" *
+               " valid_pid=$(Pidfile.isvalidpid(hostname, pid))" * skew
+    catch error
+        error isa IOError || error isa EOFError || rethrow()
+        return "pidfile unreadable"
     end
 end
 
@@ -930,14 +1027,19 @@ function _with_forecast_log_lock(f, log_path::String; timeout_sec::Float64=30.0,
     owner = false
     while owner === false
         if !isdir(lock_path) && !islink(lock_path) &&
-           !_forecast_pidfile_has_local_live_owner(lock_path)
+           !_forecast_pidfile_has_local_live_owner(
+               lock_path; stale_after_sec=stale_after_sec,
+           )
             owner = Pidfile.trymkpidlock(
                 lock_path; stale_age=stale_after_sec,
                 refresh=stale_after_sec == 0 ? 0.0 : stale_after_sec / 2,
             )
         end
         owner === false || break
-        time() < deadline || error("timed out waiting for forecast log lock: $lock_path")
+        time() < deadline || error(
+            "timed out waiting for forecast log lock: $lock_path " *
+            "[$(_forecast_pidfile_diagnosis(lock_path))]",
+        )
         sleep(min(poll_sec, max(deadline - time(), 0.0)))
     end
     try
@@ -2523,6 +2625,13 @@ end
 # :disturbed when latest_dst ≤ threshold, else :quiet; non-finite Dst → :disturbed.
 const _ACI_ACTIVITY_THRESHOLD_NT = -30.0
 const _ACI_HISTORY_WINDOW = 500
+# Stream configuration. Named rather than repeated as literals so the stream key, the readiness
+# probe and the monitor's immature-stream diagnostic all describe the same stream.
+const _ACI_TARGET_COVERAGE = 0.90
+const _ACI_GAMMA = 0.03
+const _ACI_WARMUP = 30
+# Extra verified residuals a pool must hold beyond `warmup` before it may be served from.
+const _ACI_POOL_MARGIN = 5
 _aci_regime(latest_dst::Real, thr::Real=_ACI_ACTIVITY_THRESHOLD_NT) =
     (isfinite(latest_dst) && latest_dst > thr) ? :quiet : :disturbed
 
@@ -2667,10 +2776,10 @@ function _select_aci_state(entry, latest_dst::Real, activity_threshold::Real,
     if isfinite(Float64(latest_dst))
         candidate = String(_aci_regime(Float64(latest_dst), activity_threshold))
         snapshot = entry[candidate]
-        Int(snapshot["count"]) >= warmup + 5 && (pool = candidate)
+        Int(snapshot["count"]) >= warmup + _ACI_POOL_MARGIN && (pool = candidate)
     end
     snapshot = entry[pool]
-    Int(snapshot["count"]) >= warmup + 5 || return nothing
+    Int(snapshot["count"]) >= warmup + _ACI_POOL_MARGIN || return nothing
     return _restore_aci(snapshot, target_coverage, gamma, warmup, history_window)
 end
 
@@ -2788,8 +2897,9 @@ function _aci_interval_from_log(log_path::AbstractString, center::Real,
                                 latest_dst::Real=NaN,
                                 pred_col::Symbol=:v2_pred_dst_nt,
                                 activity_threshold::Real=_ACI_ACTIVITY_THRESHOLD_NT,
-                                target_coverage::Float64=0.90, gamma::Float64=0.03,
-                                warmup::Int=30,
+                                target_coverage::Float64=_ACI_TARGET_COVERAGE,
+                                gamma::Float64=_ACI_GAMMA,
+                                warmup::Int=_ACI_WARMUP,
                                 history_window::Int=_ACI_HISTORY_WINDOW)
     try
         isfile(log_path) || return nothing
@@ -3218,6 +3328,21 @@ function write_markdown_table(path::String, df::DataFrame; limit::Int=24)
     return path
 end
 
+# Scored coverage over the rows that were actually observable. `score_operational_v2` records
+# `missing` for a row whose observation is absent or non-finite — such a row is neither a hit nor a
+# miss — so both the numerator and the DENOMINATOR must exclude it. Returns `(fraction, n)` with
+# `fraction = NaN` and `n = 0` when nothing in the frame has been verified yet.
+function _observable_coverage(flags)
+    hits = 0
+    n = 0
+    for value in flags
+        ismissing(value) && continue
+        n += 1
+        Bool(value) && (hits += 1)
+    end
+    return (fraction = n == 0 ? NaN : hits / n, n = n)
+end
+
 function _print_replay_metrics(df::DataFrame)
     println("Recent causal replay rows: $(nrow(df))")
     for (name, col) in (
@@ -3235,9 +3360,10 @@ function _print_replay_metrics(df::DataFrame)
         idx = .!ismissing.(vals)
         _print_metric(name, Float64.(vals[idx]), Float64.(df.observation_dst_nt[idx]))
     end
+    coverage = _observable_coverage(df.observed_in_90ci)
     println(
-        "Logged-model 90% coverage n=$(nrow(df)) coverage=",
-        round(mean(Bool.(df.observed_in_90ci)); digits=3),
+        "Logged-model 90% coverage n=$(coverage.n) coverage=",
+        round(coverage.fraction; digits=3),
     )
     return nothing
 end
@@ -3725,7 +3851,9 @@ function _select_validated_v2_calibration(train::DataFrame,
             # Persistence forecast = latest observed Dst at issue time.
             persm = gate_metrics[:latest_dst_nt]
             obrm = has_obrien ? gate_metrics[:obrien_dst_nt] : nothing
-            cov = nrow(vs) == 0 ? NaN : mean(Bool.(vs.v2_observed_in_90ci))
+            # Coverage over observable rows only: an unverified row is not a coverage failure, and
+            # counting it as one would push a sound candidate below v2_coverage_floor.
+            cov = _observable_coverage(vs.v2_observed_in_90ci).fraction
             beats_base = _v2_gate_pass(v2m, basem)
             beats_pers = _v2_gate_pass(v2m, persm)
             beats_obr = obrm === nothing ? true : _v2_gate_pass(v2m, obrm)
@@ -3859,8 +3987,9 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
     # into model selection.
     holdout_scored = score_operational_v2(holdout, cal)
     holdout_v2 = _scored_metric(holdout_scored, :v2_pred_dst_nt)
-    holdout_coverage = nrow(holdout_scored) == 0 ? NaN :
-        mean(Bool.(holdout_scored.v2_observed_in_90ci))
+    # Observable rows only: the holdout safety gate must not read an unverified row as an interval
+    # failure, or a split that simply has not been scored yet blocks deployment of a sound interval.
+    holdout_coverage = _observable_coverage(holdout_scored.v2_observed_in_90ci).fraction
 
     selection_audit = copy(selection.candidates)
     selected_mask = (selection_audit.feature_set .== selection.row.feature_set) .&
@@ -4008,25 +4137,48 @@ function _assert_supported_model_step(calibration::OperationalV2Calibration,
     return nothing
 end
 
+# Diagnose source-clock skew without turning it into an outage.
+#
+# Post-issue samples never enter a forecast: `_latest_causal_index` selects the newest sample at or
+# before the issue time for every source, and every downstream solar-wind window is capped at
+# `latest_common_sw`. A feed whose newest row is minutes ahead of the local clock is therefore a
+# clock-agreement diagnostic, not a causality violation. Failing the whole issuance on it converted a
+# 0.05 h skew into 4/4 failed horizons on 2026-07-30 and, sustained, into a dead-man restart loop
+# that a restart cannot fix because the clocks do not converge on restart.
+#
+# So: silent below `tolerance`; reported (with the skew and how many samples are being excluded as
+# non-causal) between `tolerance` and `sanity_limit`; fail closed beyond `sanity_limit`, where the
+# timestamps no longer plausibly describe the same clock. The remaining hard failure — a feed with no
+# causal sample at all — stays in `_latest_causal_index`.
 function _validate_feed_timestamps(issue_time::DateTime,
                                    latest_plasma::DateTime,
                                    latest_mag::DateTime,
                                    latest_dst::DateTime;
-                                   tolerance::Minute=LIVE_FUTURE_CLOCK_TOLERANCE)
+                                   tolerance::Minute=LIVE_FUTURE_CLOCK_TOLERANCE,
+                                   sanity_limit::Minute=LIVE_MAX_FUTURE_CLOCK_SKEW,
+                                   future_sample_counts=nothing)
     tolerance >= Minute(0) || throw(ArgumentError("future-clock tolerance must be nonnegative"))
+    sanity_limit >= tolerance || throw(ArgumentError(
+        "future-clock sanity limit must be at least the tolerance",
+    ))
     limit = issue_time + tolerance
-    latest_plasma <= limit || error(
-        "Plasma feed timestamp is in the future by " *
-        "$(round(Dates.value(latest_plasma - issue_time) / 3_600_000; digits=2)) h",
-    )
-    latest_mag <= limit || error(
-        "Magnetic-field feed timestamp is in the future by " *
-        "$(round(Dates.value(latest_mag - issue_time) / 3_600_000; digits=2)) h",
-    )
-    latest_dst <= limit || error(
-        "Kyoto Dst feed timestamp is in the future by " *
-        "$(round(Dates.value(latest_dst - issue_time) / 3_600_000; digits=2)) h",
-    )
+    hard_limit = issue_time + sanity_limit
+    for (source, latest) in (("Plasma", latest_plasma),
+                             ("Magnetic-field", latest_mag),
+                             ("Kyoto Dst", latest_dst))
+        latest <= limit && continue
+        skew_hours = round(Dates.value(latest - issue_time) / 3_600_000; digits=2)
+        latest <= hard_limit || error(
+            "$source feed timestamp is in the future by $skew_hours h",
+        )
+        dropped = future_sample_counts === nothing ? missing :
+                  get(future_sample_counts, source, missing)
+        @warn("$source feed timestamp is ahead of the issue clock; post-issue samples are " *
+              "excluded as non-causal and issuance continues on the causal remainder",
+              source, skew_hours, non_causal_samples=dropped,
+              tolerance_minutes=Dates.value(tolerance),
+              sanity_limit_minutes=Dates.value(sanity_limit))
+    end
     return nothing
 end
 
@@ -4099,7 +4251,12 @@ function issue_forecast(cfg::LiveVerifyConfig;
     raw_latest_mag = maximum(mag.time_tag)
     raw_dst_anchor_idx = argmax(dst_times)
     _validate_feed_timestamps(
-        issue_time, raw_latest_plasma, raw_latest_mag, dst_times[raw_dst_anchor_idx],
+        issue_time, raw_latest_plasma, raw_latest_mag, dst_times[raw_dst_anchor_idx];
+        future_sample_counts=Dict(
+            "Plasma" => count(>(issue_time), plasma.time_tag),
+            "Magnetic-field" => count(>(issue_time), mag.time_tag),
+            "Kyoto Dst" => count(>(issue_time), dst_times),
+        ),
     )
     # The tolerance above diagnoses small source-clock skew; it does not make post-issue
     # samples causal. Select the newest sample at or before the recorded issue time for
@@ -4566,6 +4723,12 @@ function issue_forecast(cfg::LiveVerifyConfig;
         n_by_finite_trailing_hour=[n_by_finite],
         n_steps_driver_fallback=[n_steps_driver_fallback],
         interval_source=[served_interval_source],
+        # Source of the frozen-tail band columns (`pred_dst_ci05/95_nt`, `v2_pred_dst_ci*`,
+        # `improved_pred_dst_ci*`), recorded before the V2.4e override rewrites `interval_source`.
+        # The batch's adaptive and static-conformal policies differ by roughly a factor of four in
+        # width, and `observed_in_90ci` / `v2_observed_in_90ci` pool both, so without this column a
+        # V2.4e-served row leaves no per-row separator for the frozen-tail coverage audit.
+        frozen_tail_interval_source=[interval_source],
         feature_driver_basis=[_ANCHOR_FEATURE_DRIVER_BASIS],
         V_kms=[driver_audit.V_kms],
         Bz_nt=[driver_audit.Bz_nt],

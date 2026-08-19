@@ -79,6 +79,47 @@ include(joinpath(@__DIR__, "..", "validation", "operational", "v2_1_calibration.
     # old target-to-target check that missed forecast-origin leakage.
     @test leaky.target_time_utc[1] < leaky.target_time_utc[2]
     @test_throws ErrorException _v21_split_audit(leaky)
+
+    # The validation -> holdout boundary is a separate comparison from the
+    # fit -> validation one, and only a holdout that leaks past validation while
+    # staying clear of fit can tell them apart: an index copied from the first
+    # comparison into the second would accept this frame. The holdout is issued
+    # one hour before the last validation target is observable, so it is trained
+    # on an outcome it could not have known, while validation itself stays
+    # causal and the three issue-time sets remain disjoint.
+    leaky_holdout = copy(causal)
+    leaky_holdout.issue_time_utc[3] = t0 + Hour(4)
+    leaky_holdout.target_time_utc[3] = t0 + Hour(5)
+    leaky_holdout.model_step_hours[3] = 1
+    @test leaky_holdout.issue_time_utc[2] > leaky_holdout.target_time_utc[1]   # validation causal
+    @test leaky_holdout.issue_time_utc[3] > leaky_holdout.target_time_utc[1]   # clear of fit
+    @test leaky_holdout.issue_time_utc[3] < leaky_holdout.target_time_utc[2]   # leaks validation
+    @test length(unique(leaky_holdout.issue_time_utc)) == 3
+    @test_throws ErrorException _v21_split_audit(leaky_holdout)
+    # The refusal must name the boundary that was crossed, so that a check
+    # comparing the wrong split cannot pass this test by throwing for another
+    # reason.
+    holdout_message = try
+        _v21_split_audit(leaky_holdout)
+        ""
+    catch err
+        sprint(showerror, err)
+    end
+    @test occursin("holdout issuance begins before all validation targets", holdout_message)
+    fit_message = try
+        _v21_split_audit(leaky)
+        ""
+    catch err
+        sprint(showerror, err)
+    end
+    @test occursin("validation issuance begins before all fit targets", fit_message)
+
+    # The boundary is strict: issuing exactly at the preceding split's last
+    # observable target is still leakage, because that target is observed at the
+    # end of the hour the forecast is issued in.
+    boundary = copy(causal)
+    boundary.issue_time_utc[3] = boundary.target_time_utc[2]
+    @test_throws ErrorException _v21_split_audit(boundary)
 end
 
 end

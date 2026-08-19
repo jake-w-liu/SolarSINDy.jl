@@ -77,6 +77,30 @@ const OPERATIONAL_V22_ERROR_EXOGENOUS_SCHEMA_VERSION =
     "operational_v2_2_m3_error_exogenous_v1"
 const OPERATIONAL_V22_ERROR_EXOGENOUS_PACKAGE_VERSION = "SolarSINDy-0.2.1"
 
+"""
+Positions in `OPERATIONAL_V22_RESIDUAL_FEATURES` of the lagged families whose history is read from
+the issue-time feature vector.
+
+Every temporal family except `h1_innovation_nt` — which comes from the matured innovation records
+rather than from the issue features — is one of the predeclared residual features, so the positions
+are derived from the two schemas instead of being written out as `(1, 5, 7, 11)`. Reordering
+`OPERATIONAL_V22_RESIDUAL_FEATURES` would otherwise have silently populated the lag families from the
+wrong columns while every length check still passed.
+"""
+const _OPERATIONAL_V22_ERROR_EXOGENOUS_ISSUE_INDICES = let
+    residual = collect(OPERATIONAL_V22_RESIDUAL_FEATURES)
+    indices = Int[]
+    unresolved = Symbol[]
+    for variable in OPERATIONAL_V22_ERROR_EXOGENOUS_TEMPORAL_VARIABLES
+        position = findfirst(==(variable), residual)
+        position === nothing ? push!(unresolved, variable) : push!(indices, position)
+    end
+    unresolved == [:h1_innovation_nt] || error(
+        "V2.2-M3 exogenous temporal families outside the issue-feature schema changed: $unresolved",
+    )
+    Tuple(indices)
+end
+
 const _OPERATIONAL_V22_ERROR_EXOGENOUS_NFEATURE =
     length(OPERATIONAL_V22_ERROR_EXOGENOUS_FEATURES)
 const _OPERATIONAL_V22_ERROR_EXOGENOUS_NGROUP =
@@ -415,8 +439,7 @@ function operational_v22_error_exogenous_features(
         )
     end
     values = Float64[issue.issue_features...]
-    issue_indices = (1, 5, 7, 11)
-    for feature_index in issue_indices
+    for feature_index in _OPERATIONAL_V22_ERROR_EXOGENOUS_ISSUE_INDICES
         for time in required_times
             push!(values, issue_at[time].issue_features[feature_index])
         end
@@ -1007,7 +1030,7 @@ function operational_v22_error_exogenous_sha256(
             artifact.base_center_sha256,
             artifact.model_step_hours,
             artifact.intercept_nt,
-            artifact.spectral_radius,
+            _operational_v22_hashable_spectral_radius(artifact.spectral_radius),
             artifact.stability_limit,
             artifact.ridge,
             artifact.threshold,
@@ -1227,9 +1250,10 @@ function read_operational_v22_error_exogenous(path::AbstractString)
         _operational_v22_error_exogenous_consistent(df, :spectral_radius),
         "exogenous artifact spectral radius",
     )
-    stored_radius == artifact.spectral_radius || throw(ArgumentError(
-        "V2.2-M3 exogenous spectral radius is inconsistent",
-    ))
+    _operational_v22_spectral_radius_agrees(stored_radius, artifact.spectral_radius) ||
+        throw(ArgumentError(
+            "V2.2-M3 exogenous spectral radius is inconsistent",
+        ))
     stored_limit = _operational_v22_error_float(
         _operational_v22_error_exogenous_consistent(df, :stability_limit),
         "exogenous artifact stability limit",

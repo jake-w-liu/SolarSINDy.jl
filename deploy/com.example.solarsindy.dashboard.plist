@@ -5,17 +5,35 @@
   launchd template for the SolarSINDy dashboard + alerting server (macOS).
 
   This supervises the read-only dashboard AND the outbound webhook notify loop (which lives in the
-  server process), so alerting availability no longer equals interactive-session availability. Fill
-  the placeholders (deploy/install_launchd.sh does this) and bootstrap with:
+  server process), so alerting availability no longer equals interactive-session availability.
+
+  Prefer the install script, which fills every placeholder below and creates the log directory:
+    deploy/install_launchd.sh <CLONE_DIR> dashboard
+  Manual install: replace EVERY placeholder in the dict below with a literal value, create
+  __MONITOR_DIR__/logs, copy to ~/Library/LaunchAgents/, then bootstrap with:
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.solarsindy.dashboard.plist
+
+  Complete placeholder list for this template — every one of them must be replaced:
 
     __JULIA_BIN__     stable juliaup shim (~/.juliaup/bin/julia), not a version-pinned directory
     __CLONE_DIR__     absolute path to the SolarSINDy.jl clone
     __APP_DIR__       __CLONE_DIR__/app  (the dashboard --project environment)
     __MONITOR_DIR__   monitor state directory (default __CLONE_DIR__/var/monitor)
+    __SWM_HOST__      bind address; use loopback unless a trusted reverse proxy fronts the service
+    __SWM_PORT__      TCP port to bind, 1-65535 (packaged default: see deploy/solarsindy.env.example)
+    EXTRA_ENV marker  the commented marker line inside EnvironmentVariables. The install script
+                      replaces that line with the allow-listed solarsindy.env keys this service
+                      reads (SWM_WEBHOOK_URL). A manual install replaces the line with its own
+                      <key>/<string> pairs, or deletes it to run with no extra keys.
 
   Set SWM_WEBHOOK_URL to enable Slack/Discord/generic push alerts. Bind stays on 127.0.0.1 by
   default; set SWM_HOST=0.0.0.0 only behind a trusted reverse proxy.
+
+  SWM_HOST, SWM_PORT and SWM_WEBHOOK_URL are taken from the install-time environment (which is where
+  bin/solarsindy puts the contents of solarsindy.env), so the installed service binds the configured
+  port instead of a hard-coded one. A launchd job inherits nothing from an interactive shell: a key
+  that is not rendered into the dict below does not reach the server. An unreplaced placeholder is
+  not silently tolerated: the server refuses to start and names the key it came from.
 -->
 <plist version="1.0">
 <dict>
@@ -41,17 +59,14 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>SWM_HOST</key>
-    <string>127.0.0.1</string>
+    <string>__SWM_HOST__</string>
     <key>SWM_PORT</key>
-    <string>8723</string>
+    <string>__SWM_PORT__</string>
     <key>SOLARSINDY_LOG</key>
     <string>__MONITOR_DIR__/live_forecast_log.csv</string>
     <key>JULIA_NUM_THREADS</key>
     <string>2</string>
-    <!-- Uncomment and set to enable push alerts:
-    <key>SWM_WEBHOOK_URL</key>
-    <string>https://hooks.example.com/...</string>
-    -->
+    <!-- __EXTRA_ENV__ -->
   </dict>
 
   <key>RunAtLoad</key>

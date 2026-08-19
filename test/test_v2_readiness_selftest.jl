@@ -30,6 +30,12 @@ const AUDIT_PATH = normpath(joinpath(@__DIR__, "..", "validation", "operational"
     end
     @test passed === true
 
+    # A self-test that stopped exercising its fixtures would still return true, and part of its
+    # fixture set is guarded on local artifacts that a fresh clone does not carry. Assert the count
+    # against the artifact-independent floor so the difference is stated rather than silent.
+    @test audit.SELFTEST_CHECK_COUNT[] >= audit.SELFTEST_MIN_CHECKS
+    @test audit.SELFTEST_MIN_CHECKS >= 42
+
     # The audit requires the served stage to be disclosed in the dashboard payload. A fixture payload
     # that omits the stack clause is exactly the regression this file exists to catch, so assert the
     # requirement in both directions rather than trusting the fixture.

@@ -161,10 +161,15 @@ jdt(dt) = (dt === missing || dt === nothing) ? nothing : string(dt) * "Z"
 const _TIME_COLS = ["issue_time_utc", "latest_solar_wind_utc", "latest_dst_time_utc", "target_time_utc"]
 const _LOG_CACHE = Ref{Any}(nothing)
 const _LOG_LOCK = ReentrantLock()
+# The file identity whose parse failed, the failure itself, and when it was recorded. Guarded by
+# `_LOG_LOCK` together with `_LOG_CACHE`.
+const _LOG_PARSE_FAILURE = Ref{Any}(nothing)
 const _CALIBRATION_CACHE = Ref{Any}(nothing)
 const _CALIBRATION_LOCK = ReentrantLock()
 const _LATEST_CYCLE_CACHE = Ref{Any}(nothing)
 const _LATEST_CYCLE_LOCK = ReentrantLock()
+const _SERVING_CYCLE_CACHE = Ref{Any}(nothing)
+const _SERVING_CYCLE_LOCK = ReentrantLock()
 const _VERIFIED_ROWS_CACHE = Ref{Any}(nothing)
 const _VERIFIED_ROWS_LOCK = ReentrantLock()
 const _HISTORY_CACHE = Ref{Any}(nothing)
@@ -205,8 +210,15 @@ end
 """Return the current forecast log as a DataFrame, reloading only when the file changes.
 When the file is absent, serve the last good frame if cached, else an empty frame so the
 log-backed endpoints degrade to `available=false` (never a 500). On a read failure mid-append,
-serve the last good frame (raising only if none exists)."""
-function get_log(path::AbstractString)
+serve the last good frame (raising only if none exists).
+
+A parse failure is cached against the failing file identity. Serving the last good frame without
+recording the failure left the cache key at the previous file, so every subsequent request re-ran the
+full parse — under the monitor's row cap a multi-second parse, serialized behind `_LOG_LOCK`, for as
+long as the unreadable file sat there. The identity is what re-arms the attempt: new bytes are always
+re-read, and only the exact file that already failed is short-circuited. `loader` is injectable so
+the caching contract can be tested against a counting loader."""
+function get_log(path::AbstractString; loader = _load_log)
     lock(_LOG_LOCK) do
         c = _LOG_CACHE[]
         if !isfile(path)
@@ -227,12 +239,22 @@ function get_log(path::AbstractString)
             return c === nothing || c[1][1] != wanted ? DataFrame() : c[2]
         end
         if c === nothing || c[1] != key
+            # Negative cache: these exact bytes already failed to parse. Re-running the parse would
+            # produce the same failure at the same cost while holding this lock, so the recorded
+            # outcome is replayed instead — the cached frame when one exists for this file, and the
+            # original exception when nothing was ever loaded from it.
+            failure = _LOG_PARSE_FAILURE[]
+            if failure !== nothing && failure.key == key
+                (c !== nothing && c[1][1] == key[1]) && return c[2]
+                throw(failure.error)
+            end
             try
-                loaded = _load_log(path)
+                loaded = loader(path)
                 key == _log_file_identity(path) || error(
                     "forecast log changed while it was being loaded",
                 )
                 _LOG_CACHE[] = (key, loaded)
+                _LOG_PARSE_FAILURE[] = nothing
             catch e
                 e isa InterruptException && rethrow()
                 # If the file vanished mid-load, degrade like the absent branch rather than 500.
@@ -240,6 +262,8 @@ function get_log(path::AbstractString)
                     wanted = _canonical_missing_log_path(path)
                     return c === nothing || c[1][1] != wanted ? DataFrame() : c[2]
                 end
+                _LOG_PARSE_FAILURE[] = (key = key, error = e, at = time(),
+                                        error_type = string(nameof(typeof(e))))
                 (c === nothing || c[1][1] != key[1]) && rethrow(e)
                 @warn "log reload failed; serving cached copy" exception=(e, catch_backtrace())
                 return c[2]
@@ -247,6 +271,32 @@ function get_log(path::AbstractString)
         end
         return _LOG_CACHE[][2]
     end
+end
+
+"""Whether the current bytes of `path` parse, and how long a standing failure has held.
+
+`get_log` degrades to the last good frame when a reload fails, which is what keeps the endpoints
+answering through a mid-append read. Health must not inherit that silence: a payload assembled from a
+cached frame while the file on disk cannot be parsed is a forecast from an unknown age presented as
+the current one, and the container health probe reads exactly that verdict. Only the failure type is
+reported — an exception message can carry the log path."""
+function log_parse_state(path::AbstractString)
+    failure, cached = lock(_LOG_LOCK) do
+        (_LOG_PARSE_FAILURE[], _LOG_CACHE[])
+    end
+    readable = (readable=true, error_age_min=nothing, error_type=nothing, serving_cached_copy=false)
+    failure === nothing && return readable
+    key = try
+        _log_file_identity(path)
+    catch e
+        e isa InterruptException && rethrow()
+        return readable
+    end
+    failure.key == key || return readable
+    return (readable=false,
+            error_age_min=round((time() - failure.at) / 60; digits=1),
+            error_type=failure.error_type,
+            serving_cached_copy=cached !== nothing && cached[1][1] == key[1])
 end
 
 # Pick forecast columns with graceful fallbacks. hasproperty is checked BEFORE
@@ -400,6 +450,73 @@ function latest_cycle(df::DataFrame)
     end
 end
 
+# How far back the serving fallback looks for a complete cycle when the newest issue hour is not one.
+# Six issue hours is the daemon's own issuance dead-man window: past it the deployment is already in
+# a declared outage, and the staleness gate rejects the cycle in any case.
+const SERVING_FALLBACK_CYCLES = 6
+
+function _cycle_at_issue_hour(df::DataFrame, hour::DateTime)
+    keep = map(df.issue_time_utc_dt) do issue
+        issue !== missing && floor(issue, Hour) == hour
+    end
+    return _sort_by_target!(df[keep, :])
+end
+
+"""Cycle the payload is served from: the newest issue hour, or the newest one that is complete.
+
+A cycle can arrive incomplete or internally inconsistent — a partial write, a retry that duplicated a
+horizon, an anchor that moved between rows — and serving it would publish a trajectory the engine
+never issued as one. Rejecting it wholesale is what blanked every log-backed endpoint while a
+complete cycle from the previous issue hour sat unread, so the newest complete cycle is served
+instead and the fact that it is not the newest issue hour travels with the payload. The selection is
+structural (no wall clock), so it caches with the log identity; the freshness gate is applied to the
+chosen cycle by the callers, at request time."""
+function _serving_cycle_uncached(df::DataFrame)
+    newest = _latest_cycle_uncached(df)
+    result = (cycle=newest, superseded=false, newest=newest)
+    nrow(newest) == 0 && return result
+    _valid_live_cycle(newest) && return result
+    hasproperty(df, :issue_time_utc_dt) || return result
+    issues = collect(skipmissing(df.issue_time_utc_dt))
+    isempty(issues) && return result
+    hours = sort(unique(floor.(issues, Hour)); rev=true)
+    last_index = min(length(hours), SERVING_FALLBACK_CYCLES + 1)
+    for index in 2:last_index
+        candidate = _cycle_at_issue_hour(df, hours[index])
+        _valid_live_cycle(candidate) &&
+            return (cycle=candidate, superseded=true, newest=newest)
+    end
+    return result
+end
+
+function serving_cycle(df::DataFrame)
+    key = _cached_log_key(df)
+    key === nothing && return _serving_cycle_uncached(df)
+    return lock(_SERVING_CYCLE_LOCK) do
+        cached = _SERVING_CYCLE_CACHE[]
+        if cached === nothing || cached[1] != key
+            cached = (key, _serving_cycle_uncached(df))
+            _SERVING_CYCLE_CACHE[] = cached
+        end
+        return cached[2]
+    end
+end
+
+"""Cycle a live payload is built from, with its freshness and the superseded-cycle disclosure.
+
+The fallback restores availability; it must never manufacture it. A complete cycle that is itself
+outside the freshness window is not something to serve in place of the newest issue hour, so the
+newest hour is reported exactly as it would be without the fallback and the endpoints degrade as
+before."""
+function _payload_cycle(df::DataFrame)
+    served = serving_cycle(df)
+    stale = _cycle_staleness(served.cycle)
+    served.superseded || return (cycle=served.cycle, superseded=false, stale=stale)
+    (stale.stale || stale.expired || stale.invalid_future) ||
+        return (cycle=served.cycle, superseded=true, stale=stale)
+    return (cycle=served.newest, superseded=false, stale=_cycle_staleness(served.newest))
+end
+
 # Verified rows: a real forecast (target strictly AFTER both the issue time and the last observed Dst — a
 # 0-lead row is not a forecast and is what the locked comparison report excludes), with a FINITE observation
 # and a finite V2 point + band. jnum(obs) rejects NaN/Inf observations that would otherwise reach the
@@ -495,11 +612,30 @@ end
 
 _prefer_metric(primary, fallback) = primary === nothing ? fallback : primary
 
-function _compute_calibration_summary(df::DataFrame)
-    # Live interval method = source of the most recent issued forecast cycle.
-    cyc = latest_cycle(df)
+function _compute_calibration_summary(df::DataFrame, cyc::DataFrame)
+    # Live interval method = the method of the cycle this build publishes, read the way the forecast
+    # payload reads it. Two readings were wrong here. Taking the newest issue hour described a cycle
+    # the payloads need not be serving: during the superseded-cycle fallback the newest hour is the
+    # incomplete one, so the panel reported "unknown" for a forecast that was on the page. And
+    # requiring one common `interval_source` across the horizons is the rule per-row disclosure
+    # replaced: a cycle whose super-learner stage acted on some horizons and not others carries two
+    # sources by design, and the common-field reading of it is empty — published as the string
+    # "nothing", which the page then showed as the live interval method.
     valid_cycle = _valid_live_cycle(cyc)
-    live_src = valid_cycle ? string(_common_cycle_field(cyc, :interval_source)) : "unknown"
+    # Every method the published cycle's horizons carry, and the one it is reported under (the
+    # method the rows carrying its weakest served label were issued with). A cycle whose horizons
+    # were served by one stage throughout has exactly one of each and they agree.
+    live_sources = valid_cycle ? _cycle_interval_sources(cyc) : String[]
+    reported_src = valid_cycle ? _cycle_interval_source(cyc) : nothing
+    # Three distinguishable states, because they are three different facts: the method the published
+    # cycle is reported under; nothing, when there is a published cycle whose horizons carry more
+    # than one method and none of them is the one it is reported under (the set below is what the
+    # page then states); and "unknown", when there is no publishable cycle to describe at all.
+    live_src = valid_cycle ? (reported_src === nothing ? nothing : String(reported_src)) : "unknown"
+    # Rows counted as "matured under the live interval method": the reported method when there is
+    # one, otherwise any method the published cycle carries. Naming a single method that the cycle
+    # does not have would attribute the count to a method that was never solely served.
+    live_src_set = live_src === nothing ? Set(live_sources) : Set([live_src])
     # Verified rows accumulate across served pipelines. Pooling them would present a record earned by
     # the previous served label as the current product's record, so the count is broken out per label
     # and the current label's own count is reported separately.
@@ -527,7 +663,9 @@ function _compute_calibration_summary(df::DataFrame)
                       live_skill_rows_remaining=LIVE_SKILL_MIN_VERIFIED,
                       interval_target_coverage=0.90,
                       served_interval_coverage_scope="empirical_only",
-                      current_interval_source=live_src, n_verified_current_source=0,
+                      current_interval_source=live_src,
+                      current_interval_sources=live_sources,
+                      n_verified_current_source=0,
                       current_served_model=live_served, n_verified_current_served_model=0,
                       by_served_model=[],
                       deepest_obs_dst_nt=nothing, n_storm_verified=0, by_source=[])
@@ -600,7 +738,7 @@ function _compute_calibration_summary(df::DataFrame)
         push!(by_source, (source=s, n=count(m),
                          coverage_90=round(mean(product_inside[m]); digits=3)))
     end
-    n_live = count(product_srcs .== live_src)
+    n_live = count(in(live_src_set), product_srcs)
 
     served_labels = "sub_hourly_model_version" in names(v) ?
         _src_label.(v.sub_hourly_model_version) : fill("unknown", n)
@@ -646,6 +784,9 @@ function _compute_calibration_summary(df::DataFrame)
             interval_target_coverage=0.90,
             served_interval_coverage_scope="empirical_only",
             current_interval_source=live_src,
+            # Every method the published cycle's horizons carry. A cycle whose stage changed between
+            # horizons has more than one, and the page states the set rather than a single name.
+            current_interval_sources=live_sources,
             n_verified_current_source=n_live,
             current_served_model=live_served,
             n_verified_current_served_model=n_live_served,
@@ -655,13 +796,20 @@ function _compute_calibration_summary(df::DataFrame)
             by_source=by_source)
 end
 
+_compute_calibration_summary(df::DataFrame) =
+    _compute_calibration_summary(df, _payload_cycle(df).cycle)
+
 function calibration_summary(df::DataFrame)
+    # The published cycle is part of what this summary states, and the fallback that chooses it is
+    # applied at request time, so the cached value is keyed on that cycle as well as on the log. The
+    # selection itself is structural and memoised, so the identity is stable while the choice is.
+    cyc = _payload_cycle(df).cycle
     key = _cached_log_key(df)
-    key === nothing && return _compute_calibration_summary(df)
+    key === nothing && return _compute_calibration_summary(df, cyc)
     return lock(_CALIBRATION_LOCK) do
         cached = _CALIBRATION_CACHE[]
-        if cached === nothing || cached[1] != key
-            cached = (key, _compute_calibration_summary(df))
+        if cached === nothing || cached[1] != key || cached[3] !== cyc
+            cached = (key, _compute_calibration_summary(df, cyc), cyc)
             _CALIBRATION_CACHE[] = cached
         end
         return cached[2]
@@ -755,6 +903,74 @@ function _common_cycle_field(cyc::DataFrame, name::Symbol)
     return all(x -> isequal(x, value), values) ? value : nothing
 end
 
+# The interval the super-learner stage serves under, and the per-row status that says the stage
+# produced this row's center. The engine writes exactly this pair, and the two must agree row by row:
+# the depth-stratified conformal band is calibrated on the V2.4e center, so a row carrying that
+# source while its own status records a fallback would publish an interval nothing calibrated for the
+# center it is drawn around.
+const V2_4_INTERVAL_SOURCE = "v24_conformal_depth"
+const V2_4_STATUS_OK = "ok"
+
+_row_v2_4_acted(row) = (v = _rowget(row, :v24_status);
+                        v isa AbstractString && String(v) == V2_4_STATUS_OK)
+
+"""Per-row coherence of a cycle's interval disclosure with the stage that served each row.
+
+V2.4 made `interval_source` a per-row field: a horizon whose super-learner stage acted carries the
+study's depth-stratified conformal band, while a horizon whose stage could not act carries the band
+the batch's own interval policy issued. Requiring one source across the four horizons therefore
+rejects precisely the cycles that per-row disclosure exists to describe — a stage that healed or
+failed between the horizons of one batch — and blanks the product over a degradation the log is
+being honest about, exactly as accepting only one served label would.
+
+Coherence is checked instead: a row records the V2.4e source when, and only when, its own status
+records that the V2.4e stage produced its center, and every remaining row carries the one source the
+batch issued them under. A cycle written before the per-row status existed carries no `v24_status`
+column at all, and there the only statement the log can make is the batch one, so those cycles keep
+the original common-source rule."""
+function _coherent_interval_sources(cyc::DataFrame)
+    hasproperty(cyc, :interval_source) || return false
+    sources = String[]
+    for r in eachrow(cyc)
+        value = _rowget(r, :interval_source)
+        (value isa AbstractString && !isempty(strip(value))) || return false
+        push!(sources, String(value))
+    end
+    isempty(sources) && return false
+    hasproperty(cyc, :v24_status) || return all(isequal(first(sources)), sources)
+    batch = String[]
+    for (index, r) in enumerate(eachrow(cyc))
+        if _row_v2_4_acted(r)
+            sources[index] == V2_4_INTERVAL_SOURCE || return false
+        else
+            sources[index] == V2_4_INTERVAL_SOURCE && return false
+            push!(batch, sources[index])
+        end
+    end
+    return isempty(batch) || all(isequal(first(batch)), batch)
+end
+
+"""Interval source the cycle is reported under, and every source its horizons carry.
+
+A cycle served by one stage throughout has a single source and reports it. A cycle whose stage
+changed between horizons is published under its weakest served label, so the reported source is read
+from the rows carrying that label — the interval the reported product was actually issued with —
+while the per-horizon sources travel with the horizons themselves."""
+function _cycle_interval_source(cyc::DataFrame)
+    common = _common_cycle_field(cyc, :interval_source)
+    common === nothing || return String(common)
+    label = _cycle_served_model(cyc)
+    label === nothing && return nothing
+    mask = [isequal(_rowget(r, :sub_hourly_model_version), label) for r in eachrow(cyc)]
+    any(mask) || return nothing
+    value = _common_cycle_field(cyc[mask, :], :interval_source)
+    return value === nothing ? nothing : String(value)
+end
+
+_cycle_interval_sources(cyc::DataFrame) =
+    sort(unique(String[String(v) for v in (_rowget(r, :interval_source) for r in eachrow(cyc))
+                       if v isa AbstractString]))
+
 """Weakest served-pipeline label of a cycle, or `nothing` when a row carries an unknown label.
 
 The stack stage is loaded per issuance and can heal or fail between the horizons of one cycle, so the
@@ -795,13 +1011,12 @@ function _valid_live_cycle(cyc::DataFrame)
     nrow(cyc) == length(LIVE_CYCLE_HORIZONS) || return false
     model = _common_cycle_field(cyc, :model_version)
     served_model = _cycle_served_model(cyc)
-    interval = _common_cycle_field(cyc, :interval_source)
     anchor = _common_cycle_field(cyc, :latest_dst_time_utc_dt)
     anchor_dst = jnum(_common_cycle_field(cyc, :latest_dst_nt))
     vintage = _common_cycle_field(cyc, :latest_solar_wind_utc_dt)
     model == CURRENT_V2_MODEL_VERSION || return false
     served_model === nothing && return false
-    interval isa AbstractString && !isempty(strip(interval)) || return false
+    _coherent_interval_sources(cyc) || return false
     anchor isa DateTime && anchor_dst !== nothing && vintage isa DateTime || return false
 
     issues = DateTime[]
@@ -833,9 +1048,10 @@ end
 
 """Forecast trajectory of the most recent cycle: anchor + per-horizon point and 90% band."""
 function build_forecast(df::DataFrame, log_path::AbstractString="")
-    cyc = latest_cycle(df)
+    served = _payload_cycle(df)
+    cyc = served.cycle
     nrow(cyc) == 0 && return (available=false, issue_time_utc=nothing, horizons=[])
-    stale = _cycle_staleness(cyc)
+    stale = served.stale
     if stale.invalid_future || stale.expired || stale.stale
         reason = stale.invalid_future ? "future issue time" :
                  stale.expired ? "expired targets" : "stale issue time"
@@ -860,6 +1076,12 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
                          pred_dst_nt=pred,
                          ci05_dst_nt=lo,
                          ci95_dst_nt=hi,
+                         # Which interval this horizon's band came from. The super-learner stage acts
+                         # per horizon, so a cycle can carry the study's depth-stratified conformal
+                         # band on the horizons it served and the batch's own policy on the rest;
+                         # the band a reader sees is only described by the row that produced it.
+                         interval_source=(v = _rowget(r, :interval_source);
+                                          v isa AbstractString ? String(v) : nothing),
                          # Alerting depth of this horizon and the V2.1 center it is taken against, so
                          # an operator can see why a warning is deeper than the served center.
                          severity_dst_nt=jnum(_severity_pred(r)),
@@ -900,7 +1122,12 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
             latest_solar_wind_utc=jdt(_common_cycle_field(cyc, :latest_solar_wind_utc_dt)),
             anchor_dst_nt=jnum(_common_cycle_field(cyc, :latest_dst_nt)),
             anchor_dst_time_utc=jdt(_common_cycle_field(cyc, :latest_dst_time_utc_dt)),
-            interval_source=string(_common_cycle_field(cyc, :interval_source)),
+            interval_source=_cycle_interval_source(cyc),
+            interval_sources=_cycle_interval_sources(cyc),
+            # True when the newest issue hour was not a complete cycle and this payload is the
+            # newest one that was. Availability is restored; the incompleteness is not masked, and
+            # the health endpoint continues to report the newest issue hour as incomplete.
+            superseded_cycle_incomplete=served.superseded,
             model_version=string(_common_cycle_field(cyc, :model_version)),
             served_model_version=string(_cycle_served_model(cyc)),
             served_product=served_product_name(_cycle_served_model(cyc)),
@@ -953,6 +1180,10 @@ actually being served instead of only whether a file is fresh."""
 function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES)
     empty_result = (cycles_considered=0, pre_stage_cycles_excluded=0, served_model_version=nothing,
                     served_product=nothing, served_fallback_cycles=0, served_fallback_rate=nothing,
+                    served_fallback_window_cycles=Int(cycles),
+                    window_start_utc=nothing, window_end_utc=nothing, window_span_hours=nothing,
+                    served_fallback_cycles_24h=0, served_fallback_window_24h_cycles=0,
+                    served_fallback_rate_24h=nothing,
                     newest_cycle_is_fallback=nothing, served_stack_cycles=0,
                     served_v2_1_cycles=0, shadow_model_version=nothing,
                     shadow_cycles_considered=0, shadow_available_cycles=0,
@@ -964,6 +1195,17 @@ function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES
     keys_present = sort(unique(collect(skipmissing(hours))))
     isempty(keys_present) && return empty_result
     window = keys_present[max(1, length(keys_present) - Int(cycles) + 1):end]
+    # The window is the last `cycles` issue hours PRESENT IN THE LOG, which is a day of issuance only
+    # while issuance is unbroken. After an outage those hours can span days, and the rate would be
+    # described as a trailing day while summarizing cycles far older than that. The window's own
+    # bounds and span are published so the rate cannot be read as something it is not, and a
+    # wall-clock-bounded rate over the last 24 h of issuance is reported beside it.
+    window_start = first(window)
+    window_end = last(window)
+    window_span = round((window_end - window_start) / Millisecond(3_600_000); digits=1)
+    day_cutoff = window_end - Hour(24)
+    fallback_24h = 0
+    staged_24h = 0
     fallback = 0
     staged = 0
     pre_stage = 0
@@ -991,6 +1233,10 @@ function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES
             staged += 1
             is_fallback = any(label -> !isequal(label, CURRENT_V2_SERVED_MODEL_VERSION), labels)
             is_fallback && (fallback += 1)
+            if hour >= day_cutoff
+                staged_24h += 1
+                is_fallback && (fallback_24h += 1)
+            end
             any(label -> isequal(label, STACK_V2_SERVED_MODEL_VERSION), labels) &&
                 (stack_served += 1)
             any(label -> isequal(label, PREVIOUS_V2_SERVED_MODEL_VERSION), labels) &&
@@ -1018,6 +1264,16 @@ function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES
             served_product=served_label === nothing ? nothing : served_product_name(served_label),
             served_fallback_cycles=fallback,
             served_fallback_rate=staged == 0 ? nothing : round(fallback / staged; digits=4),
+            # What the rate above is measured over: the requested cycle count, the issue hours it
+            # actually spans, and the same rate restricted to the trailing 24 h of issuance.
+            served_fallback_window_cycles=Int(cycles),
+            window_start_utc=jdt(window_start),
+            window_end_utc=jdt(window_end),
+            window_span_hours=window_span,
+            served_fallback_cycles_24h=fallback_24h,
+            served_fallback_window_24h_cycles=staged_24h,
+            served_fallback_rate_24h=staged_24h == 0 ? nothing :
+                round(fallback_24h / staged_24h; digits=4),
             newest_cycle_is_fallback=newest_fallback,
             served_stack_cycles=stack_served,
             served_v2_1_cycles=v2_1_served,
@@ -1031,13 +1287,14 @@ end
 
 """Threat status: current observation and most negative edge among the latest 90% intervals."""
 function build_status(df::DataFrame)
-    cyc = latest_cycle(df)
+    served = _payload_cycle(df)
+    cyc = served.cycle
     cal = calibration_summary(df)
     if nrow(cyc) == 0
         return (generated_utc=jdt(now(UTC)), available=false,
                 message="No forecast rows in log yet.", calibration=cal)
     end
-    stale = _cycle_staleness(cyc)
+    stale = served.stale
     if stale.invalid_future
         return (generated_utc=jdt(now(UTC)), available=false, stale=true, expired=false,
                 invalid_future=true,
@@ -1094,6 +1351,9 @@ function build_status(df::DataFrame)
     return (generated_utc=jdt(now(UTC)),
             available=true,
             stale=stale.stale, expired=false,
+            # The newest issue hour was not a complete cycle; this is the newest one that was, and
+            # its true age is reported below. `/api/health` still calls the newest hour incomplete.
+            superseded_cycle_incomplete=served.superseded,
             age_hours=(stale.age_hours === nothing ? nothing : round(stale.age_hours; digits=2)),
             latest_observation=(dst_nt=jnum(_common_cycle_field(cyc, :latest_dst_nt)),
                                 time_utc=jdt(_common_cycle_field(cyc, :latest_dst_time_utc_dt))),
@@ -1178,6 +1438,25 @@ function build_history(df::DataFrame, hours::Real=72)
     end
 end
 
+# Whole-nanotesla text of an alerting depth. `round(x; digits=0)` keeps the value a Float64, so the
+# webhook and the API read "-120.0 nT" for a depth the dashboard shows as "-120": the same number
+# written two ways across the surfaces an operator reads together. Ties round away from zero, which
+# is what the dashboard's own fixed-decimal formatting does.
+#
+# Total by construction. This runs inside the alert builder, so a value it cannot render must
+# degrade to the value written out, never to an exception: a corrupt depth in the log would
+# otherwise take `/api/alerts` and the webhook down instead of showing an obviously wrong number.
+# `round(Int, ...)` throws on a finite magnitude no Int64 can hold, so the machine range is checked
+# before the conversion rather than after it.
+function _alert_depth_nt(x::Real)
+    isfinite(x) || return string(x)
+    rounded = round(float(x), RoundNearestTiesAway)
+    # Exact mixed-type comparison: a Float64 outside the Int64 range fails it, and one inside is
+    # integral and converts exactly.
+    (typemin(Int) <= rounded <= typemax(Int)) || return string(x)
+    return string(Int(rounded))
+end
+
 """Active alert summary derived from the current threat status."""
 function build_alerts(df::DataFrame, st=build_status(df))
     getproperty(st, :available) == false && return (active=false, alerts=[], generated_utc=st.generated_utc)
@@ -1185,13 +1464,13 @@ function build_alerts(df::DataFrame, st=build_status(df))
     alerts = NamedTuple[]
     if th.level >= 1
         push!(alerts, (severity=th.label, level=th.level, kind="forecast",
-                       message="Forecast Dst reaches $(round(th.point_min_dst_nt; digits=0)) nT " *
+                       message="Forecast Dst reaches $(_alert_depth_nt(th.point_min_dst_nt)) nT " *
                                "($(th.label)) within the next $(round(something(st.lead_time.forecast_horizon_hours, 0.0); digits=1)) h."))
     end
     if th.watch && th.watch_level > th.level
         push!(alerts, (severity=th.watch_label, level=th.watch_level, kind="watch",
                        message="A displayed 90% target interval extends to " *
-                               "$(round(th.interval_lower_edge_min_dst_nt; digits=0)) nT " *
+                               "$(_alert_depth_nt(th.interval_lower_edge_min_dst_nt)) nT " *
                                "($(th.watch_label) range) at one or more horizons."))
     end
     return (active=!isempty(alerts), generated_utc=st.generated_utc,

@@ -210,4 +210,90 @@ end
             @test_throws ArgumentError write_operational_v22_stack(symlink_path, stack)
         end
     end
+
+    @testset "S2: numeric-looking text columns round-trip as text" begin
+        # The reader used to let CSV infer the text columns. A zero-padded or purely numeric label
+        # then parsed as a number, and `String(cell)` either threw a bare `MethodError` or silently
+        # dropped the leading zeros — a stack served under a label the file does not carry.
+        centers = _v22_centers([10, 20, 30, 40, 50, 60])
+        for label in ("007", "2026", "0.5", "-30")
+            stack = OperationalV22Stack(
+                [OperationalV22Cell(1, :pooled, 60, [0.30, 0.30, 0.10, 0.10, 0.10, 0.10];
+                                    objective_mse=2.0, iterations=10)];
+                label=label, minimum_cell_rows=48,
+            )
+            mktempdir() do tmp
+                path = joinpath(tmp, "numeric_label.csv")
+                write_operational_v22_stack(path, stack)
+                restored = read_operational_v22_stack(path)
+                @test restored.label == label
+                @test restored.label isa String
+                @test restored.supported_model_steps == stack.supported_model_steps
+                @test restored.cells == stack.cells
+                @test operational_v22_predict(restored, 1, -10.0, 0.0, 0.0, centers) ==
+                      operational_v22_predict(stack, 1, -10.0, 0.0, 0.0, centers)
+            end
+        end
+    end
+
+    @testset "S6: the shared lead set and correction cap are one definition" begin
+        @test V22.OPERATIONAL_V22_MODEL_STEPS == (1, 2, 3, 4, 6, 7)
+        # Every V2.2 layer that declares a lead set declares this one.
+        @test OPERATIONAL_V22_BOOST_SUPPORTED_MODEL_STEPS === V22.OPERATIONAL_V22_MODEL_STEPS
+        @test V22.OPERATIONAL_V22_ERROR_SUPPORTED_MODEL_STEPS ===
+              V22.OPERATIONAL_V22_MODEL_STEPS
+        @test V22.OPERATIONAL_V22_ERROR_EXOGENOUS_SUPPORTED_MODEL_STEPS ===
+              V22.OPERATIONAL_V22_MODEL_STEPS
+        @test V22.OPERATIONAL_V22_CORE_PATH_SUPPORTED_MODEL_STEPS ===
+              V22.OPERATIONAL_V22_MODEL_STEPS
+        @test V22.OPERATIONAL_V22_SHADOW_SUPPORTED_HORIZONS_H ===
+              V22.OPERATIONAL_V22_MODEL_STEPS
+        # The V2.3 and V2.4 served products declare their own lead sets; they are not aliased to the
+        # V2.2 one, so drift between the offline chain and the served product is asserted here.
+        @test V23_SERVING_MODEL_STEPS == V22.OPERATIONAL_V22_MODEL_STEPS
+        @test V24_SERVING_MODEL_STEPS == V22.OPERATIONAL_V22_MODEL_STEPS
+        # The bounded correction cap is 5 nT plus 5 nT per lead hour, shared by all three layers.
+        for step in V22.OPERATIONAL_V22_MODEL_STEPS
+            @test V22.operational_v22_correction_cap_nt(step) == 5.0 + 5.0 * step
+            @test V22._operational_v22_residual_cap(step) ==
+                  V22.operational_v22_correction_cap_nt(step)
+            @test V22._operational_v22_boost_cap(step) ==
+                  V22.operational_v22_correction_cap_nt(step)
+            @test V22._operational_v22_error_cap(step) ==
+                  V22.operational_v22_correction_cap_nt(step)
+        end
+        # The exogenous lagged-issue positions are derived from the two schemas, not written out.
+        @test V22._OPERATIONAL_V22_ERROR_EXOGENOUS_ISSUE_INDICES == (1, 5, 7, 11)
+        residual_names = collect(V22.OPERATIONAL_V22_RESIDUAL_FEATURES)
+        @test [residual_names[j] for j in V22._OPERATIONAL_V22_ERROR_EXOGENOUS_ISSUE_INDICES] ==
+              [v for v in V22.OPERATIONAL_V22_ERROR_EXOGENOUS_TEMPORAL_VARIABLES
+               if v != :h1_innovation_nt]
+    end
+
+    @testset "S9: the regime split is closed at both deployed edges" begin
+        # Kyoto Dst is integer-valued and the one-hour rate is a difference of integers, so both
+        # regime edges are hit constantly. Each is asserted at equality, one side and the other.
+        thr = V22.OPERATIONAL_V22_DEFAULT_DISTURBED_DST_NT
+        rate = V22.OPERATIONAL_V22_DEFAULT_DEEPENING_RATE_NT_PER_H
+        cpl = V22.OPERATIONAL_V22_DEFAULT_COUPLING_THRESHOLD_MVM
+        @test (thr, rate, cpl) == (-30.0, -5.0, 0.0)
+
+        # Depth edge, evaluated with a non-negative rate so only the depth test can fire: at exactly
+        # the threshold the row is already disturbed, one ulp shallower it is quiet.
+        @test operational_v22_regime(thr, 1.0, 0.0) == :recovery
+        @test operational_v22_regime(nextfloat(thr), 1.0, 0.0) == :quiet
+        @test operational_v22_regime(prevfloat(thr), 1.0, 0.0) == :recovery
+
+        # Deepening branch inside a disturbed state is a strict `rate < 0`.
+        @test operational_v22_regime(-40.0, 0.0, 0.0) == :recovery
+        @test operational_v22_regime(-40.0, prevfloat(0.0), 0.0) == :active_deepening
+
+        # Rate and coupling edges, isolated with a shallow ring current so the depth branch cannot
+        # fire: `rate <= threshold` is inclusive, `coupling > threshold` is strict.
+        @test operational_v22_regime(-10.0, rate, nextfloat(cpl)) == :active_deepening
+        @test operational_v22_regime(-10.0, nextfloat(rate), nextfloat(cpl)) == :quiet
+        @test operational_v22_regime(-10.0, prevfloat(rate), nextfloat(cpl)) == :active_deepening
+        @test operational_v22_regime(-10.0, rate, cpl) == :quiet
+        @test operational_v22_regime(-10.0, 0.0, nextfloat(cpl)) == :quiet
+    end
 end

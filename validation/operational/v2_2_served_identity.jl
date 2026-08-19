@@ -26,7 +26,7 @@
 #   --stride=<n>      keep every n-th archived row (default 1, i.e. every row)
 #   --out=<path>      per-step summary CSV (default …/v2_2_served_identity.csv)
 
-include(joinpath(@__DIR__, "v2_3_common.jl"))
+isdefined(@__MODULE__, :V23Context) || include(joinpath(@__DIR__, "v2_3_common.jl"))
 
 "Identity target: the largest absolute deviation a served center may show against the archived one."
 const V22_IDENTITY_TOL_NT = 1e-9
@@ -159,7 +159,7 @@ function run_v2_2_served_identity(; stack_path::AbstractString,
             out = String(out))
 end
 
-function main(args = ARGS)
+function main_v2_2_served_identity(args = ARGS)
     stack_path = joinpath(OPERATIONAL_PACKAGE_ROOT, "deploy", V22_SERVED_STACK_FILE)
     min_rows = V22_IDENTITY_MIN_ROWS
     stride = 1
@@ -188,5 +188,5 @@ function main(args = ARGS)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    main()
+    main_v2_2_served_identity()
 end

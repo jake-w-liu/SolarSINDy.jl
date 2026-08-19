@@ -249,6 +249,41 @@ _experts(values) = NamedTuple{V24_SERVING_EXPERTS}(Tuple(Float64.(values)))
             @test !rising.guard_applied
         end
 
+        @testset "every expert occupies its own slot: any exchange moves the center" begin
+            # An expert wired into a neighbouring slot is a silent defect while the two slots carry
+            # the same weight. In the shipped bundle 27 of 60 cells have `w_burton != w_burton_full`,
+            # so such a swap would move the published center; the fixture must therefore give every
+            # slot its own weight, and the combination must be sensitive to each one separately.
+            @test allunique(bundle.weights)
+            @test allunique(bundle.deep_weights)
+            @test all(w -> w > 0.0, bundle.weights)
+            @test all(w -> w > 0.0, bundle.deep_weights)
+            # No two slots' weights coincide with another pair's sum split either way, so an exchange
+            # cannot cancel.
+            @test sum(bundle.weights) ≈ 1.0 atol = 1e-12
+            @test sum(bundle.weights[j] for j in V24_SERVING_SINDY_FAMILY) ≈
+                  V24_SERVING_SINDY_FLOOR atol = 1e-12
+
+            # Ten distinct expert centers, so an exchange changes the combination by
+            # (w_a - w_b) * (x_b - x_a) — nonzero exactly when both differ.
+            centers = [-30.0 - 7.0 * k for k in 1:V24_SERVING_EXPERT_COUNT]
+            experts = _experts(centers)
+            base = v24_serving_center(artifacts; model_steps = 3, latest_dst = -10.0,
+                                      dst_delta_1h_nt = 0.5, vbsouth_mvm = 0.0, experts = experts)
+            for a in 1:V24_SERVING_EXPERT_COUNT, b in (a + 1):V24_SERVING_EXPERT_COUNT
+                swapped_centers = copy(centers)
+                swapped_centers[a], swapped_centers[b] = swapped_centers[b], swapped_centers[a]
+                swapped = v24_serving_center(artifacts; model_steps = 3, latest_dst = -10.0,
+                                             dst_delta_1h_nt = 0.5, vbsouth_mvm = 0.0,
+                                             experts = _experts(swapped_centers))
+                @test swapped.l1_center != base.l1_center
+                # The size of the move is the weight difference times the center difference, which is
+                # what makes this an arithmetic check rather than an inequality that any change passes.
+                @test swapped.l1_center - base.l1_center ≈
+                      (bundle.weights[a] - bundle.weights[b]) * (centers[b] - centers[a]) atol = 1e-12
+            end
+        end
+
         @testset "the physical projection is reported when it acts" begin
             # The reported center is taken through `clamp(., -2000, 50)` nT. Every anchor the study
             # scored sits far from that ceiling, so the oracle can assert the projection inert there —
@@ -298,6 +333,23 @@ _experts(values) = NamedTuple{V24_SERVING_EXPERTS}(Tuple(Float64.(values)))
                 guarded = load_v24_serving_artifacts(guarded_bundle.dir)
                 @test guarded.guard_applied
                 @test guarded.guard_reference == V24_SERVING_GUARD_REFERENCE
+                # A guard moves the published center, so the bundle must name that stage in its
+                # identity, and it must be banded by the guarded variant's own strata rather than by
+                # the quantiles of the unguarded residuals.
+                @test guarded.identity == V24_SERVED_GUARDED_IDENTITY
+                @test guarded.identity != V24_SERVED_IDENTITY
+                @test endswith(guarded.identity, V24_SERVED_GUARD_IDENTITY_TOKEN)
+                @test v24_served_identity(true) == V24_SERVED_GUARDED_IDENTITY
+                @test v24_served_conformal_variant(true) == V24_SERVED_GUARDED_VARIANT
+                for step in V24_SERVING_MODEL_STEPS,
+                    depth in (V24_SERVING_POOLED, V24_SERVING_DEPTH_BINS...)
+                    @test guarded.conformal[(step, depth)].half_width_nt ≈
+                          guarded_bundle.half_width(step, depth) *
+                          V24_FIXTURE_GUARDED_WIDTH_SCALE atol = 1e-12
+                    # The unguarded width is present in the same file and must NOT have been read.
+                    @test guarded.conformal[(step, depth)].half_width_nt !=
+                          guarded_bundle.half_width(step, depth)
+                end
                 experts = _experts([-60.0, -55.0, -70.0, -40.0, -50.0, -52.0, -48.0, -65.0, -30.0,
                                     -150.0])
                 deep = v24_serving_center(guarded; model_steps = 3, latest_dst = -120.0,
@@ -324,6 +376,42 @@ _experts(values) = NamedTuple{V24_SERVING_EXPERTS}(Tuple(Float64.(values)))
                 @test !lifted.guard_applied
                 @test lifted.center ≈ lifted.l1_center atol = 1e-12
             end
+        end
+
+        @testset "a non-finite one-hour rate is neutralised, not fatal" begin
+            # `operational_v22_regime` throws on a NaN rate. Without the neutralisation in
+            # `v24_serving_center` every row with a missing one-hour Dst rate — an interior Kyoto gap
+            # — would drop out of V2.4e into the fallback chain, which is an availability loss the
+            # suite could not see. The V2.2 path pins the identical guard; this is its V2.4 mirror.
+            experts = _experts([-60.0, -55.0, -70.0, -40.0, -50.0, -52.0, -48.0, -65.0, -30.0,
+                                -150.0])
+            for (latest, vbsouth) in ((-80.0, 3.0), (-10.0, 0.0), (-120.0, 6.0), (-45.0, 1.5))
+                zero_rate = v24_serving_center(
+                    artifacts; model_steps = 3, latest_dst = latest, dst_delta_1h_nt = 0.0,
+                    vbsouth_mvm = vbsouth, experts = experts)
+                for bad_rate in (NaN, Inf, -Inf)
+                    neutral = v24_serving_center(
+                        artifacts; model_steps = 3, latest_dst = latest,
+                        dst_delta_1h_nt = bad_rate, vbsouth_mvm = vbsouth, experts = experts)
+                    # A neutralised rate must reproduce the zero-rate row exactly: same regime, same
+                    # deepening label, same cell, same center and same band.
+                    @test neutral.regime === zero_rate.regime
+                    @test neutral.deepening_cell === zero_rate.deepening_cell
+                    @test neutral.coupling_active_mvm == zero_rate.coupling_active_mvm
+                    @test neutral.regime_cell == zero_rate.regime_cell
+                    @test neutral.center == zero_rate.center
+                    @test neutral.half_width_nt == zero_rate.half_width_nt
+                end
+            end
+            # A deepening state is reached through the rate, so a neutralised rate must NOT be
+            # labelled active deepening: this is what distinguishes neutralisation from a guess.
+            neutral_deep = v24_serving_center(
+                artifacts; model_steps = 3, latest_dst = -120.0, dst_delta_1h_nt = NaN,
+                vbsouth_mvm = 3.0, experts = experts)
+            @test !neutral_deep.deepening_cell
+            @test neutral_deep.regime !== :active_deepening
+            # The depth bin comes from the anchor Dst alone and is unaffected by the missing rate.
+            @test neutral_deep.depth_bin === :deep
         end
 
         @testset "the served center refuses inputs it cannot serve" begin
@@ -484,10 +572,19 @@ _experts(values) = NamedTuple{V24_SERVING_EXPERTS}(Tuple(Float64.(values)))
                          :wrong_served_variant, :wrong_stack_variant,
                          :guard_enabled_without_reference, :guard_disabled_with_reference,
                          :guard_switch_absent, :nine_expert_stack,
-                         :conformal_variant_mismatch)
+                         :conformal_variant_mismatch,
+                         # Cross-record defects: each file parses on its own, but they describe
+                         # different fits.
+                         :fold_year_mismatch, :conformal_fold_mismatch, :tau_fold_mismatch,
+                         :tau_cutoff_mismatch, :tau_record_drift, :guard_records_disagree,
+                         :selection_guard_switch_absent, :expert_set_absent, :n_experts_absent,
+                         :archive_past_training_cutoff,
+                         # A guard-on bundle may not go out under the unguarded identity, and may not
+                         # be banded by the unguarded variant's strata.
+                         :guard_plain_identity, :guard_missing_guarded_strata)
             @test mutation in V24_FIXTURE_MUTATIONS
         end
-        @test length(V24_FIXTURE_MUTATIONS) == 28
+        @test length(V24_FIXTURE_MUTATIONS) == 40
         @test allunique(V24_FIXTURE_MUTATIONS)
         # Every defect names the check it must trip; a new mutation without an expected message would
         # otherwise be asserted only as "throws something".
@@ -548,6 +645,44 @@ _experts(values) = NamedTuple{V24_SERVING_EXPERTS}(Tuple(Float64.(values)))
             empty_dir = joinpath(root, "empty")
             mkpath(empty_dir)
             @test_throws ErrorException load_v24_serving_artifacts(empty_dir)
+        end
+    end
+
+    @testset "the V2.4 cell regime uses the same thresholds the deployed stack was cut on" begin
+        # `v24_serving_center` labels a row's issue-time regime with `operational_v22_regime`'s
+        # package defaults, while expert E10 — the static V2.2 stack — labels its own cell with the
+        # thresholds recorded in the stack file. The two are the same regime split today, and nothing
+        # but the deployed file's SHA pin says so. This asserts the equality directly, so a restacked
+        # bundle cut on different edges cannot silently put the two experts in different regimes.
+        stack_path = joinpath(@__DIR__, "..", "deploy", "operational_v2_2_stack.csv")
+        @test isfile(stack_path)
+        recorded = CSV.read(stack_path, DataFrame)
+        for column in ("disturbed_dst_threshold_nt", "deepening_rate_threshold_nt_per_h",
+                       "coupling_threshold_mvm", "sindy_mass_floor", "minimum_cell_rows")
+            @test column in names(recorded)
+        end
+        @test length(unique(recorded.disturbed_dst_threshold_nt)) == 1
+        @test length(unique(recorded.deepening_rate_threshold_nt_per_h)) == 1
+        @test length(unique(recorded.coupling_threshold_mvm)) == 1
+        @test Float64(recorded.disturbed_dst_threshold_nt[1]) ==
+              SolarSINDy.OPERATIONAL_V22_DEFAULT_DISTURBED_DST_NT
+        @test Float64(recorded.deepening_rate_threshold_nt_per_h[1]) ==
+              SolarSINDy.OPERATIONAL_V22_DEFAULT_DEEPENING_RATE_NT_PER_H
+        @test Float64(recorded.coupling_threshold_mvm[1]) ==
+              SolarSINDy.OPERATIONAL_V22_DEFAULT_COUPLING_THRESHOLD_MVM
+        @test Float64(recorded.sindy_mass_floor[1]) ==
+              SolarSINDy.OPERATIONAL_V22_DEFAULT_SINDY_MASS_FLOOR
+        @test Int(recorded.minimum_cell_rows[1]) ==
+              SolarSINDy.OPERATIONAL_V22_DEFAULT_MINIMUM_CELL_ROWS
+        # The equality is what makes the two labellings agree; assert that consequence too, over the
+        # regime boundaries the deployed edges sit on.
+        deployed = load_v22_serving_stack(stack_path)
+        for latest in (-100.0, -70.0, -50.0, -30.0, -29.0, -10.0, 0.0),
+            rate in (-20.0, -5.1, -5.0, -4.9, 0.0, 6.0),
+            vbsouth in (0.0, 2.5)
+            coupling = v22_serving_coupling_active(vbsouth, rate)
+            @test operational_v22_regime(deployed, latest, rate, coupling) ===
+                  operational_v22_regime(latest, rate, coupling)
         end
     end
 end

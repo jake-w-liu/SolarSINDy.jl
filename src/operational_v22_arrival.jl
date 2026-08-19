@@ -1310,6 +1310,14 @@ function build_operational_v22_arrival_path(
         end
     end
 
+    # The next two fallbacks are unreachable on this path and are retained as defence in depth, not
+    # as live branches. `verify_operational_v22_arrival_queue` above already rebuilds the queue and
+    # throws unless a `:ready` queue carries a contiguous, complete, in-domain 25-row seed whose bins
+    # all end at or before the issue time, which is exactly what `operational_v22_arrival_history`
+    # needs and exactly what puts `history_end` at or before `start`. They exist so that a future
+    # relaxation of the verifier degrades to transported persistence with a named reason instead of
+    # throwing out of the issuance path; `:invalid_sparse_seed` and `:history_after_path_start` are
+    # therefore reasons no queue can currently produce.
     history = try
         operational_v22_arrival_history(queue)
     catch error

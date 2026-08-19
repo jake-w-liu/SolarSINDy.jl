@@ -6,15 +6,38 @@
 
   A periodic one-shot (StartInterval) independent of the monitor and dashboard processes. Detects a
   dead/unloaded forecast daemon or a down dashboard, writes the OUTAGE.md sentinel, and fires the
-  webhook — so an outage is caught even when neither supervised process can report it. Fill the
-  placeholders (deploy/install_launchd.sh does this) and bootstrap with:
+  webhook — so an outage is caught even when neither supervised process can report it.
+
+  Prefer the install script, which fills every placeholder below:
+    deploy/install_launchd.sh <CLONE_DIR> watchdog
+  Manual install: replace EVERY placeholder in the dict below with a literal value, copy to
+  ~/Library/LaunchAgents/, then bootstrap with:
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.solarsindy.watchdog.plist
 
-    __CLONE_DIR__     absolute path to the SolarSINDy.jl clone
-    __MONITOR_DIR__   monitor state directory (default __CLONE_DIR__/var/monitor)
+  Complete placeholder list for this template — every one of them must be replaced:
+
+    __CLONE_DIR__           absolute path to the SolarSINDy.jl clone
+    __MONITOR_DIR__         monitor state directory (default __CLONE_DIR__/var/monitor)
+    __WATCHDOG_DASH_URL__   dashboard health URL to probe, ending in /api/health. A 0.0.0.0 bind is
+                            a bind address, not a reachable destination, so probe over loopback on
+                            the configured port (packaged default: see deploy/solarsindy.env.example)
+    __WATCHDOG_STALE_SEC__  forecast-log staleness threshold, whole seconds; two issuance cycles is
+                            the packaged setting (see deploy/solarsindy.env.example)
+    EXTRA_ENV marker        the commented marker line inside EnvironmentVariables. The install
+                            script replaces that line with the allow-listed solarsindy.env keys this
+                            service reads (SWM_WEBHOOK_URL, SOLARSINDY_WATCHDOG_DATA_URL,
+                            SOLARSINDY_WATCHDOG_DATA_TIMEOUT, SOLARSINDY_WATCHDOG_STREAM_MAX_BYTES).
+                            A manual install replaces the line with its own <key>/<string> pairs, or
+                            deletes it to run with no extra keys.
 
   Set SWM_WEBHOOK_URL here to enable push alerts. The watchdog is intentionally NOT KeepAlive; it
   runs once every StartInterval seconds and exits.
+
+  The health URL follows the configured SWM_HOST/SWM_PORT (0.0.0.0 probes over loopback), and
+  SWM_WEBHOOK_URL plus SOLARSINDY_WATCHDOG_* are taken from the install-time environment, so a
+  dashboard on a non-default port is still watched instead of silently reported down. An unreplaced
+  staleness placeholder does not silently disable the freshness check: watchdog.sh reports it and
+  falls back to the documented default.
 -->
 <plist version="1.0">
 <dict>
@@ -35,13 +58,10 @@
     <key>SOLARSINDY_MONITOR_DIR</key>
     <string>__MONITOR_DIR__</string>
     <key>SOLARSINDY_WATCHDOG_DASH_URL</key>
-    <string>http://127.0.0.1:8723/api/health</string>
+    <string>__WATCHDOG_DASH_URL__</string>
     <key>SOLARSINDY_WATCHDOG_STALE_SEC</key>
-    <string>7200</string>
-    <!-- Uncomment to enable push alerts:
-    <key>SWM_WEBHOOK_URL</key>
-    <string>https://hooks.example.com/...</string>
-    -->
+    <string>__WATCHDOG_STALE_SEC__</string>
+    <!-- __EXTRA_ENV__ -->
   </dict>
 
   <key>RunAtLoad</key>

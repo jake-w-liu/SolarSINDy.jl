@@ -12,9 +12,8 @@ using DataFrames
 using Dates
 using SHA
 
-if !isdefined(@__MODULE__, :LiveVerifyConfig)
+isdefined(@__MODULE__, :LiveVerifyConfig) ||
     include(joinpath(@__DIR__, "..", "..", "examples", "live_forecast_verify.jl"))
-end
 
 const V22_REPLAY_MODEL_STEPS = copy(OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS)
 const V22_EXPOSED_BENCHMARK_LOCKED = :exposed_benchmark_locked

@@ -233,6 +233,71 @@ using DataFrames
         @test_throws ArgumentError SolarSINDy._ffill_short_gaps!([1.0], -1)
     end
 
+    @testset "C4-PKG-03: causal cleaning fills only the first three hours of a long outage" begin
+        # A six-hour V outage. The causal branch carries the last observation
+        # forward for at most three hours; hours four onward stay missing and are
+        # flagged quality = 0. This pins the semantics the caller's summary
+        # describes, so a future edit to `_ffill_short_gaps!` cannot silently
+        # lengthen or shorten the carry without failing here.
+        df = DataFrame(
+            datetime=[DateTime(2022, 3, 1) + Hour(i - 1) for i in 1:8],
+            V=[400.0, NaN, NaN, NaN, NaN, NaN, NaN, 430.0],
+            Bz=fill(-5.0, 8), By=fill(1.0, 8), n=fill(5.0, 8),
+            Pdyn=fill(2.0, 8), T=fill(1.0e5, 8), Dst=fill(-20.0, 8),
+            AE=fill(100.0, 8), AL=fill(-50.0, 8), AU=fill(80.0, 8),
+        )
+        clean_omni_data!(df; causal=true)
+        @test df.quality == [1, 1, 1, 1, 0, 0, 0, 1]
+        @test df.V[2] == 400.0 && df.V[3] == 400.0 && df.V[4] == 400.0
+        @test isnan(df.V[5]) && isnan(df.V[6]) && isnan(df.V[7])
+        # The non-causal branch is the contrasting rule: a gap longer than three
+        # hours is not interpolated at all, so every gap hour stays missing.
+        wide = DataFrame(
+            datetime=[DateTime(2022, 3, 1) + Hour(i - 1) for i in 1:8],
+            V=[400.0, NaN, NaN, NaN, NaN, NaN, NaN, 430.0],
+            Bz=fill(-5.0, 8), By=fill(1.0, 8), n=fill(5.0, 8),
+            Pdyn=fill(2.0, 8), T=fill(1.0e5, 8), Dst=fill(-20.0, 8),
+            AE=fill(100.0, 8), AL=fill(-50.0, 8), AU=fill(80.0, 8),
+        )
+        clean_omni_data!(wide)
+        @test wide.quality == [1, 0, 0, 0, 0, 0, 0, 1]
+        @test all(isnan, wide.V[2:7])
+    end
+
+    @testset "C4-PKG-04: `_interp_short_gaps!` has exactly one method" begin
+        # Two definitions of this helper coexisted (`src/data_cleaning.jl` and
+        # `src/realtime.jl`); the more specific `Vector{Float64}` one silently
+        # won for every real caller. A single method is the contract now.
+        ms = methods(SolarSINDy._interp_short_gaps!)
+        @test length(ms) == 1
+        @test basename(String(first(ms).file)) == "data_cleaning.jl"
+        @test which(SolarSINDy._interp_short_gaps!, (Vector{Float64}, Int)) === first(ms)
+
+        # Value semantics of the surviving method: bounded gaps of at most
+        # `max_gap` are interpolated linearly; longer gaps and gaps touching
+        # either end of the vector are left NaN.
+        x = [1.0, NaN, NaN, 4.0]
+        SolarSINDy._interp_short_gaps!(x, 3)
+        @test isequal(x, [1.0, 2.0, 3.0, 4.0])
+
+        boundary = [1.0, NaN, NaN, NaN, 5.0]
+        SolarSINDy._interp_short_gaps!(boundary, 3)
+        @test isequal(boundary, [1.0, 2.0, 3.0, 4.0, 5.0])
+
+        too_long = [1.0, NaN, NaN, NaN, NaN, 6.0]
+        SolarSINDy._interp_short_gaps!(too_long, 3)
+        @test isequal(too_long, [1.0, NaN, NaN, NaN, NaN, 6.0])
+
+        edges = [NaN, 2.0, NaN]
+        SolarSINDy._interp_short_gaps!(edges, 3)
+        @test isequal(edges, [NaN, 2.0, NaN])
+
+        # Non-`Vector` storage must hit the same method and the same values.
+        buf = [0.0, 1.0, NaN, 3.0, 0.0]
+        SolarSINDy._interp_short_gaps!(view(buf, 2:4), 3)
+        @test isequal(buf, [0.0, 1.0, 2.0, 3.0, 0.0])
+    end
+
     @testset "C4-PKG-02: cleaning normalizes missing and mixed measured columns" begin
         df = DataFrame(
             datetime=[DateTime(2022, 1, 1) + Hour(i - 1) for i in 1:4],

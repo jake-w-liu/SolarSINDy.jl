@@ -169,6 +169,71 @@ function logln(args...)
     return nothing
 end
 
+# Cold-archive segment naming. Segment 0 is the base archive; a hot-log schema change that
+# post-dates the archive's creation rolls forward to `<stem>.<n>.csv` with its own
+# `<stem>.<n>.csv.manifest.json`. Retention is the only writer, and `_resolve_archive_segment` only
+# ever appends to the highest-index segment, so segment order is append order and the full record is
+# the concatenation of the segments in index order.
+const FORECAST_ARCHIVE_MAX_SEGMENTS = 1000
+
+function _archive_segment_paths(archive_path::AbstractString, manifest_path::AbstractString,
+                                index::Integer)
+    index == 0 && return (String(archive_path), String(manifest_path))
+    stem, ext = splitext(String(archive_path))
+    segment = string(stem, '.', Int(index), ext)
+    return (segment, string(segment, ".manifest.json"))
+end
+
+# Pick the archive segment that can accept a frame with these `columns`. Only the HIGHEST-index
+# non-empty segment is a candidate: if its header matches, rows are appended to it; if it differs,
+# it is left byte-untouched and a new segment is opened one index further on. A header mismatch
+# therefore never produces a misaligned append AND never blocks retention permanently.
+#
+# Restricting the candidate to the last segment is what makes the documented archive contract true.
+# Searching from index 0 for the FIRST header match reuses an earlier segment whenever the hot-log
+# schema returns to an older shape — a rollback, a reverted column, an operator running the previous
+# release — and rows written later would then sit in a lower-index file than rows written earlier.
+# Segment order would no longer be append order, and reading the archive as the concatenation of its
+# segments in index order would silently interleave the record out of chronological sequence. The
+# cost of the invariant is one extra segment file after a schema revert; the alternative is an
+# archive whose ordering contract cannot be stated.
+#
+# Before the rollover a single column addition — routine in this package, where the `v2_2_*`, `v23_*`
+# and `v24_*` column families were each added within weeks — made every subsequent
+# `_retain_live_forecast_log!` throw "cold archive header mismatch". Rows were then never pruned
+# again and the hot log grew past LIVE_MONITOR_MAX_LOG_ROWS without bound, which in turn makes every
+# failed dashboard log parse a multi-second serialised stall.
+function _resolve_archive_segment(archive_path::AbstractString, manifest_path::AbstractString,
+                                  columns::Vector{String})
+    # Scan the whole index range rather than stopping at the first hole: a manually removed middle
+    # segment must not make a later, populated segment invisible and send appends backwards.
+    last_index = -1
+    for index in 0:FORECAST_ARCHIVE_MAX_SEGMENTS
+        path, _ = _archive_segment_paths(archive_path, manifest_path, index)
+        isfile(path) && filesize(path) > 0 && (last_index = index)
+    end
+    if last_index < 0
+        path, manifest = _archive_segment_paths(archive_path, manifest_path, 0)
+        return (path=path, manifest=manifest, index=0, existed=false)
+    end
+
+    path, manifest = _archive_segment_paths(archive_path, manifest_path, last_index)
+    header = try
+        names(CSV.read(path, DataFrame; limit=0))
+    catch e
+        e isa InterruptException && rethrow()
+        error("cold archive header unreadable at $path: $(sprint(showerror, e))")
+    end
+    header == columns && return (path=path, manifest=manifest, index=last_index, existed=true)
+
+    next_index = last_index + 1
+    next_index <= FORECAST_ARCHIVE_MAX_SEGMENTS || error(
+        "cold archive segment limit $FORECAST_ARCHIVE_MAX_SEGMENTS reached at $archive_path; " *
+        "refusing to append rows whose columns match no segment header")
+    next_path, next_manifest = _archive_segment_paths(archive_path, manifest_path, next_index)
+    return (path=next_path, manifest=next_manifest, index=next_index, existed=false)
+end
+
 # Append rows about to be dropped by FIFO retention to the cold archive BEFORE they leave the hot
 # log, so the locked-live record is never destroyed by the row cap. Runs inside the same forecast-log
 # lock as retention, so the archive and the hot-log truncation commit together. Returns the count of
@@ -183,13 +248,25 @@ function _archive_pruned_rows!(pruned::DataFrame;
     archive_path = abspath(archive_path)
     manifest_path = abspath(manifest_path)
     mkpath(dirname(archive_path))
-    existed = isfile(archive_path)
+    # Schema-drift handling: CSV.write appends positionally and never re-reads the target header, so
+    # a pruned frame whose columns differ from a segment's header must never be appended to it. The
+    # resolver keeps that guarantee by appending only to the highest-index segment when its header
+    # matches exactly, and opening the next index when it does not.
+    segment = _resolve_archive_segment(archive_path, manifest_path, names(pruned))
+    segment_path = segment.path
+    segment_manifest = segment.manifest
+    existed = segment.existed
+    if segment.index > 0 && !existed
+        logln("cold archive schema drift: hot-log columns match no existing segment header; ",
+              "rolling to segment ", segment.index, " at ", segment_path,
+              " (earlier segments left untouched)")
+    end
 
     prev_rows = 0
     prev_bytes = 0
-    if isfile(manifest_path)
+    if isfile(segment_manifest)
         m = try
-            JSON3.read(read(manifest_path, String))
+            JSON3.read(read(segment_manifest, String))
         catch e
             e isa InterruptException && rethrow()
             nothing
@@ -200,63 +277,48 @@ function _archive_pruned_rows!(pruned::DataFrame;
         end
     end
     # Detect external truncation/corruption since the last append before we extend the archive.
-    existed && prev_bytes != 0 && filesize(archive_path) != prev_bytes && error(
+    existed && prev_bytes != 0 && filesize(segment_path) != prev_bytes && error(
         "cold archive size changed outside retention: expected $prev_bytes bytes, " *
-        "found $(filesize(archive_path)) at $archive_path")
+        "found $(filesize(segment_path)) at $segment_path")
 
     # Manifest-completeness guard: a non-empty archive with no readable manifest (missing, or corrupt
     # JSON swallowed to prev_bytes==0) has no verified byte baseline. Without it the post-append
     # accounting check below (new_bytes == base_bytes + length(seg), base_bytes==0) can only fire
     # AFTER CSV.write has already appended the segment, so every retention retry re-appends the same
     # rows (duplicating archived evidence) and throws again while retention never completes. Refuse
-    # before serializing (like the schema-drift guard) so retention aborts and the rows stay safely in
-    # the hot log until the archive/manifest is repaired.
-    existed && prev_bytes == 0 && filesize(archive_path) > 0 && error(
-        "cold archive manifest missing or unreadable at $manifest_path beside a non-empty archive " *
-        "($(filesize(archive_path)) bytes) at $archive_path; refusing to append without a verified " *
-        "byte baseline")
-
-    # Schema-drift guard: CSV.write appends positionally and never re-reads the target header, so a
-    # pruned frame whose columns differ from the existing archive header would silently write
-    # misaligned rows under the wrong header. Refuse before touching the file so retention aborts and
-    # the rows stay safely in the hot log for the next attempt.
-    if existed
-        archive_header = try
-            names(CSV.read(archive_path, DataFrame; limit=0))
-        catch e
-            e isa InterruptException && rethrow()
-            error("cold archive header unreadable at $archive_path: $(sprint(showerror, e))")
-        end
-        names(pruned) == archive_header || error(
-            "cold archive header mismatch at $archive_path: archive columns $archive_header " *
-            "!= pruned columns $(names(pruned)); refusing to append misaligned rows")
-    end
+    # before serializing so retention aborts and the rows stay safely in the hot log until the
+    # archive/manifest is repaired.
+    existed && prev_bytes == 0 && filesize(segment_path) > 0 && error(
+        "cold archive manifest missing or unreadable at $segment_manifest beside a non-empty " *
+        "archive ($(filesize(segment_path)) bytes) at $segment_path; refusing to append without a " *
+        "verified byte baseline")
 
     # Serialize the segment once (header only when creating), hash it, append, flush.
     buf = IOBuffer()
     CSV.write(buf, pruned; append=existed, header=!existed)
     seg = take!(buf)
     seg_sha = bytes2hex(sha256(seg))
-    open(archive_path, "a") do io
+    open(segment_path, "a") do io
         write(io, seg)
         flush(io)
     end
     base_bytes = existed ? prev_bytes : 0
-    new_bytes = filesize(archive_path)
+    new_bytes = filesize(segment_path)
     new_bytes == base_bytes + length(seg) || error(
         "cold archive append incomplete: expected $(base_bytes + length(seg)) bytes, " *
-        "found $new_bytes at $archive_path")
+        "found $new_bytes at $segment_path")
 
     total_rows = prev_rows + nrow(pruned)
-    tmp = string(manifest_path, ".tmp")
+    tmp = string(segment_manifest, ".tmp")
     open(tmp, "w") do io
         JSON3.write(io, (archived_rows = total_rows,
                          archive_bytes = new_bytes,
+                         segment_index = segment.index,
                          last_segment_rows = nrow(pruned),
                          last_segment_sha256 = seg_sha,
                          updated_utc = stamp()))
     end
-    mv(tmp, manifest_path; force=true)
+    mv(tmp, segment_manifest; force=true)
     return nrow(pruned)
 end
 
@@ -401,26 +463,85 @@ _monitor_aci_ready(log_path::AbstractString, model_steps::Integer,
         log_path, 0.0, model_steps; latest_dst=latest_dst, pred_col=pred_col,
     ) !== nothing
 
+# Verified-residual counts behind one ACI readiness decision, read from the checkpoint the readiness
+# probe has just written beside the log. Returns `nothing` when no checkpoint exists for the stream
+# (e.g. a stubbed readiness function, or a log missing the required columns). Diagnostic only: it
+# never influences the policy, so a read failure degrades to an unannotated stream name.
+function _monitor_aci_stream_counts(log_path::AbstractString, model_steps::Integer,
+                                    pred_col::Symbol)
+    try
+        isfile(log_path) || return nothing
+        state = _read_live_state(String(log_path))
+        state === nothing && return nothing
+        streams = get(state, "aci_streams", nothing)
+        streams isa AbstractDict || return nothing
+        key = _aci_stream_key(pred_col, model_steps, _ACI_ACTIVITY_THRESHOLD_NT,
+                              _ACI_TARGET_COVERAGE, _ACI_GAMMA, _ACI_WARMUP,
+                              _ACI_HISTORY_WINDOW)
+        entry = get(streams, key, nothing)
+        entry isa AbstractDict || return nothing
+        counts = Int[]
+        for pool in ("all", "quiet", "disturbed")
+            snapshot = get(entry, pool, nothing)
+            snapshot isa AbstractDict || return nothing
+            push!(counts, Int(snapshot["count"]))
+        end
+        return (all=counts[1], quiet=counts[2], disturbed=counts[3])
+    catch e
+        e isa InterruptException && rethrow()
+        return nothing
+    end
+end
+
 # Choose one interval policy before any horizon is written. Both the baseline-center and served-
 # center residual streams must be mature for every required model-step lead before the batch may use
 # ACI; otherwise every horizon uses its shared static/conformal fallback.
+#
+# Which model-step leads are "required" is set by the cadence phase: the Kyoto Dst anchor lags the
+# issue hour by 0 or 1 h depending on the minute the daemon happens to run, so the same product
+# horizons {1,2,3,6} map to model steps {1,2,3,6} at lag 0 and {2,3,4,7} at lag 1. The two step sets
+# have separate residual streams with separate maturities, which is why a restart at a different
+# minute of the hour can flip this policy — and with it the fallback-row and frozen-tail band widths
+# by roughly a factor of four. That dependence was previously invisible: only the resulting `:static`
+# or `:aci` symbol was recorded. The diagnostic below names the anchor lag, the required step set and
+# every immature stream with its verified-residual counts, so the flip is attributable from the log
+# alone. `immature`, when supplied, receives the same `(model_steps, pred_col)` pairs.
 function _monitor_interval_policy(inputs;
                                   log_path::AbstractString=LOG,
                                   horizons=HORIZONS,
-                                  readiness_fn::Function=_monitor_aci_ready)
+                                  readiness_fn::Function=_monitor_aci_ready,
+                                  immature::Union{Nothing,AbstractVector}=nothing)
     issue_time = inputs.issue_time
     dst_times, dst_vals = inputs.dst
     dst_idx = _latest_causal_index(dst_times, issue_time, "Kyoto Dst")
     latest_dst_time = dst_times[dst_idx]
     latest_dst = Float64(dst_vals[dst_idx])
+    required_steps = Int[]
+    not_ready = Tuple{Int,Symbol}[]
     for horizon in horizons
         target = _next_hourly_target(issue_time, horizon, latest_dst_time)
         model_steps = Int((target - latest_dst_time) / Hour(1))
+        push!(required_steps, model_steps)
         for pred_col in (:v2_pred_dst_nt, :served_pred_dst_nt)
-            readiness_fn(log_path, model_steps, latest_dst, pred_col) || return :static
+            readiness_fn(log_path, model_steps, latest_dst, pred_col) ||
+                push!(not_ready, (model_steps, pred_col))
         end
     end
-    return :aci
+    immature === nothing || append!(immature, not_ready)
+    isempty(not_ready) && return :aci
+    anchor_lag_hours = (floor(issue_time, Hour) - latest_dst_time) / Hour(1)
+    detail = join(map(not_ready) do (model_steps, pred_col)
+        counts = _monitor_aci_stream_counts(log_path, model_steps, pred_col)
+        counts === nothing ? string(pred_col, "@ms=", model_steps) :
+            string(pred_col, "@ms=", model_steps, " n=", counts.all, "(all)/",
+                   counts.quiet, "(quiet)/", counts.disturbed, "(disturbed)")
+    end, ", ")
+    logln("interval policy :static — Kyoto anchor ", latest_dst_time,
+          " lags issue hour ", floor(issue_time, Hour), " by ", anchor_lag_hours,
+          " h, so this cadence phase needs model steps ", join(required_steps, "/"),
+          "; immature ACI residual streams (need ", _ACI_WARMUP + _ACI_POOL_MARGIN,
+          " verified rows): ", detail)
+    return :static
 end
 
 # Bound the operational hot log under the same cross-process lock used by
@@ -492,49 +613,101 @@ function _issue_horizon_cycle!(inputs;
 end
 
 # Run one cycle; returns both successful calls and whether the log contains one API-valid cycle.
-function cycle!()
+#
+# The issuance computation (solar-wind + Dst feeds, interval-policy preflight, four horizon
+# appends) is one guarded block; every step after it is an OBSERVATION-side step that does not
+# depend on the solar-wind feed and therefore runs on every cycle:
+#   * Kyoto verification (`refresh_observations!` / `verify_pending!`) closes out targets whose
+#     hour has already been published,
+#   * hot-log retention keeps the row cap and the cold archive current,
+#   * the prospective external Dst snapshot is an independent hourly scientific record — the
+#     hour it misses is lost, it cannot be backfilled,
+#   * the comparison report is the operator-facing summary.
+# Before this split a solar-wind feed outage returned early and skipped all four (observed in
+# production on 2026-07-29, cycles 15/16, ECONNRESET), so an L1 outage silently stalled Dst
+# verification and destroyed external-snapshot hours. The returned issuance status is unchanged
+# and still drives dead-man accounting only.
+#
+# Every collaborator is injectable so the skip-nothing contract is testable without the network.
+function cycle!(; prepare_fn::Function=prepare_issue_inputs,
+                  policy_fn::Function=_monitor_interval_policy,
+                  issue_cycle_fn::Function=_issue_horizon_cycle!,
+                  dst_fn::Function=_fetch_dst,
+                  refresh_fn::Function=refresh_observations!,
+                  verify_fn::Function=verify_pending!,
+                  retention_fn::Function=_retain_live_forecast_log!,
+                  snapshot_fn::Function=capture_and_score_external_dst_snapshot!,
+                  report_fn::Function=write_live_comparison_report,
+                  log_path::AbstractString=LOG,
+                  report_path::AbstractString=REPORT,
+                  calibration_path::AbstractString=V2_CALIB,
+                  external_cfg=EXTERNAL_DST_CFG,
+                  max_log_rows::Integer=MAX_LOG_ROWS)
     base_cfg = LiveVerifyConfig(; mode=:issue, model=:v2, horizon_hours=first(HORIZONS),
-                                log_path=LOG, v2_calibration_path=V2_CALIB)
-    inputs = try
-        prepare_issue_inputs(base_cfg)
+                                log_path=String(log_path),
+                                v2_calibration_path=String(calibration_path))
+    inputs = nothing
+    try
+        inputs = prepare_fn(base_cfg)
     catch e
         e isa InterruptException && rethrow()
         logln("WARN prepare issuance inputs failed: ", sprint(showerror, e))
-        return (succeeded=0, complete=false)
     end
-    interval_policy = try
-        _monitor_interval_policy(inputs)
-    catch e
-        e isa InterruptException && rethrow()
-        logln("WARN select coherent interval policy failed: ", sprint(showerror, e))
-        return (succeeded=0, complete=false)
+    interval_policy = nothing
+    if inputs !== nothing
+        try
+            interval_policy = policy_fn(inputs)
+        catch e
+            e isa InterruptException && rethrow()
+            logln("WARN select coherent interval policy failed: ", sprint(showerror, e))
+        end
     end
-    logln("forecast interval policy: ", interval_policy)
-    issuance = _issue_horizon_cycle!(inputs; interval_policy=interval_policy)
-    cfg = LiveVerifyConfig(; log_path=LOG, report_path=REPORT)
-    dst_times, dst_vals = inputs.dst
+    issuance = if interval_policy === nothing
+        logln("WARN issuance skipped this cycle; verification, retention, the external Dst ",
+              "snapshot and the comparison report still run")
+        (succeeded=0, complete=false)
+    else
+        logln("forecast interval policy: ", interval_policy)
+        issue_cycle_fn(inputs; log_path=String(log_path),
+                       calibration_path=String(calibration_path),
+                       interval_policy=interval_policy)
+    end
+
+    # Observation feed for the remaining steps. Reuse the issuance fetch when there is one;
+    # otherwise fetch Kyoto Dst once for all three consumers. If that fetch also fails, pass
+    # `nothing` and let each step use its own built-in fetch fallback rather than skipping.
+    dst = inputs === nothing ? nothing : inputs.dst
+    if dst === nothing
+        guarded("observation_dst_fetch", () -> begin
+            dst = dst_fn()
+            nothing
+        end)
+    end
+    dst_times = dst === nothing ? nothing : first(dst)
+    dst_vals = dst === nothing ? nothing : last(dst)
+
+    cfg = LiveVerifyConfig(; log_path=String(log_path), report_path=String(report_path))
     refreshed = guarded(
         "refresh_observations",
-        () -> refresh_observations!(cfg; dst_times=dst_times, dst_vals=dst_vals),
+        () -> refresh_fn(cfg; dst_times=dst_times, dst_vals=dst_vals),
     )
     refreshed || guarded(
         "verify_pending_fallback",
-        () -> verify_pending!(cfg; dst_times=dst_times, dst_vals=dst_vals),
+        () -> verify_fn(cfg; dst_times=dst_times, dst_vals=dst_vals),
     )
-    guarded("forecast_log_retention", () -> _retain_live_forecast_log!(LOG, MAX_LOG_ROWS))
-    observations = DataFrame(
+    guarded("forecast_log_retention",
+            () -> retention_fn(String(log_path), Int(max_log_rows)))
+    observations = dst === nothing ? nothing : DataFrame(
         observed_time_utc=DateTime.(dst_times),
         observed_dst_nt=Float64.(dst_vals),
     )
     guarded(
         "external_dst_snapshot",
-        () -> capture_and_score_external_dst_snapshot!(
-            EXTERNAL_DST_CFG; observations=observations,
-        ),
+        () -> snapshot_fn(external_cfg; observations=observations),
     )
     guarded("comparison_report_and_summary", () -> begin
-        df = CSV.read(LOG, DataFrame)
-        write_live_comparison_report(
+        df = CSV.read(cfg.log_path, DataFrame)
+        report_fn(
             cfg.log_path,
             cfg.report_path;
             df=df,

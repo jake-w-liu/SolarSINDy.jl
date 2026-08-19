@@ -15,7 +15,11 @@ makedocs(
         "Home" => "index.md",
         "API Reference" => [
             "Core API" => "api.md",
+            "Forecasting And Alarms" => "forecast-api.md",
             "Operational API" => "operational-api.md",
+            "V2.4e Super-Learner" => "operational-v24-api.md",
+            "V2.2 Research Chain" => "operational-v22-research-api.md",
+            "V2.3 Study API" => "operational-v23-api.md",
         ],
         "Examples" => "examples.md",
         "Live Verification" => "live-verification.md",

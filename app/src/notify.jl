@@ -8,10 +8,14 @@
 # A lost feed or dead forecast cycle is NOT treated as "quiet". Staleness of the primary Dst
 # forecast is a first-class alert state ("monitoring data stale — alert state unknown"): the
 # webhook never emits a "returned to quiet (all clear)" caused by an outage, and the all-clear
-# text is produced only from a fresh cycle that actually shows quiet conditions.
+# text is produced only from a fresh cycle that actually shows quiet conditions. A log that has
+# been emptied, truncated, rotated away or made unreadable carries no cycle at all, and an active
+# outage sentinel reports a daemon the live layers cannot see; both reach the alert state as
+# staleness, never as quiet.
 #
-# The last delivered state (level + stale flag) is persisted under var/ so a restart across a
-# threat escalation still delivers the transition instead of silently re-baselining.
+# The last delivered state (level + stale flag) and a first-data marker are persisted under var/ so
+# a restart across a threat escalation still delivers the transition instead of silently
+# re-baselining, and so an outage that spans a restart is not re-read as a cold start.
 #
 # Config: SWM_WEBHOOK_URL (empty = disabled), SWM_ALERT_STATE (optional state-file override).
 # Depends on HTTP, JSON3, Dates.
@@ -22,20 +26,50 @@ using HTTP, JSON3, Dates
 # escalate the webhook: its threat reflects a forecast issued hours-to-days ago, not now.
 _status_stale(status) = hasproperty(status, :stale) && getproperty(status, :stale) == true
 
-# The primary Dst forecast layer is "blind" when a cycle exists but is not fresh (stale,
-# expired, or degraded/incomplete feed). This is distinct from "no data yet" (before the first
-# write), where build_status returns available=false WITHOUT a forecast_issue_utc. Only the
-# blind case must raise the stale/outage alert; a cold start must not.
+# Whether this deployment has ever served a usable forecast cycle. Set the first time
+# `compute_alert_state` sees an available status and persisted with the delivered state, so the
+# marker survives a restart. It is what separates "the feed died" from "no data yet": once a
+# deployment has produced a cycle, a payload with no cycle at all is an outage, not a cold start.
+const _SEEN_DATA = Ref{Bool}(false)
+
+# The primary Dst forecast layer is "blind" whenever an unavailable status is reported after this
+# deployment has already served data. A cycle that exists but is not fresh (stale, expired, or
+# degraded/incomplete) carries a forecast_issue_utc and is blind on that alone. A payload with NO
+# cycle at all — an emptied, truncated, rotated-away or unreadable log — carries no issue time, and
+# was previously read as "no data yet" and therefore as quiet: with a delivered level already on
+# record that produced an explicit all-clear the physics never justified. The persisted
+# first-data marker is what distinguishes the two, so a genuine cold start still baselines silently.
 function _forecast_blind(status)
     getproperty(status, :available) == false || return false
-    return hasproperty(status, :forecast_issue_utc) &&
-           getproperty(status, :forecast_issue_utc) !== nothing
+    hasproperty(status, :forecast_issue_utc) &&
+        getproperty(status, :forecast_issue_utc) !== nothing && return true
+    return _SEEN_DATA[]
 end
+
+# Fold the outage sentinel into a composed alert state. The issuance dead-man and the external
+# liveness watchdog write it beside the forecast log when issuance stops or a process dies, which is
+# precisely the case the live layers cannot report themselves: an active sentinel forces the
+# stale/unknown flag so the transition can never be delivered as an all-clear.
+function alert_state_with_outage(state, outage)
+    getproperty(outage, :active) == true || return state
+    reasons = String[state.reasons...]
+    push!(reasons, "forecast monitor outage: " *
+                   something(getproperty(outage, :summary), "issuance stopped (sentinel present)"))
+    return (level = state.level, reasons = reasons, stale = true)
+end
+
+"""Composed alert state of the live layers plus the outage sentinel.
+
+The single rule shared by the alerts endpoint and the notify loop: neither may read a dead daemon as
+quiet, and both must reach the same verdict from the same inputs."""
+compose_alert_state(status, upstream_status, dbdt, outage) =
+    alert_state_with_outage(compute_alert_state(status, upstream_status, dbdt), outage)
 
 # Overall alert state = max severity across the live layers, with human-readable reasons, plus a
 # `stale` flag that is true when the primary forecast feed has gone blind (see `_forecast_blind`).
 function compute_alert_state(status, upstream_status, dbdt)
     level = 0; reasons = String[]
+    getproperty(status, :available) == true && (_SEEN_DATA[] = true)
     if getproperty(status, :available) == true && !_status_stale(status)
         th = status.threat
         if th.level >= 1; level = max(level, th.level); push!(reasons, "Dst forecast $(th.label)"); end
@@ -72,6 +106,7 @@ function reset_notify!()
     _LAST_ALERT_LEVEL[] = -1
     _LAST_ALERT_STALE[] = false
     _ALERT_STATE_LOADED[] = false
+    _SEEN_DATA[] = false
     return nothing
 end
 
@@ -97,6 +132,14 @@ function _load_alert_state!(state_path::AbstractString)
             _LAST_ALERT_LEVEL[] = Int(lvl)
             _LAST_ALERT_STALE[] = get(d, :stale, false) == true
         end
+        # The marker is only ever raised, never cleared: this load can run after the first
+        # available status of the process has already set it in memory, and a state file written
+        # before the marker existed carries no field at all. A state file is written only after an
+        # evaluation has run, so treating that legacy absence as "data has been seen" keeps an
+        # already-running deployment from re-entering the cold-start exemption across an upgrade,
+        # while a fresh install (no state file) still baselines silently.
+        seen = get(d, :seen_data, nothing)
+        (seen === nothing || seen == true) && (_SEEN_DATA[] = true)
     catch e
         e isa InterruptException && rethrow()
         @warn "could not load persisted alert state; re-baselining" state_path
@@ -113,7 +156,7 @@ function _persist_alert_state(state_path::AbstractString, level::Int, stale::Boo
         isempty(dir) || isdir(dir) || mkpath(dir)
         tmp = state_path * ".tmp"
         open(tmp, "w") do io
-            JSON3.write(io, (level = level, stale = stale,
+            JSON3.write(io, (level = level, stale = stale, seen_data = _SEEN_DATA[],
                              updated_utc = string(now(UTC)) * "Z"))
         end
         mv(tmp, state_path; force = true)
@@ -252,6 +295,35 @@ function maybe_notify!(state; url::AbstractString = get(ENV, "SWM_WEBHOOK_URL", 
     end
 end
 
+"""
+    notify_cycle!(log_path; url, state_path, ...) -> NamedTuple
+
+One evaluation of the alert layers against the live log, folded through the outage sentinel and
+delivered by `maybe_notify!`. This is the loop body, exposed as a function so the composed
+state — including the sentinel, which the live layers cannot report — is exercised directly rather
+than only inside a background task. The upstream and ground layers are injectable so an evaluation
+can be driven without touching a third-party feed.
+"""
+function notify_cycle!(log_path::AbstractString;
+                       url::AbstractString = "",
+                       state_path::AbstractString = "",
+                       now_utc::AbstractString = string(now(UTC)) * "Z",
+                       post_fn = _default_post,
+                       snapshot_fn = swpc_snapshot,
+                       dbdt_fn = () -> dashboard_dbdt_nowcast(; wait_timeout = USGS_REFRESH_WAIT_S))
+    # Restore the persisted delivered-state (and the first-data marker) BEFORE the layers are
+    # composed: the marker decides whether a cycle-less status is an outage or a cold start, so
+    # loading it after the composition would re-read the first evaluation of every restart as a
+    # deployment that has never served anything.
+    _ALERT_STATE_LOADED[] || _load_alert_state!(state_path)
+    status = build_status(get_log(log_path))
+    state = compose_alert_state(status, upstream_assessment(snapshot_fn()), dbdt_fn(),
+                                outage_state(log_path))
+    result = maybe_notify!(state; url = url, now_utc = now_utc, state_path = state_path,
+                           post_fn = post_fn)
+    return (state = state, result = result)
+end
+
 # Background loop: re-evaluate the alert state every `interval` s and notify on transitions.
 # No-op (returns nothing) when no webhook is configured, so it costs nothing by default.
 function start_notify_loop(log_path::AbstractString; interval::Int = 300)
@@ -269,15 +341,9 @@ function start_notify_loop(log_path::AbstractString; interval::Int = 300)
     return @async begin
         while true
             try
-                df = get_log(log_path)
-                status = build_status(df)
-                snap = swpc_snapshot()
-                st = compute_alert_state(
-                    status, upstream_assessment(snap),
-                    dashboard_dbdt_nowcast(; wait_timeout=USGS_REFRESH_WAIT_S),
-                )
-                r = maybe_notify!(st; url = url, now_utc = string(now(UTC)) * "Z",
-                                  state_path = state_path)
+                cycle = notify_cycle!(log_path; url = url, state_path = state_path,
+                                      now_utc = string(now(UTC)) * "Z")
+                st, r = cycle.state, cycle.result
                 getproperty(r, :fired) == true &&
                     @info "alert webhook fired" level=st.level stale=st.stale kind=get(r, :kind, "")
             catch e

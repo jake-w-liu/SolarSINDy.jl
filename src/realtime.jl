@@ -576,34 +576,6 @@ function fetch_realtime_solar_wind(; hours::Int=168,
                          Dst_hr, Dst_star_hr), t_hr, t_fresh
 end
 
-"""
-    _interp_short_gaps!(x, max_gap)
-
-In-place linear interpolation of NaN gaps ≤ max_gap points.
-"""
-function _interp_short_gaps!(x::Vector{Float64}, max_gap::Int)
-    n = length(x)
-    i = 1
-    while i <= n
-        if isnan(x[i])
-            j = i
-            while j <= n && isnan(x[j])
-                j += 1
-            end
-            gap_len = j - i
-            if gap_len <= max_gap && i > 1 && j <= n
-                for k in i:j-1
-                    frac = (k - i + 1) / (gap_len + 1)
-                    x[k] = x[i-1] + frac * (x[j] - x[i-1])
-                end
-            end
-            i = j
-        else
-            i += 1
-        end
-    end
-end
-
 # ---------------------------------------------------------------------------
 # Operational resilience helpers (testable offline; never hot-applied to the
 # running daemon — adoption is left to the user's maintenance window).

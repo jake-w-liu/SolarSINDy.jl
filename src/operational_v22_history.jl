@@ -381,6 +381,17 @@ function _operational_v22_history_validate_identity(
     return nothing
 end
 
+"""
+Refuse a rollout step whose state or driver leaves the domain the artifact was fitted on.
+
+Both coupling checks throw rather than clamping or falling back. That is deliberate and it is a
+caller contract, not an internal invariant: a coupling above `artifact.coupling_bound_mvm` is a
+driver outside the fitted range, and the multiplier below is a linear extrapolation whose stability
+was only established inside that range. A caller that rolls this layer forward over a storm stronger
+than the fitting window must therefore be prepared for the throw and route to its own fallback — the
+M1 layer will not silently extrapolate, and it will not quietly saturate the state to the bound and
+report a number as if it were in-domain.
+"""
 function _operational_v22_history_validate_domain(
         artifact::OperationalV22HistoryArtifact,
         state::OperationalV22HistoryState,

@@ -28,7 +28,7 @@
 #   --wait            poll for logs/test_confirm.exit before reading the confirmatory tree, and
 #                     fall back to the smoke tree (and its deployment) if it never appears
 
-include(joinpath(@__DIR__, "v2_3_common.jl"))
+isdefined(@__MODULE__, :V23Context) || include(joinpath(@__DIR__, "v2_3_common.jl"))
 
 "Identity target: the largest absolute deviation a served center may show against the scored one."
 const V23_IDENTITY_TOL_NT = 1e-9
@@ -386,7 +386,7 @@ function v23_identity_wait_for_sentinel(path::AbstractString;
     return isfile(path)
 end
 
-function main(args = ARGS)
+function main_v2_3_serving_identity(args = ARGS)
     deploy = joinpath(OPERATIONAL_PACKAGE_ROOT, "deploy", "v2_3_shadow")
     tree = V23_TEST_DIR
     n_anchors = 500
@@ -429,5 +429,5 @@ function main(args = ARGS)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    main()
+    main_v2_3_serving_identity()
 end

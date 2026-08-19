@@ -19,7 +19,7 @@
 # growth. File descriptors may not grow at all after warm-up, and the fixed
 # input snapshot may create at most one pending row per requested horizon.
 
-include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
+isdefined(@__MODULE__, :LiveVerifyConfig) || include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
 
 using Printf
 

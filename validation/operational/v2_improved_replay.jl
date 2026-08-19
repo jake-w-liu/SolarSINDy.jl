@@ -12,7 +12,7 @@
 #
 # Run from the package root: julia --project=. validation/operational/v2_improved_replay.jl
 
-include(joinpath(@__DIR__, "v2_lookahead_replay.jl"))   # _driver_lookup, _transit_hours, L1_DIST_KM,
+isdefined(@__MODULE__, :_transit_hours) || include(joinpath(@__DIR__, "v2_lookahead_replay.jl"))   # _driver_lookup, _transit_hours, L1_DIST_KM,
                                                         # STRICT_CAUSAL, _la_forecast, + all shared machinery
 
 const OUT_CSV_IMPROVED = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_improved_replay_scored.csv")

@@ -527,7 +527,9 @@ function operational_v22_driver_sha256(artifact::OperationalV22DriverArtifact)
             artifact.threshold,
             artifact.fit_rows,
             artifact.threshold_iterations,
-            artifact.spectral_radius,
+            # Rounded: an exact radius would make this "portable" identity depend on the
+            # eigen-solver path (see OPERATIONAL_V22_SPECTRAL_RADIUS_DIGITS).
+            _operational_v22_hashable_spectral_radius(artifact.spectral_radius),
         )
         _operational_v22_driver_hash_token(io, value)
     end
@@ -808,9 +810,10 @@ function read_operational_v22_driver(path::AbstractString)
         _operational_v22_driver_consistent(df, :spectral_radius),
         "spectral_radius",
     )
-    stored_radius == artifact.spectral_radius || throw(ArgumentError(
-        "V2.2-M2 artifact spectral radius is inconsistent",
-    ))
+    _operational_v22_spectral_radius_agrees(stored_radius, artifact.spectral_radius) ||
+        throw(ArgumentError(
+            "V2.2-M2 artifact spectral radius is inconsistent",
+        ))
     operational_v22_driver_sha256(artifact) == checksum || throw(ArgumentError(
         "V2.2-M2 artifact checksum mismatch",
     ))

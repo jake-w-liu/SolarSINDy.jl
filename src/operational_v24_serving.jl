@@ -62,8 +62,48 @@ is a different model and is refused.
 """
 const V24_SERVED_IDENTITY = "v2.4+sindy20x11+superlearner10floor+conformal"
 
+"""
+    V24_SERVED_GUARD_IDENTITY_TOKEN
+    V24_SERVED_GUARDED_IDENTITY
+
+Identity suffix a bundle must carry when its own `guard.json` enables the point-forecast guard. The
+guard is a stage that moves the published center, so by the identity's own contract it has to be
+named; without this token a guard-on bundle would go out under the unguarded identity, and every
+consumer that pins that string — the readiness audit's `EXPECTED_SUBHOURLY`, the live engine's served
+label, the deployed manifest — would report a model that is not the one being served. The currently
+deployed bundle records `guard_applied = false` and therefore keeps [`V24_SERVED_IDENTITY`](@ref)
+unchanged.
+"""
+const V24_SERVED_GUARD_IDENTITY_TOKEN = "+depthguard(static_v2_2)"
+const V24_SERVED_GUARDED_IDENTITY = V24_SERVED_IDENTITY * V24_SERVED_GUARD_IDENTITY_TOKEN
+
+"""
+    v24_served_identity(guard_applied) -> String
+
+Identity a bundle must record for the guard state it declares.
+"""
+v24_served_identity(guard_applied::Bool) =
+    guard_applied ? V24_SERVED_GUARDED_IDENTITY : V24_SERVED_IDENTITY
+
 "Study variant name of the served center, as the bundle records it and the study scored it."
 const V24_SERVED_VARIANT = "v2_4e"
+
+"""
+    V24_SERVED_GUARDED_VARIANT
+
+Study variant whose conformal strata band a guarded center. A guard changes the center, so the
+half-widths calibrated on the unguarded residuals no longer describe it; a guard-on bundle must ship
+the guarded variant's strata and is banded from them.
+"""
+const V24_SERVED_GUARDED_VARIANT = "v2_4f"
+
+"""
+    v24_served_conformal_variant(guard_applied) -> String
+
+Conformal variant the served interval is read from for the guard state a bundle declares.
+"""
+v24_served_conformal_variant(guard_applied::Bool) =
+    guard_applied ? V24_SERVED_GUARDED_VARIANT : V24_SERVED_VARIANT
 
 "Driver assumption recorded with a V2.4e served row."
 const V24_SERVED_DRIVER_ASSUMPTION =
@@ -440,7 +480,17 @@ function _v24_serving_read_stats(path::AbstractString)
 end
 
 """
-    _v24_serving_read_cells(path) -> Dict
+    _v24_serving_column_names(path) -> Vector{String}
+
+Column names of a bundle CSV, read without parsing any row. A typed `CSV.read` refuses an unknown
+column name in its `types` argument before the loader's own required-column checks can run, so the
+header is inspected first and every missing column is reported by name.
+"""
+_v24_serving_column_names(path::AbstractString) =
+    String.(propertynames(CSV.read(path, DataFrame; limit = 0)))
+
+"""
+    _v24_serving_read_cells(path, fold_year) -> Dict
 
 Read the served super-learner cells from `stack_weights.csv`. Only the served variant's rows are read,
 because that is the fit the served center uses; a bundle may legitimately ship the other fitted stacks
@@ -448,18 +498,24 @@ for comparison and they must not be able to reach the served center. Every cell 
 non-negativity, unit mass and the SINDy-family floor, and the fully pooled cell of every model step
 must exist so a row always has a fallback to walk to.
 
-When the table carries an `expert_set` column — the pipe-joined expert names the cell was fitted on —
-it must name exactly the served experts in the served order. Without that check a nine-expert row and a
-ten-expert row are indistinguishable once both are widened to the shared weight schema, and a
-nine-expert cell would be served with a hard zero on the static stack.
+The `expert_set` column — the pipe-joined expert names the cell was fitted on — and its `n_experts`
+companion are mandatory, and must name exactly the served experts in the served order. Without them a
+nine-expert row and a ten-expert row are indistinguishable once both are widened to the shared weight
+schema, and a nine-expert cell would be served with a hard zero on the static stack. Both columns are
+checked against the header before the typed read, so a bundle that omits either is refused by name
+rather than by an unnamed parser error.
+
+`fold_year` must equal the fold the selection record names, so a bundle cannot pair one fold's
+selection with another fold's weights.
 """
-function _v24_serving_read_cells(path::AbstractString)
+function _v24_serving_read_cells(path::AbstractString, fold_year::Integer)
+    for column in ("fold_year", "variant", "model_step_hours", "regime", "depth_bin", "n_rows",
+                   "expert_set", "n_experts")
+        column in _v24_serving_column_names(path) || error("$path lacks the $column column")
+    end
     table = CSV.read(path, DataFrame; types = Dict("variant" => String, "regime" => String,
                                                    "depth_bin" => String,
                                                    "expert_set" => String))
-    for column in ("variant", "model_step_hours", "regime", "depth_bin", "n_rows")
-        column in names(table) || error("$path lacks the $column column")
-    end
     weight_columns = [Symbol("w_", expert) for expert in V24_SERVING_EXPERTS]
     for column in weight_columns
         String(column) in names(table) || error(
@@ -468,8 +524,6 @@ function _v24_serving_read_cells(path::AbstractString)
         )
     end
     expected_set = join(String.(collect(V24_SERVING_EXPERTS)), "|")
-    has_expert_set = "expert_set" in names(table)
-    has_expert_count = "n_experts" in names(table)
     cells = Dict{Tuple{Int,Symbol,Symbol},V24ServingCell}()
     for r in 1:nrow(table)
         String(table.variant[r]) == V24_SERVING_STACK_VARIANT || continue
@@ -477,18 +531,18 @@ function _v24_serving_read_cells(path::AbstractString)
         step in V24_SERVING_MODEL_STEPS || error(
             "$path holds an unsupported model step $step",
         )
-        if has_expert_set
-            String(table.expert_set[r]) == expected_set || error(
-                "$path fitted the $(V24_SERVING_STACK_VARIANT) cell at step $step on the experts " *
-                "$(table.expert_set[r]); the served set is $expected_set",
-            )
-        end
-        if has_expert_count
-            Int(table.n_experts[r]) == V24_SERVING_EXPERT_COUNT || error(
-                "$path records $(table.n_experts[r]) experts in a served cell at step $step; the " *
-                "served stack has $(V24_SERVING_EXPERT_COUNT)",
-            )
-        end
+        Int(table.fold_year[r]) == Int(fold_year) || error(
+            "$path holds a served cell at step $step from fold $(table.fold_year[r]); the bundle " *
+            "selects fold $(Int(fold_year))",
+        )
+        String(table.expert_set[r]) == expected_set || error(
+            "$path fitted the $(V24_SERVING_STACK_VARIANT) cell at step $step on the experts " *
+            "$(table.expert_set[r]); the served set is $expected_set",
+        )
+        Int(table.n_experts[r]) == V24_SERVING_EXPERT_COUNT || error(
+            "$path records $(table.n_experts[r]) experts in a served cell at step $step; the " *
+            "served stack has $(V24_SERVING_EXPERT_COUNT)",
+        )
         regime = Symbol(String(table.regime[r]))
         depth = Symbol(String(table.depth_bin[r]))
         key = (step, regime, depth)
@@ -529,24 +583,30 @@ function _v24_serving_read_cells(path::AbstractString)
 end
 
 """
-    _v24_serving_read_conformal(path, variant) -> Dict
+    _v24_serving_read_conformal(path, variant, fold_year) -> Dict
 
 Read the served conformal strata from `conformal.csv`, keeping only the served variant's rows. Every
 model step must carry its pooled stratum and all three depth bins, so a row always resolves to a
-half-width without inventing one.
+half-width without inventing one. `fold_year` must equal the fold the selection record names, so a
+bundle cannot band one fold's center with another fold's residual quantiles.
 """
-function _v24_serving_read_conformal(path::AbstractString, variant::AbstractString)
+function _v24_serving_read_conformal(path::AbstractString, variant::AbstractString,
+                                     fold_year::Integer)
+    for column in ("fold_year", "variant", "model_step_hours", "depth_bin", "half_width_nt", "n",
+                   "coverage_floor")
+        column in _v24_serving_column_names(path) || error("$path lacks the $column column")
+    end
     table = CSV.read(path, DataFrame; types = Dict("variant" => String, "depth_bin" => String,
                                                    "source" => String))
-    for column in ("variant", "model_step_hours", "depth_bin", "half_width_nt", "n",
-                   "coverage_floor")
-        column in names(table) || error("$path lacks the $column column")
-    end
     strata = Dict{Tuple{Int,Symbol},V24ServingStratum}()
     for r in 1:nrow(table)
         String(table.variant[r]) == String(variant) || continue
         step = Int(table.model_step_hours[r])
         step in V24_SERVING_MODEL_STEPS || error("$path holds an unsupported model step $step")
+        Int(table.fold_year[r]) == Int(fold_year) || error(
+            "$path bands variant $variant at step $step from fold $(table.fold_year[r]); the " *
+            "bundle selects fold $(Int(fold_year))",
+        )
         depth = Symbol(String(table.depth_bin[r]))
         key = (step, depth)
         haskey(strata, key) && error("$path repeats the conformal stratum $key")
@@ -575,13 +635,33 @@ function _v24_serving_read_conformal(path::AbstractString, variant::AbstractStri
     return strata
 end
 
-"Read the climatology relaxation timescale (hours) of the bundle."
-function _v24_serving_read_tau(path::AbstractString)
+"""
+Read the climatology relaxation timescale (hours) of the bundle.
+
+The record also carries the fold and the training cutoff it was estimated on; both must agree with the
+selection record, so a timescale fitted on a different fold or a longer training window cannot be
+paired with this bundle's stack.
+"""
+function _v24_serving_read_tau(path::AbstractString, fold_year::Integer,
+                               training_max_target::DateTime)
     table = CSV.read(path, DataFrame)
-    "tau_hours" in names(table) || error("$path lacks the tau_hours column")
+    for column in ("tau_hours", "fold_year", "training_max_target_utc")
+        column in names(table) || error("$path lacks the $column column")
+    end
     nrow(table) == 1 || error("$path must hold exactly one row, found $(nrow(table))")
     tau = Float64(table.tau_hours[1])
     (isfinite(tau) && tau > 0.0) || error("$path records the non-physical timescale $tau h")
+    Int(table.fold_year[1]) == Int(fold_year) || error(
+        "$path records fold $(table.fold_year[1]); the bundle selects fold $(Int(fold_year))",
+    )
+    # CSV.jl auto-detects the cutoff as a `DateTime`; a bundle written with a quoted or offsetless
+    # string parses as text, so both spellings are accepted and compared as instants.
+    raw_cutoff = table.training_max_target_utc[1]
+    recorded = raw_cutoff isa DateTime ? raw_cutoff : DateTime(String(raw_cutoff))
+    recorded == training_max_target || error(
+        "$path was estimated to the training cutoff $recorded; the bundle records " *
+        "$training_max_target",
+    )
     return tau
 end
 
@@ -661,21 +741,10 @@ function load_v24_serving_artifacts(dir::AbstractString;
         "V2.4 bundle records the served variant $(repr(variant)); the published product is " *
         "$(V24_SERVED_VARIANT)",
     )
-    String(get(selection, "identity", "")) == V24_SERVED_IDENTITY || error(
-        "V2.4 bundle records identity $(repr(get(selection, "identity", ""))); this build serves " *
-        "$(V24_SERVED_IDENTITY)",
-    )
-    Bool(get(selection, "residual_applied", false)) == false || error(
-        "V2.4 bundle records a boosted residual layer; the served variant carries none",
-    )
-    String(get(selection, "stack_variant", V24_SERVING_STACK_VARIANT)) ==
-        V24_SERVING_STACK_VARIANT || error(
-        "V2.4 bundle records the stack variant $(repr(get(selection, "stack_variant", ""))); the " *
-        "served center reads $(V24_SERVING_STACK_VARIANT)",
-    )
     # The guard is a bundle-level switch, not a source constant, so both fields are read and they must
     # agree: an enabled guard without its reference would serve unguarded while claiming otherwise, and
-    # a disabled guard that still names a reference is a record nobody can act on.
+    # a disabled guard that still names a reference is a record nobody can act on. The switch is read
+    # before the identity because the identity a bundle must carry depends on it.
     haskey(guard, "guard_applied") || error(
         "V2.4 guard record does not say whether the point-forecast guard acts",
     )
@@ -692,6 +761,31 @@ function load_v24_serving_artifacts(dir::AbstractString;
             "an inactive guard must record $(repr(V24_SERVING_GUARD_REFERENCE_NONE))",
         )
     end
+    # The two records that carry the switch must say the same thing. A selection record claiming an
+    # unguarded product beside a guard record that enables the guard is a bundle whose disclosure and
+    # whose behaviour disagree, and nothing downstream could tell which one was served.
+    haskey(selection, "guard_applied") || error(
+        "V2.4 selection record does not say whether the point-forecast guard acts",
+    )
+    Bool(selection["guard_applied"]) == guard_applied || error(
+        "V2.4 selection record says guard_applied = $(Bool(selection["guard_applied"])) while the " *
+        "guard record says $(guard_applied); the two records disagree about the served center",
+    )
+    # A guard moves the published center, so the identity has to name it. Without this a guard-on
+    # bundle would load under the unguarded identity every downstream consumer pins.
+    expected_identity = v24_served_identity(guard_applied)
+    String(get(selection, "identity", "")) == expected_identity || error(
+        "V2.4 bundle records identity $(repr(get(selection, "identity", ""))); this build serves " *
+        "$(expected_identity)",
+    )
+    Bool(get(selection, "residual_applied", false)) == false || error(
+        "V2.4 bundle records a boosted residual layer; the served variant carries none",
+    )
+    String(get(selection, "stack_variant", V24_SERVING_STACK_VARIANT)) ==
+        V24_SERVING_STACK_VARIANT || error(
+        "V2.4 bundle records the stack variant $(repr(get(selection, "stack_variant", ""))); the " *
+        "served center reads $(V24_SERVING_STACK_VARIANT)",
+    )
     Float64(get(guard, "deepening_rate_nt_per_h_strict_below", NaN)) ==
         V24_SERVING_GUARD_RATE_NT_PER_H || error(
         "V2.4 guard record uses a deepening rate threshold this build does not serve",
@@ -725,9 +819,35 @@ function load_v24_serving_artifacts(dir::AbstractString;
         "$([String(V24_SERVING_EXPERTS[j]) for j in V24_SERVING_SINDY_FAMILY])",
     )
 
-    cells = _v24_serving_read_cells(joinpath(directory, "stack_weights.csv"))
-    conformal = _v24_serving_read_conformal(joinpath(directory, "conformal.csv"), variant)
-    tau = _v24_serving_read_tau(joinpath(directory, "climatology_tau.csv"))
+    # The fold and the training cutoff are read before the artifact tables, because every one of those
+    # tables has to be checked against them: a bundle assembled from two folds' files would otherwise
+    # load and serve a center whose weights, band and climatology came from different fits.
+    fold_year = Int(get(selection, "fold_year", 0))
+    fold_year > 0 || error("V2.4 bundle records no fold year")
+    training_max_target = DateTime(String(get(selection, "training_max_target_utc", "")))
+    pool_years = Int[Int(y) for y in get(selection, "oof_pool_years", Int[])]
+    isempty(pool_years) && error("V2.4 bundle records no out-of-fold pool years")
+    maximum(pool_years) < fold_year || error(
+        "V2.4 bundle records the out-of-fold pool year $(maximum(pool_years)) at or after its " *
+        "fold year $(fold_year); the bundle would carry a fit that saw its own scored window",
+    )
+
+    # A guarded center is not the center the unguarded residuals were quantiled on, so a guard-on
+    # bundle is banded from the guarded variant's strata and must ship them.
+    conformal_variant = v24_served_conformal_variant(guard_applied)
+    cells = _v24_serving_read_cells(joinpath(directory, "stack_weights.csv"), fold_year)
+    conformal = _v24_serving_read_conformal(joinpath(directory, "conformal.csv"),
+                                            conformal_variant, fold_year)
+    tau = _v24_serving_read_tau(joinpath(directory, "climatology_tau.csv"), fold_year,
+                                training_max_target)
+    # The guard record carries an informational copy of the timescale; if it disagrees with the served
+    # one, the bundle's own disclosure describes a relaxation the product does not use.
+    haskey(guard, "climatology_tau_hours") && (
+        Float64(guard["climatology_tau_hours"]) == tau || error(
+            "V2.4 guard record states the climatology timescale " *
+            "$(Float64(guard["climatology_tau_hours"])) h; the served table holds $tau h",
+        )
+    )
     direct_labels = Dict{Int,String}()
     for step in V24_SERVING_MODEL_STEPS
         value = _v24_manifest_value(manifest, "direct_gbm", "step$(step)")
@@ -784,14 +904,12 @@ function load_v24_serving_artifacts(dir::AbstractString;
         "deployed archive is not the fitted archive",
     )
 
-    fold_year = Int(get(selection, "fold_year", 0))
-    fold_year > 0 || error("V2.4 bundle records no fold year")
-    training_max_target = DateTime(String(get(selection, "training_max_target_utc", "")))
-    pool_years = Int[Int(y) for y in get(selection, "oof_pool_years", Int[])]
-    isempty(pool_years) && error("V2.4 bundle records no out-of-fold pool years")
-    maximum(pool_years) < fold_year || error(
-        "V2.4 bundle records the out-of-fold pool year $(maximum(pool_years)) at or after its " *
-        "fold year $(fold_year); the bundle would carry a fit that saw its own scored window",
+    # The newest shipped analog origin, continued the full seven steps, must still land inside the
+    # training window the bundle names; an archive that reaches past it would let the analog expert
+    # retrieve a neighbour whose continuation the selection never saw.
+    last(origins) + Hour(V23_ANALOG_MAX_STEP) <= training_max_target || error(
+        "the shipped analog archive ends at $(last(origins)), whose $(V23_ANALOG_MAX_STEP) h " *
+        "continuation reaches past the recorded training cutoff $training_max_target",
     )
 
     analog = V23ServingArtifacts(
@@ -815,7 +933,7 @@ function load_v24_serving_artifacts(dir::AbstractString;
         directory, manifest, v23_serving_file_sha256(manifest_path), selection, guard, analog,
         cells, conformal, tau, direct.models, direct.labels,
         String.(v23_direct_feature_names()), fold_year, training_max_target,
-        sort(pool_years), variant, guard_applied, guard_reference, V24_SERVED_IDENTITY,
+        sort(pool_years), variant, guard_applied, guard_reference, expected_identity,
     )
 end
 

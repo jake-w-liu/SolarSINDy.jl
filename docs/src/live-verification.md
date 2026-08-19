@@ -252,19 +252,52 @@ conformal interval and the legacy interval-scale band.
 When the sidecar is present, `--model=v2` issuance sources the logged 90%
 interval from the conformal half-width for the row's horizon and activity
 regime, instead of the v1-ensemble-spread interval scale. Each row records the
-band actually served in `interval_source` (`aci`, `conformal`, or
-`interval_scale`) for audit. The point
+band actually served in `interval_source` (`v24_conformal_depth`, `aci`,
+`conformal`, or `interval_scale`) for audit. The point
 forecast is unchanged; only the uncertainty band changes. The static half-width
 is shifted from the frozen center to the served V2.1 center. This preserves the
 width but does not automatically transfer the frozen-center guarantee; the
 complete-hour served-stack holdout supplies the corresponding empirical
 coverage evidence.
 
+On a V2.4e-served row `interval_source` is the study's depth-stratified band, which
+overwrites whichever band the batch's fallback policy produced. The frozen-tail columns
+(`pred_dst_ci05/95_nt`, `v2_pred_dst_ci*`, `improved_pred_dst_ci*`) still carry that
+policy's band, and the two policies differ by roughly a factor of four in width, so the
+policy behind them is recorded separately in `frozen_tail_interval_source`. Any coverage
+audit that pools `observed_in_90ci` or `v2_observed_in_90ci` must stratify on that column,
+not on `interval_source`.
+
 The public product horizons remain 1, 2, 3, and 6 hours, but point and interval
 calibration are keyed by the integration steps from the latest hourly Dst anchor.
 With the admitted zero- or one-step anchor lag, the bundled artifacts support exactly
 `1,2,3,4,6,7` model steps. Issuance fails closed if the Dst lag or any computed model
 step falls outside that calibrated set.
+
+### Cadence phase, anchor lag, and the batch interval policy
+
+The anchor lag is not a fixed property of the deployment: it follows the minute of the hour
+at which the daemon runs, and that phase is anchored when the process starts. A restart at a
+different minute therefore changes which model steps the cycle needs:
+
+| Cadence phase | Dst anchor lag | Required model steps |
+|---|---|---|
+| Issue minute before the hourly Dst publication | 1 h | `2,3,4,7` |
+| Issue minute after it | 0 h | `1,2,3,6` |
+
+The batch interval policy is chosen once per cycle and applies to all four rows: the adaptive
+band is used only when both the baseline-center and served-center residual streams are mature
+(at least 35 verified residuals) for *every* required step. The two step sets have separate
+streams with separate maturities, so the same log can be mature for `{1,2,3,6}` and immature
+for `{2,3,4,7}`. A restart that moves the phase can consequently flip the policy from `aci` to
+`static` — and with it the fallback-row and frozen-tail band widths — with no change to the
+model, the artifacts, or the data. This was the actual cause of the post-V2.4 `aci → static`
+flip, which was initially attributed to the V2.4 integration.
+
+The daemon records the full reason for a `static` selection: the anchor time and lag, the
+required step set, and every immature stream with its verified-residual counts per pool. The
+served V2.4e band is unaffected either way, since it comes from the study's split-conformal
+strata rather than from the batch policy.
 
 The operational tail is part of the served-model identity. A thrown or
 non-finite tail result aborts issuance before the forecast row is appended;
@@ -326,6 +359,14 @@ plists are generated from the templates, the deployed artifacts are reproducible
 rather than hand-edited. The monitor and dashboard use `KeepAlive` so a crash is
 restarted; the watchdog runs on a fixed `StartInterval`.
 
+Installing a template by hand is supported but is the operator's responsibility:
+each template's header comment lists every placeholder it contains, and the
+render step refuses to install a plist whose body still holds one. The daemons
+apply the same rule at startup — the dashboard names the placeholder it was
+handed instead of failing on a parse error, and the watchdog reports the bad
+value and keeps probing on the documented default rather than silently skipping
+its freshness check.
+
 ### Diagnostics and log rotation
 
 launchd does not rotate console files, so the monitor owns bounded diagnostics.
@@ -363,6 +404,36 @@ dropped are appended to an append-only cold archive under `var/monitor/archive/`
 guarded by a sidecar manifest that tracks the cumulative row count, the archive
 size, and a per-segment hash. A short or corrupted append aborts the trim, so the
 rows stay in the hot log rather than being lost.
+
+Because the archive is appended positionally, rows may only enter a file whose
+header matches them exactly. Row-schema growth is routine here — the `v2_2_*`,
+`v23_*` and `v24_*` column families were each added within weeks — so when the hot
+log's columns match no existing header, retention rolls forward to a numbered
+segment (`live_forecast_log_archive.<n>.csv` with its own manifest) rather than
+refusing. Earlier segments are left byte-identical, and the complete record is the
+concatenation of the segments in index order. Without the rollover a single column
+addition made every subsequent trim fail, so rows were never pruned again and the
+hot log grew past its cap without bound.
+
+### Cycle contract under a feed outage
+
+A cycle's issuance step depends on the L1 solar-wind feeds; its remaining steps do
+not. Kyoto verification, hot-log retention, the prospective external Dst snapshot
+and the comparison report therefore run on every cycle, whether or not forecasts
+were issued, and the issuance result feeds only the dead-man accounting. The
+external Dst snapshot in particular is an hourly record of what other centres were
+publishing at that time; a missed hour cannot be recovered. When issuance inputs
+are unavailable, the observation-side steps fetch Kyoto Dst independently.
+
+Small source-clock skew is treated as a diagnostic rather than an outage. Post-issue
+samples never enter a forecast — the newest sample at or before the issue time is
+selected for every source, and the driver windows are capped at that time — so a feed
+whose newest row is a few minutes ahead of the local clock is reported, with the skew
+and the number of excluded samples, and issuance continues on the causal remainder.
+Beyond a larger sanity bound the timestamps no longer plausibly describe the same
+clock and issuance fails closed, as it does when a feed has no causal sample at all.
+Both bounds are set by `LIVE_FUTURE_CLOCK_TOLERANCE_MIN` and
+`LIVE_MAX_FUTURE_CLOCK_SKEW_MIN`.
 
 ### Container deployment
 

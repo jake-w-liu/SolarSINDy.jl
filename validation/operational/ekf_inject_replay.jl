@@ -14,7 +14,7 @@
 #
 # Run from the package root: julia --project=. validation/operational/ekf_inject_replay.jl
 
-include(joinpath(@__DIR__, "ekf_storm_replay.jl"))   # STORMS, LEADS, MAIN_RATE, _rmse, _ffill!, OMNI,
+isdefined(@__MODULE__, :STORMS) || include(joinpath(@__DIR__, "ekf_storm_replay.jl"))   # STORMS, LEADS, MAIN_RATE, _rmse, _ffill!, OMNI,
                                                      # paired_improvement, _cell, _per_storm_signs,
                                                      # _shadow_library, _shadow_decay_cap, BOOT_YEAR0, Q_* consts
 

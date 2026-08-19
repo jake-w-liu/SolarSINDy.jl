@@ -26,7 +26,9 @@
 # systemd templates in deploy/ (Linux) — the CLI detects service mode and refuses to fight it.
 #
 # Config: environment variables win; optionally put them in <clone>/solarsindy.env
-# (auto-sourced, gitignored; template in deploy/solarsindy.env.example).
+# (auto-sourced, gitignored; template in deploy/solarsindy.env.example). `install-service`
+# renders the allow-listed keys into each launchd job, so editing the file afterwards requires
+# re-running it; until then `status` probes the installed plist's port, not the file's.
 #   SWM_HOST / SWM_PORT          dashboard bind (default 127.0.0.1:8723)
 #   SOLARSINDY_MONITOR_DIR       monitor state dir (default <clone>/var/monitor)
 #   SWM_WEBHOOK_URL              enable push alerts (Slack/Discord/generic JSON POST)
@@ -241,7 +243,28 @@ rotate_cli_log() {
   return 0
 }
 
-health_json() { command -v curl >/dev/null 2>&1 || return 0; curl -fsS -m "${1:-3}" "$URL/api/health" 2>/dev/null || true; }
+health_json() { command -v curl >/dev/null 2>&1 || return 0; curl -fsS -m "${1:-3}" "${2:-$URL}/api/health" 2>/dev/null || true; }
+
+# Port the INSTALLED dashboard service actually binds, read from its rendered plist. The config
+# file supplies the CLI's default, but once a service is installed the plist is the authority:
+# editing solarsindy.env without reinstalling must not make `status` probe a port nothing listens
+# on and then report the dashboard unreachable. Silent (returns 1) when nothing is installed or the
+# plist carries no numeric port.
+installed_dashboard_port() {
+  local org_try plist port
+  command -v plutil >/dev/null 2>&1 || return 1
+  for org_try in "${SOLARSINDY_ORG:-empire}" example; do
+    plist="$HOME/Library/LaunchAgents/com.$org_try.solarsindy.dashboard.plist"
+    [ -f "$plist" ] || continue
+    port="$(plutil -extract EnvironmentVariables.SWM_PORT raw -o - "$plist" 2>/dev/null || true)"
+    port="$(printf '%s' "$port" | tr -d '[:space:]')"
+    case "$port" in
+      ''|*[!0-9]*) continue ;;
+      *) printf '%s\n' "$port"; return 0 ;;
+    esac
+  done
+  return 1
+}
 
 # Auto-open the dashboard after a successful interactive `start`: only when stdout is a
 # TTY (captured/piped/service/test invocations never pop a browser), a desktop opener
@@ -439,7 +462,7 @@ stop_one() {
 }
 
 cmd_status() {
-  local rc_mon=1 rc_dash=1 pid
+  local rc_mon=1 rc_dash=1 pid url="$URL" installed_port
   say "SolarSINDy live forecast system — $ROOT"
   if pid="$(pid_of "$MON_PID" "$MON_MARK")"; then
     say "monitor:   RUNNING (pid $pid, up $(ps -o etime= -p "$pid" | tr -d ' '))  [CLI]"
@@ -451,20 +474,26 @@ cmd_status() {
     say "monitor:   stopped"
   fi
   if pid="$(pid_of "$DASH_PID" "$DASH_MARK")"; then
-    say "dashboard: RUNNING (pid $pid, up $(ps -o etime= -p "$pid" | tr -d ' '))  [CLI] — $URL"
+    say "dashboard: RUNNING (pid $pid, up $(ps -o etime= -p "$pid" | tr -d ' '))  [CLI] — $url"
     rc_dash=0
   elif service_mode_active dashboard; then
-    say "dashboard: RUNNING  [installed service] — $URL"
+    # A CLI-started dashboard binds $PORT by construction; an installed service binds whatever its
+    # plist was rendered with, which is the authority once it exists.
+    if installed_port="$(installed_dashboard_port)" && [ "$installed_port" != "$PORT" ]; then
+      url="http://$BROWSE_HOST:$installed_port"
+      note "installed dashboard service binds port $installed_port; the config file says $PORT — probing the installed port"
+    fi
+    say "dashboard: RUNNING  [installed service] — $url"
     rc_dash=0
   else
     say "dashboard: stopped"
   fi
   local h
-  h="$(health_json 3)"
+  h="$(health_json 3 "$url")"
   if [ -n "$h" ]; then
     say "health:    $h"
   elif [ $rc_dash -eq 0 ]; then
-    say "health:    dashboard process is up but $URL/api/health did not answer (starting up?)"
+    say "health:    dashboard process is up but $url/api/health did not answer (starting up?)"
   fi
   local log="$MONITOR_DIR/live_forecast_log.csv" age
   if [ -f "$log" ]; then

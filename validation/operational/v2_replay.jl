@@ -13,7 +13,7 @@
 #
 # Run from the package root: julia --project=. validation/operational/v2_replay.jl
 
-include(joinpath(@__DIR__, "v2_lookahead_replay.jl"))   # _driver_lookup, _transit_hours, _shadow_library, etc.
+isdefined(@__MODULE__, :_transit_hours) || include(joinpath(@__DIR__, "v2_lookahead_replay.jl"))   # _driver_lookup, _transit_hours, _shadow_library, etc.
 
 const OUT_CSV_V2 = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_replay_scored.csv")
 const OUT_MD_V2  = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_replay_report.md")

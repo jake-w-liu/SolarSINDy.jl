@@ -804,6 +804,7 @@ using DataFrames
                        0.9728734135554586; rtol=1e-12)
     end
 
+    include("test_compat.jl")
     include("test_discovery_provenance.jl")
     include("test_storm_lambda_selection.jl")
     include("test_synthetic_equation_recovery.jl")
@@ -884,5 +885,42 @@ using DataFrames
     end
 
     include("test_live_forecast_verify.jl")
+
+    # Real-data oracles that depend on locally generated, untracked artifacts (the OMNI archive, the
+    # V2.3 base table and hourly frame, the three served-identity tables) register themselves in the
+    # ledger before deciding whether to run. A clean checkout legitimately cannot run them; what it
+    # must not do is report a green suite without saying so. The ledger is printed, its shape is
+    # pinned so a gate cannot be deleted unnoticed, and an environment that has the artifacts —
+    # `SOLARSINDY_REQUIRE_LOCAL_ARTIFACTS=1` — refuses any absence.
+    @testset "Local-artifact oracle ledger" begin
+        isdefined(Main, :LocalArtifactGate) ||
+            Base.include(Main, joinpath(@__DIR__, "local_artifact_gate.jl"))
+        gate = Main.LocalArtifactGate
+        gate.report()
+        registered = sort([entry.oracle for entry in gate.LEDGER])
+        @test registered == sort([
+            "V2 replay driver lookups on the OMNI archive",
+            "V2.2 served-identity table",
+            "V2.2 static-stack identity on the archived base table",
+            "V2.3 self-origin analog identity on the archived hourly frame",
+            "V2.3 serving-identity table",
+            "V2.4e serving-identity table",
+        ])
+        @test all(!isempty(entry.artifact) for entry in gate.LEDGER)
+        @test all(entry.present == ispath(entry.artifact) for entry in gate.LEDGER)
+        @test length(gate.exercised_oracles()) + length(gate.skipped_oracles()) ==
+              length(gate.LEDGER)
+        if gate.require_local_artifacts()
+            @test gate.skipped_oracles() == String[]
+        else
+            # A clean checkout may skip, but only for an artifact that is genuinely absent, and
+            # every skip must be named.
+            for entry in gate.LEDGER
+                entry.present && continue
+                @test !ispath(entry.artifact)
+                @test entry.oracle in gate.skipped_oracles()
+            end
+        end
+    end
 
 end

@@ -31,7 +31,7 @@ const OPERATIONAL_V22_RESIDUAL_TOP_K_GRID = (2, 4, 6)
 const OPERATIONAL_V22_RESIDUAL_SCHEMA_VERSION = "operational_v2_2_residual_v1"
 
 _operational_v22_residual_cap(model_step_hours::Integer) =
-    5.0 + 5.0 * Int(model_step_hours)
+    operational_v22_correction_cap_nt(model_step_hours)
 
 "Immutable fitted residual cell for one forecast lead."
 struct OperationalV22ResidualCell
@@ -842,7 +842,15 @@ function read_operational_v22_residual(path::AbstractString)
     isfile(source) && !islink(source) || throw(ArgumentError(
         "residual core must be a regular non-symlink file: $source",
     ))
-    df = CSV.read(source, DataFrame)
+    # Text-valued columns are read as text; see `read_operational_v22_stack` for why.
+    df = CSV.read(source, DataFrame;
+                  types = Dict(:schema_version => String, :label => String,
+                               :candidate_feature_names => String, :ridge_grid => String,
+                               :top_k_grid => String, :supported_model_steps => String,
+                               :feature_names => String, :ranked_feature_names => String,
+                               :feature_mean => String, :feature_scale => String,
+                               :coefficients => String),
+                  validate = false)
     names(df) == collect(String.(_OPERATIONAL_V22_RESIDUAL_CSV_COLUMNS)) ||
         throw(ArgumentError(
             "residual core CSV schema does not exactly match " *
@@ -931,6 +939,14 @@ function read_operational_v22_residual(path::AbstractString)
             ),
         ))
     end
+    # The file's own `supported_model_steps` metadata was parsed and then discarded, so a core whose
+    # metadata claimed one lead set while its cells carried another loaded without complaint and was
+    # then queried by the metadata's steps. The two must describe the same core.
+    cell_steps = sort!(unique(cell.model_step_hours for cell in cells))
+    sort!(unique!(supported_steps)) == cell_steps || throw(ArgumentError(
+        "residual core CSV declares supported model steps $(supported_steps) but carries cells for " *
+        "$(cell_steps)",
+    ))
     return OperationalV22ResidualCore(
         cells; label=label, candidate_feature_names=candidate_features,
         ridge_grid=ridge_grid, top_k_grid=top_k_grid,

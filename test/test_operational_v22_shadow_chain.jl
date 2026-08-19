@@ -208,7 +208,31 @@ end
           chain.artifact.conformal_sha256
     @test occursin(r"^[0-9a-f]{64}$",
                    operational_v22_shadow_chain_sha256(chain.artifact))
-    @test operational_v22_shadow_chain_sha256(chain.artifact) ==
+    # Determinism has to be asserted across a second, independently assembled artifact: hashing the
+    # same object twice is true of any function at all, so it proves nothing about this one.
+    rebuilt = _shadow_test_chain()
+    @test operational_v22_shadow_chain_sha256(rebuilt.artifact) ==
+          operational_v22_shadow_chain_sha256(chain.artifact)
+    # And the identity must be sensitive: a chain assembled from the same bindings, driver and core
+    # but a different M3 artifact must hash differently, or the identity would not name the stage it
+    # claims to bind.
+    other_error_state = OperationalV22ErrorStateArtifact(
+        chain.base_hash,
+        3.0,                       # the reference chain's intercept is 2.0
+        zeros(9);
+        support_mask=ntuple(_ -> false, 9),
+        ridge=1.0e-6,
+        fit_rows=64,
+        selection_score=1.25,
+        label="synthetic-m3",
+    )
+    shifted_artifact = OperationalV22ShadowChainArtifact(
+        chain.bindings, chain.driver, chain.core, other_error_state, chain.conformal,
+    )
+    @test shifted_artifact.base_center_sha256 == chain.artifact.base_center_sha256
+    @test first(shifted_artifact.m3_sha256_by_horizon) !=
+          first(chain.artifact.m3_sha256_by_horizon)
+    @test operational_v22_shadow_chain_sha256(shifted_artifact) !=
           operational_v22_shadow_chain_sha256(chain.artifact)
     @test validate_operational_v22_shadow_chain(
         chain.artifact,

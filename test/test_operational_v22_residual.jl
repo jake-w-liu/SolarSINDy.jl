@@ -253,6 +253,45 @@ end
             symlink(path, link)
             @test_throws ArgumentError read_operational_v22_residual(link)
             @test_throws ArgumentError write_operational_v22_residual(link, core)
+
+            # S3: the file's own supported-lead metadata was parsed and then discarded, so a core
+            # whose metadata claimed one lead set while its cells carried another loaded silently.
+            wrong_steps = copy(valid)
+            wrong_steps[!, :supported_model_steps] = string.(wrong_steps.supported_model_steps)
+            wrong_steps.supported_model_steps .= "1;2;3;4;6;7"
+            wrong_steps_path = joinpath(tmp, "wrong-steps.csv")
+            CSV.write(wrong_steps_path, wrong_steps)
+            @test_throws ArgumentError read_operational_v22_residual(wrong_steps_path)
+
+            # A metadata list that merely repeats or reorders the same leads still loads: the check
+            # compares the lead SET the cells carry, not the literal text.
+            reordered = copy(valid)
+            reordered[!, :supported_model_steps] = string.(reordered.supported_model_steps)
+            declared = sort(unique(Int.(valid.model_step_hours)))
+            reordered.supported_model_steps .=
+                join(vcat(reverse(declared), declared[1:1]), ";")
+            reordered_path = joinpath(tmp, "reordered-steps.csv")
+            CSV.write(reordered_path, reordered)
+            @test read_operational_v22_residual(reordered_path).cells == restored.cells
+        end
+    end
+
+    @testset "S2: a numeric-looking residual label round-trips as text" begin
+        candidates = V22R_FEATURES[1:2]
+        cells = [_v22r_cell(1, candidates; coefficients=[1.0, 2.0, -1.0])]
+        for label in ("007", "2026")
+            relabelled = OperationalV22ResidualCore(
+                cells; label=label, candidate_feature_names=candidates,
+                ridge_grid=(1.0,), top_k_grid=(2,),
+            )
+            mktempdir() do tmp
+                path = joinpath(tmp, "residual.csv")
+                write_operational_v22_residual(path, relabelled)
+                restored = read_operational_v22_residual(path)
+                @test restored.label == label
+                @test restored.label isa String
+                @test restored.cells == relabelled.cells
+            end
         end
     end
 end

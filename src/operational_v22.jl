@@ -31,6 +31,59 @@ const OPERATIONAL_V22_STACK_SCHEMA_VERSION = "operational_v2_2_stack_v1"
 
 const _OPERATIONAL_V22_WEIGHT_TOLERANCE = 1e-10
 
+"""
+Spectral-radius reproducibility budget for the offline V2.2 companion artifacts (M2 driver, M3
+error-state, M3 exogenous).
+
+The radius is `maximum(abs, eigvals(companion))`. LAPACK reaches the same eigenvalues by different
+orderings and blockings depending on the matrix layout and the BLAS thread count, so two runs on the
+same coefficients can differ in the last few bits — `0.944846470372869` versus `0.9448464703728752`
+was measured on a 125x125 companion here. An exact `==` between a stored radius and the one the
+constructor recomputes therefore refuses a perfectly good artifact on a different host, and an exact
+radius folded into a "portable" identity makes that identity host-dependent.
+
+The reproducibility budget is the fix on both counts: the stored and recomputed radii must agree to
+`rtol`, and the identity hashes the radius rounded to `digits`. The *stability* gate is untouched —
+a candidate is still refused unless its recomputed radius satisfies the module's own
+`radius <= 1 + stability tolerance`.
+"""
+const OPERATIONAL_V22_SPECTRAL_RADIUS_RTOL = 1e-9
+const OPERATIONAL_V22_SPECTRAL_RADIUS_ATOL = 1e-12
+const OPERATIONAL_V22_SPECTRAL_RADIUS_DIGITS = 9
+
+"Radius as a portable identity token: rounded so an eigen-solver path cannot move the hash."
+_operational_v22_hashable_spectral_radius(radius::Real) =
+    round(Float64(radius); digits = OPERATIONAL_V22_SPECTRAL_RADIUS_DIGITS)
+
+"Whether a stored radius and a recomputed one describe the same companion matrix."
+_operational_v22_spectral_radius_agrees(stored::Real, recomputed::Real) =
+    isapprox(Float64(stored), Float64(recomputed);
+             rtol = OPERATIONAL_V22_SPECTRAL_RADIUS_RTOL,
+             atol = OPERATIONAL_V22_SPECTRAL_RADIUS_ATOL)
+
+"""
+    OPERATIONAL_V22_MODEL_STEPS
+
+Forecast leads every Operational V2.2 layer supports. The residual core, the boosted layer, the M3
+error state, the M3 exogenous correction, the hourly core path and the shadow-chain contract all
+declare this same set; each used to spell it out separately, so a lead added to one layer and not the
+others would have gone unnoticed until a cell lookup failed at issuance.
+"""
+const OPERATIONAL_V22_MODEL_STEPS = (1, 2, 3, 4, 6, 7)
+
+"""
+    operational_v22_correction_cap_nt(model_step_hours)
+
+Bounded magnitude a V2.2 correction layer may add at a given lead: 5 nT plus 5 nT per lead hour. The
+residual core, the boosted layer and the M3 error state share this bound by construction rather than
+by three identical expressions.
+"""
+const OPERATIONAL_V22_CORRECTION_CAP_BASE_NT = 5.0
+const OPERATIONAL_V22_CORRECTION_CAP_PER_HOUR_NT = 5.0
+operational_v22_correction_cap_nt(model_step_hours::Integer) =
+    OPERATIONAL_V22_CORRECTION_CAP_BASE_NT +
+    OPERATIONAL_V22_CORRECTION_CAP_PER_HOUR_NT * Int(model_step_hours)
+
 "One immutable lead/regime weight cell in an [`OperationalV22Stack`](@ref)."
 struct OperationalV22Cell
     model_step_hours::Int
@@ -770,7 +823,14 @@ function read_operational_v22_stack(path::AbstractString)
     isfile(source) && !islink(source) || throw(ArgumentError(
         "V2.2 stack must be a regular non-symlink file: $source",
     ))
-    df = CSV.read(source, DataFrame)
+    # The text-valued columns are read as text. Without this a numeric-looking label ("007",
+    # "2026") parses as a number, and `String(cell)` then throws a bare `MethodError` — or, for a
+    # zero-padded label, silently round-trips to a different string. `validate = false` keeps a
+    # missing column reporting through the schema check below rather than through the parser.
+    df = CSV.read(source, DataFrame;
+                  types = Dict(:schema_version => String, :label => String, :regime => String,
+                               :supported_model_steps => String),
+                  validate = false)
     names(df) == collect(String.(_OPERATIONAL_V22_CSV_COLUMNS)) || throw(ArgumentError(
         "V2.2 stack CSV schema does not exactly match " *
         OPERATIONAL_V22_STACK_SCHEMA_VERSION,

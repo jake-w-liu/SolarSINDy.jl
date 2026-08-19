@@ -258,6 +258,24 @@ end
             symlink(path, link)
             @test_throws ArgumentError read_operational_v22_boost(link)
             @test_throws ArgumentError write_operational_v22_boost(link, artifact)
+
+            # S10: the digest is lowercase hex everywhere this package writes one, and every other
+            # reader requires that spelling. This reader case-folded, so it accepted a digest the
+            # identity never produced.
+            upper = copy(valid)
+            upper[!, :artifact_sha256] = uppercase.(string.(upper.artifact_sha256))
+            @test occursin(r"^[0-9A-F]{64}$", upper.artifact_sha256[1])
+            upper_path = joinpath(tmp, "upper-digest.csv")
+            CSV.write(upper_path, upper)
+            @test_throws ArgumentError read_operational_v22_boost(upper_path)
+            # The same file with the digest spelled as written still loads.
+            lower = copy(upper)
+            lower[!, :artifact_sha256] = lowercase.(lower.artifact_sha256)
+            lower_path = joinpath(tmp, "lower-digest.csv")
+            CSV.write(lower_path, lower)
+            @test SolarSINDy._operational_v22_boost_sha256(
+                      read_operational_v22_boost(lower_path)) ==
+                  SolarSINDy._operational_v22_boost_sha256(artifact)
         end
     end
 end

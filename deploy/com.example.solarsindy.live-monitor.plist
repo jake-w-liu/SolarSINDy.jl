@@ -4,11 +4,16 @@
 <!--
   launchd template for the SolarSINDy live Dst forecast monitor (macOS).
 
-  Prefer the install script, which fills these placeholders and creates the log directory:
+  Prefer the install script, which fills every placeholder below and creates the log directory:
     deploy/install_launchd.sh <CLONE_DIR>
-  Manual install: replace every __PLACEHOLDER__ with an absolute path, create
+  Manual install: replace EVERY placeholder in the dict below with a literal value, create
   __MONITOR_DIR__/logs, copy to ~/Library/LaunchAgents/, then bootstrap with:
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.solarsindy.live-monitor.plist
+
+  A launchd job inherits nothing from an interactive shell, so a key that is not rendered here does
+  not reach the daemon.
+
+  Complete placeholder list for this template — every one of them must be replaced:
 
     __JULIA_BIN__     absolute path to the julia launcher. Use the STABLE juliaup shim
                       (~/.juliaup/bin/julia), NOT a version-pinned juliaup directory such as
@@ -16,6 +21,13 @@
                       deletes version directories and would leave a silent 60 s crash loop.
     __CLONE_DIR__     absolute path to the SolarSINDy.jl clone (the --project environment)
     __MONITOR_DIR__   output/state directory (default __CLONE_DIR__/var/monitor)
+    EXTRA_ENV marker  the commented marker line inside EnvironmentVariables. The install
+                      script replaces that line with the allow-listed solarsindy.env keys this
+                      service reads (SOLARSINDY_V2_CALIBRATION, LIVE_MONITOR_*,
+                      LIVE_FUTURE_CLOCK_TOLERANCE_MIN, LIVE_MAX_FUTURE_CLOCK_SKEW_MIN,
+                      SOLARSINDY_V2_4_DEPLOY_DIR, SOLARSINDY_V2_3_SHADOW_DIR,
+                      SOLARSINDY_V2_2_STACK*). A manual install replaces the line with its own
+                      <key>/<string> pairs, or deletes it to run with no extra keys.
 
   Console streams go to bounded, self-rotating files under __MONITOR_DIR__/logs (launchd does not
   rotate them, so the daemon rotates launchd.out/launchd.err once per (re)start and mirrors its full
@@ -43,6 +55,7 @@
     <string>__MONITOR_DIR__</string>
     <key>JULIA_NUM_THREADS</key>
     <string>2</string>
+    <!-- __EXTRA_ENV__ -->
   </dict>
 
   <key>RunAtLoad</key>

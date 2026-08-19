@@ -22,6 +22,67 @@ withenv("SOLARSINDY_MONITOR_DIR" => TEST_MONITOR_DIR) do
 end
 end
 
+# Synthetic V2.4e deployment bundle, so the monitor-side cycle test drives the real served stage
+# instead of the fallback chain. That combination — a mature adaptive-conformal batch policy over a
+# V2.4e-served cycle — is the one the `1ee9ab0` incident broke and no test covered.
+include(joinpath(@__DIR__, "v2_4_serving_fixture.jl"))
+using .V24ServingFixture: build_v24_fixture_bundle
+
+# Verified-residual history deep enough for the adaptive-conformal streams to be servable at each
+# listed model step. Both the baseline-center and served-center streams read the same rows, so one
+# frame matures both; the selector needs `warmup + margin` rows in a pool before a stream may be
+# used, and the counts are per model step, which is why the required step set (and therefore the
+# cadence phase) decides whether the batch can use ACI at all.
+function _mature_aci_log_frame(anchor; model_steps, per_step::Int)
+    L = LiveMonitorRetentionTestHarness
+    total = per_step * length(model_steps)
+    issues = L.DateTime[]
+    targets = L.DateTime[]
+    steps = Int[]
+    latest = Float64[]
+    v2_pred = Float64[]
+    served_pred = Float64[]
+    observed = Float64[]
+    for slot in 1:total
+        step = model_steps[mod1(slot, length(model_steps))]
+        issue = anchor - L.Hour(total - slot + 2)
+        push!(issues, issue)
+        push!(targets, issue + L.Hour(step))
+        push!(steps, step)
+        push!(latest, -35.0 - 3.0 * sinpi(2 * slot / 13))
+        center = -42.0 - 4.0 * sinpi(2 * slot / 17)
+        push!(v2_pred, center)
+        push!(served_pred, center - 1.5)
+        push!(observed, center + 2.0 + 3.0 * sinpi(2 * slot / 11) + 0.4 * step)
+    end
+    return L.DataFrame(
+        issue_time_utc=string.(issues),
+        latest_dst_time_utc=string.(issues),
+        target_time_utc=string.(targets),
+        model_version=fill(L.OPERATIONAL_V2_1_MODEL_VERSION, total),
+        model_step_hours=steps,
+        latest_dst_nt=latest,
+        v2_pred_dst_nt=v2_pred,
+        served_pred_dst_nt=served_pred,
+        observation_dst_nt=observed,
+    )
+end
+
+# Diagnostic lines the monitor appended to its bounded ring during `f`. The daemon's operational
+# record is the artifact under test for the policy diagnostic, not an incidental print.
+function _monitor_diag_during(f)
+    L = LiveMonitorRetentionTestHarness
+    before = isfile(L.DIAG_LOG) ? filesize(L.DIAG_LOG) : 0
+    value = redirect_stdout(devnull) do
+        f()
+    end
+    text = isfile(L.DIAG_LOG) ? open(L.DIAG_LOG) do io
+        seek(io, before)
+        read(io, String)
+    end : ""
+    return (value=value, diag=text)
+end
+
 function _two_point_swpc_fixture(target::AbstractString, dst::Real)
     return """[
       {"time_tag":"2026-07-01T04:59:00","dst":0.0},
@@ -1131,8 +1192,10 @@ end
     end
 
     # A pre-existing archive whose header does not match the hot-log schema (the v2.0->v2.1
-    # column-addition drift class) must abort retention before any append: the prune throws, the hot
-    # log keeps every row, and the archive is byte-identical, so no misaligned rows are written.
+    # column-addition drift class) must never receive misaligned rows. It is left byte-identical and
+    # retention rolls to a new numbered segment instead of refusing: the old behaviour threw on every
+    # cycle from the first schema upgrade onwards, so rows were never pruned again and the hot log
+    # grew past LIVE_MONITOR_MAX_LOG_ROWS without bound.
     mktempdir() do dir
         log_path = joinpath(dir, "live.csv")
         make_log(log_path)
@@ -1140,9 +1203,75 @@ end
         mkpath(dirname(archive_path))
         write(archive_path, "issue_time_utc,target_time_utc,marker\n")  # 3 columns vs the 6-col log
         archive_before = read(archive_path)
-        @test_throws ErrorException L._retain_live_forecast_log!(log_path, 4)
+        @test L._retain_live_forecast_log!(log_path, 4) == 2
+        # Fail-closed guarantee preserved: the mismatched archive is untouched.
         @test read(archive_path) == archive_before
-        @test L.CSV.read(log_path, L.DataFrame).marker == collect(1:6)
+        @test !ispath(string(archive_path, ".manifest.json"))
+        # The pruned rows landed in a new segment carrying their own header.
+        segment = joinpath(dir, "archive", "live_forecast_log_archive.1.csv")
+        @test isfile(segment)
+        segment_rows = L.CSV.read(segment, L.DataFrame)
+        @test names(segment_rows) ==
+              ["issue_time_utc", "latest_dst_time_utc", "target_time_utc",
+               "model_version", "observation_dst_nt", "marker"]
+        @test segment_rows.marker == [1, 2]
+        manifest = L.JSON3.read(read(string(segment, ".manifest.json"), String))
+        @test Int(manifest.archived_rows) == 2
+        @test Int(manifest.segment_index) == 1
+        @test Int(manifest.archive_bytes) == filesize(segment)
+        @test L.CSV.read(log_path, L.DataFrame).marker == [3, 4, 5, 6]
+    end
+
+    # Full schema-upgrade lifecycle: an archive created under schema A, a hot log upgraded to
+    # A + column, and two further retentions. Both prune, the schema-A segment stays byte-identical
+    # after its last matching append, the schema-B rows accumulate in their own segment with a
+    # consistent manifest, and the hot log ends at the cap.
+    mktempdir() do dir
+        log_path = joinpath(dir, "live.csv")
+        archive_path = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+        segment_path = joinpath(dir, "archive", "live_forecast_log_archive.1.csv")
+
+        make_log(log_path)
+        @test L._retain_live_forecast_log!(log_path, 4) == 2
+        @test isfile(archive_path)
+        @test L.CSV.read(archive_path, L.DataFrame).marker == [1, 2]
+        base_archive_bytes = read(archive_path)
+
+        upgraded = (markers) -> begin
+            rows = L.DataFrame(
+                issue_time_utc=string.([base + L.Hour(i) for i in markers]),
+                latest_dst_time_utc=string.([base + L.Hour(i) for i in markers]),
+                target_time_utc=string.([base + L.Hour(i + 1) for i in markers]),
+                model_version=fill("v2", length(markers)),
+                observation_dst_nt=fill(missing, length(markers)),
+                marker=collect(markers),
+                v24_status=fill("ok", length(markers)),   # the routine column-addition drift
+            )
+            L.CSV.write(log_path, rows)
+            rm(L._live_state_path(log_path); force=true)
+            L._load_or_rebuild_live_state!(log_path)
+            return rows
+        end
+
+        upgraded(10:17)
+        @test L._retain_live_forecast_log!(log_path, 4) == 4
+        @test read(archive_path) == base_archive_bytes
+        @test isfile(segment_path)
+        @test L.CSV.read(segment_path, L.DataFrame).marker == collect(10:13)
+
+        upgraded(20:27)
+        @test L._retain_live_forecast_log!(log_path, 4) == 4
+        @test read(archive_path) == base_archive_bytes
+        segment_rows = L.CSV.read(segment_path, L.DataFrame)
+        @test segment_rows.marker == vcat(collect(10:13), collect(20:23))
+        @test "v24_status" in names(segment_rows)
+        manifest = L.JSON3.read(read(string(segment_path, ".manifest.json"), String))
+        @test Int(manifest.archived_rows) == 8
+        @test Int(manifest.archive_bytes) == filesize(segment_path)
+        @test Int(manifest.last_segment_rows) == 4
+        @test Int(manifest.segment_index) == 1
+        @test !ispath(joinpath(dir, "archive", "live_forecast_log_archive.2.csv"))
+        @test L.nrow(L.CSV.read(log_path, L.DataFrame)) == 4
     end
 
     # Retention derives the archive path from the log's own directory and, when no archive exists yet,
@@ -1165,6 +1294,70 @@ end
         # archive.
         @test dirname(dirname(archive_path)) == dir
         @test archive_path != L.FORECAST_ARCHIVE
+    end
+end
+
+@testset "Live monitor cold-archive appends only to the highest-index segment" begin
+    L = LiveMonitorRetentionTestHarness
+    seg = (dir, i) -> joinpath(dir, "archive", "live_forecast_log_archive.$(i).csv")
+    schema_a = markers -> L.DataFrame(a=collect(markers), b=string.(collect(markers)))
+    schema_b = markers -> L.DataFrame(a=collect(markers), b=string.(collect(markers)),
+                                      c=collect(markers))
+
+    # The archive's stated contract is that segment order is append order, so reading the segments
+    # in index order reproduces the write order. Resolving to the FIRST header-matching segment
+    # broke exactly that whenever the hot-log schema returned to an earlier shape — a reverted
+    # column, an operator running the previous release — because rows written third would be
+    # appended to segment 0, ahead of rows written second in segment 1. Only the highest-index
+    # segment is a candidate, so a schema revert opens a new segment instead of writing backwards.
+    mktempdir() do dir
+        archive_path = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+        manifest_path = string(archive_path, ".manifest.json")
+        archive = frame -> L._archive_pruned_rows!(
+            frame; archive_path=archive_path, manifest_path=manifest_path,
+        )
+
+        @test archive(schema_a(1:2)) == 2
+        @test archive(schema_b(3:4)) == 2
+        @test isfile(seg(dir, 1))
+        @test archive(schema_a(5:6)) == 2
+
+        @test isfile(seg(dir, 2))
+        @test L.CSV.read(archive_path, L.DataFrame).a == [1, 2]
+        @test L.CSV.read(seg(dir, 1), L.DataFrame).a == [3, 4]
+        @test L.CSV.read(seg(dir, 2), L.DataFrame).a == [5, 6]
+        # The invariant itself: concatenating the segments in index order is the append order.
+        @test reduce(vcat, [L.CSV.read(p, L.DataFrame).a
+                            for p in (archive_path, seg(dir, 1), seg(dir, 2))]) == collect(1:6)
+
+        # A further schema-A frame extends the LAST segment, never segment 0.
+        @test archive(schema_a(7:8)) == 2
+        @test L.CSV.read(seg(dir, 2), L.DataFrame).a == [5, 6, 7, 8]
+        @test !ispath(seg(dir, 3))
+        @test L.CSV.read(archive_path, L.DataFrame).a == [1, 2]
+        manifest = L.JSON3.read(read(string(seg(dir, 2), ".manifest.json"), String))
+        @test Int(manifest.segment_index) == 2
+        @test Int(manifest.archived_rows) == 4
+        @test Int(manifest.archive_bytes) == filesize(seg(dir, 2))
+    end
+
+    # A manually removed middle segment must not make a later, populated segment invisible: the
+    # resolver scans the whole index range, so appends still go forward instead of into the hole.
+    mktempdir() do dir
+        archive_path = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+        manifest_path = string(archive_path, ".manifest.json")
+        mkpath(dirname(archive_path))
+        L.CSV.write(archive_path, schema_a(1:2))
+        L.CSV.write(seg(dir, 2), schema_a(3:4))
+        write(string(seg(dir, 2), ".manifest.json"),
+              "{\"archived_rows\":2,\"archive_bytes\":$(filesize(seg(dir, 2)))}")
+
+        @test !ispath(seg(dir, 1))
+        @test L._archive_pruned_rows!(
+            schema_a(5:6); archive_path=archive_path, manifest_path=manifest_path) == 2
+        @test !ispath(seg(dir, 1))
+        @test L.CSV.read(seg(dir, 2), L.DataFrame).a == [3, 4, 5, 6]
+        @test L.CSV.read(archive_path, L.DataFrame).a == [1, 2]
     end
 end
 
@@ -1250,5 +1443,258 @@ end
         archived = L.CSV.read(archive_path, L.DataFrame)
         @test archived.a == [1, 2, 3, 4]
         @test archived.b == ["p", "q", "r", "s"]
+    end
+end
+
+@testset "Live monitor cycle never skips the observation-side steps" begin
+    L = LiveMonitorRetentionTestHarness
+    # A solar-wind feed outage must not also stall Kyoto verification, hot-log retention, the
+    # prospective external Dst snapshot (an hourly record that cannot be backfilled) or the
+    # comparison report. Before the split every one of those was skipped by an early return, which
+    # is what happened in production on 2026-07-29 (cycles 15/16, ECONNRESET).
+    make_log = (log_path) -> begin
+        L.CSV.write(log_path, L.DataFrame(
+            issue_time_utc=["2026-07-01T00:00:00", "2026-07-01T01:00:00"],
+            latest_dst_time_utc=["2026-07-01T00:00:00", "2026-07-01T01:00:00"],
+            target_time_utc=["2026-07-01T01:00:00", "2026-07-01T02:00:00"],
+            model_version=fill(L.OPERATIONAL_V2_1_MODEL_VERSION, 2),
+            observation_dst_nt=[-20.0, missing],
+        ))
+        return log_path
+    end
+
+    run_cycle = (log_path, prepare_fn, policy_fn) -> begin
+        called = String[]
+        seen_refresh = Ref{Any}(:unset)
+        seen_snapshot = Ref{Any}(:unset)
+        record = name -> (args...; kwargs...) -> (push!(called, name); nothing)
+        issuance = redirect_stdout(devnull) do
+            L.cycle!(;
+                prepare_fn=prepare_fn,
+                policy_fn=policy_fn,
+                issue_cycle_fn=(args...; kwargs...) -> begin
+                    push!(called, "issue")
+                    (succeeded=length(L.HORIZONS), complete=true)
+                end,
+                dst_fn=() -> begin
+                    push!(called, "dst")
+                    ([L.DateTime(2026, 7, 1, 2)], [-21.0])
+                end,
+                refresh_fn=(cfg; dst_times=nothing, dst_vals=nothing) -> begin
+                    push!(called, "refresh")
+                    seen_refresh[] = (dst_times, dst_vals)
+                    nothing
+                end,
+                verify_fn=record("verify"),
+                retention_fn=record("retention"),
+                snapshot_fn=(cfg; observations=nothing) -> begin
+                    push!(called, "snapshot")
+                    seen_snapshot[] = observations
+                    nothing
+                end,
+                report_fn=record("report"),
+                log_path=log_path,
+                report_path=string(log_path, ".md"),
+                calibration_path=L.V2_CALIB,
+                max_log_rows=length(L.HORIZONS),
+            )
+        end
+        return (issuance=issuance, called=called,
+                refresh=seen_refresh[], snapshot=seen_snapshot[])
+    end
+
+    mktempdir() do dir
+        # Issuance inputs unavailable (feed outage).
+        outcome = run_cycle(make_log(joinpath(dir, "outage.csv")),
+                            _cfg -> error("solar wind feed unavailable"),
+                            _inputs -> error("interval policy must not be reached"))
+        @test outcome.issuance == (succeeded=0, complete=false)
+        @test "issue" ∉ outcome.called
+        # The observation feed is fetched independently and every later step still runs, in order.
+        @test outcome.called == ["dst", "refresh", "retention", "snapshot", "report"]
+        # The independently fetched feed actually reaches the steps that consume it, rather than
+        # each of them silently refetching or being handed nothing.
+        @test outcome.refresh == ([L.DateTime(2026, 7, 1, 2)], [-21.0])
+        @test outcome.snapshot isa L.DataFrame
+        @test outcome.snapshot.observed_time_utc == [L.DateTime(2026, 7, 1, 2)]
+        @test outcome.snapshot.observed_dst_nt == [-21.0]
+
+        # Interval-policy preflight failure: same contract.
+        outcome = run_cycle(make_log(joinpath(dir, "policy.csv")),
+                            _cfg -> (issue_time=L.DateTime(2026, 7, 1, 2),
+                                     dst=([L.DateTime(2026, 7, 1, 2)], [-21.0])),
+                            _inputs -> error("residual stream unreadable"))
+        @test outcome.issuance == (succeeded=0, complete=false)
+        @test "issue" ∉ outcome.called
+        # Issuance inputs existed, so their Dst is reused rather than refetched.
+        @test outcome.called == ["refresh", "retention", "snapshot", "report"]
+        @test outcome.refresh == ([L.DateTime(2026, 7, 1, 2)], [-21.0])
+        @test outcome.snapshot.observed_dst_nt == [-21.0]
+
+        # Healthy control: issuance runs and the same observation-side steps follow it.
+        outcome = run_cycle(make_log(joinpath(dir, "healthy.csv")),
+                            _cfg -> (issue_time=L.DateTime(2026, 7, 1, 2),
+                                     dst=([L.DateTime(2026, 7, 1, 2)], [-21.0])),
+                            _inputs -> :static)
+        @test outcome.issuance == (succeeded=length(L.HORIZONS), complete=true)
+        @test outcome.called == ["issue", "refresh", "retention", "snapshot", "report"]
+
+        # The narrower verifier is still the fallback when the refresh itself fails.
+        called = String[]
+        record = name -> (args...; kwargs...) -> (push!(called, name); nothing)
+        redirect_stdout(devnull) do
+            L.cycle!(;
+                prepare_fn=_cfg -> error("solar wind feed unavailable"),
+                policy_fn=_inputs -> :static,
+                issue_cycle_fn=(args...; kwargs...) -> (succeeded=0, complete=false),
+                dst_fn=() -> ([L.DateTime(2026, 7, 1, 2)], [-21.0]),
+                refresh_fn=(args...; kwargs...) -> error("refresh failed"),
+                verify_fn=record("verify"),
+                retention_fn=record("retention"),
+                snapshot_fn=record("snapshot"),
+                report_fn=record("report"),
+                log_path=make_log(joinpath(dir, "fallback.csv")),
+                report_path=joinpath(dir, "fallback.md"),
+                calibration_path=L.V2_CALIB,
+                max_log_rows=length(L.HORIZONS),
+            )
+        end
+        @test called == ["verify", "retention", "snapshot", "report"]
+    end
+end
+
+@testset "Live monitor interval policy names the immature streams behind :static" begin
+    L = LiveMonitorRetentionTestHarness
+    mktempdir() do dir
+        log_path = joinpath(dir, "live.csv")
+        anchor = L.DateTime(2026, 7, 15, 12)
+        # Residual history only at model steps {2,3,4,7}: the anchor-lag-1 step set. At lag 0 the
+        # cycle needs {1,2,3,6}, so exactly the ms=1 and ms=6 streams are immature — the cadence
+        # phase alone decides the batch policy, which is the dependence the diagnostic must expose.
+        L.CSV.write(log_path, _mature_aci_log_frame(anchor; model_steps=(2, 3, 4, 7), per_step=40))
+        L._load_or_rebuild_live_state!(log_path)
+
+        issue = anchor + L.Minute(5)                        # anchor lag 0 -> steps {1,2,3,6}
+        inputs = (issue_time=issue, dst=([anchor - L.Hour(1), anchor], [-45.0, -44.0]))
+        immature = Tuple{Int,Symbol}[]
+        outcome = _monitor_diag_during() do
+            L._monitor_interval_policy(inputs; log_path=log_path, immature=immature)
+        end
+        @test outcome.value == :static
+        @test Set(immature) == Set([(1, :v2_pred_dst_nt), (1, :served_pred_dst_nt),
+                                    (6, :v2_pred_dst_nt), (6, :served_pred_dst_nt)])
+        @test occursin("interval policy :static", outcome.diag)
+        @test occursin("lags issue hour", outcome.diag)
+        @test occursin("model steps 1/2/3/6", outcome.diag)
+        @test occursin("v2_pred_dst_nt@ms=1 n=0(all)", outcome.diag)
+        @test occursin("served_pred_dst_nt@ms=6 n=0(all)", outcome.diag)
+        @test occursin(string(L._ACI_WARMUP + L._ACI_POOL_MARGIN, " verified rows"), outcome.diag)
+        @test !occursin("@ms=2", outcome.diag)
+        @test !occursin("@ms=3", outcome.diag)
+
+        # Same log, anchor lag 1: the required step set becomes {2,3,4,7}, every stream is mature,
+        # and the identical history now yields the adaptive policy. Nothing but the phase changed.
+        lagged_issue = anchor + L.Hour(1) + L.Minute(5)
+        lagged_inputs = (issue_time=lagged_issue,
+                         dst=([anchor - L.Hour(1), anchor], [-45.0, -44.0]))
+        lagged_immature = Tuple{Int,Symbol}[]
+        lagged = _monitor_diag_during() do
+            L._monitor_interval_policy(lagged_inputs; log_path=log_path,
+                                       immature=lagged_immature)
+        end
+        @test lagged.value == :aci
+        @test isempty(lagged_immature)
+        @test !occursin("interval policy :static", lagged.diag)
+    end
+end
+
+@testset "Live monitor completes a V2.4e cycle under a mature ACI policy" begin
+    L = LiveMonitorRetentionTestHarness
+    mktempdir() do root
+        bundle = build_v24_fixture_bundle(joinpath(root, "bundle"))
+        log_path = joinpath(root, "live.csv")
+        issue_time = L.DateTime(2026, 7, 15, 12, 30)
+        anchor = L.floor(issue_time, L.Hour) - L.Hour(1)     # anchor lag 1 -> steps {2,3,4,7}
+        L.CSV.write(log_path,
+                    _mature_aci_log_frame(anchor; model_steps=(1, 2, 3, 4, 6, 7), per_step=40))
+        L._load_or_rebuild_live_state!(log_path)
+
+        feed_times = collect((issue_time - L.Hour(24)):L.Minute(1):issue_time)
+        plasma = L.DataFrame(
+            time_tag=feed_times,
+            speed=[470.0 + 20.0 * sinpi(2 * k / 613) for k in eachindex(feed_times)],
+            density=[6.0 + 0.8 * sinpi(2 * k / 421) for k in eachindex(feed_times)],
+        )
+        mag = L.DataFrame(
+            time_tag=feed_times,
+            bz_gsm=[-6.0 + 3.0 * sinpi(2 * k / 517) for k in eachindex(feed_times)],
+            by_gsm=[1.5 * cospi(2 * k / 379) for k in eachindex(feed_times)],
+        )
+        dst_times = collect((anchor - L.Hour(24)):L.Hour(1):anchor)
+        dst_values = collect(range(-30.0, -78.0; length=length(dst_times)))
+
+        cfg = L.LiveVerifyConfig(; mode=:issue, model=:v2, horizon_hours=first(L.HORIZONS),
+                                 log_path=log_path, v2_calibration_path=L.V2_CALIB)
+        withenv("SOLARSINDY_V2_4_DEPLOY_DIR" => bundle.dir,
+                "SOLARSINDY_V2_2_STACK" => L.V2_2_DEFAULT_STACK_PATH,
+                "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(root, "no_shadow")) do
+            L.reset_v2_2_stack!(); L.reset_v2_3_shadow!(); L.reset_v2_4_serving!()
+            inputs = L.prepare_issue_inputs(
+                cfg; issue_time=issue_time,
+                plasma_fn=() -> plasma, mag_fn=() -> mag,
+                dst_fn=() -> (dst_times, dst_values),
+            )
+            policy = redirect_stdout(devnull) do
+                L._monitor_interval_policy(inputs; log_path=log_path)
+            end
+            @test policy == :aci
+            issuance = redirect_stdout(devnull) do
+                redirect_stderr(devnull) do
+                    L._issue_horizon_cycle!(
+                        inputs; log_path=log_path, calibration_path=L.V2_CALIB,
+                        interval_policy=policy,
+                    )
+                end
+            end
+            @test issuance.succeeded == length(L.HORIZONS)
+            # The incident: a V2.4e cycle under an aci batch policy was reported incomplete, the
+            # dead-man tripped after six cycles and the supervisor restarted the daemon.
+            @test issuance.complete
+            @test L._complete_issuance_cycle(log_path, issue_time, :aci)
+            @test L._complete_issuance_cycle(log_path, issue_time, :static)
+            L.reset_v2_2_stack!(); L.reset_v2_3_shadow!(); L.reset_v2_4_serving!()
+        end
+
+        df = L.CSV.read(log_path, L.DataFrame)
+        cycle = df[(L.nrow(df) - length(L.HORIZONS) + 1):L.nrow(df), :]
+        @test L.floor.(L._parse_dt.(cycle.issue_time_utc), L.Hour) ==
+              fill(L.floor(issue_time, L.Hour), length(L.HORIZONS))
+        @test all(==(L.V2_4_STATUS_OK), cycle.v24_status)
+        @test all(==(L.V2_4_INTERVAL_SOURCE), cycle.interval_source)
+        @test sort(Int.(cycle.model_step_hours)) == [2, 3, 4, 7]
+        # T-21: the served band is the study's depth band on every row, while the frozen-tail band
+        # columns came from the batch's adaptive policy. Only the new column records that.
+        @test all(==("aci"), cycle.frozen_tail_interval_source)
+        @test all(cycle.frozen_tail_interval_source .!= cycle.interval_source)
+        @test all(isfinite, Float64.(cycle.pred_dst_ci05_nt))
+        @test all(isfinite, Float64.(cycle.served_pred_dst_ci05_nt))
+
+        # Flipping one row's V2.4 status must make the cycle incomplete under both policies:
+        # a cycle carrying the conformal-depth source on a row the V2.4 stage did not serve is
+        # incoherent, whatever the batch policy was.
+        flipped_path = joinpath(root, "flipped.csv")
+        flipped = copy(df)
+        # Widen the column first: the CSV reader pools the served statuses into a fixed-width
+        # inline string type that cannot hold a longer fallback reason.
+        statuses = Vector{Union{Missing,String}}(undef, L.nrow(df))
+        for idx in 1:L.nrow(df)
+            value = df[idx, :v24_status]
+            statuses[idx] = ismissing(value) ? missing : String(value)
+        end
+        statuses[end] = "fallback:deployment_absent"
+        flipped.v24_status = statuses
+        L.CSV.write(flipped_path, flipped)
+        @test !L._complete_issuance_cycle(flipped_path, issue_time, :aci)
+        @test !L._complete_issuance_cycle(flipped_path, issue_time, :static)
     end
 end

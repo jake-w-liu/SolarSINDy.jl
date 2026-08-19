@@ -18,7 +18,7 @@
 #
 # Run from the package root: julia --project=. validation/operational/v2_3_kernel.jl
 
-include(joinpath(@__DIR__, "v2_replay.jl"))   # _v2_forecast, _v2_admitted_driver, _v2_relaxed_tail_driver,
+isdefined(@__MODULE__, :_selftest_v2) || include(joinpath(@__DIR__, "v2_replay.jl"))   # _v2_forecast, _v2_admitted_driver, _v2_relaxed_tail_driver,
                                               # _transit_hours, TAU0_V2, R0_V2, TAU_MAX, _apply_v2_1_safeguards
 
 """

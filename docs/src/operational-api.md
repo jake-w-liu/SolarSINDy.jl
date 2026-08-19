@@ -1,96 +1,36 @@
-# Operational API
+# Operational API — the served path
 
-Discovery, baseline, data-processing, metric, and utility functions are
-documented in the [core API](api.md).
+The stages that stand behind the published forecast: the versioned operational cores and their
+calibration artifacts, the static V2.2 regime stack, and the V2.3 analog serving layer. The stage
+that serves the current center is documented in the
+[V2.4e super-learner](operational-v24-api.md).
 
-## Forecasting And Alarms
+Discovery, data, baseline, metric and utility functions are documented in the
+[core API](api.md), forecast issuance and alarms in
+[forecasting and alarms](forecast-api.md). The offline research chain behind the V2.2 stack is
+documented in the [V2.2 research chain](operational-v22-research-api.md), and the V2.3 study
+machinery in the [V2.3 study API](operational-v23-api.md).
 
-```@docs
-ForecastState
-ForecastResult
-OperationalV2Calibration
-default_operational_v2_calibration
-operational_v2_feature_tuple
-init_forecast
-step_forecast!
-forecast_ahead
-fit_operational_v2_calibration
-operational_v2_predict
-score_operational_v2
-write_operational_v2_calibration
-read_operational_v2_calibration
-SolarSINDy.AlarmCooldownState
-StormSeverity
-QUIET
-MODERATE
-INTENSE
-SUPERINTENSE
-Alarm
-AlarmConfig
-default_alarm_config
-classify_severity
-check_alarm
-maybe_fire_horizon_alarm!
-alarm_print
-alarm_log
-fetch_swpc_plasma
-fetch_swpc_mag
-fetch_swpc_dst
-fetch_realtime_solar_wind
-run_monitor
-recover_shadow_state
-DEFAULT_FEED_DEADMAN_THRESHOLD
-feed_deadman_tripped
-storm_lambda_grid
-select_storm_lambda
-write_storm_lambda_selection
-read_storm_lambda_selection
+## Versioned Cores And Calibration Artifacts
+
+```@autodocs
+Modules = [SolarSINDy]
+Pages = ["operational_artifacts.jl"]
+Private = false
 ```
 
-## Versioned Operational Core
+## Static V2.2 Stack Serving
 
-```@docs
-OPERATIONAL_V2_1_MODEL_VERSION
-OPERATIONAL_V2_0_MODEL_VERSION
-OperationalCoreArtifacts
-OperationalCalibrationArtifacts
-OperationalCore
-canonical_operational_version
-operational_core_artifacts
-operational_calibration_artifacts
-validate_operational_core_artifacts
-load_operational_core
-init_operational_forecast
-operational_core_forecast
+```@autodocs
+Modules = [SolarSINDy]
+Pages = ["operational_v22_serving.jl"]
+Private = false
 ```
 
-## Conformal Calibration
+## V2.3 Analog Serving
 
-```@docs
-ConformalCalibration
-ConformalStratum
-fit_conformal
-conformal_stratum
-conformal_halfwidth
-conformal_interval
-conformal_coverage
-write_conformal_calibration
-read_conformal_calibration
-AdaptiveConformal
-init_adaptive_conformal
-adaptive_conformal_step!
-run_adaptive_conformal
-```
-
-## Online Assimilation
-
-```@docs
-AssimilationFilter
-init_assimilation
-current_dst
-current_coeffs
-dst_variance
-assimilation_predict!
-assimilation_update!
-run_assimilation
+```@autodocs
+Modules = [SolarSINDy]
+Pages = ["operational_v23_serving.jl"]
+Private = false
 ```

@@ -7,7 +7,7 @@ using Downloads
 using Printf
 using Statistics
 
-include(joinpath(@__DIR__, "v2_replay.jl"))
+isdefined(@__MODULE__, :_selftest_v2) || include(joinpath(@__DIR__, "v2_replay.jl"))
 
 const GFZ_KP_URL = "https://kp.gfz.de/app/files/Kp_ap_Ap_SN_F107_since_1932.txt"
 const GFZ_KP_SOURCE = OPERATIONAL_GFZ_KP_SOURCE

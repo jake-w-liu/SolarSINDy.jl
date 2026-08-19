@@ -6,7 +6,7 @@ using Dates
 using Printf
 using Statistics
 
-include(joinpath(@__DIR__, "v2_replay.jl"))
+isdefined(@__MODULE__, :_selftest_v2) || include(joinpath(@__DIR__, "v2_replay.jl"))
 
 const BROAD_CATALOG = OPERATIONAL_STORM_CATALOG
 const BROAD_OUT_CSV = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_broad_replay_scored.csv")

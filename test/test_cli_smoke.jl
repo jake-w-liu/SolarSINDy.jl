@@ -161,6 +161,55 @@
         zurls = filter(l -> occursin("URL=", l), split(String(take!(z_io)), '\n'))
         @test any(l -> occursin("http://127.0.0.1:65123", l), zurls)
 
+        # Installed-service port: once a service exists, its rendered plist is the authority for
+        # the port it binds. Editing the config file without reinstalling used to make `status`
+        # probe the config's port and report a healthy dashboard unreachable.
+        if Sys.isapple() && Sys.which("plutil") !== nothing
+            svc_root = mktempdir()
+            svc_home = joinpath(svc_root, "home"); mkpath(svc_home)
+            fake_bin = joinpath(svc_root, "bin"); mkpath(fake_bin)
+            fake_launchctl = joinpath(fake_bin, "launchctl")
+            # Reports only the dashboard as loaded, so the monitor stays "stopped" and the two
+            # branches are exercised independently.
+            write(fake_launchctl, """#!/bin/sh
+case "\$1" in
+  list) echo "1234\t0\tcom.empire.solarsindy.dashboard" ;;
+esac
+exit 0
+""")
+            chmod(fake_launchctl, 0o755)
+            installer = normpath(joinpath(@__DIR__, "..", "deploy", "install_launchd.sh"))
+            install_env = copy(ENV)
+            install_env["HOME"] = svc_home
+            install_env["PATH"] = string(fake_bin, ":", get(ENV, "PATH", ""))
+            install_env["SOLARSINDY_LOAD"] = "0"
+            install_env["SOLARSINDY_ORG"] = "empire"
+            install_env["SOLARSINDY_JULIA"] = shim
+            install_env["SOLARSINDY_MONITOR_DIR"] = joinpath(svc_root, "monitor")
+            install_env["SWM_PORT"] = "9137"
+            delete!(install_env, "SWM_HOST")
+            delete!(install_env, "SWM_WEBHOOK_URL")
+            @test success(pipeline(setenv(`$bash $installer dashboard`, install_env);
+                                   stdout=devnull, stderr=devnull))
+            plist = joinpath(svc_home, "Library", "LaunchAgents",
+                             "com.empire.solarsindy.dashboard.plist")
+            @test isfile(plist)
+
+            svc_env = copy(env)
+            delete!(svc_env, "SOLARSINDY_IGNORE_SERVICE")   # let the service guard see the fake
+            svc_env["HOME"] = svc_home
+            svc_env["PATH"] = string(fake_bin, ":", get(ENV, "PATH", ""))
+            svc_env["SOLARSINDY_MONITOR_DIR"] = joinpath(svc_root, "state")
+            svc_io = IOBuffer()
+            svc = run(pipeline(setenv(ignorestatus(`$bash $cli status`), svc_env);
+                               stdout=svc_io, stderr=devnull); wait=true)
+            svc_out = String(take!(svc_io))
+            @test svc.exitcode == 1                          # dashboard up, monitor stopped
+            @test occursin("installed dashboard service binds port 9137", svc_out)
+            @test occursin("9137", svc_out)
+            @test !occursin("http://127.0.0.1:65123", svc_out)
+        end
+
         # Broken config must not brick the CLI: the malformed line is skipped with a
         # warning, the good lines still apply, every command keeps working, and the two
         # foot-gun classes (unquoted whitespace value, parser-reserved variable name) are

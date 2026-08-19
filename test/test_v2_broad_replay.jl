@@ -8,6 +8,10 @@ const BROAD_REPLAY_SCRIPT = normpath(joinpath(@__DIR__, "..", "validation", "ope
                                               "v2_broad_replay.jl"))
 include(BROAD_REPLAY_SCRIPT)
 
+isdefined(Main, :LocalArtifactGate) ||
+    Base.include(Main, normpath(joinpath(@__DIR__, "local_artifact_gate.jl")))
+using Main.LocalArtifactGate: local_artifact_available
+
 @testset "V2 broad historical replay helpers" begin
     @testset "catalog threshold selection has fixed independent counts" begin
         cat = load_storm_catalog()
@@ -147,11 +151,19 @@ end
     # Every causally filled replay tuple must preserve the exact proton-only
     # dynamic-pressure identity. V, density, and the source Pdyn column can have
     # different missingness, so pressure may not be forward-filled independently.
-    for lookup in (_driver_lookup_range(2019, 2022), _driver_lookup(2022))
-        @test !isempty(lookup)
-        @test all(values(lookup)) do driver
-            driver.Pdyn == dynamic_pressure(driver.n, driver.V)
+    # The lookups read the OMNI archive, which the offline data pipeline writes
+    # and which a clean checkout does not carry; the oracle registers that
+    # dependency rather than erroring out of the suite.
+    if local_artifact_available("V2 replay driver lookups on the OMNI archive", OPERATIONAL_OMNI)
+        for lookup in (_driver_lookup_range(2019, 2022), _driver_lookup(2022))
+            @test !isempty(lookup)
+            @test all(values(lookup)) do driver
+                driver.Pdyn == dynamic_pressure(driver.n, driver.V)
+            end
         end
+    else
+        @test_skip "OMNI archive absent at $(OPERATIONAL_OMNI); run the data pipeline or set " *
+                   "SOLARSINDY_OMNI_EXTRACTED"
     end
 
     blended = _blend(0.4, fut_slow, slow)

@@ -10,7 +10,7 @@
 
 using CSV, DataFrames, Dates, Printf, Statistics
 
-include(joinpath(@__DIR__, "v2_replay.jl"))
+isdefined(@__MODULE__, :_selftest_v2) || include(joinpath(@__DIR__, "v2_replay.jl"))
 
 const OUT_RESEARCH_ROWS = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_research_scorecard_rows.csv")
 const OUT_RESEARCH_MD = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_research_scorecard_report.md")

@@ -1,0 +1,67 @@
+name: CI
+
+# A clean checkout is the environment this repository was never tested in: the study artifacts under
+# `validation/output/` are deliberately untracked, and the package shipped for months with a
+# standard-library compat bound that made it unresolvable on its own declared minimum Julia. Every
+# job here therefore runs on a fresh clone with nothing generated in advance.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Pkg.test — Julia ${{ matrix.julia-version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # The declared minimum in Project.toml and the release the package is developed on.
+        julia-version: ['1.10', '1.12']
+        os: [ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia-version }}
+      - uses: julia-actions/cache@v2
+      - name: Resolve the declared compat on this Julia
+        # The failure this repeats: a `[compat]` bound on a standard library pins the package to one
+        # Julia release, and resolution — not the test suite — is where that shows.
+        run: julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate()'
+      - name: Confirm the checkout carries no generated study output
+        run: |
+          if [ -d validation/output ]; then
+            echo "validation/output must not be tracked; the artifact-gated oracles rely on it being absent" >&2
+            exit 1
+          fi
+      - uses: julia-actions/julia-buildpkg@v1
+      # The suite's own "Local-artifact oracle ledger" testset prints, in this job's log, which
+      # real-data oracles ran and which were skipped for want of an untracked artifact, and fails if
+      # a registered gate disappears. A separate step restating that in prose showed nothing a reader
+      # could act on, so the ledger is read where it is produced.
+      - uses: julia-actions/julia-runtest@v1
+
+  docs:
+    name: Documentation build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: julia-actions/cache@v2
+      - name: Instantiate the documentation environment
+        run: julia --project=docs -e 'using Pkg; Pkg.resolve(); Pkg.instantiate()'
+      - name: Build the manual
+        # `docs/make.jl` runs with checkdocs=:exports, doctest=true and warnonly=false, so this step
+        # fails on a missing manual entry or a stale doctest, not only on a broken page.
+        run: julia --project=docs docs/make.jl

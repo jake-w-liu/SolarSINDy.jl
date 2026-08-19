@@ -5,13 +5,13 @@ import SHA
 
 "Frozen issue-time feature schema for the V2.2 boosted residual."
 const OPERATIONAL_V22_BOOST_FEATURES = OPERATIONAL_V22_RESIDUAL_FEATURES
-const OPERATIONAL_V22_BOOST_SUPPORTED_MODEL_STEPS = (1, 2, 3, 4, 6, 7)
+const OPERATIONAL_V22_BOOST_SUPPORTED_MODEL_STEPS = OPERATIONAL_V22_MODEL_STEPS
 const OPERATIONAL_V22_BOOST_SCHEMA_VERSION = "operational_v2_2_boost_v1"
 const OPERATIONAL_V22_BOOST_PACKAGE_VERSION = "SolarSINDy-0.2.1"
 const OPERATIONAL_V22_BOOST_EVOTREES_VERSION = "0.18.7"
 
 _operational_v22_boost_cap(model_step_hours::Integer) =
-    5.0 + 5.0 * Int(model_step_hours)
+    operational_v22_correction_cap_nt(model_step_hours)
 
 """
 Immutable, lead-specific boosted-residual artifact.
@@ -806,9 +806,9 @@ function read_operational_v22_boost(path::AbstractString)
         throw(ArgumentError(
             "unsupported boost artifact EvoTrees version: $evotrees_version",
         ))
-    checksum = lowercase(string(_operational_v22_consistent_column(
-        df, :artifact_sha256,
-    )))
+    # No case folding: every writer in this package emits a lowercase hex digest, and every other
+    # reader requires one. Folding here accepted a digest spelling the identity never produced.
+    checksum = string(_operational_v22_consistent_column(df, :artifact_sha256))
     occursin(r"^[0-9a-f]{64}$", checksum) || throw(ArgumentError(
         "boost artifact checksum is malformed",
     ))

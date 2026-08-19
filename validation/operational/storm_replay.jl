@@ -16,7 +16,7 @@
 
 using Dates, DataFrames, Statistics, Printf, CSV
 include(joinpath(@__DIR__, "paths.jl"))
-include(joinpath(OPERATIONAL_PACKAGE_ROOT, "examples", "live_forecast_verify.jl"))  # replay_recent_table, _omni_replay_inputs, LiveVerifyConfig, _load_calibration_for_model
+isdefined(@__MODULE__, :LiveVerifyConfig) || include(joinpath(OPERATIONAL_PACKAGE_ROOT, "examples", "live_forecast_verify.jl"))  # replay_recent_table, _omni_replay_inputs, LiveVerifyConfig, _load_calibration_for_model
 
 const OMNI = OPERATIONAL_OMNI
 const OUT_CSV = joinpath(OPERATIONAL_OUTPUT_DIR, "storm_replay_scored.csv")
@@ -76,7 +76,10 @@ function report_block(io, title, df)
     for h in HORIZONS
         mt = metrics_table(df, h); isempty(mt) && continue
         sort!(mt, :rmse)
-        cov = mean(Bool.(df[df.model_step_hours .== h, :v2_observed_in_90ci]))
+        # `v2_observed_in_90ci` is `missing` where the row could not be verified; such a row is
+        # neither a coverage hit nor a coverage miss, so it leaves both the numerator and the
+        # denominator (see score_operational_v2).
+        cov = _observable_coverage(df[df.model_step_hours .== h, :v2_observed_in_90ci]).fraction
         v2rank = findfirst(==("V2"), mt.model)
         @printf("  h=%d h:  best=%-16s  v2 rank %d/%d (RMSE %.2f)  v2 90%%CI cov=%.2f\n",
                 h, mt.model[1], v2rank, nrow(mt), mt[mt.model.=="V2", :rmse][1], cov)

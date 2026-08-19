@@ -172,7 +172,7 @@ function _v22_temporal_probe(table::DataFrame, features, lead::Int)
     return best
 end
 
-function main()
+function main_v2_2_temporal_probe()
     table, features = _v22_temporal_table()
     println("rows=$(nrow(table)) features=$(length(features)) max_target=$(maximum(table.target_time_utc))")
     for lead in (1, 2, 3, 4, 6, 7)
@@ -181,5 +181,5 @@ function main()
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    main()
+    main_v2_2_temporal_probe()
 end

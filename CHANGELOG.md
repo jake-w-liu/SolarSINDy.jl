@@ -2,6 +2,73 @@
 
 All notable changes to `SolarSINDy.jl` will be documented in this file.
 
+## [Unreleased] - 2026-08-19 (deep-debug fix pass; no served number moves; version stays 0.2.1)
+
+A six-way independent audit of the shipped tree produced 44 confirmed code-side findings. None of
+them says a published forecast number is wrong: the deployed bundle's fitted objects, the served
+identity oracle over 753 anchors / 4,518 rows, and the depth-safe severity center and watch edge on
+all production rows were each reproduced to Δ = 0.0 during the audit. The findings are about
+alerting correctness, availability, disclosure, and the evidence that protects the served
+arithmetic. This pass closes them without touching the served center, the bands, the stack weights,
+the conformal strata, the SINDy family floor, the fallback chain, or the served identity
+`v2.4+sindy20x11+superlearner10floor+conformal`.
+
+One published *string* does change: alert text and the webhook body now render a storm depth as an
+integer ("-37 nT" where the previous build printed "-37.0 nT"), matching what the dashboard has
+always shown. The value, the tier and every numeric payload field are untouched; a consumer that
+parses a decimal out of the alert sentence needs to accept an integer there.
+
+Alerting and availability:
+
+- the webhook no longer announces an all-clear when the forecast log becomes empty or unreadable
+  after data has been served; the blind-forecast rule is persisted across restarts and the alert
+  loop and `/api/alerts` consult the outage sentinel through the same rule
+- a cycle whose four rows carry different `interval_source` values is judged per row — a row's
+  source must be coherent with that row's own status — so a cycle in which the super-learner served
+  some horizons and fell back coherently on the rest is published under its weakest served label
+  with the interval source disclosed per horizon, instead of blanking the product; `/api/health`
+  still reports the newest cycle as incomplete when it is, so the dead-man still trips
+- the log cache records a parse failure instead of re-parsing the bad file on every request while
+  holding the lock, and `/api/health` no longer reports `ok` from a stale cached frame while the
+  current log cannot be parsed
+- dashboard responses carry a content-security policy, `X-Content-Type-Options` and a referrer
+  policy, and third-party feed text reaches the DOM escaped
+- the monitor's observation-side work — Kyoto verification, hot-log retention, the prospective
+  external Dst snapshot and the comparison report — runs on every cycle even when issuance inputs
+  are unavailable, so a solar-wind feed outage no longer costs an hour of the independent Dst record
+- a cold-archive header mismatch rolls the archive to a numbered segment instead of failing
+  retention permanently, and the forecast-log lock consults Pidfile's own staleness rule
+
+Evidence and tooling:
+
+- the synthetic V2.4 stack fixture gave all six non-family experts the same weight, which made every
+  permutation among them a no-op; all ten weights are now distinct and strictly positive, and the
+  unit suite asserts that exchanging any two experts moves the center by exactly the weight
+  difference times the center difference. In the deployed bundle 27 of 60 cells carry
+  `w_burton != w_burton_full`, so this is the class of defect the fixture could not see
+- the V2.1 split audit's validation→holdout forecast-origin check and the V2.1 served-holdout
+  promotion gate are recomputed by tests instead of read from their frozen columns; the published
+  coverage 117,575 / 135,817 and the 0.85 promotion floor are unchanged
+- `Pkg.test()` passes on a clean checkout. Six oracles that read untracked generated artifacts
+  register in a ledger the suite prints and pins, so a green run states which real-data oracles it
+  exercised; `SOLARSINDY_REQUIRE_LOCAL_ARTIFACTS=1` makes any absence a failure
+- `[compat] Logging = "1.11.0"` is dropped: with `julia = "1.10"` it made the package unresolvable
+  on its own declared minimum. `test/test_compat.jl` pins the rule for every standard-library
+  dependency, checks the declared minimum against the README, and requires every declared
+  dependency to have a consumer
+- duplicate `include`s of the shared replay and study scripts are guarded and the five colliding
+  `main()` entry points are renamed after their scripts, removing 3,380 method-overwrite warnings
+  from a full test run; the 34 that remain come from PlotlySupply overriding PlotlyBase
+- `examples/experiments.jl` loads the deployed V2.4e bundle and serves one row through
+  `v24_serving_center`, so the file the development harness reports as passing now touches the
+  operator it is cited as evidence for
+- `docs/Manifest.toml` is re-resolved (`SolarSINDy` 0.2.1 with `EvoTrees` and `Logging`) and the
+  API reference reaches every exported binding through `@autodocs` blocks keyed on source file, so
+  `docs/make.jl` builds with `checkdocs = :exports` and `warnonly = false` at exit 0
+- `.github/workflows/ci.yml` runs the suite on a clean checkout on the declared minimum Julia and on
+  the development release, and builds the manual
+- the development-harness audit scans bundled application suites (`app/test`) alongside `test/`
+
 ## [Unreleased] - 2026-08-18 (served V2.4e super-learner; version bump deferred)
 
 Served point center moves from the static V2.2 regime stack to the **V2.4e super-learner**:

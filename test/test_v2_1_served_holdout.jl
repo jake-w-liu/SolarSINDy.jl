@@ -75,6 +75,66 @@ include(SERVED_HOLDOUT_SCRIPT)
     @test audit.omni_sha256[1] ==
           "5b9f068431fe3d5f4406360cd8176f6631d03d28417c99e0117e1058400fdb97"
 
+    # The promotion gate is arithmetic, not a column: the frozen summary records
+    # `pooled_gate_pass`, and reading it back proves only that the file says what
+    # it says. The published pooled coverage sits between the promotion floor and
+    # the nominal target, so the gate's verdict depends on the floor being the
+    # declared 0.85 — raising it to the nominal 0.90 would flip the published
+    # promotion to a refusal. The comparison is therefore recomputed here on
+    # cohorts that straddle the floor.
+    @test V21_SERVED_HOLDOUT_FLOOR == 0.85
+    @test V21_SERVED_HOLDOUT_NOMINAL == 0.90
+    published_coverage = 117_575 / 135_817
+    @test overall.served_coverage[1] == published_coverage
+    @test V21_SERVED_HOLDOUT_FLOOR <= published_coverage < V21_SERVED_HOLDOUT_NOMINAL
+    @test overall.promotion_coverage_floor[1] == V21_SERVED_HOLDOUT_FLOOR
+    @test overall.nominal_coverage[1] == V21_SERVED_HOLDOUT_NOMINAL
+    @test overall.pooled_gate_pass[1] ==
+          (overall.served_coverage[1] >= overall.promotion_coverage_floor[1])
+    @test all(
+        r -> r.pooled_gate_pass == (r.pooled_gate_applies &&
+                                    r.served_coverage >= r.promotion_coverage_floor),
+        eachrow(summary),
+    )
+    # Only the pooled cohort carries the gate; a per-lead cohort above the floor
+    # must not be reported as promotion evidence.
+    @test sum(Bool.(summary.pooled_gate_applies)) == 1
+
+    toy_cohort(n::Int, hits::Int; storm::Bool=false) = DataFrame(
+        model_step_hours=fill(1, n),
+        observation_dst_nt=fill(storm ? -60.0 : 0.0, n),
+        served_v2_1_dst_nt=fill(storm ? -60.0 : 0.0, n),
+        frozen_tail_dst_nt=fill(storm ? -60.0 : 0.0, n),
+        served_interval_hit=[k <= hits for k in 1:n],
+        frozen_tail_interval_hit=fill(true, n),
+    )
+    # (rows, hits, expected verdict at the declared 0.85 floor). 85/100 pins the
+    # inclusive edge; 8_657/10_000 is the published coverage to four decimals and
+    # is the case a 0.90 floor would refuse.
+    for (n, hits, expected) in ((100, 90, true), (100, 86, true), (100, 85, true),
+                                (100, 84, false), (100, 0, false),
+                                (10_000, 8_657, true), (10_000, 8_499, false))
+        gated = _v21_summary_row(toy_cohort(n, hits), "toy", 1, "all";
+                                 pooled_gate_applies=true)
+        @test gated.n_rows == n
+        @test gated.served_hits == hits
+        @test gated.served_coverage == hits / n
+        @test gated.promotion_coverage_floor == V21_SERVED_HOLDOUT_FLOOR
+        @test gated.pooled_gate_applies
+        @test gated.pooled_gate_pass == expected
+        # The same cohort without the pooled declaration never reports promotion
+        # evidence, however high its coverage.
+        @test !_v21_summary_row(toy_cohort(n, hits), "toy", 1, "all").pooled_gate_pass
+    end
+    # A cohort shaped exactly like the published one — same row count, same hit
+    # count — passes the recomputed gate, which is what the published verdict
+    # asserts.
+    published_shape = _v21_summary_row(toy_cohort(135_817, 117_575), "published_shape", 0,
+                                       "all"; pooled_gate_applies=true)
+    @test published_shape.served_coverage == published_coverage
+    @test published_shape.pooled_gate_pass == overall.pooled_gate_pass[1]
+    @test published_shape.pooled_gate_pass
+
     source = read(SERVED_HOLDOUT_SCRIPT, String)
     @test occursin("force_frozen=true", source)
     @test occursin("holdout_residual_updates=[0]", source)

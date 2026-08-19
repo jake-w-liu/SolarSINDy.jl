@@ -42,12 +42,12 @@ using Statistics
 # `v2_replay.jl`; the second include re-evaluates identical constants, which is
 # a no-op, and is cheap (about one second) compared with re-deriving the
 # constants here and letting them drift.
-include(joinpath(@__DIR__, "v2_3_kernel.jl"))
+isdefined(@__MODULE__, :_selftest_v23) || include(joinpath(@__DIR__, "v2_3_kernel.jl"))
 # The second pass through `v2_replay.jl` re-attaches identical docstrings, which
 # Julia reports; the definitions themselves are unchanged, so the notices are
 # silenced rather than left to bury a real warning in a long run log.
 Logging.with_logger(Logging.NullLogger()) do
-    include(joinpath(@__DIR__, "v2_3_base_table.jl"))
+    isdefined(@__MODULE__, :V23_BASE_DIR) || include(joinpath(@__DIR__, "v2_3_base_table.jl"))
 end
 
 # ---------------------------------------------------------------------------

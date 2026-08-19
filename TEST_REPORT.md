@@ -316,6 +316,9 @@ per-step blend recomputation), and a cap widened beyond the published value (the
 
 ### Full verification
 
+Measured at the V2.3 integration (2026-08); superseded by the 2026-08-19 table at the end of this
+report. The per-file counts below are the counts of that tree, not of the current one.
+
 | Check | Result |
 |---|---|
 | `Pkg.test()` | 20313 / 20313 pass, 0 failures, 11m52s |
@@ -777,6 +780,12 @@ stopped being generated is a failure rather than a shorter loop.
 
 ### Full verification
 
+Measured at the V2.4e integration (2026-08-18); superseded by the 2026-08-19 table at the end of this
+report. `test/test_serving_identity_oracles.jl` at 199, `test/test_operational_v22_serving.jl` at 93
+and `v2_readiness_audit.jl --self-test` at 38 checks are counts that require untracked locally
+generated artifacts; a clean checkout reaches fewer, and the difference is now recorded rather than
+implied.
+
 | Check | Result |
 |---|---|
 | `test/test_operational_v24_serving.jl` | 425 / 425 pass |
@@ -845,3 +854,80 @@ stage.
 | `validation/operational/v2_4_learn.jl` (run 6, 8 threads) | complete in 1,477.9 s wall / 1,465.5 s recorded, selection `v2_4e`, decision `SHADOW`, serve rule `SERVE_ELIGIBLE_PENDING_G4` on ALL and E2 — all identical to run 5 |
 | `validation/operational/v2_4_serving_identity.jl` (against the regenerated `learn_year_2025.csv`) | PASS, max abs Δ = 0.0 nT on all fifteen columns over 753 anchors / 4,518 rows |
 | `Pkg.test()` after the change | 282,260 / 282,260 pass, 0 failures, 33m24.1s; the whole-stage V2.4 testset contributes 137,183. The total is not comparable with the 282,144 recorded earlier in this file, which predates unrelated test additions elsewhere in the tree, and the wall time reflects a concurrent study re-run on the same machine |
+
+## Test and documentation pass: the clean-checkout suite (2026-08-19)
+
+### What was not observable before
+
+Three of the findings in this pass are about the evidence rather than the product.
+
+**A fixture that hid a swapped expert.** `v24_fixture_weights` gave each of the six non-SINDy-family
+expert slots `rest / length(others)`, so any permutation among `persistence, burton, burton_full,
+obrien, direct_gbm, climatology` was a mathematical no-op and the whole live-verification suite
+passed with the engine's `burton` and `burton_full` slots exchanged. The deployed bundle is not
+uniform: 27 of the 60 cells in `deploy/v2_4/stack_weights.csv` carry `w_burton != w_burton_full`, so
+the same exchange in production would have moved the published center. All ten fixture weights are
+now distinct and strictly positive, each group summing exactly to its mass, and
+`test/test_operational_v24_serving.jl` asserts for each of the 45 expert pairs that exchanging two
+experts moves the center by exactly `(w_a - w_b)(x_b - x_a)`.
+
+**Two gates that were never recomputed.** The V2.1 split audit's validation→holdout forecast-origin
+comparison and the V2.1 served-holdout promotion gate were both asserted only through frozen CSV
+columns. `test/test_v2_1_calibration.jl` now adds a holdout that leaks past the last validation
+target while staying clear of the fit targets — the only shape that can distinguish the second
+comparison from the first — plus the strict-equality boundary, and checks the refusal message names
+the boundary crossed. `test/test_v2_1_served_holdout.jl` recomputes `pooled_gate_pass` on cohorts at
+84, 85, 86 and 8,657/10,000 hits and on a cohort shaped exactly like the published one
+(117,575 / 135,817 = 0.86569), asserts the published gate equals the comparison of its own published
+coverage against its own published floor, and asserts that only the pooled cohort carries the gate.
+The published coverage and the 0.85 floor are unchanged.
+
+**Oracles that disappeared on a clean checkout.** `Pkg.test()` on a fresh clone of `80ad1e1` did not
+pass: `test/test_v2_broad_replay.jl` errored on the untracked OMNI archive and
+`test/test_v2_3_runners.jl` failed `@test source.real` after `oracle_frame()` silently fell back to a
+synthetic frame, while four further real-data oracles degraded to bare `@test_skip`. All six now
+register in `Main.LocalArtifactGate` before deciding whether to run; `test/runtests.jl` prints the
+ledger and pins its membership, and `SOLARSINDY_REQUIRE_LOCAL_ARTIFACTS=1` makes any absence a
+failure.
+
+### Mutations re-applied and killed
+
+| Mutation | Location | Suite | Result |
+|---|---|---|---|
+| `burton` ↔ `burton_full` slot exchange in the served expert panel | `examples/live_forecast_verify.jl:2445` | `test/test_live_forecast_verify.jl` | 894 pass / **4 fail** (was 852/852 pass at HEAD): the recomputed `l1_center` -65.9252 nT against the logged -65.8605 nT, and the two band edges with it |
+| `rows[2]` → `rows[1]` in the validation→holdout origin check | `validation/operational/v2_1_calibration.jl:213` | `test/test_v2_1_calibration.jl` | 20 pass / **3 fail**: the leaking holdout is no longer rejected, its refusal message is empty, and the strict boundary is accepted |
+| promotion floor 0.85 → 0.90 in the pooled gate | `validation/operational/v2_1_served_holdout.jl:197` | `test/test_v2_1_served_holdout.jl` | 100 pass / **5 fail**: the 86 %, 85 % and 8,657/10,000 cohorts and the published-shape cohort all lose the gate |
+
+Each mutation was applied in place, run, then reverted from a byte copy and confirmed identical by
+SHA-256 (`examples/live_forecast_verify.jl`
+`fc8f5f83957dfa0e44f6b86ef0c53343d709d0997c3f1b9e81fbffda6685ddef` before and after).
+
+### Full verification (2026-08-19)
+
+Clean checkout means a `git archive` of the tree with this pass applied and **no**
+`validation/output/`, which is what a fresh clone gets.
+
+| Check | Result |
+|---|---|
+| `Pkg.test()` on a clean checkout | **282,900 pass, 6 broken, 282,906 total, exit 0, 22m51.8s.** The 6 broken are the six ledger-recorded skips; at `80ad1e1` the same environment gave 1 error, 1 failure and 4 silent skips |
+| Local-artifact oracle ledger (clean checkout) | 6 registered, 0 exercised, 6 skipped, each named with its missing artifact; the ledger testset itself contributes 16 assertions |
+| Repository-internal method-overwrite warnings during `Pkg.test()` | **0** (3,380 before, of which 57 were the colliding `main` entry points). The shared replay and study scripts are now included under a guard, and the five colliding `main()` definitions were renamed to script-specific entry points; the 34 warnings that remain are PlotlySupply overriding PlotlyBase, outside this repository |
+| `.agents/scripts/dev-harness-audit.sh` | PASS 340, WARN 3, FAIL 0. The warnings are the pre-existing loose V2.2/app tolerances and two absent paper directories; the scan now covers `app/test` as well as `test/` |
+| `test/test_operational_v24_serving.jl` | 783 / 783 pass (425 / 425 before this pass and the loader-hardening pass) |
+| `test/test_live_forecast_verify.jl` | 898 / 898 pass |
+| `test/test_v2_1_calibration.jl` | 23 / 23 pass |
+| `test/test_v2_1_served_holdout.jl` | 105 / 105 pass |
+| `test/test_conformal.jl` | 167 / 167 pass, standalone as well as through `runtests.jl` |
+| `test/test_compat.jl` (new) | 56 / 56 pass |
+| `validation/operational/v2_readiness_audit.jl --self-test` | PASS, 44 independent checks with the local artifacts present; PASS, 42 with `SOLARSINDY_OPERATIONAL_OUTPUT_DIR` pointed at an empty directory. The count is artifact-dependent, which the earlier "38 checks" claim did not say |
+| `test/test_serving_identity_oracles.jl` | 199 / 199 with the identity tables present; 163 pass + 3 recorded skips without them |
+| `test/test_operational_v22_serving.jl` | 93 / 93 with the base table present; 89 pass + 1 recorded skip without it |
+| `test/test_v2_broad_replay.jl` | 30 / 30 and 33 / 33 with the OMNI archive present; 29 pass + 1 recorded skip without it |
+| `test/test_v2_3_runners.jl`, self-origin oracle | 77 / 77 on the archived hourly frame; 76 pass + 1 recorded skip without it |
+| `app/test/runtests.jl` inside the package suite | 1,343 / 1,343 pass |
+| `examples/experiments.jl` | PASS, and now loads `deploy/v2_4` and serves one row through `v24_serving_center` — cell `active_deepening/deep`, center -126.734 nT, band ±31.857 nT, recomputed from the resolved cell's own weights and the bundle's own conformal stratum |
+| `julia --project=docs docs/make.jl` | exit 0, zero errors, zero warnings (258 docstrings were missing from the manual before, and the documented build previously failed at instantiation) |
+| `Pkg.resolve()` on the declared minimum Julia 1.10.11 | RESOLVED, then `Pkg.instantiate()` and `using SolarSINDy` load 427 exported bindings. Before dropping the `Logging` compat bound: `Unsatisfiable requirements detected for package Logging` |
+
+Counts that require untracked locally generated artifacts are marked above. Every other count is
+what a clean clone reaches.

@@ -2660,6 +2660,16 @@ function audit_dashboard_payload!(state::AuditState, payload, api_url::AbstractS
     state.live_metrics[:dashboard_driver_assumption] = driver
 end
 
+# How many independent checks the self-test ran, and the floor it may not fall below.
+#
+# Several fixture blocks are guarded on a local artifact (the served identity table, the deployed
+# stack digest, the live log), so the count is environment-dependent: a checkout that carries them
+# runs two more than one that does not. Reporting only a verdict made that difference invisible, and
+# a self-test that quietly stopped exercising its fixtures would still return true. The floor is the
+# artifact-independent count, so a fresh clone asserts the same contract as a working checkout.
+const SELFTEST_CHECK_COUNT = Ref{Int}(0)
+const SELFTEST_MIN_CHECKS = 42
+
 function selftest_readiness_audit()
     passed = 0
     fixed_now = DateTime(2026, 6, 26, 7, 15, 0)
@@ -3390,6 +3400,134 @@ function selftest_readiness_audit()
     @assert parsed[3] == "http://127.0.0.1:18723/api/status"
     passed += 1
 
+    # ---- payload FAIL branches that nothing exercised ------------------------------------------
+    # Each fixture below drives one condition whose `fail!` no earlier fixture reaches, so removing
+    # or inverting that condition changes no self-test verdict. They are asserted by (level, name)
+    # pair like the fixtures above, and each names the exact branch it holds down.
+    payload_state(payload, url) = begin
+        state = AuditState()
+        state.live_metrics[:served_n] = 3
+        state.live_metrics[:served_rmse] = 1.234
+        state.live_metrics[:baseline_rmse] = 2.345
+        state.live_metrics[:newest_cycle_served_label] = EXPECTED_SUBHOURLY
+        audit_dashboard_payload!(state, payload, url;
+                                 require_fresh = true,
+                                 max_issue_age_hours = 3.0,
+                                 now_utc = fixed_now)
+        state
+    end
+    failed(state, name) = any(c -> c.level == :fail && c.name == name, state.checks)
+
+    # An unavailable payload is the readiness gate's own view of a blanked dashboard: it is the
+    # check that would catch a cycle the API refused to publish, and nothing was holding it down.
+    for value in (false, nothing, "no")
+        blank = deepcopy(good)
+        blank["available"] = value
+        @assert failed(payload_state(blank, "selftest://unavailable"),
+                       "dashboard API availability") "an unavailable dashboard payload must fail"
+    end
+    missing_available = deepcopy(good)
+    delete!(missing_available, "available")
+    @assert failed(payload_state(missing_available, "selftest://no-availability-field"),
+                   "dashboard API availability") "a payload with no availability field must fail"
+    passed += 1
+
+    # The published RMSE must agree with the RMSE recomputed from the log. A payload that disagrees
+    # by more than the rounding tolerance is a dashboard reporting a number its own log does not
+    # support; the zero-row and fabricated-zero fixtures above never reach this branch.
+    drifted = deepcopy(good)
+    drifted["calibration"]["v2_rmse_nt"] = 9.99
+    @assert failed(payload_state(drifted, "selftest://rmse-drift"),
+                   "dashboard API V2 RMSE") "a published RMSE that disagrees with the log must fail"
+    barely = deepcopy(good)
+    barely["calibration"]["v2_rmse_nt"] = 1.28          # log rounds to 1.23; 0.05 > the 0.015 bound
+    @assert failed(payload_state(barely, "selftest://rmse-drift-small"),
+                   "dashboard API V2 RMSE") "the RMSE agreement tolerance must be tight"
+    agreeing = deepcopy(good)
+    agreeing["calibration"]["v2_rmse_nt"] = 1.23
+    @assert !failed(payload_state(agreeing, "selftest://rmse-agrees"),
+                    "dashboard API V2 RMSE") "an agreeing RMSE must still pass"
+    passed += 1
+
+    # `generated_utc` is the payload's own clock. A stale one means the API answered from a frozen
+    # process; a future one means the reader and the server disagree about now. Both were unheld.
+    stale_generated = deepcopy(good)
+    stale_generated["generated_utc"] = string(fixed_now - Minute(45)) * "Z"
+    @assert failed(payload_state(stale_generated, "selftest://generated-stale"),
+                   "dashboard API generated freshness") "a stale generated_utc must fail"
+    future_generated = deepcopy(good)
+    future_generated["generated_utc"] = string(fixed_now + Minute(30)) * "Z"
+    @assert failed(payload_state(future_generated, "selftest://generated-future"),
+                   "dashboard API generated freshness") "a future generated_utc must fail"
+    passed += 1
+
+    # The driver vintage the payload publishes must be current: a solar-wind timestamp beyond the
+    # issue-age bound is a cycle issued from drivers older than the product claims.
+    stale_wind = deepcopy(good)
+    stale_wind["latest_solar_wind_utc"] = string(fixed_now - Hour(6)) * "Z"
+    @assert failed(payload_state(stale_wind, "selftest://solar-wind-stale"),
+                   "dashboard solar-wind freshness") "a stale latest_solar_wind_utc must fail under strict freshness"
+    future_wind = deepcopy(good)
+    future_wind["latest_solar_wind_utc"] = string(fixed_now + Hour(1)) * "Z"
+    @assert failed(payload_state(future_wind, "selftest://solar-wind-future"),
+                   "dashboard solar-wind freshness") "a future latest_solar_wind_utc must fail"
+    passed += 1
+
+    # A served label outside the pinned set must be refused as the published product even when the
+    # log agrees with it: agreement between two surfaces reporting the same unpinned build is not
+    # what makes a product the published one. With the log disagreeing, the mismatch branch fails
+    # anyway, which is why the earlier unpinned fixture could not hold this branch down.
+    unpinned_agreed = deepcopy(good)
+    unpinned_agreed["served_model_version"] = EXPECTED_SUBHOURLY * "+unpinned"
+    unpinned_state = AuditState()
+    unpinned_state.live_metrics[:served_n] = 3
+    unpinned_state.live_metrics[:served_rmse] = 1.234
+    unpinned_state.live_metrics[:baseline_rmse] = 2.345
+    unpinned_state.live_metrics[:newest_cycle_served_label] = EXPECTED_SUBHOURLY * "+unpinned"
+    audit_dashboard_payload!(unpinned_state, unpinned_agreed, "selftest://unpinned-agreed";
+                             require_fresh = true, max_issue_age_hours = 3.0, now_utc = fixed_now)
+    @assert failed(unpinned_state, "dashboard API served label") "an unpinned label agreed by API and log must still be refused"
+    passed += 1
+
+    # ---- a stage that changed between the horizons of one cycle --------------------------------
+    # The super-learner acts per horizon, so one batch can serve three horizons and fall back on the
+    # fourth. That cycle is not serving the published product, and the fallback rate is what says so:
+    # reading it as a fallback only when EVERY row fell back would drop exactly this shape — the one
+    # the per-row disclosure exists to describe — out of the gate.
+    function mixed_cycle_fixture(cycle_labels::Vector{Vector{String}})
+        rows = NamedTuple[]
+        for (index, labels) in enumerate(cycle_labels)
+            issue = fixed_now - Hour(length(cycle_labels) - index)
+            for (lead, label) in zip(EXPECTED_LEADS, labels)
+                push!(rows, (issue_time_utc = string(issue),
+                             sub_hourly_model_version = label,
+                             v24_status = label == EXPECTED_SUBHOURLY ? "ok" :
+                                          "fallback:serving_error",
+                             v2_2_status = "ok",
+                             target_time_utc = string(issue + Hour(lead))))
+            end
+        end
+        return DataFrame(rows)
+    end
+    partial = mixed_cycle_fixture(vcat([fill(EXPECTED_SUBHOURLY, 4) for _ in 1:23],
+                                       [[EXPECTED_SUBHOURLY, EXPECTED_SUBHOURLY,
+                                         EXPECTED_SUBHOURLY, EXPECTED_SUBHOURLY_STACK]]))
+    partial_state = AuditState()
+    audit_served_stage_health!(partial_state, partial; stack_available = true)
+    @assert failed(partial_state, "served stage fallback rate") "a newest cycle that fell back on one horizon must fail"
+    @assert partial_state.live_metrics[:served_fallback_cycles] == 1 "a partially fallen-back cycle counts once"
+    fully_served = mixed_cycle_fixture([fill(EXPECTED_SUBHOURLY, 4) for _ in 1:24])
+    fully_state = AuditState()
+    audit_served_stage_health!(fully_state, fully_served; stack_available = true)
+    @assert !failed(fully_state, "served stage fallback rate") "a fully served window must still pass"
+    @assert fully_state.live_metrics[:served_fallback_cycles] == 0 "a fully served window has no fallback cycle"
+    passed += 1
+
+    SELFTEST_CHECK_COUNT[] = passed
+    passed >= SELFTEST_MIN_CHECKS || error(
+        "readiness audit self-test ran $(passed) checks, fewer than the $(SELFTEST_MIN_CHECKS) " *
+        "that need no local artifact; fixtures have stopped being exercised",
+    )
     println("readiness audit self-test PASS: $(passed) independent checks")
     return true
 end

@@ -233,36 +233,13 @@ const DEFAULT_OPERATIONAL_V2_FEATURES = [
     :sqrt_Pdyn_npa,
 ]
 
-const OPERATIONAL_V2_MEMORY_FEATURES = [
-    :dst_delta_1h_nt,
-    :dst_delta_3h_nt,
-    :dst_delta_6h_nt,
-    :Bz_delta_1h_nt,
-    :VBsouth_delta_1h_mvm,
-    :VBsouth_mean_3h_mvm,
-    :VBsouth_mean_6h_mvm,
-    :Bsouth_mean_3h_nt,
-    :Bsouth_mean_6h_nt,
-]
-
-const OPERATIONAL_V2_EXPERT_FEATURES = [
-    :baseline_spread_nt,
-    :v1_minus_persistence_nt,
-    :obrien_minus_v1_nt,
-    :burton_minus_v1_nt,
-]
-
-const OPERATIONAL_V2_STORM_PHASE_FEATURES = [
-    :main_phase_pressure_nt,
-    :main_phase_pressure_6h_nt,
-    :coupling_active_mvm,
-    :coupling_active_6h_mvm,
-    :recovery_pressure_nt,
-    :main_phase_recovery_pressure,
-    :horizon_coupling_pressure,
-    :storm_guard_active,
-    :storm_guard_minus_v1_nt,
-]
+# The memory, expert and storm-phase feature groups have no canonical constant.
+# `add_operational_v2_features!` is the single producer, and the deployed
+# calibration's own `feature` column is the authoritative list of what is served;
+# a standing constant duplicated that list and drifted from it (it advertised
+# nine memory features where the served calibration uses six), so a reader could
+# mistake it for a servable set. Test `V2-FEATURES-PARITY` pins the calibration
+# against the producer instead.
 
 const OPERATIONAL_V2_BASELINE_COLUMNS = Pair{Symbol,Symbol}[
     :persistence => :persistence_dst_nt,
@@ -1055,6 +1032,14 @@ Apply `cal` row by row to a copy of `df` and return the copy with derived V2
 features, predictions, intervals, residuals, coverage indicators, and selected
 component metadata. Required forecast, observation, and calibration-feature
 columns must be present.
+
+`v2_observed_in_90ci` is `Union{Missing,Bool}`: a row whose `observation_dst_nt`
+is absent or non-finite has not been verified yet, so it is neither a coverage
+hit nor a coverage miss and is recorded as `missing`. Averaging the column with
+`skipmissing` therefore reports coverage over the rows that were actually
+observable; treating an unobservable row as `false` would count a forecast that
+nothing has scored as a failure and depress every coverage figure by the
+unverified fraction of the frame.
 """
 function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
     out = add_operational_v2_features!(copy(df))
@@ -1068,7 +1053,7 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
     v2_corr = Vector{Float64}(undef, nrow(out))
     v2_corrected = Vector{Float64}(undef, nrow(out))
     v2_residual = Vector{Float64}(undef, nrow(out))
-    v2_in_ci = Vector{Bool}(undef, nrow(out))
+    v2_in_ci = Vector{Union{Missing,Bool}}(undef, nrow(out))
     v2_component = Vector{String}(undef, nrow(out))
     v2_component_pred = Vector{Float64}(undef, nrow(out))
     needs_baselines = if cal.selected_component == :ensemble
@@ -1097,8 +1082,11 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
         v2_corr[i] = pred.correction
         v2_corrected[i] = pred.corrected_sindy_pred
         v2_residual[i] = obs - pred.pred_dst
-        v2_in_ci[i] = min(pred.ci05_dst, pred.ci95_dst) <= obs <=
-                      max(pred.ci05_dst, pred.ci95_dst)
+        # An unobservable row is not a coverage miss. `min(...) <= NaN <= max(...)` is `false`, which
+        # is indistinguishable from an interval that genuinely excluded the observation, so a frame
+        # carrying not-yet-verified rows silently reported them as failures.
+        v2_in_ci[i] = isfinite(obs) ? (min(pred.ci05_dst, pred.ci95_dst) <= obs <=
+                                       max(pred.ci05_dst, pred.ci95_dst)) : missing
         v2_component[i] = pred.selected_component
         v2_component_pred[i] = pred.selected_component_pred
     end

@@ -22,7 +22,14 @@ using SHA
 using SolarSINDy
 
 export build_v24_fixture_bundle, v24_fixture_frame, v24_fixture_weights, V24_FIXTURE_MUTATIONS,
-       V24_FIXTURE_EXPECTED_ERRORS
+       V24_FIXTURE_EXPECTED_ERRORS, V24_FIXTURE_GUARDED_WIDTH_SCALE
+
+"""
+Ratio between the guarded and unguarded conformal half-widths a guard-on fixture bundle ships. The
+two sets are deliberately different so a test can tell which one the loader read; a guarded bundle
+banded by the unguarded strata is exactly the defect the guarded-variant requirement exists to stop.
+"""
+const V24_FIXTURE_GUARDED_WIDTH_SCALE = 1.25
 
 "Defects `build_v24_fixture_bundle` can inject, each of which the loader must refuse."
 const V24_FIXTURE_MUTATIONS = (
@@ -37,6 +44,15 @@ const V24_FIXTURE_MUTATIONS = (
     :wrong_expert_set, :wrong_expert_count, :wrong_floor_group, :wrong_served_variant,
     :wrong_stack_variant, :guard_enabled_without_reference, :guard_disabled_with_reference,
     :guard_switch_absent, :nine_expert_stack, :conformal_variant_mismatch,
+    # Cross-record defects: the bundle's files each parse, but they describe different fits. A fold
+    # mismatch, a drifted timescale copy, disagreeing guard switches and a stack table missing the
+    # column that distinguishes a nine-expert row from a ten-expert one all loaded before.
+    :fold_year_mismatch, :conformal_fold_mismatch, :tau_fold_mismatch, :tau_cutoff_mismatch,
+    :tau_record_drift, :guard_records_disagree, :selection_guard_switch_absent,
+    :expert_set_absent, :n_experts_absent, :archive_past_training_cutoff,
+    # Guard-on identity defects: a guard moves the center, so a guarded bundle may not go out under
+    # the unguarded identity, and it may not be banded by the unguarded variant's strata.
+    :guard_plain_identity, :guard_missing_guarded_strata,
 )
 
 """
@@ -81,6 +97,19 @@ const V24_FIXTURE_EXPECTED_ERRORS = Dict{Symbol,String}(
     :guard_switch_absent => "does not say whether the point-forecast guard acts",
     :nine_expert_stack => "holds no $(V24_SERVING_STACK_VARIANT) cell",
     :conformal_variant_mismatch => "holds no conformal stratum for variant",
+    :fold_year_mismatch => "the bundle selects fold",
+    :conformal_fold_mismatch => "the bundle selects fold",
+    :tau_fold_mismatch => "the bundle selects fold",
+    :tau_cutoff_mismatch => "was estimated to the training cutoff",
+    :tau_record_drift => "guard record states the climatology timescale",
+    :guard_records_disagree => "the two records disagree about the served center",
+    :selection_guard_switch_absent =>
+        "selection record does not say whether the point-forecast guard acts",
+    :expert_set_absent => "lacks the expert_set column",
+    :n_experts_absent => "lacks the n_experts column",
+    :archive_past_training_cutoff => "reaches past the recorded training cutoff",
+    :guard_plain_identity => "records identity",
+    :guard_missing_guarded_strata => "holds no conformal stratum for variant",
 )
 
 """
@@ -103,23 +132,57 @@ function v24_fixture_frame(; n::Int = 720, t0::DateTime = DateTime(2015, 3, 1, 0
 end
 
 """
+Relative shares of the four SINDy-family slots (`served_v2_1`, `frozen_v2_1`, `t1r_analog`,
+`static_v2_2`, in `V24_SERVING_SINDY_FAMILY` order) and of the six remaining expert slots
+(`persistence`, `burton`, `burton_full`, `obrien`, `direct_gbm`, `climatology`). Each group sums to
+one, and every share inside a group is distinct.
+
+Distinctness is the point. Equal shares make any permutation of the slots they cover a mathematical
+no-op, so a fixture built on them cannot see an expert wired into the wrong slot — and in the shipped
+bundle 27 of 60 cells carry `w_burton != w_burton_full`, so the same swap in production would move
+the published center. The shares are irregular rather than a smooth ramp so that no pair sums to
+another pair either, which is what makes a two-slot exchange observable in the combination and not
+only in the weight vector.
+"""
+const V24_FIXTURE_FAMILY_SHARES = (0.30, 0.27, 0.23, 0.20)
+const V24_FIXTURE_OTHER_SHARES = (0.22, 0.19, 0.17, 0.16, 0.14, 0.12)
+
+"""
     v24_fixture_weights(; sindy_mass, total) -> Vector{Float64}
 
 Ten weights in `V24_SERVING_EXPERTS` order carrying `sindy_mass` on the SINDy family — served, frozen,
 analog and the static stack — and summing to `total`. The defaults sit exactly on the served floor,
 which is where an off-by-a-hair weight check would show.
+
+All ten weights are distinct and strictly positive, so every expert slot is individually observable:
+a center computed with two experts exchanged differs from the center computed with them in place.
+The last slot of each group absorbs the rounding residual so the family mass and the total are exact
+in floating point, not merely within a tolerance.
 """
 function v24_fixture_weights(; sindy_mass::Float64 = V24_SERVING_SINDY_FLOOR,
                              total::Float64 = 1.0)
     weights = zeros(Float64, V24_SERVING_EXPERT_COUNT)
-    for j in V24_SERVING_SINDY_FAMILY
-        weights[j] = sindy_mass / length(V24_SERVING_SINDY_FAMILY)
-    end
-    rest = total - sindy_mass
+    family = collect(V24_SERVING_SINDY_FAMILY)
     others = [j for j in 1:V24_SERVING_EXPERT_COUNT if !(j in V24_SERVING_SINDY_FAMILY)]
-    for j in others
-        weights[j] = rest / length(others)
+    length(family) == length(V24_FIXTURE_FAMILY_SHARES) ||
+        error("the fixture's family shares no longer match V24_SERVING_SINDY_FAMILY")
+    length(others) == length(V24_FIXTURE_OTHER_SHARES) ||
+        error("the fixture's non-family shares no longer match V24_SERVING_EXPERTS")
+    _v24_fixture_spread!(weights, family, V24_FIXTURE_FAMILY_SHARES, sindy_mass)
+    _v24_fixture_spread!(weights, others, V24_FIXTURE_OTHER_SHARES, total - sindy_mass)
+    return weights
+end
+
+"""
+Lay `mass` over `slots` in the proportions `shares`, giving the last slot the exact residual so the
+group's mass is reproduced bit for bit rather than only to a tolerance.
+"""
+function _v24_fixture_spread!(weights::Vector{Float64}, slots::Vector{Int},
+                              shares::NTuple{N,Float64}, mass::Float64) where {N}
+    for k in 1:(length(slots) - 1)
+        weights[slots[k]] = mass * shares[k]
     end
+    weights[slots[end]] = mass - sum(weights[slots[k]] for k in 1:(length(slots) - 1))
     return weights
 end
 
@@ -136,9 +199,10 @@ shared weight schema.
 function _stack_row(step::Int, regime::Symbol, depth::Symbol, weights::Vector{Float64};
                     variant::AbstractString = V24_SERVING_STACK_VARIANT, n_rows::Int = 4096,
                     expert_set::AbstractString = join(String.(collect(V24_SERVING_EXPERTS)), "|"),
-                    n_experts::Int = V24_SERVING_EXPERT_COUNT)
+                    n_experts::Int = V24_SERVING_EXPERT_COUNT,
+                    fold_year::Int = 2026)
     named = NamedTuple{Tuple(Symbol("w_", e) for e in V24_SERVING_EXPERTS)}(Tuple(weights))
-    return merge((fold_year = 2026, variant = String(variant), model_step_hours = step,
+    return merge((fold_year = fold_year, variant = String(variant), model_step_hours = step,
                   regime = String(regime), depth_bin = String(depth), n_rows = n_rows,
                   n_experts = n_experts, expert_set = String(expert_set)), named,
                  (weight_sum = sum(weights),
@@ -235,43 +299,54 @@ function build_v24_fixture_bundle(dir::AbstractString; mutate::Union{Nothing,Sym
     stack_rows = NamedTuple[]
     base = v24_fixture_weights()
     deep = v24_fixture_weights(; sindy_mass = 0.75)
+    # Every stack row carries the bundle's own fold, so a fold mismatch is an injected defect rather
+    # than the fixture's default state.
+    stack_row(args...; kw...) = _stack_row(args...; fold_year = fold_year, kw...)
     for step in V24_SERVING_MODEL_STEPS
         (mutate === :missing_pooled_cell && step == last(V24_SERVING_MODEL_STEPS)) ||
-            push!(stack_rows, _stack_row(step, V24_SERVING_POOLED, V24_SERVING_POOLED, base))
-        push!(stack_rows, _stack_row(step, :quiet, V24_SERVING_POOLED, base; n_rows = 2048))
-        push!(stack_rows, _stack_row(step, :active_deepening, :deep, deep; n_rows = 96))
+            push!(stack_rows, stack_row(step, V24_SERVING_POOLED, V24_SERVING_POOLED, base))
+        push!(stack_rows, stack_row(step, :quiet, V24_SERVING_POOLED, base; n_rows = 2048))
+        push!(stack_rows, stack_row(step, :active_deepening, :deep, deep; n_rows = 96))
     end
     if mutate === :sub_floor_mass
-        push!(stack_rows, _stack_row(first(V24_SERVING_MODEL_STEPS), :recovery, :moderate,
-                                     v24_fixture_weights(; sindy_mass = 0.4)))
+        push!(stack_rows, stack_row(first(V24_SERVING_MODEL_STEPS), :recovery, :moderate,
+                                    v24_fixture_weights(; sindy_mass = 0.4)))
     elseif mutate === :non_unit_mass
-        push!(stack_rows, _stack_row(first(V24_SERVING_MODEL_STEPS), :recovery, :moderate,
-                                     v24_fixture_weights(; total = 0.9)))
+        push!(stack_rows, stack_row(first(V24_SERVING_MODEL_STEPS), :recovery, :moderate,
+                                    v24_fixture_weights(; total = 0.9)))
     elseif mutate === :negative_weight
         bad = v24_fixture_weights()
         # The static-stack expert is the one the floor group also counts, so a negative weight is put on
         # a non-family slot: this must be refused by the non-negativity check, not by the floor check.
         bad[V24_SERVING_EXPERT_COUNT - 1] = -0.05
         bad[V24_SERVING_EXPERT_COUNT - 2] += 0.05
-        push!(stack_rows, _stack_row(first(V24_SERVING_MODEL_STEPS), :recovery, :moderate, bad))
+        push!(stack_rows, stack_row(first(V24_SERVING_MODEL_STEPS), :recovery, :moderate, bad))
     end
     if mutate === :wrong_expert_set
         # A served cell whose recorded expert set is the nine-expert one: the widened weight columns
         # would still parse, and the static stack would silently be served at weight zero.
-        stack_rows[1] = _stack_row(
+        stack_rows[1] = stack_row(
             first(V24_SERVING_MODEL_STEPS), V24_SERVING_POOLED, V24_SERVING_POOLED, base;
             expert_set = join(String.(collect(V24_SERVING_EXPERTS))[1:end - 1], "|"),
         )
     elseif mutate === :wrong_expert_count
-        stack_rows[1] = _stack_row(first(V24_SERVING_MODEL_STEPS), V24_SERVING_POOLED,
-                                   V24_SERVING_POOLED, base;
-                                   n_experts = V24_SERVING_EXPERT_COUNT - 1)
+        stack_rows[1] = stack_row(first(V24_SERVING_MODEL_STEPS), V24_SERVING_POOLED,
+                                  V24_SERVING_POOLED, base;
+                                  n_experts = V24_SERVING_EXPERT_COUNT - 1)
     elseif mutate === :nine_expert_stack
         # The whole table relabelled as the nine-expert fit: the served variant then has no cells at
         # all, which is a different failure from a single mislabelled row.
         stack_rows = [merge(row, (variant = "L1a",)) for row in stack_rows]
+    elseif mutate === :fold_year_mismatch
+        # One served cell fitted on the neighbouring fold. Every column still parses and the weights
+        # still satisfy the mass and floor checks, so only a cross-record comparison catches it.
+        stack_rows[1] = merge(stack_rows[1], (fold_year = fold_year - 1,))
     end
-    CSV.write(record("stack_weights.csv"), DataFrame(stack_rows))
+    stack_table = DataFrame(stack_rows)
+    # A stack table without the column that distinguishes a nine-expert row from a ten-expert one.
+    mutate === :expert_set_absent && select!(stack_table, Not(:expert_set))
+    mutate === :n_experts_absent && select!(stack_table, Not(:n_experts))
+    CSV.write(record("stack_weights.csv"), stack_table)
 
     # ---- conformal strata ----
     # `:wrong_served_variant` renames the served variant everywhere the bundle records it. The loader
@@ -283,6 +358,14 @@ function build_v24_fixture_bundle(dir::AbstractString; mutate::Union{Nothing,Sym
     # its interval instead of silently serving half-widths calibrated on a different center.
     served_variant = mutate === :wrong_served_variant ? "v2_4d" : V24_SERVED_VARIANT
     conformal_variant = mutate === :conformal_variant_mismatch ? "v2_4f" : served_variant
+    # A guard-on bundle is banded by the guarded variant's strata, so it must ship them. Writing both
+    # variants — at deliberately different widths — is what lets a test prove the loader read the
+    # guarded set rather than falling back to the unguarded one.
+    guard_applied = guard || mutate in (:guard_enabled_without_reference, :guard_plain_identity,
+                                        :guard_missing_guarded_strata)
+    write_guarded_strata = guard_applied && mutate !== :guard_missing_guarded_strata
+    conformal_fold(depth) = mutate === :conformal_fold_mismatch &&
+                            depth === V24_SERVING_POOLED ? fold_year - 1 : fold_year
     conformal_rows = NamedTuple[]
     for step in V24_SERVING_MODEL_STEPS, depth in (V24_SERVING_POOLED, V24_SERVING_DEPTH_BINS...)
         (mutate === :missing_conformal_bin && step == first(V24_SERVING_MODEL_STEPS) &&
@@ -291,18 +374,34 @@ function build_v24_fixture_bundle(dir::AbstractString; mutate::Union{Nothing,Sym
         (mutate === :zero_half_width && step == first(V24_SERVING_MODEL_STEPS) &&
          depth === :shallow) && (half = 0.0)
         push!(conformal_rows, (
-            fold_year = fold_year, variant = conformal_variant, model_step_hours = step,
+            fold_year = conformal_fold(depth), variant = conformal_variant,
+            model_step_hours = step,
             depth_bin = String(depth), half_width_nt = half, n = 5000,
             coverage_floor = 0.9001, source = "own", calibration_note = "fixture",
+        ))
+        write_guarded_strata && push!(conformal_rows, (
+            fold_year = conformal_fold(depth), variant = V24_SERVED_GUARDED_VARIANT,
+            model_step_hours = step,
+            depth_bin = String(depth), half_width_nt = half * V24_FIXTURE_GUARDED_WIDTH_SCALE,
+            n = 4000, coverage_floor = 0.9002, source = "own", calibration_note = "fixture guarded",
         ))
     end
     CSV.write(record("conformal.csv"), DataFrame(conformal_rows))
 
     # ---- climatology timescale ----
     tau = mutate === :bad_tau ? -7.5 : 7.5
+    tau_fold = mutate === :tau_fold_mismatch ? fold_year - 1 : fold_year
+    # `:archive_past_training_cutoff` moves the recorded cutoff back behind the newest shipped
+    # origin's seven-step continuation; both records that carry it move together, so the defect is
+    # caught by the archive check rather than by the timescale record's own cutoff comparison.
+    training_max_target = mutate === :archive_past_training_cutoff ?
+        string(last(frame.time_utc) - Hour(V23_ANALOG_MAX_STEP + 24)) :
+        string(last(frame.time_utc))
+    tau_cutoff = mutate === :tau_cutoff_mismatch ?
+        string(last(frame.time_utc) + Hour(1)) : training_max_target
     CSV.write(record("climatology_tau.csv"), DataFrame(
-        tau_hours = [tau], fold_year = [fold_year], n_training_anchors = [1234],
-        training_max_target_utc = [string(last(frame.time_utc))],
+        tau_hours = [tau], fold_year = [tau_fold], n_training_anchors = [1234],
+        training_max_target_utc = [tau_cutoff],
     ))
 
     # ---- guard and selection records ----
@@ -312,7 +411,6 @@ function build_v24_fixture_bundle(dir::AbstractString; mutate::Union{Nothing,Sym
     # The floor group of the served stack counts the static stack; dropping it is a floor that no longer
     # means what the bundle says it means, even though every weight still passes the mass check.
     mutate === :wrong_floor_group && (family = family[1:end - 1])
-    guard_applied = guard || mutate === :guard_enabled_without_reference
     guard_reference = if mutate === :guard_disabled_with_reference
         V24_SERVING_GUARD_REFERENCE
     elseif mutate === :guard_enabled_without_reference
@@ -343,7 +441,7 @@ function build_v24_fixture_bundle(dir::AbstractString; mutate::Union{Nothing,Sym
             mutate === :guard_depth_edge_drift ? -25.0 : V24_SERVING_DEPTH_MODERATE_NT,
         "depth_bin_deep_nt_at_or_below" => V24_SERVING_DEPTH_DEEP_NT,
         "conformal_coverage" => V24_SERVING_COVERAGE,
-        "climatology_tau_hours" => tau,
+        "climatology_tau_hours" => mutate === :tau_record_drift ? tau + 0.25 : tau,
         "l1_min_cell_rows" => 48,
     )
     # A guard record that does not say whether the guard acts cannot be served either way.
@@ -352,20 +450,33 @@ function build_v24_fixture_bundle(dir::AbstractString; mutate::Union{Nothing,Sym
         JSON3.pretty(io, guard_record)
         println(io)
     end
+    # A guard is a stage that moves the published center, so a guarded bundle must record the guarded
+    # identity. `:guard_plain_identity` is the defect that bundle would be without it.
+    identity = if mutate === :bad_identity
+        "v2.4-fixture"
+    elseif mutate === :guard_plain_identity
+        V24_SERVED_IDENTITY
+    else
+        v24_served_identity(guard_applied)
+    end
     selected = Dict{String,Any}(
         "served_variant" => served_variant,
-        "identity" => mutate === :bad_identity ? "v2.4-fixture" : V24_SERVED_IDENTITY,
+        "identity" => identity,
         "driver_assumption" => V24_SERVED_DRIVER_ASSUMPTION,
         "stack_variant" => mutate === :wrong_stack_variant ? "L1a" : V24_SERVING_STACK_VARIANT,
         "residual_applied" => mutate === :residual_claimed,
+        # The selection record carries the guard switch too; the loader requires the two records to
+        # agree, so a bundle cannot disclose one product and serve another.
+        "guard_applied" => mutate === :guard_records_disagree ? !guard_applied : guard_applied,
         "fold_year" => fold_year,
         "bundle_label" => "fixture",
-        "training_max_target_utc" => string(last(frame.time_utc)),
+        "training_max_target_utc" => training_max_target,
         "oof_pool_years" => mutate === :pool_year_at_fold_year ?
                             vcat(oof_pool_years, [fold_year]) : oof_pool_years,
         "conformal_pool_years" => oof_pool_years,
         "julia_threads" => 1,
     )
+    mutate === :selection_guard_switch_absent && delete!(selected, "guard_applied")
     open(record("selected.json"), "w") do io
         JSON3.pretty(io, selected)
         println(io)
@@ -373,7 +484,7 @@ function build_v24_fixture_bundle(dir::AbstractString; mutate::Union{Nothing,Sym
 
     # ---- manifest ----
     manifest_rows = NamedTuple[
-        (entry_type = "build", name = "identity", count = NaN, value = V24_SERVED_IDENTITY),
+        (entry_type = "build", name = "identity", count = NaN, value = identity),
         (entry_type = "fold", name = "year", count = Float64(fold_year), value = "fixture"),
         (entry_type = "analog_archive", name = "origins", count = Float64(length(origins)),
          value = "first=$(first(origins));last=$(last(origins))"),
@@ -405,6 +516,9 @@ function build_v24_fixture_bundle(dir::AbstractString; mutate::Union{Nothing,Sym
     return (dir = directory, frame = frame, origins = origins, stats = stats,
             files = written, weights = base, deep_weights = deep, tau = tau,
             served_variant = served_variant, guard_applied = guard_applied,
+            identity = identity, conformal_variant = conformal_variant,
+            guarded_strata = write_guarded_strata,
+            training_max_target_utc = training_max_target,
             fold_year = fold_year, oof_pool_years = oof_pool_years,
             half_width = _fixture_half_width, calibration = calibration,
             design_names = names_29)

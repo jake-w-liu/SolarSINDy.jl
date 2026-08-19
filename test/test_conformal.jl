@@ -1,3 +1,13 @@
+# Tests for conformal.jl: static split-conformal calibration, its sidecar file contract, and the
+# adaptive-conformal stream.
+#
+# Every import the file needs is declared here, so the file runs on its own
+# (`julia --project=. test/test_conformal.jl`) as well as through `runtests.jl`.
+
+using Test
+using SolarSINDy
+using CSV
+using DataFrames
 using Random
 using Statistics
 
@@ -508,6 +518,92 @@ end
             [-floatmax(Float64)], [floatmax(Float64)], [1.0], [0.0];
             min_stratum_n=1,
         )
+    end
+
+    @testset "CF-4: activity regime is closed at the threshold (inclusivity pinned)" begin
+        # Kyoto Dst is integer-valued, so `latest_dst == threshold` is hit
+        # constantly: 12 of 324 production rows sit exactly at -30.0 nT. The
+        # boundary is INCLUSIVE — equality is :disturbed, the wider and safer
+        # stratum. A `<=` → `<` edit would silently move those rows into the
+        # narrow quiet band, so the equality case is asserted directly.
+        thr = SolarSINDy.CONFORMAL_ACTIVITY_THRESHOLD_NT
+        @test thr == -30.0
+        @test SolarSINDy._activity_regime(-30.0, -30.0) === :disturbed
+        @test SolarSINDy._activity_regime(-30.0, thr) === :disturbed
+        @test SolarSINDy._activity_regime(-29.999, -30.0) === :quiet
+        @test SolarSINDy._activity_regime(-30.001, -30.0) === :disturbed
+        @test SolarSINDy._activity_regime(prevfloat(-30.0), -30.0) === :disturbed
+        @test SolarSINDy._activity_regime(nextfloat(-30.0), -30.0) === :quiet
+        @test SolarSINDy._activity_regime(NaN, -30.0) === :disturbed
+        # Same inclusivity on a non-default threshold, so the test is not pinning
+        # the constant instead of the comparison.
+        @test SolarSINDy._activity_regime(-50.0, -50.0) === :disturbed
+        @test SolarSINDy._activity_regime(-49.999, -50.0) === :quiet
+
+        # End to end against the DEPLOYED sidecar: a row at exactly the threshold
+        # must be banded by the disturbed half-width, not the quiet one. The two
+        # differ by ~1.7x at h=1, so this locks the served 90% band width.
+        sidecar = joinpath(@__DIR__, "..", "deploy",
+                           "operational_v2_calibration_conformal.csv")
+        @test isfile(sidecar)
+        cal = read_conformal_calibration(sidecar)
+        for (h, key_dist, key_quiet) in (
+            (1.0, :h1_disturbed, :h1_quiet),
+            (7.0, :h6_disturbed, :h6_quiet),
+        )
+            hw_dist = cal.strata[key_dist].half_width
+            hw_quiet = cal.strata[key_quiet].half_width
+            @test hw_dist > hw_quiet          # the two strata are distinguishable
+            @test conformal_halfwidth(cal, h, -30.0) == hw_dist
+            @test conformal_halfwidth(cal, h, -29.0) == hw_quiet
+        end
+        # The deployed widths themselves, so a re-fit that moved them is visible.
+        @test cal.strata[:h1_disturbed].half_width ≈ 8.005661211740083 atol = 1e-12
+        @test cal.strata[:h1_quiet].half_width ≈ 4.778072446948574 atol = 1e-12
+        @test cal.strata[:h6_disturbed].half_width ≈ 16.816667724439505 atol = 1e-12
+        @test cal.strata[:h6_quiet].half_width ≈ 11.328841340818673 atol = 1e-12
+    end
+
+    @testset "CF-5: ACI marks gap steps `missing`, never a coverage miss" begin
+        # A gap step (non-finite point or observation) carries no residual, so it
+        # is not an observed miss. `coverage` already excludes it; the raw
+        # `covered` vector must say so too, or `mean(covered)` deflates.
+        pts = [0.0, 0.0, NaN, 0.0, 0.0]
+        obs = [0.0, 0.0, 0.0, 0.0, 0.0]
+        r = run_adaptive_conformal(pts, obs; target_coverage=0.90, gamma=0.05,
+                                   warmup=0)
+        @test length(r.covered) == length(pts)
+        @test eltype(r.covered) === Union{Missing,Bool}
+        @test ismissing(r.covered[3])
+        @test count(ismissing, r.covered) == 1
+        @test all(c === true for c in r.covered[[1, 2, 4, 5]])
+        @test r.coverage == 1.0
+        @test mean(skipmissing(r.covered)) == 1.0
+        # The defect this pins: scoring the gap as `false` would report 0.8.
+        @test !isequal(r.covered[3], false)
+
+        # A gap in the observation stream behaves identically.
+        r2 = run_adaptive_conformal([0.0, 0.0, 0.0], [0.0, NaN, 0.0];
+                                    target_coverage=0.90, gamma=0.05, warmup=0)
+        @test ismissing(r2.covered[2])
+        @test r2.coverage == 1.0
+
+        # Single-step API: same contract, and the gap step still reports a band
+        # and leaves the stream state untouched.
+        ac = init_adaptive_conformal(; target_coverage=0.90, gamma=0.1, warmup=0)
+        append!(ac.history, fill(5.0, 20))
+        hlen0 = length(ac.history); a0 = ac.alpha_t
+        s_gap = adaptive_conformal_step!(ac, 0.0, NaN)
+        @test ismissing(s_gap.covered)
+        @test isfinite(s_gap.half_width)
+        @test length(ac.history) == hlen0
+        @test ac.alpha_t == a0
+        # A scored step still returns a plain Bool through the same type.
+        s_hit = adaptive_conformal_step!(ac, 0.0, 0.0)
+        @test s_hit.covered === true
+        s_miss = adaptive_conformal_step!(ac, 0.0, 1.0e6)
+        @test s_miss.covered === false
+        @test typeof(s_gap) === typeof(s_hit) === typeof(s_miss)
     end
 
 end

@@ -91,6 +91,32 @@ using .V24ServingFixture
         @test_throws ArgumentError _validate_feed_timestamps(
             issue_time, issue_time, issue_time, issue_time; tolerance=Minute(-1),
         )
+        # Between the tolerance and the sanity limit the skew is reported, not fatal: post-issue
+        # samples are already excluded by the causal selection, so failing the whole issuance here
+        # turned local clock drift into a 4/4-horizon outage and then a dead-man restart loop that
+        # a restart cannot fix. The hard failure survives one second past the sanity limit.
+        @test LIVE_MAX_FUTURE_CLOCK_SKEW > LIVE_FUTURE_CLOCK_TOLERANCE
+        at_sanity = issue_time + LIVE_MAX_FUTURE_CLOCK_SKEW
+        for skewed in (
+            (at_sanity, issue_time, issue_time),
+            (issue_time, at_sanity, issue_time),
+            (issue_time, issue_time, at_sanity),
+        )
+            @test (@test_logs (:warn,) match_mode = :any _validate_feed_timestamps(
+                issue_time, skewed...,
+            )) === nothing
+            @test_throws ErrorException _validate_feed_timestamps(
+                issue_time, (skewed .+ Second(1))...,
+            )
+        end
+        # A single call reports every skewed feed, not just the first.
+        @test_logs (:warn,) (:warn,) (:warn,) match_mode = :any _validate_feed_timestamps(
+            issue_time, at_sanity, at_sanity, at_sanity,
+        )
+        @test_throws ArgumentError _validate_feed_timestamps(
+            issue_time, issue_time, issue_time, issue_time;
+            tolerance=Minute(2), sanity_limit=Minute(1),
+        )
         @test _latest_causal_index(
             [issue_time - Minute(1), issue_time + Minute(1), issue_time],
             issue_time,
@@ -130,12 +156,28 @@ using .V24ServingFixture
             skewed_dst = (vcat(dst_times, [issue_time + Minute(1)]),
                           vcat(dst_values, [-800.0]))
 
+            # Beyond the 2 min tolerance but inside the sanity limit: the feed still carries causal
+            # samples, so issuance must proceed on those rather than failing the whole cycle.
+            beyond_tolerance = [issue_time + Minute(3), issue_time + Minute(4)]
+            drifted_plasma = vcat(
+                causal_plasma,
+                DataFrame(time_tag=beyond_tolerance, speed=[1200.0, 1200.0],
+                          density=[50.0, 50.0]),
+            )
+            drifted_mag = vcat(
+                causal_mag,
+                DataFrame(time_tag=beyond_tolerance, bz_gsm=[-100.0, -100.0],
+                          by_gsm=[50.0, 50.0]),
+            )
+            drifted_dst = (vcat(dst_times, [issue_time + Minute(3)]),
+                           vcat(dst_values, [-800.0]))
+
             configs = [LiveVerifyConfig(;
                 model=:v2,
                 horizon_hours=1,
                 log_path=joinpath(dir, "forecast_$i.csv"),
                 report_path=joinpath(dir, "report_$i.md"),
-            ) for i in 1:2]
+            ) for i in 1:3]
             causal_inputs = prepare_issue_inputs(
                 configs[1]; issue_time,
                 plasma_fn=() -> causal_plasma,
@@ -148,16 +190,33 @@ using .V24ServingFixture
                 mag_fn=() -> skewed_mag,
                 dst_fn=() -> skewed_dst,
             )
+            drifted_inputs = prepare_issue_inputs(
+                configs[3]; issue_time,
+                plasma_fn=() -> drifted_plasma,
+                mag_fn=() -> drifted_mag,
+                dst_fn=() -> drifted_dst,
+            )
             redirect_stdout(devnull) do
-                issue_forecast(configs[1]; inputs=causal_inputs, write_trajectory=false, verbose=false)
-                issue_forecast(configs[2]; inputs=skewed_inputs, write_trajectory=false, verbose=false)
+                redirect_stderr(devnull) do
+                    issue_forecast(configs[1]; inputs=causal_inputs, write_trajectory=false, verbose=false)
+                    issue_forecast(configs[2]; inputs=skewed_inputs, write_trajectory=false, verbose=false)
+                    issue_forecast(configs[3]; inputs=drifted_inputs, write_trajectory=false, verbose=false)
+                end
             end
             causal_row = CSV.read(configs[1].log_path, DataFrame)[1, :]
             skewed_row = CSV.read(configs[2].log_path, DataFrame)[1, :]
+            drifted_row = CSV.read(configs[3].log_path, DataFrame)[1, :]
 
             @test DateTime(skewed_row.latest_solar_wind_utc) == issue_time
             @test DateTime(skewed_row.latest_dst_time_utc) == latest_dst_time
             @test skewed_row.latest_dst_nt == last(dst_values)
+            # Causality is the invariant the widened tolerance must not touch: the drifted row was
+            # admitted, and every driver it used is at or before its own issue time.
+            @test DateTime(drifted_row.latest_solar_wind_utc) <= issue_time
+            @test DateTime(drifted_row.latest_solar_wind_utc) == issue_time
+            @test DateTime(drifted_row.latest_dst_time_utc) <= issue_time
+            @test DateTime(drifted_row.latest_dst_time_utc) == latest_dst_time
+            @test drifted_row.latest_dst_nt == last(dst_values)
             for column in (
                 :anchor_dst_star_nt, :target_time_utc, :V_kms, :Bz_nt, :By_nt,
                 :n_cm3, :Pdyn_npa, :target_step_V_kms, :target_step_Bz_nt,
@@ -166,7 +225,30 @@ using .V24ServingFixture
                 :served_pred_dst_ci05_nt, :served_pred_dst_ci95_nt,
             )
                 @test isequal(skewed_row[column], causal_row[column])
+                @test isequal(drifted_row[column], causal_row[column])
             end
+
+            # A feed whose samples are ALL post-issue still fails closed: there is no causal
+            # sample to fall back to, whatever the skew band says.
+            all_future = LiveVerifyConfig(;
+                model=:v2, horizon_hours=1,
+                log_path=joinpath(dir, "forecast_all_future.csv"),
+                report_path=joinpath(dir, "report_all_future.md"),
+            )
+            future_only_inputs = prepare_issue_inputs(
+                all_future; issue_time,
+                plasma_fn=() -> DataFrame(time_tag=[issue_time + Minute(3)],
+                                          speed=[500.0], density=[6.0]),
+                mag_fn=() -> causal_mag,
+                dst_fn=() -> (dst_times, dst_values),
+            )
+            @test_throws ErrorException redirect_stdout(devnull) do
+                redirect_stderr(devnull) do
+                    issue_forecast(all_future; inputs=future_only_inputs,
+                                   write_trajectory=false, verbose=false)
+                end
+            end
+            @test !isfile(all_future.log_path)
         end
     end
 
@@ -1053,6 +1135,12 @@ using .V24ServingFixture
                 @test Float64(row.served_pred_dst_nt) != Float64(row.v2_2_stack_pred_dst_nt)
                 # The served band is the study's conformal band for this center, disclosed as such.
                 @test row.interval_source == V2_4_INTERVAL_SOURCE
+                # The V2.4e override rewrites `interval_source`, so the batch policy behind the
+                # frozen-tail band columns is disclosed separately. On a cold log that policy is the
+                # static conformal fallback; the adaptive counterpart is pinned end to end by the
+                # mature-log cycle test beside the monitor.
+                @test row.frozen_tail_interval_source == "conformal"
+                @test row.frozen_tail_interval_source != row.interval_source
                 @test Float64(row.served_pred_dst_ci05_nt) == Float64(row.v24_ci05_nt)
                 @test Float64(row.served_pred_dst_ci95_nt) == Float64(row.v24_ci95_nt)
                 @test row.served_pred_dst_ci05_nt < row.served_pred_dst_nt <
@@ -1913,6 +2001,207 @@ using .V24ServingFixture
             wait(first_owner)
             wait(second_owner)
             @test take!(entered) == :second
+        end
+    end
+
+    @testset "C0-6e: a live foreign owner past the staleness horizon is reclaimed" begin
+        # PID-reuse shape: the lock names this process — a live, local PID that is not a forecast
+        # daemon — exactly as a lock left by a SIGKILLed daemon whose PID was later recycled would.
+        # The ownership short-circuit is the ONLY place Pidfile's staleness rule can be consulted, so
+        # it has to apply that rule itself: a fresh lock still holds (unchanged), an unrefreshed one
+        # past 5 * stale_after_sec is reclaimed instead of wedging every locked step forever.
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "live_forecast_log.csv")
+            lock_path = log_path * ".lock"
+            write(lock_path, string(getpid(), " ", gethostname()))
+
+            @test _forecast_pidfile_has_local_live_owner(lock_path)
+            @test _forecast_pidfile_has_local_live_owner(lock_path; stale_after_sec=900.0)
+            @test_throws ErrorException _with_forecast_log_lock(
+                log_path; timeout_sec=0.2, stale_after_sec=900.0, poll_sec=0.02,
+            ) do
+                :must_not_run
+            end
+            @test isfile(lock_path)
+
+            # Age the same live-PID lock past 5 * stale_after_sec without touching it.
+            sleep(0.25)
+            @test !_forecast_pidfile_has_local_live_owner(lock_path; stale_after_sec=0.02)
+            @test _with_forecast_log_lock(
+                log_path; timeout_sec=1.0, stale_after_sec=0.02, poll_sec=0.02,
+            ) do
+                isfile(lock_path) ? :reclaimed : :missing
+            end == :reclaimed
+            @test !ispath(lock_path)
+
+            # stale_after_sec == 0 disables Pidfile's staleness rule; mirror that exactly.
+            write(lock_path, string(getpid(), " ", gethostname()))
+            sleep(0.05)
+            @test _forecast_pidfile_has_local_live_owner(lock_path; stale_after_sec=0)
+        end
+    end
+
+    @testset "C0-6f: the staleness mirror matches Pidfile, future-dated mtime included" begin
+        # The ownership short-circuit is the only place Pidfile's staleness rule can run, so the
+        # mirror's contract is exactly `!Pidfile.stale_pidfile` for a local live PID. Pin that as a
+        # differential oracle against the stdlib rather than restating the rule, and cover the
+        # future-dated case (`age < -stale_age`) the age clause alone does not reach: on the pinned
+        # Julia the stdlib only WARNS there and does not reclaim, so a mirror that reported the lock
+        # stale would diverge from the authority without clearing anything.
+        # `open_exclusive` consults `stale_pidfile` only when `stale_age > 0`, so `stale_age == 0`
+        # disables the rule at the CALL SITE rather than inside it. The oracle models the call site
+        # `_with_forecast_log_lock` actually uses, refresh included.
+        mirror_matches_stdlib = (lock_path, stale) -> begin
+            expected = !(stale > 0 && Pidfile.stale_pidfile(String(lock_path), stale, stale / 2))
+            return _forecast_pidfile_has_local_live_owner(lock_path; stale_after_sec=stale) ==
+                   expected
+        end
+
+        mktempdir() do tmp
+            log_path = joinpath(tmp, "live_forecast_log.csv")
+            lock_path = log_path * ".lock"
+            write(lock_path, string(getpid(), " ", gethostname()))
+            # A backwards clock step / skewed filesystem: the lock's mtime lies in the future.
+            run(`touch -t 203001010000 $lock_path`)
+            _, _, age = Pidfile.parse_pidfile(String(lock_path))
+            @test age < 0
+
+            for stale in (0.0, 0.02, 900.0)
+                @test mirror_matches_stdlib(lock_path, stale)
+            end
+            # The stdlib does not reclaim a future-dated lock by age, and the exclusive open — the
+            # authority the mirror stands in for — agrees.
+            @test Pidfile.trymkpidlock(lock_path; stale_age=900.0, refresh=450.0) === false
+            @test _forecast_pidfile_has_local_live_owner(lock_path; stale_after_sec=900.0)
+
+            # The short-circuit swallows the stdlib's own skew warning, so the wedge would otherwise
+            # be a silent 30 s stall on every locked step. It has to name its cause.
+            wedge = try
+                _with_forecast_log_lock(
+                    log_path; timeout_sec=0.1, stale_after_sec=900.0, poll_sec=0.02,
+                ) do
+                    :must_not_run
+                end
+                nothing
+            catch e
+                e
+            end
+            @test wedge isa ErrorException
+            @test occursin("FUTURE", wedge.msg)
+            @test occursin(lock_path, wedge.msg)
+            @test isfile(lock_path)
+        end
+
+        # The same oracle in the reclaim direction: an unrefreshed live-PID lock past 5 * stale_age
+        # is stale for the stdlib and unowned for the mirror, so a mutation of either clause shows.
+        mktempdir() do tmp
+            lock_path = joinpath(tmp, "live_forecast_log.csv.lock")
+            write(lock_path, string(getpid(), " ", gethostname()))
+            sleep(0.25)
+            @test Pidfile.stale_pidfile(String(lock_path), 0.02, 0.01)
+            for stale in (0.0, 0.02, 900.0)
+                @test mirror_matches_stdlib(lock_path, stale)
+            end
+        end
+    end
+
+    @testset "T-17: a malformed clock-skew setting warns and keeps the documented default" begin
+        # These resolve at load time in the engine behind the supervised daemon. `error()` here made
+        # one typo in a launchd EnvironmentVariables entry abort the load, which launchd turns into
+        # a 60 s restart loop that issues nothing. Fail-safe, not fail-to-start; the installer is
+        # where the same typo is fatal.
+        withenv("LIVE_FUTURE_CLOCK_TOLERANCE_MIN" => nothing) do
+            @test _live_minutes_from_env("LIVE_FUTURE_CLOCK_TOLERANCE_MIN", 2) == Minute(2)
+        end
+        withenv("LIVE_FUTURE_CLOCK_TOLERANCE_MIN" => " 7 ") do
+            @test _live_minutes_from_env("LIVE_FUTURE_CLOCK_TOLERANCE_MIN", 2) == Minute(7)
+        end
+        withenv("LIVE_FUTURE_CLOCK_TOLERANCE_MIN" => "0") do
+            @test _live_minutes_from_env("LIVE_FUTURE_CLOCK_TOLERANCE_MIN", 2) == Minute(0)
+        end
+        for bad in ("two", "", "3.5", "-1", "2 minutes")
+            withenv("LIVE_FUTURE_CLOCK_TOLERANCE_MIN" => bad) do
+                value = @test_logs (:warn,) match_mode = :any _live_minutes_from_env(
+                    "LIVE_FUTURE_CLOCK_TOLERANCE_MIN", 2,
+                )
+                @test value == Minute(2)
+            end
+        end
+
+        # The band is resolved as a pair. An inconsistent pair leaves the "report and exclude" band
+        # empty, so it falls back to BOTH documented defaults rather than widening the sanity limit,
+        # which would relax a fail-closed guard the operator never asked to relax.
+        withenv("LIVE_FUTURE_CLOCK_TOLERANCE_MIN" => "30",
+                "LIVE_MAX_FUTURE_CLOCK_SKEW_MIN" => "10") do
+            band = @test_logs (:warn,) match_mode = :any _live_clock_skew_band()
+            @test band.tolerance == Minute(LIVE_FUTURE_CLOCK_TOLERANCE_DEFAULT_MIN)
+            @test band.limit == Minute(LIVE_MAX_FUTURE_CLOCK_SKEW_DEFAULT_MIN)
+            @test band.limit >= band.tolerance
+        end
+        withenv("LIVE_FUTURE_CLOCK_TOLERANCE_MIN" => "3",
+                "LIVE_MAX_FUTURE_CLOCK_SKEW_MIN" => "30") do
+            band = _live_clock_skew_band()
+            @test band.tolerance == Minute(3)
+            @test band.limit == Minute(30)
+        end
+        withenv("LIVE_FUTURE_CLOCK_TOLERANCE_MIN" => nothing,
+                "LIVE_MAX_FUTURE_CLOCK_SKEW_MIN" => "nope") do
+            band = @test_logs (:warn,) match_mode = :any _live_clock_skew_band()
+            @test band.tolerance == Minute(LIVE_FUTURE_CLOCK_TOLERANCE_DEFAULT_MIN)
+            @test band.limit == Minute(LIVE_MAX_FUTURE_CLOCK_SKEW_DEFAULT_MIN)
+        end
+        # Whatever the environment held at load, the loaded band is usable.
+        @test LIVE_MAX_FUTURE_CLOCK_SKEW >= LIVE_FUTURE_CLOCK_TOLERANCE
+        @test LIVE_FUTURE_CLOCK_TOLERANCE >= Minute(0)
+    end
+
+    @testset "T-30: an unobservable row is neither a coverage hit nor a coverage miss" begin
+        # `min(ci05, NaN) <= NaN <= max(...)` is `false`, indistinguishable from an interval that
+        # genuinely excluded the observation. A frame carrying not-yet-verified rows therefore
+        # reported them as coverage FAILURES, and every consumer that averaged the column depressed
+        # its coverage by the unverified fraction of the frame.
+        center = [-20.0, -20.0, -20.0, -20.0]
+        frame = DataFrame(
+            pred_dst_nt=center,
+            pred_dst_ci05_nt=center .- 5.0,
+            pred_dst_ci95_nt=center .+ 5.0,
+            #      inside      unobserved  outside     unobserved
+            observation_dst_nt=[-21.0, NaN, -40.0, NaN],
+            Bz_nt=[0.0, 0.0, 0.0, 0.0],
+        )
+        cal = OperationalV2Calibration([:Bz_nt], [0.0], [1.0], [0.0, 1.0], 1.0, "t30")
+        scored = score_operational_v2(frame, cal)
+
+        @test eltype(scored.v2_observed_in_90ci) == Union{Missing,Bool}
+        @test scored.v2_observed_in_90ci[1] === true
+        @test scored.v2_observed_in_90ci[3] === false
+        @test ismissing(scored.v2_observed_in_90ci[2])
+        @test ismissing(scored.v2_observed_in_90ci[4])
+        # An unobservable row is not silently promoted to a hit either.
+        @test !any(x -> !ismissing(x) && x, scored.v2_observed_in_90ci[[2, 4]])
+
+        # The denominator excludes it: coverage equals the observable-only average, not 1/4.
+        coverage = _observable_coverage(scored.v2_observed_in_90ci)
+        @test coverage.n == 2
+        @test coverage.fraction == 0.5
+        @test coverage.fraction ==
+              mean(Bool[scored.v2_observed_in_90ci[i] for i in (1, 3)])
+
+        # A frame with nothing verified yet is reported as unknown, never as zero coverage.
+        unverified = score_operational_v2(frame[[2, 4], :], cal)
+        blank = _observable_coverage(unverified.v2_observed_in_90ci)
+        @test blank.n == 0
+        @test isnan(blank.fraction)
+
+        # `missing` serialises as an empty cell, matching how the live logger already records an
+        # unverified row.
+        mktempdir() do tmp
+            path = joinpath(tmp, "scored.csv")
+            CSV.write(path, scored)
+            reread = CSV.read(path, DataFrame)
+            @test ismissing(reread.v2_observed_in_90ci[2])
+            @test reread.v2_observed_in_90ci[1] === true
+            @test reread.v2_observed_in_90ci[3] === false
         end
     end
 

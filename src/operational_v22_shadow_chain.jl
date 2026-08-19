@@ -4,7 +4,7 @@ import SHA
 
 const OPERATIONAL_V22_SHADOW_SCHEMA_VERSION = "operational_v2_2_shadow_chain_v1"
 const OPERATIONAL_V22_SHADOW_PRODUCT_VERSION = "v2.2-shadow"
-const OPERATIONAL_V22_SHADOW_SUPPORTED_HORIZONS_H = (1, 2, 3, 4, 6, 7)
+const OPERATIONAL_V22_SHADOW_SUPPORTED_HORIZONS_H = OPERATIONAL_V22_MODEL_STEPS
 const OPERATIONAL_V22_SHADOW_DEFAULT_FEATURE_SCHEMA = ntuple(
     index -> "matured_h1_innovation_lag_" *
              string(OPERATIONAL_V22_ERROR_LAGS_H[index]) * "h",
@@ -282,14 +282,10 @@ struct OperationalV22ShadowBindings
             ),
             begin
                 normalized = _operational_v22_shadow_feature_schema(feature_schema)
-                exogenous_schema = if isdefined(
-                        @__MODULE__, :OPERATIONAL_V22_ERROR_EXOGENOUS_FEATURES)
-                    Tuple(String.(getfield(
-                        @__MODULE__, :OPERATIONAL_V22_ERROR_EXOGENOUS_FEATURES,
-                    )))
-                else
-                    ()
-                end
+                # `operational_v22_error_exogenous.jl` is included before this file, so the
+                # exogenous schema is always defined here; the guarded lookup it replaced could
+                # silently accept only the default schema if that ever stopped being true.
+                exogenous_schema = Tuple(String.(OPERATIONAL_V22_ERROR_EXOGENOUS_FEATURES))
                 normalized in (
                     OPERATIONAL_V22_SHADOW_DEFAULT_FEATURE_SCHEMA,
                     exogenous_schema,

@@ -17,7 +17,11 @@ using Dates
 using Statistics
 using SolarSINDy
 
-include(normpath(joinpath(@__DIR__, "..", "validation", "operational", "v2_3_common.jl")))
+isdefined(@__MODULE__, :V23Context) || include(normpath(joinpath(@__DIR__, "..", "validation", "operational", "v2_3_common.jl")))
+
+isdefined(Main, :LocalArtifactGate) ||
+    Base.include(Main, normpath(joinpath(@__DIR__, "local_artifact_gate.jl")))
+using Main.LocalArtifactGate: local_artifact_available
 
 const CORE = load_operational_core(OPERATIONAL_V2_1_MODEL_VERSION)
 const CAL = read_operational_v2_calibration(
@@ -379,11 +383,13 @@ Real hourly driver records, so the self-origin oracle is checked on the archive
 the study actually rolls out over rather than on a smooth synthetic frame. Falls
 back to the deterministic synthetic frame when the generated artifact is absent.
 """
+const ORACLE_FRAME_PATH = normpath(joinpath(@__DIR__, "..", "validation", "output",
+                                            "operational", "v2_3_base",
+                                            "v2_3_hourly_frame.csv"))
+
 function oracle_frame()
-    path = joinpath(@__DIR__, "..", "validation", "output", "operational", "v2_3_base",
-                    "v2_3_hourly_frame.csv")
-    isfile(path) || return (frame=synthetic_frame(4000), real=false)
-    frame = CSV.read(path, DataFrame; types=Dict("time_utc" => DateTime))
+    isfile(ORACLE_FRAME_PATH) || return (frame=synthetic_frame(4000), real=false)
+    frame = CSV.read(ORACLE_FRAME_PATH, DataFrame; types=Dict("time_utc" => DateTime))
     return (frame=frame, real=true)
 end
 
@@ -437,8 +443,17 @@ end
     @test checked >= 5 * V23_STEP_COUNT
     @test worst <= 1e-9
     @test worst_driver <= 1e-9
-    # The identity must hold on the real archive, not only on a smooth frame.
-    @test source.real
+    # The identity must hold on the real archive, not only on a smooth frame. The
+    # hourly frame is written by the offline base-table build and is not tracked,
+    # so a clean checkout runs the identity on the synthetic frame and records
+    # that the archive leg did not run.
+    if local_artifact_available("V2.3 self-origin analog identity on the archived hourly frame",
+                                ORACLE_FRAME_PATH)
+        @test source.real
+    else
+        @test_skip "hourly frame absent at $(ORACLE_FRAME_PATH); run " *
+                   "validation/operational/v2_3_base_table.jl"
+    end
 end
 
 """

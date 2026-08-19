@@ -70,9 +70,55 @@ const _CT = Dict(".html"=>"text/html; charset=utf-8", ".js"=>"application/javasc
                  ".woff2"=>"font/woff2", ".map"=>"application/json")
 content_type(path) = get(_CT, lowercase(splitext(path)[2]), "application/octet-stream")
 
+# Response hardening carried by every response this server emits.
+#
+# The dashboard renders third-party feed text (NOAA product identifiers and alert summaries, the
+# NOAA scale token) and log-written text (served labels, interval sources, station codes). Those are
+# escaped where they are rendered; the policy here is the second line, bounding what injected markup
+# could reach even if a sink were missed. Every source is the page's own origin: the scripts, the
+# stylesheet, and the API the page fetches.
+#
+# `style-src` admits inline styles deliberately. The panels carry per-element style attributes for
+# the threat-tier colours, and the plotting library writes its own style rules into the document at
+# runtime; refusing them would leave the page rendered without its colour coding and without plots.
+# `script-src` admits the plotting CDN because the page falls back to it when no vendored copy is
+# present, which is the documented offline-first behaviour of this deployment.
+#
+# `connect-src 'self'` is the whole fetch surface, and it governs one request the page does not
+# issue itself: the plotting library fetches the network panel's base map (a topojson file for the
+# requested scope and resolution) at draw time, from its own default source, the plotting CDN. That
+# request is not something an offline deployment could serve either, so the map is vendored beside
+# the bundle (`public/vendor/topojson/`) and `app.js` points the library at this origin before the
+# first plot is drawn. The policy therefore stays closed and the map is drawn from the same origin
+# as the rest of the page. The pairing is asserted in the app test suite against the shipped bundle,
+# so a bundle upgrade that changes the default source or the map name cannot pass silently.
+const CONTENT_SECURITY_POLICY = join([
+    "default-src 'self'",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "form-action 'none'",
+    # `blob:` is required for the plot toolbar's PNG export: the plotting library renders the chart
+    # into a blob URL and loads it as an image before handing the file to the browser. Without it the
+    # download silently fails with the library's own "problem downloading your snapshot" notice.
+    "img-src 'self' data: blob:",
+    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self' https://cdn.plot.ly",
+    "connect-src 'self'",
+], "; ")
+
+const SECURITY_HEADERS = [
+    "Content-Security-Policy" => CONTENT_SECURITY_POLICY,
+    "X-Content-Type-Options" => "nosniff",
+    "Referrer-Policy" => "no-referrer",
+]
+
+hardened_response(status::Int, headers, body) =
+    HTTP.Response(status, vcat(SECURITY_HEADERS, collect(headers)), body)
+
 json_response(obj; status::Int=200) =
-    HTTP.Response(status, ["Content-Type" => "application/json; charset=utf-8",
-                           "Cache-Control" => "no-store"], JSON3.write(obj))
+    hardened_response(status, ["Content-Type" => "application/json; charset=utf-8",
+                               "Cache-Control" => "no-store"], JSON3.write(obj))
 
 function _safe_queryparams(query::AbstractString)
     params = try
@@ -88,27 +134,28 @@ end
 function serve_static(path::AbstractString)
     rel = lstrip(path, '/')
     isempty(rel) && (rel = "index.html")
-    (occursin("..", rel) || occursin('\0', rel)) && return HTTP.Response(403, "forbidden")
+    (occursin("..", rel) || occursin('\0', rel)) &&
+        return hardened_response(403, [], "forbidden")
     file = normpath(joinpath(PUBLIC_DIR, rel))
-    isfile(file) || return HTTP.Response(404, "not found")
+    isfile(file) || return hardened_response(404, [], "not found")
     resolved = try
         realpath(file)
     catch e
         e isa InterruptException && rethrow()
-        return HTTP.Response(404, "not found")
+        return hardened_response(404, [], "not found")
     end
     public_root = realpath(PUBLIC_DIR)
     relative = relpath(resolved, public_root)
     separator = string(Base.Filesystem.path_separator)
     confined = !isabspath(relative) && relative != ".." &&
                !startswith(relative, ".." * separator)
-    (confined && isfile(resolved)) || return HTTP.Response(403, "forbidden")
+    (confined && isfile(resolved)) || return hardened_response(403, [], "forbidden")
     # Extension whitelist: only the known dashboard asset types are served. A stray file dropped
     # into public/ (editor backup, .DS_Store, a mis-copied config) is treated as "not found"
     # rather than leaked as application/octet-stream — this is the guard the endpoint documents.
-    haskey(_CT, lowercase(splitext(resolved)[2])) || return HTTP.Response(404, "not found")
-    return HTTP.Response(200, ["Content-Type" => content_type(resolved),
-                              "Cache-Control" => "no-store"], read(resolved))
+    haskey(_CT, lowercase(splitext(resolved)[2])) || return hardened_response(404, [], "not found")
+    return hardened_response(200, ["Content-Type" => content_type(resolved),
+                                   "Cache-Control" => "no-store"], read(resolved))
 end
 
 function api_handler(path::AbstractString, query::AbstractString, log_path::AbstractString)
@@ -183,21 +230,20 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
         df = get_log(log_path)
         snap = swpc_snapshot_cached_or_refresh()
         status = build_status(df)
-        combined = compute_alert_state(
-            status, upstream_assessment(snap),
-            dashboard_dbdt_nowcast(; wait_timeout=0.0),
-        )
         # An active outage sentinel forces the stale/unknown flag and adds an explicit reason, so a
         # dead or unloaded daemon (which the live layers cannot report) is not read as "quiet".
+        # `compose_alert_state` is the same rule the webhook loop delivers on, so the endpoint and
+        # the notification cannot disagree about whether the monitor is blind. The persisted
+        # first-data marker is restored once per process for the same reason: without it a restart
+        # into an outage would report the cycle-less log as a deployment that never served data.
+        _ALERT_STATE_LOADED[] || _load_alert_state!(_default_alert_state_path(log_path))
         outage = outage_state(log_path)
-        reasons = String[combined.reasons...]
-        getproperty(outage, :active) && push!(reasons,
-            "forecast monitor outage: " *
-            something(getproperty(outage, :summary), "issuance stopped (sentinel present)"))
-        overall_stale = combined.stale || getproperty(outage, :active)
+        combined = compose_alert_state(status, upstream_assessment(snap),
+                                       dashboard_dbdt_nowcast(; wait_timeout=0.0), outage)
         return json_response(merge(build_alerts(df, status),
-                                   (overall_level = combined.level, overall_reasons = reasons,
-                                    overall_stale = overall_stale, overall_outage = outage)))
+                                   (overall_level = combined.level,
+                                    overall_reasons = String[combined.reasons...],
+                                    overall_stale = combined.stale, overall_outage = outage)))
     else
         return json_response((error="unknown endpoint", path=path); status=404)
     end
@@ -240,6 +286,16 @@ function make_handler(log_path::AbstractString)
     return function (req::HTTP.Request)
         uri = HTTP.URI(req.target)
         path = uri.path
+        # This server reads: it publishes a log the daemon writes and holds no state a request may
+        # change. The method was previously ignored, so a POST, PUT or DELETE was answered with the
+        # GET body and a 200 — a write that reads as accepted. Only retrieval is answered.
+        method = uppercase(String(req.method))
+        if method != "GET" && method != "HEAD"
+            return hardened_response(405, ["Allow" => "GET, HEAD",
+                                           "Content-Type" => "application/json; charset=utf-8",
+                                           "Cache-Control" => "no-store"],
+                                     JSON3.write((error="method not allowed", method=method)))
+        end
         try
             if path == "/api/health"
                 ok = isfile(log_path)
@@ -250,7 +306,19 @@ function make_handler(log_path::AbstractString)
                     e isa InterruptException && rethrow()
                     DataFrame()
                 end : DataFrame()
-                cycle_complete = ok && _valid_live_cycle(cycle)
+                # Deliberately the NEWEST issue hour, never the cycle the live payloads fell back
+                # to. The fallback exists to restore availability, and health exists to state that
+                # the newest issuance is not complete: reading the served cycle here would report a
+                # healthy deployment while the daemon was failing to issue, and the six-cycle
+                # issuance dead-man reads exactly this field.
+                readable = !ok || log_parse_state(log_path).readable
+                cycle_complete = ok && readable && _valid_live_cycle(cycle)
+                superseded = ok ? try
+                    serving_cycle(get_log(log_path)).superseded
+                catch e
+                    e isa InterruptException && rethrow()
+                    nothing
+                end : nothing
                 cycle_state = ok && nrow(cycle) > 0 ? _cycle_staleness(cycle) : nothing
                 cycle_stale = cycle_state !== nothing && (
                     cycle_state.stale || cycle_state.expired || cycle_state.invalid_future
@@ -266,6 +334,15 @@ function make_handler(log_path::AbstractString)
                     e isa InterruptException && rethrow()
                     nothing
                 end : nothing
+                # Whether the newest bytes on disk actually parse. Everything else here is computed
+                # from the cached frame plus the file's mtime, so a log the loader cannot read would
+                # otherwise be reported as a fresh, complete, healthy cycle: the age is the mtime of
+                # the very file that was rejected, and the cycle is one that may no longer be in it.
+                # The absent-log case was already honest; the unreadable one was not, and the
+                # container probe and the issuance dead-man both read this verdict.
+                parse_state = ok ? log_parse_state(log_path) :
+                    (readable=true, error_age_min=nothing, error_type=nothing,
+                     serving_cached_copy=false)
                 # The daemon rewrites the log every cycle, so a file mtime older than the
                 # staleness window means it has stopped issuing — report "stale" (dashboard dot
                 # turns red). A recent file is still unhealthy when its latest issue hour lacks
@@ -274,12 +351,18 @@ function make_handler(log_path::AbstractString)
                 # dominates: it reports "outage" even when the log file mtime still looks fresh.
                 status = getproperty(outage, :active) ? "outage" :
                          !ok ? "no_log" :
+                         !parse_state.readable ? "unreadable" :
                          ((age !== nothing && age > STALE_CYCLE_HOURS * 60) || cycle_stale) ?
                              "stale" :
                          !cycle_complete ? "incomplete" : "ok"
                 return json_response((status = status,
                                       log_age_min=age,
+                                      log_readable=parse_state.readable,
+                                      log_parse_error_age_min=parse_state.error_age_min,
+                                      log_parse_error_type=parse_state.error_type,
+                                      serving_cached_log_copy=parse_state.serving_cached_copy,
                                       cycle_complete=cycle_complete,
+                                      superseded_cycle_incomplete=superseded,
                                       outage=outage,
                                       served=served,
                                       server_time_utc=string(now(UTC)) * "Z"))
@@ -340,12 +423,41 @@ function warmup(log_path::AbstractString)
 end
 
 """
+    bind_setting_from_env(name, default) -> String
+
+Read a launchd/shell bind setting, rejecting an unsubstituted plist placeholder with a message that
+names the file to repair. A hand-copied `com.example.solarsindy.dashboard.plist` whose
+`__SWM_PORT__` was never replaced otherwise reaches `parse(Int, "__SWM_PORT__")`, and launchd turns
+that `ArgumentError` into a sixty-second crash loop whose cause is one line of a stack trace.
+"""
+function bind_setting_from_env(name::AbstractString, default::AbstractString)
+    value = strip(get(ENV, name, default))
+    if startswith(value, "__") && endswith(value, "__")
+        error("$name is still the launchd template placeholder $(value). Render the plist with " *
+              "deploy/install_launchd.sh, or replace every placeholder listed in the template's " *
+              "header comment before bootstrapping the job.")
+    end
+    isempty(value) && error("$name is empty; set it to a value or unset it to take the default " *
+                            "$(default).")
+    return String(value)
+end
+
+"Parse `SWM_PORT` with a message that distinguishes a bad value from an unrendered placeholder."
+function port_from_env(; name::AbstractString = "SWM_PORT", default::AbstractString = "8723")
+    raw = bind_setting_from_env(name, default)
+    port = tryparse(Int, raw)
+    (port === nothing || port < 1 || port > 65535) &&
+        error("$name must be a TCP port between 1 and 65535, got $(repr(raw)).")
+    return port
+end
+
+"""
     start_server(; host, port, log_path, blocking=true)
 
 Start the dashboard server. Returns the `HTTP.Server` when `blocking=false`.
 """
-function start_server(; host::AbstractString = get(ENV, "SWM_HOST", "127.0.0.1"),
-                        port::Integer = parse(Int, get(ENV, "SWM_PORT", "8723")),
+function start_server(; host::AbstractString = bind_setting_from_env("SWM_HOST", "127.0.0.1"),
+                        port::Integer = port_from_env(),
                         log_path::AbstractString = default_log(),
                         blocking::Bool = true)
     handler = make_handler(log_path)

@@ -36,7 +36,7 @@
 #   --anchors=<n>    minimum number of scored anchors to reproduce (default 500)
 #   --out=<path>     per-row output CSV (default …/output/operational/v2_4_serving_identity.csv)
 
-include(joinpath(@__DIR__, "v2_3_common.jl"))
+isdefined(@__MODULE__, :V23Context) || include(joinpath(@__DIR__, "v2_3_common.jl"))
 
 "Identity target: the largest absolute deviation a served stage may show against the scored one."
 const V24_IDENTITY_TOL_NT = 1e-9
@@ -468,7 +468,7 @@ function run_v2_4_serving_identity(; bundle::AbstractString=V24_IDENTITY_DEFAULT
             bundle=String(bundle), tree=String(tree), out=String(out))
 end
 
-function main(args=ARGS)
+function main_v2_4_serving_identity(args=ARGS)
     bundle = V24_IDENTITY_DEFAULT_BUNDLE
     tree = V24_IDENTITY_DEFAULT_TREE
     year = 2025
@@ -501,5 +501,5 @@ function main(args=ARGS)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    main()
+    main_v2_4_serving_identity()
 end

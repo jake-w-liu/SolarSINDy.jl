@@ -6,9 +6,11 @@
   <title>Space-Weather Threat Monitor</title>
   <meta name="description" content="Open-source geomagnetic-storm (Dst) forecast monitor with empirically evaluated uncertainty." />
   <link rel="stylesheet" href="/style.css" />
-  <!-- Plotly: prefer a locally vendored copy (offline); fall back to the official CDN. -->
-  <script src="/vendor/plotly.min.js"
-    onerror="(function(){var s=document.createElement('script');s.src='https://cdn.plot.ly/plotly-2.35.2.min.js';s.onerror=function(){window.__plotlyFailed=true;};document.head.appendChild(s);})();"></script>
+  <!-- Plotly: a locally vendored copy (offline-first). The CDN fallback is registered from app.js
+       rather than from an inline onerror attribute, which the response's script-src policy refuses.
+       The network panel's base map is vendored beside the bundle (vendor/topojson) and app.js points
+       the library at it, so the map is fetched from this origin as the connect-src policy requires. -->
+  <script src="/vendor/plotly.min.js"></script>
 </head>
 <body>
   <header class="topbar">
@@ -59,6 +61,10 @@
         <h2>Dst forecast &amp; 90% target interval</h2>
         <span class="src-badge" id="interval-badge">&mdash;</span>
       </div>
+      <!-- Shown only while the newest issuance has not completed and the forecast below is the
+           most recent cycle that did. Without it the panel presents a forecast as current with no
+           indication that the newest issuance is failing. -->
+      <p class="caption hidden" id="forecast-supersede"></p>
       <div id="forecast-plot" class="plot"></div>
       <!-- The alerting numbers the threat tier and the watch are taken on. They are not the served
            center and band, so they are shown explicitly rather than left implicit in the alert text. -->

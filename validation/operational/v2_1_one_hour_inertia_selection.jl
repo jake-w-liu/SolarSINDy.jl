@@ -8,7 +8,7 @@ using DataFrames
 using Printf
 using Statistics
 
-include(joinpath(@__DIR__, "v2_replay.jl"))
+isdefined(@__MODULE__, :_selftest_v2) || include(joinpath(@__DIR__, "v2_replay.jl"))
 
 const H1_BROAD_CSV = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_broad_replay_scored.csv")
 const H1_GSCALE_CSV = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_gscale_replay_scored.csv")

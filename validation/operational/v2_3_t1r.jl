@@ -42,7 +42,7 @@
 # Run from the package root:
 #   JULIA_NUM_THREADS=4 julia --startup-file=no --project=. validation/operational/v2_3_t1r.jl
 
-include(joinpath(@__DIR__, "v2_3_common.jl"))
+isdefined(@__MODULE__, :V23Context) || include(joinpath(@__DIR__, "v2_3_common.jl"))
 
 # ---------------------------------------------------------------------------
 # Recipe constants (all pinned to the deployed V2.1 point calibration)

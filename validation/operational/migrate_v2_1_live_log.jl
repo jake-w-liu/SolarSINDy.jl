@@ -9,7 +9,7 @@ using DataFrames
 using SHA
 
 include(joinpath(@__DIR__, "paths.jl"))
-include(joinpath(OPERATIONAL_PACKAGE_ROOT, "examples", "live_forecast_verify.jl"))
+isdefined(@__MODULE__, :LiveVerifyConfig) || include(joinpath(OPERATIONAL_PACKAGE_ROOT, "examples", "live_forecast_verify.jl"))
 
 const V21_HOT_LOG = joinpath(OPERATIONAL_PACKAGE_ROOT, "var", "monitor", "live_forecast_log.csv")
 const V20_ARCHIVE_DIR = joinpath(OPERATIONAL_PACKAGE_ROOT, "data", "historical", "v2_0")

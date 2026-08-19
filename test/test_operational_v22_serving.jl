@@ -15,6 +15,10 @@ using DataFrames
 using Dates
 using SolarSINDy
 
+isdefined(Main, :LocalArtifactGate) ||
+    Base.include(Main, normpath(joinpath(@__DIR__, "local_artifact_gate.jl")))
+using Main.LocalArtifactGate: local_artifact_available
+
 const DEPLOY_STACK = normpath(joinpath(@__DIR__, "..", "deploy", V22_SERVED_STACK_FILE))
 const DEPLOY_MANIFEST = normpath(joinpath(@__DIR__, "..", "deploy", V22_SERVED_STACK_MANIFEST))
 const BASE_TABLE = normpath(joinpath(
@@ -163,7 +167,8 @@ end
     end
 
     @testset "archived static-stack column is reproduced" begin
-        if !isfile(BASE_TABLE)
+        if !local_artifact_available("V2.2 static-stack identity on the archived base table",
+                                     BASE_TABLE)
             @test_skip "V2.3 base table is absent; run validation/operational/v2_3_base_table.jl"
         else
             stack = load_v22_serving_stack(DEPLOY_STACK)

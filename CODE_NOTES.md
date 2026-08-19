@@ -914,3 +914,65 @@ the per-variant gate table gains one row: V2.4b's 7 h loss to the static stack i
 `latest <= -100` cell crosses the 0.50 nT allowance (+0.598 nT on 391 rows) and is therefore
 recorded, and it passes because its one-sided lower bound is -1.750 nT, so the loss is not
 bootstrap-supported.
+
+## Test and documentation pass: what a clean checkout could see (2026-08-19)
+
+| Item | Record |
+|---|---|
+| Objective | Close the deep-debug findings whose subject is the evidence rather than the product: fixtures that make a defect unobservable, oracles that vanish silently on a clean checkout, an environment declaration the package cannot satisfy on its own declared minimum Julia, and reports whose numbers no longer describe the tree |
+| Contract | No served number moves; every mutation the audit recorded as SURVIVED is killed by a test and shown failing under that exact mutation; oracles may only be tightened; an absent local artifact produces a recorded skip, never a silent pass |
+| Evidence | `logs/deep_debug_full/FIX_PLAN.md` items T-07, T-08, T-09, T-10, T-12, T-13, T-36, T-37, T-38, T-39, T-40, T-41, T-42, T-44; the deployed `deploy/v2_4/stack_weights.csv` (27 of 60 cells carry `w_burton != w_burton_full`); the published served-holdout coverage 117,575 / 135,817 = 0.86569 against the 0.85 promotion floor |
+| Independent oracles | Hand-computed weighted combinations over ten distinct fixture weights (`(w_a - w_b)(x_b - x_a)` for every one of the 45 expert pairs); the split-audit boundary constructed so that only the validation→holdout comparison can reject it; toy cohorts straddling the promotion floor at 84, 85, 86 and 8,657/10,000; the deployed bundle's own cell weights and conformal strata recomputed in `examples/experiments.jl` |
+| Test plan | `test/v2_4_serving_fixture.jl` gives all ten expert slots distinct positive weights, each group summing exactly to its mass; `test/test_operational_v24_serving.jl` asserts every pairwise exchange moves the center by the exact weight-difference product; `test/test_v2_1_calibration.jl` adds the validation→holdout leak and the strict-boundary case; `test/test_v2_1_served_holdout.jl` recomputes the promotion gate instead of reading its column; `test/local_artifact_gate.jl` records every artifact-gated oracle and `test/runtests.jl` pins the ledger; `test/test_compat.jl` pins the declared environment |
+| Baseline verification | Every suite was run before and after each change, and each named mutation was re-applied in place and shown to fail, then reverted with a SHA-256 comparison against the pre-mutation file |
+| Data regeneration trigger | None: no artifact under `deploy/` or `validation/output/` was written, and no served arithmetic was touched |
+| Harness | `julia --project=. -e 'using Pkg; Pkg.test()'` on a fresh `git archive` checkout with no `validation/output/`; `julia --project=. examples/experiments.jl`; `julia --project=docs docs/make.jl`; `.agents/scripts/dev-harness-audit.sh` |
+| Risk | The ledger's registered-gate list is pinned by name, so adding an artifact-gated oracle requires updating `runtests.jl` — deliberate, because a gate that appears without a record is the defect this replaces |
+
+### The fixture that could not see a swapped expert
+
+`v24_fixture_weights` gave the six non-SINDy-family slots `rest / length(others)` each. Any
+permutation among `persistence, burton, burton_full, obrien, direct_gbm, climatology` was therefore a
+mathematical no-op, which is why the engine's `burton` ↔ `burton_full` slot swap passed the whole
+live-verification suite. The deployed bundle is not uniform — 27 of its 60 cells have
+`w_burton != w_burton_full` — so the same swap in production would have moved the published center.
+
+All ten weights are now distinct and strictly positive, laid out as irregular shares of the family
+mass and of the remainder, with the last slot of each group carrying the exact residual so the family
+mass and the total are reproduced bit for bit rather than to a tolerance. The unit suite asserts, for
+each of the 45 expert pairs, that exchanging two experts moves the center by exactly
+`(w_a - w_b)(x_b - x_a)`, which is an arithmetic statement rather than an inequality any change would
+satisfy.
+
+### Skips that say so
+
+Six oracles read artifacts the offline scripts generate and the repository deliberately does not
+track: the OMNI archive, the V2.3 base table and hourly frame, and the three served-identity tables.
+Two of them used to fail the suite outright on a clean checkout — one error, one failure — and three
+degraded to a silent `@test_skip`. Each now registers itself in `Main.LocalArtifactGate` before
+deciding whether to run, `runtests.jl` prints the ledger and pins its membership, and
+`SOLARSINDY_REQUIRE_LOCAL_ARTIFACTS=1` turns any absence into a failure for an environment that has
+the full evidence set. A green suite therefore states which real-data oracles it exercised.
+
+### The environment declaration
+
+`[compat] Logging = "1.11.0"` beside `julia = "1.10"` made the package unresolvable on its own
+declared minimum: Julia 1.10 ships `Logging` with no version at all, so resolution failed with
+`Unsatisfiable requirements detected for package Logging`. Dropping the bound restores resolution and
+loading on 1.10.11, which is what `README.md` has been promising. `test/test_compat.jl` pins the rule
+for every standard-library dependency, checks the declared minimum against the sentence in the
+README, and requires every declared dependency to have a consumer — either `src/` or, for
+`PlotlySupply`, `Printf` and `Logging`, a named shipped script or test that loads it under this same
+project environment.
+
+Those three are unused by `src/`, which is what the audit found, but they are not unused by the
+package. Removing all three from `[deps]` and re-resolving still loads on this machine, because a
+plain session also sees the user's default environment; under the isolated load path `Pkg.test()`
+uses (`JULIA_LOAD_PATH="@"`), the same tree fails with `ArgumentError: Package PlotlySupply not found
+in current path` when the test suite loads `validation/canonical_figure_generation.jl`, and with
+`Package Printf not found in current path` when `examples/external_dst_snapshot_collector.jl` — the
+prospective Dst collector the live monitor calls — is loaded. With the three declared, the same
+command loads both. They therefore stay in `[deps]`, with the reason recorded in
+`test/test_compat.jl` beside the check that each named consumer still exists; moving them to a
+separate environment would change the documented run command of every figure and study script and of
+the production collector, which is a larger change than this pass is scoped for.
