@@ -4697,7 +4697,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
         served_interval_source = V2_4_INTERVAL_SOURCE
     end
 
-    # ---- V2.1 product forecast = current frozen-tail center + operational tail.
+    # ---- Final product fields: V2.4e when its stage acts, otherwise the explicit fallback stage.
     served_pred_dst = sub_hourly_pred_dst
     served_ci05_dst = sub_hourly_ci05
     served_ci95_dst = sub_hourly_ci95

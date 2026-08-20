@@ -10,8 +10,8 @@ It is designed for research workflows around:
 - comparison against classical empirical Dst baselines
 - OMNI2 ingestion and storm extraction
 - rolling forecast utilities and storm alarms
-- a calibrated V2.1 live product built on the revised 20-candidate,
-  11-active-term SINDy equation
+- an Operational V2.4e live product that retains the revised 20-candidate,
+  11-active-term SINDy equation within a ten-expert super learner
 
 ## Package Scope
 
@@ -25,8 +25,9 @@ Core capabilities:
 - compare against `Burton`, `BurtonFull`, and `OBrienMcP`
 - prepare cleaned storm windows from OMNI2 data
 - run rolling Dst forecast utilities from saved coefficients
-- serve V2.1 forecasts with causal calibration, conformal intervals,
-  ballistically propagated L1 forcing, and guarded multi-hour tails
+- serve V2.4e forecasts with causal ten-expert weighting, depth-stratified
+  conformal intervals, ballistically propagated L1 forcing, and explicit
+  predecessor fallbacks
 
 ## Installation
 
@@ -62,10 +63,10 @@ The realtime forecasting example is not hidden in the validation pipeline. It is
 
 The forecasting paths:
 
-- fetches live solar wind data from NOAA SWPC
-- load the versioned V2.1 20/11 discovery artifacts
-- advances rolling forecasts with uncertainty bands
-- emits configurable storm alarms
+- fetch live solar wind data from NOAA SWPC
+- load the versioned V2.1 20/11 discovery artifacts used by V2.4e's sparse experts
+- advance rolling forecasts with uncertainty bands
+- emit configurable storm alarms
 
 See the [Examples](examples.md) page for the monitor command and the
 [Live Verification](live-verification.md) page for the prediction-to-observation
@@ -81,7 +82,10 @@ The package currently has deterministic automated tests for:
 - OMNI parsing, fill-value replacement, cleaning, and storm catalog extraction
 - realtime hourly aggregation and forecast initialization
 
-The operational `v2` alias resolves to V2.1. Historical V2.0 artifacts are
+The operational `v2` alias selects the V2.1 base operator from which the current
+serving path constructs Operational V2.4e. A complete cycle is labelled
+`v2.4+sindy20x11+superlearner10floor+conformal`; static V2.2 and V2.1 are explicit
+fallback stages, not the normal served product. Historical V2.0 artifacts are
 available only through an explicit version request. Run the complete package
 suite and readiness audit before relying on regenerated results or deploying the
 monitor.

@@ -20,8 +20,9 @@ This example:
 - prints storm alarms based on configurable thresholds
 
 This is the package's primary discovery-core forecasting example. The managed
-live product uses `examples/live_monitor.jl`, which issues the complete V2.1
-forecast at 1, 2, 3, and 6 h.
+live product uses `examples/live_monitor.jl`, which issues Operational V2.4e at
+1, 2, 3, and 6 h. V2.4e combines ten experts, including two forms of the V2.1
+predecessor, and records any fallback stage explicitly.
 
 ## Live Verification Example
 
@@ -38,8 +39,10 @@ then updates the same row with the observed Dst and residual after the target
 hour is published. It also logs persistence, Burton, BurtonFull, and
 O'Brien--McPherron baselines for the same target.
 
-V2.1 is the default. Pass `--model=v1` only when an explicit uncalibrated-core
-comparison is required.
+The default `--model=v2` option selects the V2.1 base operator used to construct
+the served V2.4e cycle. Pass `--model=v1` only for an explicit uncalibrated-core
+comparison. The served-model field, rather than the base-model option, identifies
+which operational stage produced each row.
 
 Other useful modes:
 

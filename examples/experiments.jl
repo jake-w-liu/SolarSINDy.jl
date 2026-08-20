@@ -57,7 +57,7 @@ function main()
     @assert count(!=(0.0), core.coefficients) == 11
     @assert V2_SERVED_TAIL_VERSION ==
             "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
-    # Served pipeline: the V2.1 operator followed by the fitted static regime stack.
+    # V2.2 predecessor: the V2.1 operator followed by the fitted static regime stack.
     @assert V2_2_SERVED_TAIL_VERSION ==
             "v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)"
     # The V2.3 analog candidate is a shadow forecast; its confirmatory decision was NO_GO.
@@ -93,7 +93,7 @@ function main()
 
     serve_deployed_v24_row()
 
-    println("SolarSINDy experiments: V2.1 deterministic smoke PASS")
+    println("SolarSINDy experiments: V2.4e serving and predecessor smoke PASS")
     return true
 end
 

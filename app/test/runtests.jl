@@ -145,7 +145,7 @@ const PAYLOADS = {
   "/api/status": {
     available: true, generated_utc: "@@ISSUE@@", forecast_issue_utc: "@@ISSUE@@",
     latest_solar_wind_utc: "@@ISSUE@@", model_version: "v2.1",
-    served_model_version: "@@SERVED@@", served_product: "V2.4" + MARKER,
+    served_model_version: "@@SERVED@@", served_product: "V2.4e" + MARKER,
     latest_observation: { dst_nt: -40.0, time_utc: "@@ISSUE@@" },
     threat: { level: 2, label: "Moderate storm", watch: true, watch_level: 3,
               watch_label: "Intense storm", point_min_dst_nt: -70.0,
@@ -163,7 +163,7 @@ const PAYLOADS = {
                    by_source: [{ source: MARKER, n: 3, coverage_90: 0.9 },
                                { source: "aci", n: 4, coverage_90: 0.88 }],
                    by_served_model: [{ product: MARKER, n: 3, coverage_90: 0.9, rmse_nt: 4.0 },
-                                     { product: "V2.4", n: 4, coverage_90: 0.88, rmse_nt: 4.4 }] },
+                                     { product: "V2.4e", n: 4, coverage_90: 0.88, rmse_nt: 4.4 }] },
     upstream: { available: true,
                 solar_wind: { available: true, speed_kms: 520.0, bz_gsm_nt: -12.0, bt_nt: 14.0,
                               density_cm3: 6.0, mag_time_utc: "@@ISSUE@@" },
@@ -178,7 +178,7 @@ const PAYLOADS = {
     available: true, issue_time_utc: "@@ISSUE@@", latest_solar_wind_utc: "@@ISSUE@@",
     anchor_dst_nt: -40.0, anchor_dst_time_utc: "@@ISSUE@@", interval_source: MARKER,
     interval_sources: [MARKER, "v24_conformal_depth"], superseded_cycle_incomplete: false,
-    served_product: "V2.4" + MARKER, served_model_version: "@@SERVED@@",
+    served_product: "V2.4e" + MARKER, served_model_version: "@@SERVED@@",
     recent_observed: [{ target_utc: "@@ISSUE@@", observed_dst_nt: -40.0 }],
     horizons: [{ target_utc: "2026-06-26T07:00:00Z", horizon_hours: 1.0, pred_dst_nt: -70.0,
                  ci05_dst_nt: -95.0, ci95_dst_nt: -45.0, severity_dst_nt: -75.0,
@@ -1340,7 +1340,7 @@ const V2_1_DRIVER_TOKEN =
                                 v24_regime_cell="quiet/shallow")
         fc = build_forecast(df)
         @test fc.available == true
-        @test fc.served_product == "V2.4"
+        @test fc.served_product == "V2.4e"
         for h in fc.horizons
             @test h.pred_dst_nt == -88.0
             @test h.severity_dst_nt == -95.0
@@ -1394,7 +1394,7 @@ const V2_1_DRIVER_TOKEN =
         served = build_status(live_cycle_fixture(iss;
             served_model=CURRENT_V2_SERVED_MODEL_VERSION,
             driver_assumption=SUPERLEARNER_DRIVER_TOKEN))
-        @test served.served_product == "V2.4"
+        @test served.served_product == "V2.4e"
         @test occursin("fitted combination of ten causal forecasts",
                        served.lead_time.driver_assumption)
         @test occursin("includes the static regime stack among the combined forecasts",
@@ -1425,7 +1425,7 @@ const V2_1_DRIVER_TOKEN =
         @test silent.lead_time.driver_assumption == "unrecorded"
 
         @test served_product_name("v2.1+sindy20x11+L1A") == "V2.1"
-        @test served_product_name(CURRENT_V2_SERVED_MODEL_VERSION) == "V2.4"
+        @test served_product_name(CURRENT_V2_SERVED_MODEL_VERSION) == "V2.4e"
         @test served_product_name(nothing) == "unknown"
         # The dashboard names every stage of the served label it can be handed; an unknown token falls
         # back to the raw label rather than claiming a capability the pipeline does not have.
@@ -1493,7 +1493,7 @@ const V2_1_DRIVER_TOKEN =
         @test length(by_label) == 2
         @test by_label[PREVIOUS_V2_SERVED_MODEL_VERSION].n == 5 * length(LIVE_CYCLE_HORIZONS)
         @test by_label[CURRENT_V2_SERVED_MODEL_VERSION].n == 3 * length(LIVE_CYCLE_HORIZONS)
-        @test by_label[CURRENT_V2_SERVED_MODEL_VERSION].product == "V2.4"
+        @test by_label[CURRENT_V2_SERVED_MODEL_VERSION].product == "V2.4e"
         @test cal.n_verified_current_served_model ==
               by_label[CURRENT_V2_SERVED_MODEL_VERSION].n
         @test cal.n_verified_current_served_model < cal.n_verified
@@ -1561,7 +1561,7 @@ const V2_1_DRIVER_TOKEN =
         @test health.cycles_considered == 4
         @test health.pre_stage_cycles_excluded == 20
         @test health.served_model_version == CURRENT_V2_SERVED_MODEL_VERSION
-        @test health.served_product == "V2.4"
+        @test health.served_product == "V2.4e"
         @test health.served_fallback_cycles == 0
         @test health.served_fallback_rate == 0.0
         @test health.newest_cycle_is_fallback == false
@@ -3022,19 +3022,19 @@ esac
             @test !occursin("[`\${product} served`, c.v2_matched_rmse_nt]", js)
             label_probe = label_block.captures[1] * """
             console.log(JSON.stringify([
-              servedRowLabel("V2.4", 0, 212),
-              servedRowLabel("V2.4", 47, 212),
-              servedRowLabel("V2.4", 212, 212),
-              servedRowLabel("V2.4", 250, 212),
-              servedRowLabel("V2.4", null, 212),
+              servedRowLabel("V2.4e", 0, 212),
+              servedRowLabel("V2.4e", 47, 212),
+              servedRowLabel("V2.4e", 212, 212),
+              servedRowLabel("V2.4e", 250, 212),
+              servedRowLabel("V2.4e", null, 212),
             ]));
             """
             labels = JSON3.read(read(pipeline(ignorestatus(`$node -e $label_probe`)), String))
-            @test labels[1] == "served pipelines (mixed record; 0 of 212 rows under V2.4)"
-            @test labels[2] == "served pipelines (mixed record; 47 of 212 rows under V2.4)"
-            @test labels[3] == "V2.4 served"
-            @test labels[4] == "V2.4 served"
-            @test labels[5] == "served pipelines (mixed record; 0 of 212 rows under V2.4)"
+            @test labels[1] == "served pipelines (mixed record; 0 of 212 rows under V2.4e)"
+            @test labels[2] == "served pipelines (mixed record; 47 of 212 rows under V2.4e)"
+            @test labels[3] == "V2.4e served"
+            @test labels[4] == "V2.4e served"
+            @test labels[5] == "served pipelines (mixed record; 0 of 212 rows under V2.4e)"
 
             # The superseded-cycle disclosure reaches all three payloads and was rendered nowhere:
             # the panel showed a forecast as current with no indication that the newest issuance had

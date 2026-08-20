@@ -1012,7 +1012,7 @@ function _v23_append_rerun_log(plan::V23RunPlan, reason::AbstractString;
     row = DataFrame(rerun_utc=[string(now(UTC))], stage=[String(stage)],
                     reason=[String(reason)], overwritten_decision=[previous],
                     replacement_decision=[String(replacement)])
-    CSV.write(path, row; append=isfile(path), writeheader=!isfile(path))
+    CSV.write(path, row; append=isfile(path), header=!isfile(path))
     return path
 end
 

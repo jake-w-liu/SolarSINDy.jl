@@ -63,10 +63,11 @@ const V2_3_SHADOW_MODEL_VERSION =
     "v2.3-shadow+sindy20x11+L1A+ADC(magnetic,K25)+T1rcal+LAT+E"
 const LIVE_SKILL_MIN_VERIFIED = 48
 
-# Reader-facing product name of a served-pipeline label: the label's leading version token, so the
-# dashboard and the API name the product the log actually recorded instead of a hardcoded version.
+# Reader-facing product name of a served-pipeline label. The selected V2.4e variant keeps its suffix;
+# fallback labels use their leading version token, so the UI still names the stage the log recorded.
 function served_product_name(label)
     label isa AbstractString || return "unknown"
+    label == CURRENT_V2_SERVED_MODEL_VERSION && return "V2.4e"
     token = first(split(String(label), "+"))
     isempty(token) && return "unknown"
     return startswith(token, "v") ? uppercase(token) : token

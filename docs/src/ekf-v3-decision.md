@@ -5,7 +5,7 @@
 **NOT PROMOTABLE.** Retire adaptive-EKF-on-SINDy from the operational product;
 retain it only as a reproducible research extension. Neither tested overlay met the
 promotion gate on the revised 20-candidate, 11-active-term SINDy core. The live
-monitor, API, dashboard, and alerting path therefore serve V2.1 without an EKF.
+current V2.4e monitor, API, dashboard, and alerting path therefore serve no EKF output.
 
 ## Comparison
 

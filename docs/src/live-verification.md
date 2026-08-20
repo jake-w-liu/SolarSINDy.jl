@@ -112,19 +112,22 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --report=SolarSINDy.jl/var/monitor/live_comparison_report.md
 ```
 
-The headline comparison uses the same target rows for the served center, the
-V2.1 frozen-tail ablation, SINDy v1, persistence, Burton, BurtonFull, and
-O'Brien--McPherron. The served column is the product forecast; it is produced by
-the V2.1 operator followed by the fitted static regime stack over the six point
-components, and it falls back to the V2.1 operator alone, under the V2.1
-identity, whenever the stack stage cannot act. The frozen-tail and selector
-fields are audit evidence, not additional products.
+The headline comparison uses the same target rows for the served center and its
+logged comparators. A normal complete cycle is Operational V2.4e: a ten-expert
+super learner over two V2.1 predecessor forms, a T1r analog, persistence, three
+empirical ring-current forecasts, direct gradient boosting, climatological
+relaxation, and static V2.2. If the V2.4e stage cannot act, the row records the
+static V2.2 or V2.1 fallback identity instead of presenting that forecast as
+V2.4e. Frozen-tail, shadow, and selector fields are audit evidence, not
+additional served products.
 
-## V2 Calibration
+## V2 base calibration retained in V2.4e
 
-The default live model is V2.1; `--model=v2` is its accepted short alias.
-Use `--model=v1` explicitly to reproduce the uncalibrated discovery-core path.
-V2.1 applies a causal ridge residual correction to the current revised 20/11
+The default `--model=v2` option selects the V2.1 base operator; it does not name
+the final served product. The operational path subsequently constructs V2.4e and
+records the exact served identity on every issued row. Use `--model=v1`
+explicitly to reproduce the uncalibrated discovery-core path. V2.1 applies a
+causal ridge residual correction to the current revised 20/11
 SINDy forecast and supplies an empirically evaluated 90%-target prediction interval. The correction
 uses only issue-time fields: latest Dst, solar-wind
 speed, IMF components, density, dynamic pressure, and derived causal coupling
@@ -163,18 +166,18 @@ forecast; the internal `v2_selected_component` field is audit metadata, not a
 separate headline model.
 
 The logged V2.1 frozen-tail center remains available for ablation scores. The
-served fields add the validation-selected operational tail: forecast steps with
+predecessor operator adds the validation-selected operational tail: forecast steps with
 sufficient upstream coverage use ballistically propagated L1 forcing; later
 hours use regime-aware Bz/By relaxation; causal rapid-deepening projection,
 one-hour inertia, state-conditioned inertia, and an extreme-Dst guard constrain
-known failure regimes. The fitted static regime stack then combines that center
-with the frozen V2.1 center, persistence and the three physical baselines, and the
-result is the single product forecast the dashboard displays. The published threat
-level and the interval lower edge that raises a watch are both taken on the deeper
-of the served center and the V2.1 center it replaced, so a stack that reports a
-shallower storm cannot lower a warning. The sub-hour line on the forecast chart is
-the V2.1 core trajectory, shown for shape only; the issued horizons are the served
-centers and can sit away from that line.
+known failure regimes. The fitted static regime stack combines that center with
+the frozen V2.1 center, persistence, and the three physical baselines. Static
+V2.2 is then one of the ten inputs to V2.4e, which is the normal served point
+forecast. The published threat level and the interval lower edge that raises a
+watch are taken on the deepest of V2.4e, static V2.2, and the V2.1 predecessor,
+so the super learner cannot lower a predecessor warning. The sub-hour line on
+the forecast chart is the V2.1 core trajectory, shown for shape only; the issued
+horizons are the served V2.4e centers and can sit away from that line.
 
 The frozen package also includes a separate complete-hour served-stack holdout
 under `data/operational_validation/v2_1_served_holdout_*`. It applies the
@@ -233,7 +236,7 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --table=SolarSINDy.jl/validation/output/operational/live_replay_v2_144h.csv
 ```
 
-The V2.1 calibration is not evidence of readiness by itself. It must be
+The V2.1 base calibration is not evidence of V2.4e readiness by itself. It must be
 scored chronologically against held-out rows and then accumulated through locked
 live forecasts exactly like v1.
 

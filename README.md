@@ -11,13 +11,12 @@ The package is organized as two layers:
    closed-form solar wind–magnetosphere coupling equation for Dst from storm time
    series, alongside classical physical baselines. The current discovery artifact has
    20 candidate terms and 11 active terms.
-2. **Operational forecasting (V2.1).** A causal post-processing layer calibrates the
-   revised 20/11 point forecast and attaches **split-conformal predictive intervals
-   with finite-sample marginal coverage under exchangeability**. It then applies
-   ballistically propagated L1 forcing, regime-aware
-   Bz/By relaxation, a causal rapid-deepening projection, a validation-selected
-   one-hour inertia blend, and an extreme-Dst inertia guard. The archived 21/10 V2.0
-   core is available only through an explicit historical request.
+2. **Operational forecasting (V2.4e).** The serving path forms ten causal experts,
+   including two V2.1 predecessor forms built on the revised 20/11 point forecast,
+   and combines them with nonnegative step-, regime-, and depth-specific weights.
+   It publishes depth-stratified split-conformal intervals and records any fallback
+   to static V2.2 or V2.1 explicitly. The archived 21/10 V2.0 core is available only
+   through an explicit historical request.
 
 ## Capabilities
 
@@ -29,7 +28,7 @@ The package is organized as two layers:
 - classical baselines: Burton, Burton-full, and O'Brien–McPherron
 - NASA OMNI2 ingestion, cleaning, and storm-catalog extraction
 
-**Operational forecasting (V2.1)**
+**Operational forecasting (V2.4e with a V2.1 base operator)**
 
 - a causal correction layer, `Dst_v2 = Dst_v1 + β₀ + Σ βⱼ zⱼ`, fit only from prior
   (replay/live) rows so it never looks ahead of the issue time
@@ -43,7 +42,7 @@ The package is organized as two layers:
 - guarded component selection over corrected SINDy, uncorrected SINDy v1, persistence,
   Burton, Burton-full, and O'Brien–McPherron, deployed only after chronological validation
 - online assimilation utilities for reproducibility and shadow experiments; EKF-on-SINDy
-  failed promotion gates and is not part of the V2 forecast
+  failed promotion gates and is not part of V2.4e serving
 - forecast skill metrics (RMSE, correlation, skill score, prediction efficiency, Wilcoxon)
 
 **Real-time**
