@@ -95,6 +95,10 @@ end
     C = ExternalDstCollectorTestHarness
     @test C._parse_http_last_modified(["Last-Modified" => "Sat, 27 Jun 2026 05:10:00 GMT"]) ==
           C.DateTime(2026, 6, 27, 5, 10, 0)
+    @test C._parse_external_time("2026-06-27T05:10:00.123456Z") ==
+          C.DateTime(2026, 6, 27, 5, 10, 0, 123)
+    @test ismissing(C._parse_external_time("2026-06-27T05:10:00.123garbage"))
+    @test ismissing(C._parse_external_time("2026-06-27T05:10:00.123+08:00"))
     @test C._parse_temerin_model_run("Time of model run:     2026/178-05:05:44") ==
           C.DateTime(2026, 6, 27, 5, 5, 44)
     @test C._parse_temerin_model_run("Time of model run: 2024/060-12:34:56") ==
@@ -1024,6 +1028,10 @@ end
           (deadline=340.0, skipped=0)
     @test_throws ArgumentError L._advance_cycle_deadline(0.0, 1.0, 0.0)
     @test_throws ArgumentError L._advance_cycle_deadline(0.0, Inf, 1.0)
+    mkpath(dirname(L.LOG))
+    write(L.LOG, "issue_time_utc\n2026-08-24T08:00:00.123garbage\n")
+    @test L.newest_issuance_age_hours() === nothing
+    rm(L.LOG)
     issue = L.DateTime(2026, 7, 15, 12, 10)
     targets = L.floor(issue, L.Hour) .+ L.Hour.(collect(L.HORIZONS))
     cycle_rows = L.DataFrame(

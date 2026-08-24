@@ -357,10 +357,8 @@ function newest_issuance_age_hours()
     for row in rows
         s = row.issue_time_utc
         ismissing(s) && continue
-        str = String(string(s))
-        t = tryparse(DateTime, str)
-        t === nothing && (t = tryparse(DateTime, split(str, '.')[1]))
-        t === nothing && continue
+        t = parse_dt(String(string(s)))
+        t === missing && continue
         (latest === nothing || t > latest) && (latest = t)
     end
     latest === nothing && return nothing

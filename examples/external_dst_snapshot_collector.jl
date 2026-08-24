@@ -106,13 +106,19 @@ function _parse_external_time(x)
     s = strip(String(string(x)))
     isempty(s) && return missing
     s = replace(s, " " => "T")
-    s = replace(s, r"Z$" => "")
-    s = split(s, '.')[1]
+    m = match(r"^(.{19})(?:\.(\d+))?Z?$", s)
+    m === nothing && return missing
+    base = m.captures[1]
+    parsed = nothing
     for fmt in (dateformat"yyyy-mm-ddTHH:MM:SS", dateformat"yyyy/mm/dd-HH:MM:SS")
-        t = tryparse(DateTime, s, fmt)
-        t !== nothing && return t
+        parsed = tryparse(DateTime, base, fmt)
+        parsed !== nothing && break
     end
-    return missing
+    parsed === nothing && return missing
+    fraction = m.captures[2]
+    fraction === nothing && return parsed
+    digits = first(fraction, min(length(fraction), 3))
+    return parsed + Millisecond(parse(Int, rpad(digits, 3, '0')))
 end
 
 function _parse_http_last_modified(headers)

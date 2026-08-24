@@ -931,3 +931,33 @@ Clean checkout means a `git archive` of the tree with this pass applied and **no
 
 Counts that require untracked locally generated artifacts are marked above. Every other count is
 what a clean clone reaches.
+
+## Live-feed scalar and UTC parsing (2026-08-24)
+
+### Reproduced defects
+
+Before the change, the dashboard and realtime parsers accepted timestamps such as
+`2026-08-24T01:02:03garbage` and `2026-08-24T01:02:03+08:00` by reading only their first 19
+characters. Fractional seconds were discarded. The SWPC and USGS numeric helpers also converted JSON
+booleans to `1.0` or `0.0`; a boolean could therefore select a solar-wind or Kp row, or contribute a
+finite dB/dt value. A structured timestamp could raise `MethodError` instead of being skipped.
+
+### Independent expectations
+
+The regression cases name exact accepted values and exact rejected shapes. They check one- and
+six-digit fractions against hand-written `DateTime` values, reject suffixes and offsets, reject
+objects and booleans, and exercise the behavior through `fetch_swpc_dst`, RTSW/Kp selection, USGS
+dB/dt calculation, monitor freshness and subhourly trajectory serialization. The external-Dst
+collector tests cover both supported date layouts and the same complete-input rule.
+
+### Results
+
+| Check | Result |
+|---|---|
+| `app/test/runtests.jl` | 1,527 / 1,527 pass |
+| Realtime parser and monitor testsets | 182 / 182 pass |
+| External-Dst collector and live-monitor testsets | 434 / 434 pass |
+| `Pkg.test()` | 283,249 pass, 5 recorded local-artifact skips, 283,254 total, 0 failures, 17m22.6s |
+| `examples/experiments.jl` | V2.4e serving and predecessor smoke completed; center -126.734 nT and band +/-31.857 nT for the bundled probe row |
+| `.agents/scripts/dev-harness-audit.sh .` | 221 checks completed, 1 existing tolerance advisory, 0 failures |
+| `julia --project=docs docs/make.jl` | exit 0; doctests, cross-references and HTML rendering completed |

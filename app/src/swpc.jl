@@ -29,13 +29,19 @@ const SWPC_FUTURE_TOL_MIN = 2.0
 const KP_MAX_AGE_MIN = 240.0                  # Kp is a 3-hour product
 const SCALES_MAX_AGE_MIN = 120.0
 
-# parse a possibly-string numeric to Float64 or nothing
-_pf(x) = x === nothing ? nothing : (x isa Number ? Float64(x) : try
-    parse(Float64, strip(String(x)))
-catch e
-    e isa InterruptException && rethrow()
-    nothing
-end)
+# Parse a possibly-string numeric to finite Float64 or nothing. JSON booleans are not
+# measurements even though Julia's Bool is a subtype of Real.
+function _pf(x)
+    (x === nothing || x === missing || x isa Bool) && return nothing
+    x isa Real && return jnum(x)
+    parsed = try
+        tryparse(Float64, strip(String(x)))
+    catch e
+        e isa InterruptException && rethrow()
+        nothing
+    end
+    return jnum(parsed)
+end
 
 function _swpc_row_field(idx, row, name)
     i = get(idx, name, nothing)
@@ -46,13 +52,13 @@ end
 # SWPC times: "2026-06-20 10:52:00.000" or "2026-06-20T06:00:00"
 function _swpc_dt(s)
     (s === nothing || s === missing) && return missing
-    str = replace(strip(String(s)), " " => "T")
-    try
-        return DateTime(first(str, 19))
+    str = try
+        replace(strip(String(s)), " " => "T")
     catch e
         e isa InterruptException && rethrow()
         return missing
     end
+    return parse_dt(str)
 end
 
 function _source_freshness(timestamp, max_age_min::Real;

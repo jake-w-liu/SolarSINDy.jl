@@ -75,7 +75,17 @@ function dbdt_tier(v)
     return (level = 4, label = DBDT_BAND_LABELS[5])
 end
 
-_num(x) = (x === nothing || x === missing) ? nothing : (x isa Real ? Float64(x) : tryparse(Float64, String(x)))
+function _num(x)
+    (x === nothing || x === missing || x isa Bool) && return nothing
+    x isa Real && return jnum(x)
+    parsed = try
+        tryparse(Float64, strip(String(x)))
+    catch e
+        e isa InterruptException && rethrow()
+        nothing
+    end
+    return jnum(parsed)
+end
 
 function _elapsed_minutes(t0, t1)
     d0 = parse_dt(t0); d1 = parse_dt(t1)

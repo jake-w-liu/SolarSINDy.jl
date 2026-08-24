@@ -139,20 +139,26 @@ function jnum(x)
     return isfinite(value) ? value : nothing
 end
 
-# Tolerant ISO8601 -> DateTime (handles 0..n fractional-second digits); missing-safe.
+# UTC ISO 8601 -> DateTime (handles 0..n fractional-second digits); missing-safe.
+# DateTime stores milliseconds, so longer fractions are truncated to millisecond precision.
+# Offsets are rejected instead of being silently relabelled as UTC by downstream `jdt` calls.
 function parse_dt(s)
     (s === missing || s === nothing) && return missing
-    str = strip(String(s))
-    isempty(str) && return missing
-    try
-        return DateTime(str)                      # fast path (<=3 fractional digits)
+    str = try
+        strip(String(s))
     catch e
         e isa InterruptException && rethrow()
-        m = match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})", str)
-        m === nothing && return missing
-        dt = tryparse(DateTime, m.captures[1])    # whole-second fallback; tryparse → nothing on a
-        return dt === nothing ? missing : dt      # format-valid but invalid date (e.g. month 13), never throws
+        return missing
     end
+    isempty(str) && return missing
+    m = match(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?Z?$", str)
+    m === nothing && return missing
+    dt = tryparse(DateTime, m.captures[1])
+    dt === nothing && return missing
+    fraction = m.captures[2]
+    fraction === nothing && return dt
+    digits = first(fraction, min(length(fraction), 3))
+    return dt + Millisecond(parse(Int, rpad(digits, 3, '0')))
 end
 
 # DateTime -> ISO UTC string with explicit Z, or nothing.
@@ -862,7 +868,7 @@ function _subhour_traj(log_path::AbstractString; cycle_issue=nothing)
             t = parse_dt(String(p.t))
             t === missing && continue
             (anchor !== missing && t < anchor) && continue
-            push!(out, (target_utc = String(p.t) * "Z", dst_nt = jnum(p.dst)))
+            push!(out, (target_utc = jdt(t), dst_nt = jnum(p.dst)))
         end
         return out
     catch e

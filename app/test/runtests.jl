@@ -342,8 +342,26 @@ const V2_1_DRIVER_TOKEN =
         @test _swpc_row_field(idx, ["2026-06-26T00:00:00Z", "460.5", "1.7"], "speed") == 460.5
         @test _swpc_row_field(idx, ["2026-06-26T00:00:00Z", "460.5"], "density") === nothing
         @test _swpc_row_field(idx, ["2026-06-26T00:00:00Z", "460.5"], "bz_gsm") === nothing
+        @test _pf(true) === nothing
+        @test _pf(false) === nothing
+        @test _swpc_row_field(idx, ["2026-06-26T00:00:00Z", true, "1.7"], "speed") === nothing
         @test_throws InterruptException _pf(_InterruptingSWPCText())
         @test_throws InterruptException _swpc_dt(_InterruptingSWPCText())
+    end
+
+    @testset "external timestamps are exact UTC values" begin
+        @test parse_dt("2026-08-24T01:02:03") == DateTime(2026, 8, 24, 1, 2, 3)
+        @test parse_dt("2026-08-24T01:02:03Z") == DateTime(2026, 8, 24, 1, 2, 3)
+        @test parse_dt("2026-08-24T01:02:03.1Z") == DateTime(2026, 8, 24, 1, 2, 3, 100)
+        @test parse_dt("2026-08-24T01:02:03.123456Z") == DateTime(2026, 8, 24, 1, 2, 3, 123)
+        @test parse_dt("2026-08-24T01:02:03garbage") === missing
+        @test parse_dt("2026-08-24T01:02:03+08:00") === missing
+        @test parse_dt("2026-13-24T01:02:03Z") === missing
+        @test parse_dt(Dict("unexpected" => "object")) === missing
+        @test _swpc_dt("2026-08-24 01:02:03.123456") == DateTime(2026, 8, 24, 1, 2, 3, 123)
+        @test _swpc_dt("2026-08-24 01:02:03junk") === missing
+        @test _swpc_dt("2026-08-24 01:02:03+08:00") === missing
+        @test _swpc_dt(Dict("unexpected" => "object")) === missing
     end
 
     @testset "SWPC alert parsing is UTF-8 safe and isolates malformed records" begin
@@ -1946,11 +1964,12 @@ esac
         dir = mktempdir(); logf = joinpath(dir, "log.csv")
         iss = DateTime("2026-06-30T23:59:50.122")
         write(joinpath(dir, "subhour_trajectory.json"),
-              """{"points":[{"t":"2026-06-30T22:00:00","dst":1.0},{"t":"2026-06-30T23:15:00","dst":0.5},""" *
+              """{"points":[{"t":"2026-06-30T22:00:00","dst":1.0},{"t":"2026-06-30T23:15:00Z","dst":0.5},""" *
               """{"t":"2026-07-01T00:00:00","dst":-1.0}],"anchor_time_utc":"2026-06-30T23:00:00",""" *
               """"issue_time_utc":"2026-06-30T23:59:50.122","anchor_dst_nt":0.0}""")
         matched = _subhour_traj(logf; cycle_issue = iss)           # anchor drops the 22:00 point
         @test length(matched) == 2
+        @test matched[1].target_utc == "2026-06-30T23:15:00Z"      # never append a second Z
         @test _subhour_traj(logf; cycle_issue = iss + Hour(1)) |> isempty   # log advanced -> stale sidecar
         @test length(_subhour_traj(logf)) == 2                     # no cycle context -> back-compat
     end
@@ -2128,7 +2147,11 @@ esac
         @test USGS_LIVE_DATA_TYPE == "adjusted"
         reference = now(UTC)
         times = jdt.([reference - Minute(4), reference - Minute(2)])
+        @test _num(true) === nothing
+        @test _num(false) === nothing
+        @test _num("1e999") === nothing
         @test _dbdt_series(times, [0.0, 20.0], [0.0, 0.0])[2] == 10.0
+        @test isnan(_dbdt_series(times, [false, true], [false, false])[2])
         @test isnan(_dbdt_series([times[1], times[1]], [0.0, 20.0], [0.0, 0.0])[2])
         @test isnan(_dbdt_series(reverse(times), [0.0, 20.0], [0.0, 0.0])[2])
         d = (times=times,
@@ -2564,15 +2587,18 @@ esac
         @test String(chosen.time_tag) == "2026-07-14T11:59:00"
 
         malformed_rows = Any[1, Dict(:time_tag=>"bad"),
+            Dict(:time_tag=>Dict("unexpected"=>"object"), :bt=>5.0, :bz_gsm=>-2.0),
             Dict(:time_tag=>"2026-07-14T11:58:00", :active=>"false",
                  :bt=>4.0, :bz_gsm=>-1.0)]
         @test _rtsw_latest(malformed_rows, [:bt, :bz_gsm]; reference=reference) ==
-              malformed_rows[3]
+              malformed_rows[4]
 
         kp_rows = [
             Dict(:time_tag=>"2026-07-14T09:00:00", :Kp=>"5.0"),
             Dict(:time_tag=>"2026-07-14T12:10:00", :Kp=>"9.0"),
             Dict(:time_tag=>"bad", :Kp=>"8.0"),
+            Dict(:time_tag=>Dict("unexpected"=>"object"), :Kp=>"7.0"),
+            Dict(:time_tag=>"2026-07-14T10:00:00", :Kp=>true),
             Dict(:time_tag=>"2026-07-14T11:00:00", :Kp=>nothing),
         ]
         kp_current = _parse_swpc_kp(kp_rows; reference=reference)

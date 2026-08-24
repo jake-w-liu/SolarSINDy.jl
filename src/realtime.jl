@@ -290,16 +290,25 @@ end
 
 Parse an SWPC/Kyoto timestamp, tolerating the ISO-8601 `T` separator
 (`2026-06-14T05:00:00`), the space separator (`2026-06-14 05:00:00`), and an
-optional fractional-second suffix. Returns `nothing` if unparseable.
+optional fractional-second suffix and `Z`. Returns `nothing` if unparseable.
+DateTime stores milliseconds, so longer fractions are truncated to that precision.
+Explicit UTC offsets are rejected rather than silently relabelled as UTC.
 """
 function _parse_swpc_time(s::AbstractString)
-    str = String(s)
-    base = split(str, '.')[1]                # drop any fractional-second suffix
+    str = strip(String(s))
+    m = match(r"^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(?:\.(\d+))?Z?$", str)
+    m === nothing && return nothing
+    base = m.captures[1]
+    parsed = nothing
     for fmt in (dateformat"yyyy-mm-ddTHH:MM:SS", dateformat"yyyy-mm-dd HH:MM:SS")
-        t = tryparse(DateTime, base, fmt)
-        t !== nothing && return t
+        parsed = tryparse(DateTime, base, fmt)
+        parsed !== nothing && break
     end
-    return tryparse(DateTime, str)            # last resort: default ISO constructor
+    parsed === nothing && return nothing
+    fraction = m.captures[2]
+    fraction === nothing && return parsed
+    digits = first(fraction, min(length(fraction), 3))
+    return parsed + Millisecond(parse(Int, rpad(digits, 3, '0')))
 end
 
 """

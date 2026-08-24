@@ -976,3 +976,23 @@ command loads both. They therefore stay in `[deps]`, with the reason recorded in
 `test/test_compat.jl` beside the check that each named consumer still exists; moving them to a
 separate environment would change the documented run command of every figure and study script and of
 the production collector, which is a larger change than this pass is scoped for.
+
+## Live-feed scalar and UTC parsing (2026-08-24)
+
+Live inputs now cross two explicit type boundaries. Numeric fields accept finite real values or
+complete numeric strings; they reject booleans, missing values, structured JSON values and
+non-finite numbers. This matters because Julia defines `Bool <: Real`: converting `true` to
+`1.0` previously allowed a JSON boolean to masquerade as solar-wind, Kp or magnetometer data.
+
+Timestamp fields accept complete UTC timestamps with either the documented `T` separator or, where
+the source permits it, a space separator. A trailing `Z` and an all-digit fractional part are
+optional. Explicit offsets and trailing characters are rejected because the application does not
+perform offset conversion and must not relabel an offset timestamp as UTC. Fractions are retained to
+the millisecond precision supported by `DateTime`; additional digits are truncated. The same rule is
+used by the dashboard, realtime Kyoto parser, monitor freshness check and prospective external-Dst
+collector. Subhourly trajectory output is formatted from the parsed time, preventing an existing
+`Z` suffix from becoming `ZZ`.
+
+Malformed external records continue to be skipped or represented as unavailable according to the
+existing caller contract. `InterruptException` is still rethrown. No forecast equation, fitted
+coefficient, deployment bundle or scientific data product changes in this patch.
