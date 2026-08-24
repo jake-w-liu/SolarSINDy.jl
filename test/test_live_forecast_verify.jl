@@ -2433,10 +2433,10 @@ using .V24ServingFixture
             text = read(report_path, String)
 
             @test out == report_path
-            @test occursin("Verified rows used: 2", text)
+            @test occursin("Verified rows used across all served identities: 2", text)
             @test occursin("Invalid verified rows excluded: 0", text)
             @test occursin("Pending rows: 1", text)
-            @test occursin("Same-row forecast comparison rows: 2", text)
+            @test occursin("Same-row current-identity comparison rows: 2", text)
             @test occursin("## Same-Row Model Comparison", text)
             @test occursin("| Historical V2.0 | 2 |", text)
             @test occursin("| SINDy v1 | 2 |", text)
@@ -3030,12 +3030,12 @@ using .V24ServingFixture
             @test result.rows == [1, 2]
             @test nrow(df) == 2
             @test all(!ismissing, df.observation_dst_nt)
-            @test occursin("Same-row forecast comparison rows: 2", text)
+            @test occursin("Same-row current-identity comparison rows: 2", text)
             @test occursin("Historical V2.0 is the archived operational method", text)
         end
     end
 
-    @testset "C0-3: live report headlines Operational V2.1 when available" begin
+    @testset "C0-3: live report headlines the exact current served identity" begin
         mktempdir() do dir
             log_path = joinpath(dir, "v2_log.csv")
             report_path = joinpath(dir, "v2_report.md")
@@ -3061,6 +3061,7 @@ using .V24ServingFixture
                 served_pred_dst_ci95_nt=[-37.0, -40.0],
                 served_residual_dst_nt=[-1.0, 1.0],
                 served_observed_in_90ci=[true, true],
+                sub_hourly_model_version=fill(V2_4_SERVED_TAIL_VERSION, 2),
                 v2_selected_component=["v2", "v2"],
                 persistence_dst_nt=[-39.0, -44.0],
                 burton_dst_nt=[-41.0, -44.0],
@@ -3070,16 +3071,35 @@ using .V24ServingFixture
             CSV.write(log_path, df)
             write_live_comparison_report(log_path, report_path)
             text = read(report_path, String)
-            @test occursin("V2.1 is the dashboard forecast", text)
-            @test occursin("V2.1 90% interval coverage", text)
-            @test occursin("| V2.1 | 2 |", text)
+            @test occursin("Current served identity: V2.4e (`$(V2_4_SERVED_TAIL_VERSION)`)", text)
+            @test occursin("V2.4e 90% interval coverage", text)
+            @test occursin("| V2.4e | 2 |", text)
             @test occursin("| V2.1 frozen-tail ablation | 2 |", text)
             @test occursin("V2.1 frozen-tail pred", text)
+            @test !occursin("V2.1 is the dashboard forecast", text)
+
+            # Earlier served identities stay separate from the current headline cohort.
+            mixed_history = vcat(first(df, 1), df)
+            mixed_history.issue_time_utc[1] = "2026-06-06T08:00:00"
+            mixed_history.latest_dst_time_utc[1] = "2026-06-06T08:00:00"
+            mixed_history.target_time_utc[1] = "2026-06-06T10:00:00"
+            mixed_history.sub_hourly_model_version[1] = V2_SERVED_TAIL_VERSION
+            mixed_history_path = joinpath(dir, "mixed_served_history.csv")
+            mixed_history_report = joinpath(dir, "mixed_served_history.md")
+            CSV.write(mixed_history_path, mixed_history)
+            write_live_comparison_report(mixed_history_path, mixed_history_report)
+            mixed_text = read(mixed_history_report, String)
+            @test occursin("Verified rows used across all served identities: 3", mixed_text)
+            @test occursin("Verified rows under the current served identity set: 2", mixed_text)
+            @test occursin("Same-row current-identity comparison rows: 2", mixed_text)
+            @test occursin("| V2.1 | `$(V2_SERVED_TAIL_VERSION)` | 1 |", mixed_text)
+            @test occursin("| V2.4e | `$(V2_4_SERVED_TAIL_VERSION)` | 2 |", mixed_text)
 
             # Expanded legacy rows can contain populated served_* columns. The
             # persisted model identity, not column presence, controls labeling.
             historical = copy(df)
             historical.model_version .= "v2"
+            select!(historical, Not(:sub_hourly_model_version))
             historical_path = joinpath(dir, "historical_with_served.csv")
             historical_report = joinpath(dir, "historical_with_served.md")
             CSV.write(historical_path, historical)
@@ -3100,8 +3120,8 @@ using .V24ServingFixture
             )
             empty_current_text = read(empty_current_report, String)
             @test occursin("Newest issued forecast: none", empty_current_text)
-            @test occursin("V2.1 is the dashboard forecast", empty_current_text)
-            @test occursin("Verified rows used: 0", empty_current_text)
+            @test occursin("V2.1 is the recorded base method", empty_current_text)
+            @test occursin("Verified rows used across all served identities: 0", empty_current_text)
             @test !occursin(
                 "Historical V2.0 is the archived operational method",
                 empty_current_text,
@@ -3130,7 +3150,7 @@ using .V24ServingFixture
             report_path = joinpath(dir, "historical_report.md")
             write_live_comparison_report(historical_log, report_path)
             text = read(report_path, String)
-            @test occursin("Same-row forecast comparison rows: 1533", text)
+            @test occursin("Same-row current-identity comparison rows: 1533", text)
             @test occursin("Historical V2.0 90% interval coverage: 0.88", text)
             @test occursin("| Historical V2.0 | 1533 | 9.54 |", text)
             @test occursin(

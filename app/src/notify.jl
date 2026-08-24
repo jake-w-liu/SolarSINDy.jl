@@ -75,7 +75,7 @@ function compute_alert_state(status, upstream_status, dbdt)
         if th.level >= 1; level = max(level, th.level); push!(reasons, "Dst forecast $(th.label)"); end
         if th.watch
             level = max(level, th.watch_level)
-            push!(reasons, "a 90% target interval extends into the $(th.watch_label) range")
+            push!(reasons, "the conservative 90% alerting edge reaches the $(th.watch_label) range")
         end
     end
     if upstream_status !== nothing && getproperty(upstream_status, :available) == true &&

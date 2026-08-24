@@ -4,9 +4,9 @@
 # turns it into honest JSON payloads. Design principles:
 #   * The locked log is the single source of truth. This layer never re-computes a
 #     forecast; it serves exactly what was issued and (later) verified.
-#   * A watch is assessed from the most negative lower edge among the displayed 90%-target
-#     predictive intervals, not only from the point forecast. The watch is a conservative
-#     screen, not a one-sided confidence statement or a storm probability.
+#   * A watch is assessed from the deepest 90% lower edge across the served and predecessor
+#     safety stages, not only from the point forecast. This alerting edge is disclosed separately
+#     from the displayed served band; it is not a confidence bound or a storm probability.
 #   * Calibration (coverage, RMSE) is recomputed from the log itself, so the dashboard
 #     cannot drift from a stale report file.
 #
@@ -843,40 +843,6 @@ function _recent_observed(df::DataFrame; hours::Real=48)
     return out
 end
 
-# Sub-hour MODEL trajectory (display only) written by the engine next to the log: V2 integrated
-# at a sub-hour step. Not a validated sub-hour forecast (Dst is observed hourly; the ODE is hourly-fit) — it is the
-# hourly model's own interpolation. Defensive: missing/unreadable/stale → [].
-#
-# Staleness gate (documented contract): the engine writes the sidecar in a try/catch AFTER
-# appending the log row, so a failed trajectory computation leaves an old sidecar while the log
-# advances — which would draw a sub-hour curve from a different cycle than the served hourly
-# forecast. The sidecar records its own issue/anchor time; we serve it only when its issue time
-# matches the current cycle's, and drop any point that predates the cycle anchor.
-function _subhour_traj(log_path::AbstractString; cycle_issue=nothing)
-    isempty(log_path) && return NamedTuple[]
-    f = joinpath(dirname(log_path), "subhour_trajectory.json")
-    isfile(f) || return NamedTuple[]
-    try
-        d = JSON3.read(read(f, String))
-        if cycle_issue !== nothing && cycle_issue !== missing
-            sc_issue = haskey(d, :issue_time_utc) ? parse_dt(get(d, :issue_time_utc, nothing)) : missing
-            (sc_issue === missing || abs(sc_issue - cycle_issue) > _CYCLE_TOL) && return NamedTuple[]
-        end
-        anchor = haskey(d, :anchor_time_utc) ? parse_dt(get(d, :anchor_time_utc, nothing)) : missing
-        out = NamedTuple[]
-        for p in d.points
-            t = parse_dt(String(p.t))
-            t === missing && continue
-            (anchor !== missing && t < anchor) && continue
-            push!(out, (target_utc = jdt(t), dst_nt = jnum(p.dst)))
-        end
-        return out
-    catch e
-        e isa InterruptException && rethrow()
-        return NamedTuple[]
-    end
-end
-
 # Staleness of a served cycle: age since the newest issue time, and whether every target hour is
 # already in the past. A daemon crash or feed retirement freezes the log, so a cycle issued
 # hours-to-days ago must not be served as the current operational status without a machine-readable
@@ -1123,7 +1089,6 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
                          audit_baseline_dst_nt=jnum(_audit_pred(r))))
     end
     issue = stale.issue_max
-    cycle_issue = issue === missing ? nothing : issue
     return (available=true,
             issue_time_utc=jdt(issue),
             latest_solar_wind_utc=jdt(_common_cycle_field(cyc, :latest_solar_wind_utc_dt)),
@@ -1141,7 +1106,6 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
             stale=stale.stale, expired=stale.expired, invalid_future=stale.invalid_future,
             age_hours=(stale.age_hours === nothing ? nothing : round(stale.age_hours; digits=2)),
             recent_observed=_recent_observed(df),
-            subhour_trajectory=_subhour_traj(log_path; cycle_issue=cycle_issue),
             horizons=horizons)
 end
 
@@ -1349,8 +1313,8 @@ function build_status(df::DataFrame)
     lvl_pt, lbl_pt = dst_threat_level(point_min)
     lvl_wc, lbl_wc = dst_threat_level(interval_lower_edge_min)
     # Reported threat level is the point-forecast level; a "watch" flag fires when the
-    # lower edge of a displayed 90%-target interval reaches a stronger storm tier than the
-    # point forecast. This does not turn the marginal interval into a one-sided bound.
+    # conservative alerting edge reaches a stronger storm tier than the point forecast. This
+    # does not turn any constituent marginal interval into a one-sided bound.
     watch = lvl_wc > lvl_pt
     horizon_max = (h = filter(!isnothing,
         [jnum(_rowget(r, :horizon_hours)) for r in eachrow(cyc)]);
@@ -1476,7 +1440,7 @@ function build_alerts(df::DataFrame, st=build_status(df))
     end
     if th.watch && th.watch_level > th.level
         push!(alerts, (severity=th.watch_label, level=th.watch_level, kind="watch",
-                       message="A displayed 90% target interval extends to " *
+                       message="The conservative 90% alerting edge reaches " *
                                "$(_alert_depth_nt(th.interval_lower_edge_min_dst_nt)) nT " *
                                "($(th.watch_label) range) at one or more horizons."))
     end

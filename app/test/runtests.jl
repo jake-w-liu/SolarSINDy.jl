@@ -180,6 +180,7 @@ const PAYLOADS = {
     interval_sources: [MARKER, "v24_conformal_depth"], superseded_cycle_incomplete: false,
     served_product: "V2.4e" + MARKER, served_model_version: "@@SERVED@@",
     recent_observed: [{ target_utc: "@@ISSUE@@", observed_dst_nt: -40.0 }],
+    subhour_trajectory: [{ target_utc: "2026-06-26T06:15:00Z", dst_nt: -999.0 }],
     horizons: [{ target_utc: "2026-06-26T07:00:00Z", horizon_hours: 1.0, pred_dst_nt: -70.0,
                  ci05_dst_nt: -95.0, ci95_dst_nt: -45.0, severity_dst_nt: -75.0,
                  severity_ci05_dst_nt: -105.0, severity_ci05_source: "v2_1_served",
@@ -824,11 +825,12 @@ const V2_1_DRIVER_TOKEN =
         alerts = build_alerts(df, st).alerts
         @test any(alert -> alert.kind == "watch" && alert.level == 1, alerts)
         watch = only(filter(alert -> alert.kind == "watch", alerts))
-        @test occursin("displayed 90% target interval", watch.message)
+        @test occursin("conservative 90% alerting edge", watch.message)
         @test !occursin("cannot be excluded", watch.message)
         fc = build_forecast(df)
         @test length(fc.horizons) == 4
         @test fc.issue_time_utc == string(iss_new) * "Z"
+        @test !hasproperty(fc, :subhour_trajectory)
     end
 
     @testset "latest_cycle does not merge restart cycles across an hour boundary" begin
@@ -1454,7 +1456,8 @@ const V2_1_DRIVER_TOKEN =
         app_source = read(joinpath(dirname(APPSRC), "public", "app.js"), String)
         @test !occursin("Forecast: V2.1", app_source)
         @test !occursin("Product forecast: V2.1.", app_source)
-        @test occursin("V2.1 core trajectory (display)", app_source)
+        @test !occursin("V2.1 core trajectory (display)", app_source)
+        @test occursin("issued centers as a visual guide", app_source)
     end
 
     @testset "a cycle whose stack stage healed mid-cycle stays available" begin
@@ -1958,20 +1961,6 @@ esac
                            for l in webhook_lines()[(wh_c + 1):end])
             end
         end
-    end
-
-    @testset "sub-hour trajectory served only for the matching cycle" begin
-        dir = mktempdir(); logf = joinpath(dir, "log.csv")
-        iss = DateTime("2026-06-30T23:59:50.122")
-        write(joinpath(dir, "subhour_trajectory.json"),
-              """{"points":[{"t":"2026-06-30T22:00:00","dst":1.0},{"t":"2026-06-30T23:15:00Z","dst":0.5},""" *
-              """{"t":"2026-07-01T00:00:00","dst":-1.0}],"anchor_time_utc":"2026-06-30T23:00:00",""" *
-              """"issue_time_utc":"2026-06-30T23:59:50.122","anchor_dst_nt":0.0}""")
-        matched = _subhour_traj(logf; cycle_issue = iss)           # anchor drops the 22:00 point
-        @test length(matched) == 2
-        @test matched[1].target_utc == "2026-06-30T23:15:00Z"      # never append a second Z
-        @test _subhour_traj(logf; cycle_issue = iss + Hour(1)) |> isempty   # log advanced -> stale sidecar
-        @test length(_subhour_traj(logf)) == 2                     # no cycle context -> back-compat
     end
 
     @testset "geoelectric nowcast keeps the storm ramp and serves the real endpoint" begin
@@ -2931,7 +2920,7 @@ esac
         @test occursin("const lvl = Math.max(pointLevel, watchLevel);", js)
         @test occursin("const alertLabel = watchLevel > pointLevel ? th.watch_label : th.label;", js)
         @test occursin("const body = watchLevel > pointLevel", js)
-        @test occursin("A displayed 90% target interval extends to", js)
+        @test occursin("The conservative 90% alerting edge reaches", js)
         @test occursin("interval_lower_edge_min_dst_nt", js)
         # The alerting numbers are quoted by the alert text, so they must actually be displayed:
         # a number an operator is alerted on that appears nowhere on the page is not auditable.
@@ -2942,8 +2931,8 @@ esac
         @test occursin("severity_dst_nt", js)
         @test occursin("severity_ci05_dst_nt", js)
         @test occursin("severity_ci05_source", js)
-        @test occursin("Depth-safe alerting values across these horizons", js)
-        for token in ("the static regime stack", "the V2.1 operator")
+        @test occursin("Conservative alerting envelope across these horizons", js)
+        for token in ("the Static V2.2 predecessor safety band", "the V2.1 predecessor safety band")
             @test occursin(token, js)
         end
         # An unrecognised pipeline stage falls back to the raw label for the whole pipeline instead of
@@ -3020,10 +3009,10 @@ esac
             console.log(JSON.stringify(out));
             """
             rendered = JSON3.read(read(pipeline(ignorestatus(`$node -e $severity_probe`)), String))
-            @test occursin("severity centre -95 nT", rendered[1].text)
-            @test occursin("watch edge -105 nT", rendered[1].text)
+            @test occursin("centre -95 nT", rendered[1].text)
+            @test occursin("90% lower edge -105 nT", rendered[1].text)
             # The deepest edge belongs to the V2.1 operator, so that is the stage named.
-            @test occursin("edge from the V2.1 operator", rendered[1].text)
+            @test occursin("set by the V2.1 predecessor safety band", rendered[1].text)
             @test rendered[1].hidden == false
             # No alerting values in the payload leaves the line empty and hidden rather than showing
             # an em dash where a warning number belongs.
@@ -3031,7 +3020,7 @@ esac
             @test rendered[2].hidden == true
             # A source token that resolves through Object.prototype is rendered as the token, never as
             # whatever that property happens to be: the stage that set a warning must be a name.
-            @test occursin("edge from toString", rendered[3].text)
+            @test occursin("set by toString", rendered[3].text)
             @test !occursin("function", rendered[3].text)
         end
         # The pooled served row of the live-skill table is a mixed-pipeline record until every
@@ -3155,7 +3144,7 @@ esac
         for label in ("Forecast: \${productName(st)} (", "Verified issued",
                       "Product forecast: \${esc(product)}.",
                       "served RMSE nT", "verified forecasts",
-                      "V2.1 core trajectory (display)",
+                      "issued centers as a visual guide",
                       "V2.1 frozen-tail ablation", "SINDy v1", "Persistence",
                       "Burton full", "O'Brien–McPherron", "live_skill_mature",
                       "matched point forecast (n=\${matchedN})", "no best method is highlighted",
@@ -3172,10 +3161,12 @@ esac
         end
         @test occursin("mature && v != null", js)
         @test !occursin("calibrated uncertainty", html)
-        @test occursin("package's V2.1 forecaster", readme)
+        @test occursin("Normal cycles use Operational V2.4e", readme)
         @test occursin("exactly the same", readme)
-        @test occursin("48 common rows", readme)
-        @test occursin("project's **V2.1** nowcaster", readme)
+        @test occursin(r"48\s+common rows", readme)
+        @test occursin("**Operational V2.4e**", readme)
+        @test !occursin("package's V2.1 forecaster", readme)
+        @test !occursin("project's **V2.1** nowcaster", readme)
         @test !occursin("package's V2 forecaster", readme)
         @test !occursin("V2 and every baseline", readme)
         for unsupported in ("GIC driver", "GIC forecast", "GIC alert thresholds",
@@ -3186,7 +3177,7 @@ esac
             @test !occursin(unsupported, served_source)
         end
         @test occursin("GIC-hazard indicator", html)
-        @test occursin("90% target-interval lower edge", html)
+        @test occursin("conservative 90% alerting edge", html)
         for metric in ("cur-dst", "worst-dst", "horizon")
             @test occursin("\$(\"" * metric * "\").textContent = \"—\"", js)
         end
@@ -3695,6 +3686,11 @@ esac
             forecast_names = String[String(t.name) for t in rendered.plots["forecast-plot"].traces
                                     if haskey(t, :name)]
             @test any(name -> occursin(escaped, name), forecast_names)
+            @test !any(name -> occursin("V2.1 core trajectory", name), forecast_names)
+            @test !any(t -> haskey(t, :y) &&
+                            any(v -> v isa Number && Float64(v) == -999.0, t.y),
+                       rendered.plots["forecast-plot"].traces)
+            @test occursin("no sub-hour", sinks["forecast-caption"])
 
             # The base map is fetched from this origin, and the setting is applied once, before the
             # first plot is drawn — the library reads it when a geo subplot is created.

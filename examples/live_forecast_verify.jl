@@ -82,14 +82,16 @@ function _usage()
       --replay-omni          Build a longer causal replay table from local OMNI CSV.
       --fit-v2-calibration   Fit V2 calibration from --table CSV.
       --wait                 Issue one row, then poll until its target observation arrives.
-      --campaign             Issue multiple operational-v2 horizons, verify, and report.
+      --campaign             Issue multiple operational horizons, verify, and report.
       --summary              Print aggregate live-log scores.
       --comparison-report    Write standard locked-live comparison report.
 
     Options:
-      --model=v1|v2.1        Forecast model to log/score. The `v2` alias resolves
-                            to V2.1. Default: V2.1; use v1 explicitly for the
-                            uncalibrated discovery-core forecast.
+      --model=v1|v2.1        Base forecast operator. The `v2` alias resolves to
+                            V2.1, from which normal issuance constructs V2.4e;
+                            every row records the final effective served identity.
+                            Default base: V2.1. Use v1 only for an explicit
+                            uncalibrated discovery-core comparison.
       --poll-seconds=N       Poll interval for --wait/--campaign. Default: 300.
       --timeout-hours=N      Maximum wait time for --wait/--campaign. Default: 4.
       --horizon-hours=N      Hourly target index after issue time. Default: 1.
@@ -906,11 +908,10 @@ _subhourly_driver(plasma::DataFrame, mag::DataFrame, step_time::DateTime,
                   recent, latest_common_sw::DateTime) =
     _subhourly_driver_with_status(plasma, mag, step_time, recent, latest_common_sw).driver
 
-# Sub-hour MODEL TRAJECTORY for the near term: the V2 forecast integrated at a sub-hour step (default 15 min)
-# with the same per-hour drivers (observed / L1 look-ahead / regime-aware tail). This is DISPLAY ONLY and is a model
-# trajectory, not a validated sub-hour forecast: Dst is published only hourly (no sub-hour ground truth) and the
-# discovered ODE is fit on hourly data, so the curve is the hourly-scale model's own interpolation. It tracks the
-# hourly forecast closely because the ring current has little sub-hour structure.
+# Optional legacy diagnostic: integrate the V2.1 base operator at a sub-hour step. This is neither
+# a V2.4e forecast nor a validated sub-hour product: Dst is published hourly and the sparse equation
+# was fitted on hourly data. Operational issuance leaves this diagnostic disabled, and the dashboard
+# uses only the issued target-hour centers.
 function _fork_forecast_state(template::ForecastState, t0::DateTime, dst0::Real;
                               dt::Real=template.dt)
     # The library and coefficient arrays are immutable during forecasting, so all
@@ -4220,7 +4221,7 @@ end
 
 function issue_forecast(cfg::LiveVerifyConfig;
                         inputs=nothing,
-                        write_trajectory::Bool=true,
+                        write_trajectory::Bool=false,
                         verbose::Bool=true,
                         interval_policy::Symbol=:auto,
                         tail_step_fn::Function=step_forecast!)
@@ -4860,7 +4861,8 @@ function issue_forecast(cfg::LiveVerifyConfig;
     append_result = _append_forecast!(cfg.log_path, row; return_status=true)
     row_idx = append_result.row_idx
 
-    # Sub-hour model trajectory (display only) for the latest newly logged cycle.
+    # Opt-in V2.1 base diagnostic for research tests. The live monitor leaves this disabled, and the
+    # public API does not expose the sidecar.
     try
         _write_subhour_trajectory!(
             joinpath(dirname(cfg.log_path), "subhour_trajectory.json"),
@@ -5325,6 +5327,40 @@ function _row_model_version(df::DataFrame, row_idx::Int)
     return "v1"
 end
 
+# Exact served-stage identity of a row. `model_version` names the V2.1 base operator even when the
+# final center is V2.4e, so operational reporting must prefer the per-row served label. Older logs
+# without that column fall back to their recorded base identity.
+function _row_served_model_version(df::DataFrame, row_idx::Int)
+    base = _row_model_version(df, row_idx)
+    # In pre-migration V2.0 logs, `sub_hourly_model_version` names a display/tail diagnostic rather
+    # than the product that supplied the scored center. Bare `v2` is the authoritative historical
+    # product identity there. Modern rows write the canonical `v2.1` base plus the effective served
+    # stage in the sub-hourly identity column.
+    base in ("v2", "v2.0", "v2_0") && return base
+    if String(:sub_hourly_model_version) in names(df)
+        value = df[row_idx, :sub_hourly_model_version]
+        if !ismissing(value)
+            label = strip(String(value))
+            isempty(label) || return label
+        end
+    end
+    return base
+end
+
+# Reader-facing name for an exact served identity. Only the selected deployed V2.4 bundle earns the
+# V2.4e suffix; unknown or fallback identities remain visible through their leading version token
+# and are always accompanied by the exact identity in generated reports.
+function _served_product_name(label::AbstractString)
+    value = strip(String(label))
+    value == V2_4_SERVED_TAIL_VERSION && return "V2.4e"
+    value == V2_2_SERVED_TAIL_VERSION && return "V2.2"
+    value == V2_SERVED_TAIL_VERSION && return "V2.1"
+    value in ("v2", "v2.0", "v2_0") && return "Historical V2.0"
+    isempty(value) && return "unknown"
+    token = first(split(value, "+"))
+    return startswith(token, "v") ? uppercase(token) : token
+end
+
 function _row_is_strictly_future(df::DataFrame, row_idx::Int)
     try
         issue = _parse_dt(df[row_idx, :issue_time_utc])
@@ -5381,7 +5417,7 @@ function _operational_log_identity(
     # migration. New issuance always writes the explicit canonical `v2.1`.
     has_historical = any(v -> v in ("v2", "v2.0", "v2_0"), versions)
     has_current && has_historical && throw(ArgumentError(
-        "forecast log mixes historical V2.0 and current V2.1 rows; migrate it before reporting",
+        "forecast log mixes historical V2.0 and V2.1-base rows; migrate it before reporting",
     ))
     has_current && return :v2_1
     has_historical && return :v2_0
@@ -5392,12 +5428,14 @@ function _operational_log_identity(
 end
 
 function _standard_model_columns(df::DataFrame;
-                                 identity::Symbol=_operational_log_identity(df))
+                                 identity::Symbol=_operational_log_identity(df),
+                                 served_label::Union{Nothing,String}=nothing)
     specs = Pair{String,Symbol}[]
     has_served_product = String(:served_pred_dst_nt) in names(df)
     if has_served_product
-        served_label = identity == :v2_1 ? "V2.1" : "Historical V2.0"
-        push!(specs, served_label => :served_pred_dst_nt)
+        product_label = served_label === nothing ?
+            (identity == :v2_1 ? "V2.1" : "Historical V2.0") : served_label
+        push!(specs, product_label => :served_pred_dst_nt)
     end
     base_label = identity == :v2_1 ? "V2.1" : "Historical V2.0"
     v2_label = has_served_product ? "$base_label frozen-tail ablation" : base_label
@@ -5474,9 +5512,10 @@ function _model_residual(df::DataFrame, row_idx::Int, pred_col::Symbol)
     return observed - pred
 end
 
-# Forecast identity key (issue hour, target time, model version) as strings, coalescing a
-# missing model version to "v1" (matching _row_model_version), or nothing when the time fields are
-# absent/missing. Forecasts for the same target in different hourly issue cycles remain distinct.
+# Forecast identity key (issue hour, target time, exact served identity) as strings, falling back to
+# the base model identity for legacy logs, or nothing when the time fields are absent/missing.
+# Forecasts for the same target in different hourly issue cycles or under different served products
+# remain distinct.
 function _forecast_identity_key(df::DataFrame, i::Int)
     (String(:issue_time_utc) in names(df) && String(:target_time_utc) in names(df)) || return nothing
     (ismissing(df[i, :issue_time_utc]) || ismissing(df[i, :target_time_utc])) && return nothing
@@ -5488,10 +5527,10 @@ function _forecast_identity_key(df::DataFrame, i::Int)
     end
     return (String(string(issue)),
             String(string(df[i, :target_time_utc])),
-            _row_model_version(df, i))
+            _row_served_model_version(df, i))
 end
 
-# Deduplicate scored rows by forecast identity (issue hour, target time, model version),
+# Deduplicate scored rows by forecast identity (issue hour, target time, exact served identity),
 # keeping the earliest issue timestamp. A handful of pre-2026-06-26 rows predate the append-time
 # pending-dedup guard, so duplicate rows from the same hourly product cycle remain in the raw log and would be
 # double-counted in pooled RMSE/MAE/coverage; scoring-time dedup removes that overweighting without
@@ -5543,6 +5582,32 @@ function _newest_issue_time(df::DataFrame)
     return latest
 end
 
+# Exact served labels present in the newest hourly issue cycle. A cycle can legitimately contain
+# more than one label if a stage heals between horizons; in that case reporting must say it is mixed
+# rather than assigning every row to one product.
+function _current_served_labels(df::DataFrame)
+    newest = _newest_issue_time(df)
+    newest === nothing && return String[]
+    newest_hour = _floor_hour(newest)
+    labels = String[]
+    for i in 1:nrow(df)
+        issue = try
+            _parse_dt(df[i, :issue_time_utc])
+        catch e
+            e isa InterruptException && rethrow()
+            continue
+        end
+        _floor_hour(issue) == newest_hour || continue
+        push!(labels, _row_served_model_version(df, i))
+    end
+    return sort!(unique(labels))
+end
+
+function _rows_for_served_labels(df::DataFrame, rows::Vector{Int}, labels::Vector{String})
+    wanted = Set(labels)
+    return [i for i in rows if _row_served_model_version(df, i) in wanted]
+end
+
 function write_live_comparison_report(
     log_path::String,
     report_path::String;
@@ -5558,11 +5623,20 @@ function write_live_comparison_report(
     valid_verified, n_duplicate_dropped = _dedup_scored_indices(df, strictly_future)
     pending = _pending_indices(df)
     identity = _operational_log_identity(df; empty_identity)
-    model_specs = _standard_model_columns(df; identity=identity)
-    comparison_rows = _same_row_model_indices(df, valid_verified, model_specs)
+    current_labels = _current_served_labels(df)
+    no_issued_rows = _newest_issue_time(df) === nothing
+    if isempty(current_labels)
+        push!(current_labels, identity == :v2_1 ? "v2.1" : "v2")
+    end
+    current_verified = _rows_for_served_labels(df, valid_verified, current_labels)
+    headline_name = length(current_labels) == 1 ?
+        _served_product_name(only(current_labels)) : "Mixed served stages"
+    model_specs = _standard_model_columns(
+        df; identity=identity, served_label=headline_name,
+    )
+    comparison_rows = _same_row_model_indices(df, current_verified, model_specs)
     served_active = any(last(spec) == :served_pred_dst_nt for spec in model_specs)
-    current_active = identity == :v2_1
-    headline_name = current_active ? "V2.1" : "Historical V2.0"
+    base_is_v2_1 = identity == :v2_1
     headline_col = served_active ? :served_pred_dst_nt : :v2_pred_dst_nt
     headline_ci05 = served_active ? :served_pred_dst_ci05_nt : :v2_pred_dst_ci05_nt
     headline_ci95 = served_active ? :served_pred_dst_ci95_nt : :v2_pred_dst_ci95_nt
@@ -5588,24 +5662,57 @@ function write_live_comparison_report(
         end
     end
     push!(lines, "")
-    push!(lines, "Verified rows used: $(length(valid_verified))")
+    push!(lines, "Verified rows used across all served identities: $(length(valid_verified))")
     push!(lines, "Invalid verified rows excluded: $(length(invalid_verified))")
-    push!(lines, "Duplicate (issue hour, target, model) scored rows excluded: $(n_duplicate_dropped)")
+    push!(lines, "Duplicate (issue hour, target, served identity) scored rows excluded: $(n_duplicate_dropped)")
     push!(lines, "Pending rows: $(length(pending))")
-    push!(lines, "Same-row forecast comparison rows: $(length(comparison_rows))")
+    if length(current_labels) == 1
+        push!(lines, "Current served identity: $headline_name (`$(only(current_labels))`)")
+    else
+        products = join(["$(_served_product_name(label)) (`$label`)" for label in current_labels], ", ")
+        push!(lines, "Current served identities: $products **[MIXED NEWEST CYCLE]**")
+    end
+    push!(lines, "Verified rows under the current served identity set: $(length(current_verified))")
+    push!(lines, "Same-row current-identity comparison rows: $(length(comparison_rows))")
     if !ismissing(coverage)
         push!(lines, "$headline_name 90% interval coverage: $(_fmt3(coverage))")
     end
 
     push!(lines, "")
+    push!(lines, "## Verified Rows by Exact Served Identity")
+    push!(lines, "")
+    push!(lines, "| served product | exact served identity | n | RMSE nT | 90% interval coverage |")
+    push!(lines, "| --- | --- | ---: | ---: | ---: |")
+    verified_labels = sort!(unique(_row_served_model_version(df, i) for i in valid_verified))
+    for label in verified_labels
+        rows = [i for i in valid_verified if _row_served_model_version(df, i) == label]
+        pred_col = served_active ? :served_pred_dst_nt : :v2_pred_dst_nt
+        ci05_col = served_active ? :served_pred_dst_ci05_nt : :v2_pred_dst_ci05_nt
+        ci95_col = served_active ? :served_pred_dst_ci95_nt : :v2_pred_dst_ci95_nt
+        metric_rows = [i for i in rows if _has_prediction(df, i, pred_col)]
+        preds, obs = _metric_rows_for_indices(df, pred_col, metric_rows)
+        metric = _metric_values(preds, obs)
+        label_coverage = _interval_coverage_fraction(df, metric_rows, ci05_col, ci95_col)
+        rmse_text = metric === nothing ? "" : _fmt2(metric.rmse)
+        coverage_text = ismissing(label_coverage) ? "" : _fmt3(label_coverage)
+        push!(lines, "| $(_served_product_name(label)) | `$label` | $(length(metric_rows)) | $rmse_text | $coverage_text |")
+    end
+
+    push!(lines, "")
     push!(lines, "## Same-Row Model Comparison")
     push!(lines, "")
-    if current_active && served_active
-        push!(lines, "V2.1 is the dashboard forecast. Its frozen-tail ablation is retained only as an audit comparator; all rows are identical verified targets.")
-    elseif current_active
-        push!(lines, "V2.1 is the current operational method; all rows are identical verified targets.")
+    if no_issued_rows && base_is_v2_1
+        push!(lines, "No issued row is available; V2.1 is the recorded base method for this empty log.")
+    elseif no_issued_rows
+        push!(lines, "No issued row is available; Historical V2.0 is the recorded base method for this empty log.")
+    elseif served_active && length(current_labels) == 1 && base_is_v2_1
+        push!(lines, "$headline_name is the effective served product in the newest issue cycle. The headline cohort uses only rows carrying its exact served identity; the V2.1 frozen-tail center remains an audit comparator on the same verified targets.")
+    elseif served_active && length(current_labels) == 1
+        push!(lines, "Historical V2.0 is the archived operational method. Its served and frozen-tail centers, v1, and physical baselines are compared on identical verified rows.")
     elseif served_active
-        push!(lines, "Historical V2.0 is the archived operational method. Its frozen-tail ablation, v1, and physical baselines are compared on identical verified rows.")
+        push!(lines, "The newest issue cycle contains more than one disclosed served stage. The headline cohort is therefore labelled as mixed and includes only rows carrying one of those exact identities; results for every identity remain separated above.")
+    elseif base_is_v2_1
+        push!(lines, "V2.1 is the recorded base method in this legacy-schema log; all rows are identical verified targets.")
     else
         push!(lines, "Historical V2.0 is the archived operational method. This table compares V2.0, v1, and baselines on identical verified rows.")
     end
@@ -5620,7 +5727,8 @@ function write_live_comparison_report(
     push!(lines, "")
     push!(lines, "## Verified $headline_name Rows")
     push!(lines, "")
-    ref_header = served_active ? "$headline_name frozen-tail pred | " : ""
+    frozen_name = base_is_v2_1 ? "V2.1" : "Historical V2.0"
+    ref_header = served_active ? "$frozen_name frozen-tail pred | " : ""
     push!(lines, "| issue UTC | target UTC | lead h | observed | $(lowercase(headline_name)) pred | residual obs-pred | abs error | inside 90% CI | $(ref_header)SINDy v1 pred | persistence | Burton | OBrien |")
     if served_active
         push!(lines, "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |")
@@ -5671,14 +5779,16 @@ function write_live_comparison_report(
         push!(lines, "## Pending Rows")
         push!(lines, "")
         if served_active
-            push!(lines, "| issue UTC | target UTC | model | $headline_name pred | $headline_name frozen-tail pred | CI05 | CI95 |")
-            push!(lines, "| --- | --- | --- | ---: | ---: | ---: | ---: |")
+            comparator_name = base_is_v2_1 ? "V2.1 frozen-tail" : "Historical V2.0 frozen-tail"
+            push!(lines, "| issue UTC | target UTC | served product | exact served identity | served pred | $comparator_name pred | CI05 | CI95 |")
+            push!(lines, "| --- | --- | --- | --- | ---: | ---: | ---: | ---: |")
         else
             push!(lines, "| issue UTC | target UTC | model | Historical V2.0 pred | CI05 | CI95 |")
             push!(lines, "| --- | --- | --- | ---: | ---: | ---: |")
         end
         for row_idx in pending
             model_version = _row_model_version(df, row_idx)
+            served_version = _row_served_model_version(df, row_idx)
             pred = _prediction_value(df, row_idx, headline_col)
             ismissing(pred) && (pred = _optional_float(df, row_idx, :pred_dst_nt))
             ci05 = _optional_float(df, row_idx, headline_ci05)
@@ -5690,7 +5800,7 @@ function write_live_comparison_report(
                 push!(lines,
                     "| $(_fmt_text(df[row_idx, :issue_time_utc])) | " *
                     "$(_fmt_text(df[row_idx, :target_time_utc])) | " *
-                    "$(_fmt_text(model_version)) | " *
+                    "$(_served_product_name(served_version)) | `$served_version` | " *
                     "$(_fmt2(pred)) | $(_fmt2(ref_pred)) | $(_fmt2(ci05)) | $(_fmt2(ci95)) |"
                 )
             else
@@ -5724,7 +5834,7 @@ function write_live_comparison_report(
 
     if String(:v2_selected_component) in names(df) && !isempty(comparison_rows)
         push!(lines, "")
-        audit_version = current_active ? "V2.1" : "V2.0"
+        audit_version = base_is_v2_1 ? "V2.1 base" : "V2.0"
         push!(lines, "## Operational $audit_version Audit")
         push!(lines, "")
         push!(lines, "The component column is internal $audit_version audit metadata, not a separate headline model.")
@@ -5747,12 +5857,14 @@ function write_live_comparison_report(
     push!(lines, "")
     push!(lines, "- A row is correct for point accuracy only by its absolute error against the locked target observation.")
     push!(lines, "- A row is correct for probabilistic coverage only if the observation falls inside the locked interval.")
-    if current_active && served_active
-        push!(lines, "- V2.1 is the dashboard forecast; judge it against its frozen-tail ablation and physical baselines on the same verified rows.")
-    elseif current_active
-        push!(lines, "- These rows identify V2.1; judge its point forecast against physical baselines on the same verified rows.")
-    elseif served_active
+    if served_active && length(current_labels) == 1 && base_is_v2_1
+        push!(lines, "- $headline_name is the current effective served product; judge it only on rows carrying its exact served identity and against comparators evaluated on those same targets.")
+    elseif served_active && length(current_labels) == 1
         push!(lines, "- These rows are historical V2.0 evidence; judge its served product against the frozen-tail ablation and physical baselines on the same verified rows.")
+    elseif served_active
+        push!(lines, "- The newest cycle contains mixed served stages; do not attribute the combined headline cohort to any one product, and use the exact-identity table for stage-specific evidence.")
+    elseif base_is_v2_1
+        push!(lines, "- These legacy-schema rows identify the V2.1 base method; judge its point forecast against physical baselines on the same verified rows.")
     else
         push!(lines, "- These rows are historical V2.0 evidence and must not be attributed to V2.1.")
     end
@@ -5763,7 +5875,8 @@ function write_live_comparison_report(
     write(report_path, join(lines, "\n") * "\n")
     println("Wrote locked-live comparison report: $report_path")
     println(
-        "Verified rows used: $(length(valid_verified)); " *
+        "Verified rows across all served identities: $(length(valid_verified)); " *
+        "current identity set: $(length(current_verified)); " *
         "invalid verified rows excluded: $(length(invalid_verified)); " *
         "pending rows: $(length(pending))"
     )
@@ -5775,14 +5888,20 @@ function summarize_log(log_path::String)
     df = CSV.read(log_path, DataFrame)
     println("Live forecast log: $log_path")
     identity = _operational_log_identity(df)
-    model_specs = _standard_model_columns(df; identity=identity)
-    # Deduplicate scored rows by (issue hour, target, model) so pre-guard duplicate rows do
+    current_labels = _current_served_labels(df)
+    isempty(current_labels) && push!(current_labels, identity == :v2_1 ? "v2.1" : "v2")
+    headline = length(current_labels) == 1 ?
+        _served_product_name(only(current_labels)) : "Mixed served stages"
+    model_specs = _standard_model_columns(df; identity=identity, served_label=headline)
+    # Deduplicate scored rows by (issue hour, target, exact served identity) so pre-guard duplicate rows do
     # not double-count in the pooled metrics/coverage (see _dedup_scored_indices).
     verified = _verified_indices(df)
     kept, n_duplicate_dropped = _dedup_scored_indices(df, verified)
     n_duplicate_dropped > 0 && println(
-        "(excluded $n_duplicate_dropped duplicate (issue hour, target, model) scored row(s) from pooled metrics)")
-    comparison_rows = _same_row_model_indices(df, kept, model_specs)
+        "(excluded $n_duplicate_dropped duplicate (issue hour, target, served identity) scored row(s) from pooled metrics)")
+    current_verified = _rows_for_served_labels(df, kept, current_labels)
+    comparison_rows = _same_row_model_indices(df, current_verified, model_specs)
+    println("Verified rows across all served identities: $(length(kept)); current identity set: $(length(current_verified))")
     for (name, col) in model_specs
         (col == :v1_pred_dst_nt || String(col) in names(df)) || continue
         preds, obs = _metric_rows_for_indices(df, col, comparison_rows)
@@ -5797,7 +5916,6 @@ function summarize_log(log_path::String)
         ismissing(value) || push!(flags, Bool(value))
     end
     if !isempty(flags)
-        headline = identity == :v2_1 ? "V2.1" : "Historical V2.0"
         println(
             "$headline 90% coverage n=$(length(flags)) " *
             "coverage=$(round(mean(flags); digits=3))",

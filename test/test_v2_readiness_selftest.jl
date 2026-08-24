@@ -11,6 +11,7 @@ module V2ReadinessSelfTestTests
 
 using Test
 using Dates
+using DataFrames
 
 const AUDIT_PATH = normpath(joinpath(@__DIR__, "..", "validation", "operational",
                                      "v2_readiness_audit.jl"))
@@ -36,6 +37,19 @@ const AUDIT_PATH = normpath(joinpath(@__DIR__, "..", "validation", "operational"
     @test audit.SELFTEST_CHECK_COUNT[] >= audit.SELFTEST_MIN_CHECKS
     @test audit.SELFTEST_MIN_CHECKS >= 42
 
+    # Kyoto can remain on the same Dst anchor across consecutive issue hours while new L1
+    # measurements arrive. Those are distinct forecasts. A repeated row inside one issue hour is
+    # still a duplicate, matching the live append key exactly.
+    pending = DataFrame(
+        model_version=fill("v2.1", 2),
+        issue_time_utc=[DateTime(2026, 8, 24, 12, 48), DateTime(2026, 8, 24, 13, 19)],
+        latest_dst_time_utc=fill(DateTime(2026, 8, 24, 12), 2),
+        target_time_utc=fill(DateTime(2026, 8, 24, 14), 2),
+    )
+    @test nrow(audit.pending_duplicate_groups(pending)) == 0
+    pending.issue_time_utc[2] = DateTime(2026, 8, 24, 12, 59)
+    @test nrow(audit.pending_duplicate_groups(pending)) == 1
+
     # The audit requires the served stage to be disclosed in the dashboard payload. A fixture payload
     # that omits the stack clause is exactly the regression this file exists to catch, so assert the
     # requirement in both directions rather than trusting the fixture.
@@ -57,6 +71,18 @@ const AUDIT_PATH = normpath(joinpath(@__DIR__, "..", "validation", "operational"
                                    now_utc = DateTime(2026, 6, 26, 7, 15, 0))
     @test any(c -> c.level == :fail && c.name == "dashboard API V2-tail assumption",
               served_state.checks)
+
+    # Reader-facing readiness output must identify the effective product. V2.1 remains valid
+    # predecessor evidence, but it must not be presented as the current operational method.
+    mktempdir() do dir
+        report = joinpath(dir, "readiness.md")
+        audit.write_report(audit.AuditState(), report)
+        text = read(report, String)
+        @test occursin("# Operational V2.4e Readiness Audit", text)
+        @test occursin("exact Operational V2.4e bundle", text)
+        @test !occursin("# Operational V2.1 Readiness Audit", text)
+        @test !occursin("recomputes Operational V2.1 readiness", text)
+    end
 end
 
 end # module

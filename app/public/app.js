@@ -236,17 +236,18 @@ function renderThreat(st) {
 
   const wf = $("watch-flag");
   if (th.watch) {
-    wf.textContent = `WATCH · a 90% target interval extends to ${fmt(lowerEdge,0)} nT (${th.watch_label} range)`;
+    wf.textContent = `WATCH · conservative 90% alerting edge reaches ${fmt(lowerEdge,0)} nT (${th.watch_label} range)`;
     wf.classList.remove("hidden");
   } else { wf.classList.add("hidden"); }
 
-  const served = st.served_model_version || st.model_version || "v2.1";
-  const caps = pipelineCapabilities(served);
+  const served = st.served_model_version || st.model_version || "";
+  const caps = served ? pipelineCapabilities(served) : "";
+  const identityText = served ? `${served}${caps ? " · " + caps : ""}` : "identity unavailable";
   const staleNote = st.stale
     ? ` · STALE: issued ${st.age_hours != null ? fmt(st.age_hours, 1) + " h" : ""} ago`
     : "";
   $("model-line").textContent =
-    `Forecast: ${productName(st)} (${served}${caps ? " · " + caps : ""}) · `
+    `Forecast: ${productName(st)} (${identityText}) · `
     + `live interval method: ${intervalMethodText(st.calibration)} · `
     + `status generated ${relTime(st.generated_utc)} · latest solar wind ${relTime(st.latest_solar_wind_utc)}${staleNote}.`;
 }
@@ -303,10 +304,10 @@ function forecastTrack(history, cutoffMs) {
 // ---- severity-line block (extracted verbatim and executed by the app test suite) ----
 // Reader-facing name of the stage whose own band edge the watch is assessed on.
 const SEVERITY_EDGE_SOURCES = {
-  served: "the served forecast",
-  v2_2_stack: "the static regime stack",
-  v2_1_served: "the V2.1 operator",
-  legacy_center_shift: "the served band shifted onto the alerting center",
+  served: "the served forecast band",
+  v2_2_stack: "the Static V2.2 predecessor safety band",
+  v2_1_served: "the V2.1 predecessor safety band",
+  legacy_center_shift: "the legacy shifted safety band",
 };
 
 // The alerting center and watch edge, shown under the served forecast.
@@ -336,11 +337,11 @@ function renderSeverityLine(horizons) {
   const centerText = centers.length ? `${fmt(Math.min(...centers), 0)} nT` : "—";
   const edgeText = edges.length ? `${fmt(Math.min(...edges), 0)} nT` : "—";
   el.classList.remove("hidden");
-  el.textContent = `Depth-safe alerting values across these horizons: severity centre ${centerText}, `
-    + `watch edge ${edgeText}${source ? ` (edge from ${source})` : ""}. `
-    + `These are the deepest of the served values and the values each earlier stage of the pipeline `
-    + `would have published, so a shallower or narrower served forecast cannot lower a warning an `
-    + `earlier stage would have raised. The threat tier and the watch are taken on them.`;
+  el.textContent = `Conservative alerting envelope across these horizons: centre ${centerText}, `
+    + `90% lower edge ${edgeText}${source ? ` (set by ${source})` : ""}. `
+    + `This envelope retains the deepest value from the served forecast and each predecessor `
+    + `safety stage. Predecessor values affect alerting only; the displayed and issued forecast `
+    + `remains the served product.`;
 }
 // ---- end severity-line block ----
 
@@ -402,11 +403,7 @@ async function renderForecast(forecast, history, status) {
   const px = (anchorT ? [anchorT] : []).concat(fx);
   const v2y = (anchorT ? [anchorY] : []).concat(v2);
 
-  // sub-hour model trajectory (display only): V2 integrated at sub-hour steps
-  const traj = (forecast.subhour_trajectory || []).filter(p => p && p.dst_nt != null && p.target_utc);
-  const trajX = traj.map(p => p.target_utc), trajY = traj.map(p => p.dst_nt);
-
-  const ally = [...oy, ...lo, ...hi, ...v2y, ...trajY, ...track.y]
+  const ally = [...oy, ...lo, ...hi, ...v2y, ...track.y]
     .filter(v => v != null && !Number.isNaN(v));
   const ymin = ally.length ? Math.min(...ally) : -50, ymax = ally.length ? Math.max(...ally) : 20;
   const { shapes, anns } = thresholdShapes(ymin, ymax);
@@ -432,21 +429,17 @@ async function renderForecast(forecast, history, status) {
   // observed reality (on top)
   if (ox.length) traces.push({ x: ox, y: oy, mode:"lines+markers", name:"Observed Dst",
     line:{color:WONG.obs, width:2}, marker:{size:5} });
-  // Sub-hour line, drawn at 15-min resolution when available. It is the V2.1 core trajectory the
-  // engine integrates for display, not the issued product: the issued horizons are the served stack
-  // centers, marked separately below, so the two can visibly diverge during a storm.
-  const useTraj = trajX.length && anchorT != null && anchorY != null;   // guard null anchor before prepending
-  const fcx = useTraj ? [anchorT].concat(trajX) : px;
-  const fcy = useTraj ? [anchorY].concat(trajY) : v2y;
+  // The served product is issued only at the scored target hours. Connect those centers to the anchor as
+  // a guide to the eye; do not substitute the legacy V2.1 15-minute diagnostic trajectory.
+  const fcx = px;
+  const fcy = v2y;
   // The product name is read from the served label the log recorded, and legend names and hover
   // templates are parsed for the plotting library's markup subset, so it is escaped for that sink
   // exactly as it is for the caption below.
   const plotProduct = escPlot(product);
-  const lineName = useTraj ? "V2.1 core trajectory (display)" : `${plotProduct} forecast`;
-  // 15-min markers: medium blue, size 5 (matches the other series); distinguished from the hourly markers by
-  // shade (medium vs dark) and size (5 vs 7). Zooming separates them, so no per-zoom resize.
-  traces.push({ x: fcx, y: fcy, mode:"lines+markers", name:lineName,
-    line:{color:WONG.fcst, width:2.2}, marker:{size:5, color:"#3f8fd0", line:{color:"#0b1020", width:0.5}},
+  const lineName = `${plotProduct} forecast`;
+  traces.push({ x: fcx, y: fcy, mode:"lines", name:lineName,
+    line:{color:WONG.fcst, width:2.2},
     hovertemplate:`${lineName} %{y:.1f} nT<extra></extra>` });
   // markers at the issued hourly horizons (the scored targets): darker + larger to flag the scored points.
   traces.push({ x: px, y: v2y, mode:"markers", name:`issued horizons (${plotProduct})`,
@@ -465,8 +458,8 @@ async function renderForecast(forecast, history, status) {
   const src = forecast.interval_source || "—";
   cap.innerHTML = `Dark markers: ${esc(product)} issued <span data-reltime="${esc(forecast.issue_time_utc)}">${esc(relTime(forecast.issue_time_utc))}</span> from solar wind through `
     + `<span data-reltime="${esc(forecast.latest_solar_wind_utc)}">${esc(relTime(forecast.latest_solar_wind_utc))}</span>. L1 look-ahead drives target hours already measured upstream; beyond the L1-known window, Bz/By relax toward quiet with a longer timescale during rapid Dst deepening. `
-    + `Solid blue: the V2.1 core trajectory at 15-min steps, shown for shape only; the issued horizons are the ${esc(product)} centers and can sit away from that line. `
-    + `Shaded: the 90% target interval (${esc(src)}); served-center coverage is assessed empirically and no distribution-free guarantee is claimed. A watch appears when a displayed interval's lower edge, taken on the alerting center, enters a stronger Dst range than the point forecast. `
+    + `Solid blue connects the anchor observation and the ${esc(product)} issued centers as a visual guide; no sub-hour ${esc(product)} values are claimed. `
+    + `Shaded: the served 90% target interval (${esc(src)}); served-center coverage is assessed empirically and no distribution-free guarantee is claimed. A watch appears when the conservative alerting edge—the deepest 90% lower edge across the served and predecessor safety stages—enters a stronger Dst range than the point forecast. `
     + `Dotted blue: previously issued forecasts for hours that now have observed Dst (orange). `
     + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Genuine new-disturbance lead is the L1 transit (~30–60 min).`;
 }
@@ -708,11 +701,13 @@ function renderPipeline(status, dbdt) {
   const sw = (status && status.upstream && status.upstream.solar_wind) || {};
   const l1 = sw.available ? `Bz ${fmt(sw.bz_gsm_nt, 1)} nT · ${fmt(sw.speed_kms, 0)} km/s` : "DSCOVR/ACE · OMNI";
   const dbdtIndicator = (dbdt && dbdt.available) ? `${fmt(dbdt.current_dbdt, 1)} nT/min · ${dbdt.current_tier.label}` : "USGS ground mag";
+  const hasForecastIdentity = status && (status.served_product || status.served_model_version || status.model_version);
+  const forecastLabel = hasForecastIdentity ? `${productName(status)} forecast` : "forecast identity unavailable";
   const stages = [
     { ic:"☉", nm:"Eruption", ds:"Flare / CME launch", tag:"future", tl:"not in this system (T2)" },
     { ic:"🪐", nm:"CME transit", ds:"Heliosphere → arrival", tag:"future", tl:"CME models (T2)" },
     { ic:"🛰", nm:"L1 solar wind", ds:l1, tag:"live", tl:"live (SWPC)" },
-    { ic:"🧲", nm:"Dst (ring current)", ds:"This forecaster (v2)", tag:"live", tl:"live nowcast" },
+    { ic:"🧲", nm:"Dst (ring current)", ds:forecastLabel, tag:"live", tl:"live nowcast" },
     { ic:"📈", nm:"dB/dt indicator", ds:dbdtIndicator, tag:"live", tl:"live (USGS)" },
     { ic:"⚡", nm:"GIC / grid", ds:"Transformer stress", tag:"future", tl:"T3/T4" },
   ];
@@ -773,7 +768,7 @@ function browserNotify(status) {
     try {
       const alertLabel = watchLevel > pointLevel ? th.watch_label : th.label;
       const body = watchLevel > pointLevel
-        ? `A displayed 90% target interval extends to ${fmt(intervalLowerEdge(th), 0)} nT (${alertLabel} range).`
+        ? `The conservative 90% alerting edge reaches ${fmt(intervalLowerEdge(th), 0)} nT (${alertLabel} range).`
         : `The point forecast reaches the ${alertLabel} range.`;
       new Notification("⛬ Space-Weather alert", {
         body,

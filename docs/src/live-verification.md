@@ -173,11 +173,13 @@ one-hour inertia, state-conditioned inertia, and an extreme-Dst guard constrain
 known failure regimes. The fitted static regime stack combines that center with
 the frozen V2.1 center, persistence, and the three physical baselines. Static
 V2.2 is then one of the ten inputs to V2.4e, which is the normal served point
-forecast. The published threat level and the interval lower edge that raises a
+forecast. The published threat level and the conservative 90% alerting edge that raises a
 watch are taken on the deepest of V2.4e, static V2.2, and the V2.1 predecessor,
-so the super learner cannot lower a predecessor warning. The sub-hour line on
-the forecast chart is the V2.1 core trajectory, shown for shape only; the issued
-horizons are the served V2.4e centers and can sit away from that line.
+so the super learner cannot lower a predecessor warning. This alerting-only edge is
+disclosed separately and can differ from the shaded V2.4e band. The forecast chart
+connects the latest observation to the issued V2.4e target centers as a visual
+guide. It does not display or imply sub-hour V2.4e forecasts, because V2.4e is
+defined only at the scored target hours.
 
 The frozen package also includes a separate complete-hour served-stack holdout
 under `data/operational_validation/v2_1_served_holdout_*`. It applies the

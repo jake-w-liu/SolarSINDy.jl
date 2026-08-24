@@ -54,16 +54,17 @@ The package is organized as two layers:
 
 The dashboard and live monitor serve a single forecast whose SINDy core is the same
 20-candidate/11-active-term artifact used by the revised discovery paper. The served
-point center is the **V2.4e super-learner**: a fitted non-negative combination of ten
+point center is the **V2.4e super-learner**: a fitted nonnegative combination of ten
 causal forecasts, weighted per model step, per causal issue-time regime and per
-ring-current depth bin, with a 0.60 mass floor on the SINDy family. The ten are the served
+ring-current depth bin, with a 0.60 lower bound on the outer weight assigned to four experts
+classified in the operational SINDy lineage. The ten are the served
 V2.1 operator center, the frozen-tail V2.1 center, an analog driver-continuation center with
 the refit ridge correction, persistence, Burton, Burton-full, O'Brien-McPherron, a tuned
 direct increment-GBM, climatology-relaxed persistence, and the fixed 2010-2017 static V2.2
-regime stack. The static stack counts inside the SINDy family, because that product is itself
-a composition of the deployed SINDy operators, and giving the combination that column lets it
-recover the physics composition in the deep storm cells rather than having it imposed as a
-minimum afterwards. The served identity is
+regime stack. Static V2.2 counts as one classified outer expert even though it is itself a
+six-expert mixture containing nonsparse components. The 0.60 constraint is therefore an
+expert-taxonomy rule, not a lower bound on the atomic contribution of the sparse equation.
+The served identity is
 
 ```text
 v2.4+sindy20x11+superlearner10floor+conformal

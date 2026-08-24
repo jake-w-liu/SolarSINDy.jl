@@ -6,9 +6,10 @@ forecast **with its empirically evaluated 90% target band**, a **rolling forecas
 (each issued forecast plotted against the observation that later arrived), an explicit lead-time
 statement, the scored track record, and the Sun → grid warning chain.
 
-This dashboard ships **as part of [`SolarSINDy.jl`](../)** — it is the operational front-end over
-the package's V2.1 forecaster. A Julia REST backend (no web framework — just
-`HTTP.jl`) serving a Plotly UI. Single origin, no build step.
+This dashboard ships **as part of [`SolarSINDy.jl`](../)** and presents the package's effective
+served forecast. Normal cycles use Operational V2.4e; any fallback to static V2.2 or the V2.1
+predecessor is named explicitly from the row-level served identity. A Julia REST backend (no web
+framework, only `HTTP.jl`) serves a Plotly UI from one origin with no build step.
 
 > Research tool, not an operational authority. For official alerts use **NOAA SWPC**.
 
@@ -82,21 +83,24 @@ rather than holding the dashboard request open on DNS, TLS, or a public-data out
 
 The integrity rules of this project carry into the UI:
 
-- **No bare point forecasts.** Every forecast is shown with its 90% target interval. A
-  watch appears when the most negative lower edge among the displayed intervals enters a
-  stronger Dst range than the point forecast; it is not a one-sided confidence bound or a
-  storm probability. The served-center shift and bounded online update do not retain the
-  frozen-center distribution-free guarantee, so coverage is reported empirically.
+- **No bare point forecasts.** Every forecast is shown with its served 90% target interval.
+  A watch uses the deepest 90% lower edge across the served product and its predecessor
+  safety stages, which is disclosed separately as the conservative alerting edge. It is
+  not a one-sided confidence bound or a storm probability. The served-center shift and
+  bounded online update do not retain the frozen-center distribution-free guarantee, so
+  coverage is reported empirically.
 - **Lead time is stated against physics.** Forecast steps use ballistically propagated L1 forcing
   when the corresponding upstream window has sufficient coverage, then regime-aware Bz/By
   relaxation beyond the measured L1 window. The genuine upstream lead
   for a *new* disturbance is the L1 advection time (~30–60 min). Multi-day
   confident-severity lead needs CME models not yet in this system.
 - **Live evaluation is computed from the log.** Coverage and RMSE are recomputed from the
-  scored rows every load. The matched RMSE table includes served V2.1, its frozen-tail ablation,
-  SINDy v1, persistence, Burton, Burton full, and O'Brien--McPherron on exactly the same
-  observed targets. No best method is highlighted before 48 common rows mature, and the
-  storm-row count remains visible so quiet-only evidence cannot be mistaken for storm skill.
+  scored rows every load. The matched RMSE table includes the effective served product, the V2.1
+  frozen-tail ablation, SINDy v1, persistence, Burton, Burton full, and O'Brien--McPherron on
+  exactly the same observed targets. Counts and scores are also separated by exact served label,
+  so earlier V2.1/V2.2 rows are not attributed to V2.4e. No best method is highlighted before 48
+  common rows mature, and the storm-row count remains visible so quiet-only evidence cannot be
+  mistaken for storm skill.
 
 ## Threat scale
 
@@ -117,10 +121,12 @@ These thresholds follow the classifications used by
 
 ## Data & provenance
 
-- **Dst forecast**: the project's **V2.1** nowcaster: interpretable discovered sparse equation,
-  causal correction, online adaptive-conformal intervals, ballistically propagated L1 forcing,
-  regime-aware Bz/By relaxation, and guarded fallback selection. The V2.1
-  frozen-tail center remains in the log only for same-row ablation.
+- **Dst forecast**: **Operational V2.4e**, a nonnegative ten-expert super learner with a
+  SINDy-family weight floor and depth-stratified split-conformal target intervals. Its inputs
+  include two V2.1 predecessor forms, a causal analog forecast, static V2.2, persistence, three
+  physical baselines, direct gradient boosting, and climatological relaxation. Static V2.2 and
+  V2.1 remain explicit fail-closed fallbacks; the V2.1 frozen-tail center remains a same-row
+  ablation rather than the current served product.
 - **Solar wind (L1)**: NOAA SWPC real-time products (`rtsw_wind_1m`, `rtsw_mag_1m`) for live
   issuance; the NASA OMNI archive (CDAWeb) is used for offline calibration and historical replay.
   **Dst**: Kyoto WDC (via NOAA SWPC `kyoto-dst`). **Ground dB/dt**: the provisional USGS

@@ -13,10 +13,17 @@ arithmetic. This pass closes them without touching the served center, the bands,
 the conformal strata, the SINDy family floor, the fallback chain, or the served identity
 `v2.4+sindy20x11+superlearner10floor+conformal`.
 
-One published *string* does change: alert text and the webhook body now render a storm depth as an
-integer ("-37 nT" where the previous build printed "-37.0 nT"), matching what the dashboard has
-always shown. The value, the tier and every numeric payload field are untouched; a consumer that
-parses a decimal out of the alert sentence needs to accept an integer there.
+Reader-facing output changes without moving a served number. Alert text and the webhook body now
+render a storm depth as an integer ("-37 nT" where the previous build printed "-37.0 nT"), matching
+the dashboard. The forecast chart now connects the observed anchor directly to the issued V2.4e
+target-hour centers and no longer publishes the V2.1 sub-hour diagnostic as a product trajectory.
+Readiness and live-comparison reports name the exact effective served identity and keep predecessor
+rows separate. The dashboard also distinguishes the shaded served interval from the conservative
+alerting edge retained across predecessor safety stages. The readiness duplicate oracle now matches
+the append contract's issue-hour key, so a legitimate next-hour forecast can reuse a delayed Kyoto
+Dst anchor while incorporating newer L1 measurements. The values, tiers, and numerical payload
+fields are unchanged; a consumer that parses a decimal out of the alert sentence needs to accept an
+integer there.
 
 Alerting and availability:
 
@@ -323,8 +330,8 @@ Serving-path corrections found by a post-integration audit of the same release:
   case the row carries a separate `...+unpinned` identity that neither the dashboard nor the
   readiness audit accepts as the published product
 - the dashboard and API derive the product name from the served label instead of naming
-  V2.1, caption the 15-minute line as the V2.1 core trajectory shown for display, and
-  report verified rows per served label (`by_served_model`,
+  V2.1, expose only the issued target-hour product centers rather than the legacy 15-minute
+  base-operator diagnostic, and report verified rows per served label (`by_served_model`,
   `n_verified_current_served_model`) so a record earned by the previous pipeline is not
   presented as the current product's
 - `/api/forecast` exposes `severity_dst_nt`, `severity_ci05_dst_nt` and

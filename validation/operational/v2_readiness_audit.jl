@@ -1474,6 +1474,31 @@ function cycle_groups(df::DataFrame)
     return DataFrame[df[coalesce.(hours .== hour, false), :] for hour in keys_present]
 end
 
+"""Duplicate pending rows under the live append contract.
+
+An issuance in a later UTC hour is a distinct forecast even when Kyoto has not yet published a
+new Dst anchor and the target overlaps an earlier cycle: newly arrived L1 measurements can change
+that forecast. The append path is idempotent only within `(issue hour, target, base model)`, so the
+readiness oracle uses the same key rather than conflating valid consecutive-hour reissuances.
+"""
+function pending_duplicate_groups(pending::DataFrame)
+    nrow(pending) == 0 && return DataFrame()
+    required = (:model_version, :issue_time_utc, :target_time_utc)
+    all(has_col(pending, c) for c in required) || throw(ArgumentError(
+        "pending duplicate audit requires model_version, issue_time_utc, and target_time_utc",
+    ))
+    issue_times = parse_utc_datetime.(pending.issue_time_utc)
+    keyed = select(pending, [:model_version, :target_time_utc])
+    keyed[!, :issue_hour_utc] = [
+        issue === missing ? missing : floor(issue, Hour) for issue in issue_times
+    ]
+    counts = combine(
+        groupby(keyed, [:model_version, :issue_hour_utc, :target_time_utc]),
+        nrow => :n,
+    )
+    return counts[counts.n .> 1, :]
+end
+
 """Rows of the newest issue cycle of a live log, keyed on the issue hour.
 
 The dashboard API and the stage-health windows both key a cycle on its issue hour, so the audit must
@@ -2021,8 +2046,7 @@ function audit_live_log!(state::AuditState)
     if nrow(pending) == 0
         pass!(state, "pending duplicate guard", "no pending rows")
     else
-        counts = combine(groupby(pending, [:model_version, :latest_dst_time_utc, :target_time_utc]), nrow => :n)
-        dup = counts[counts.n .> 1, :]
+        dup = pending_duplicate_groups(pending)
         if nrow(dup) == 0
             pass!(state, "pending duplicate guard", "pending rows=$(nrow(pending)), duplicate groups=0")
         else
@@ -3626,10 +3650,10 @@ end
 function write_report(state::AuditState, path::AbstractString)
     open(path, "w") do io
         stamp = Dates.format(now(), DateFormat("yyyy-mm-dd HH:MM:SS"))
-        println(io, "# Operational V2.1 Readiness Audit\n")
+        println(io, "# Operational V2.4e Readiness Audit\n")
         println(io, "**Verdict:** $(verdict(state))")
         println(io, "**Generated:** $(stamp) local time\n")
-        println(io, "This audit recomputes Operational V2.1 readiness from complete-hour causal replay of the served stack on the chronological holdout, the locked live log, retrospective severe-storm replay artifacts, exact Kp/G-scale replay, broad Dst-intense archive replay, external NOAA Kp forecast archive check, Temerin--Li Dst archive valid-time comparison, and the prospective external Dst issue-time snapshot collector. V2.1 denotes the revised 20-candidate/11-active-term SINDy core; V2.0 denotes the archived 21-candidate/10-active-term comparator. The holdout does not reconstruct fractional subhourly live windows. This audit is an engineering and research guard, not a venue-submission certificate.\n")
+        println(io, "This audit gates the exact Operational V2.4e bundle, its served identity, and the newest live cycle. It combines complete-hour causal replay of the predecessor served stack on the chronological holdout, the locked live log, retrospective severe-storm replay artifacts, exact Kp/G-scale replay, broad Dst-intense archive replay, external NOAA Kp forecast archive checks, Temerin--Li Dst valid-time comparisons, and the prospective external Dst issue-time snapshot collector. V2.4e is the normal ten-expert served center; static V2.2 and V2.1 are disclosed fail-closed stages. The V2.1 complete-hour holdout remains predecessor evidence and does not reconstruct fractional subhourly live windows. V2.1 denotes the revised 20-candidate/11-active-term SINDy core; V2.0 denotes the archived 21-candidate/10-active-term comparator. This audit is an engineering and research guard, not a venue-submission certificate.\n")
 
         npass = count(c -> c.level == :pass, state.checks)
         nwarn = count(c -> c.level == :warn, state.checks)
@@ -3648,7 +3672,7 @@ function write_report(state::AuditState, path::AbstractString)
 
         if haskey(state.live_metrics, :served_holdout_summary)
             summary = state.live_metrics[:served_holdout_summary]
-            println(io, "\n## Complete-Hour Served-Stack V2.1 Chronological Holdout\n")
+            println(io, "\n## Complete-Hour V2.1 Predecessor Served-Stack Chronological Holdout\n")
             println(io, "The pooled row is the declared static-interval promotion gate. Lead-specific and quiet/storm rows disclose where coverage departs from the pooled result and the 0.90 nominal target.\n")
             println(io, "| Cohort | Lead [h] | n | Served RMSE [nT] | Served coverage | Frozen-tail coverage |")
             println(io, "|---|---:|---:|---:|---:|---:|")
