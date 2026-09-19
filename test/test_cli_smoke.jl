@@ -51,6 +51,39 @@
         st = run(setenv(ignorestatus(`$bash $cli status`), env); wait=true)
         @test st.exitcode == 2                               # both components stopped
 
+        # GNU stat may emit partial stdout when BSD flags fail. Age reporting
+        # must use only the successful fallback, including under set -u.
+        mktempdir() do stat_dir
+            stat_bin = joinpath(stat_dir, "bin"); mkpath(stat_bin)
+            stat_shim = joinpath(stat_bin, "stat")
+            write(stat_shim, raw"""#!/bin/bash
+if [ "$1" = "-f" ]; then
+  printf 'partial filesystem output\n'
+  exit 1
+fi
+printf '%s\n' "$CLI_TEST_MTIME"
+""")
+            chmod(stat_shim, 0o755)
+            write(joinpath(stat_dir, "live_forecast_log.csv"), "issue_time_utc\n2026-09-19T12:00\n")
+            stat_env = merge(env, Dict(
+                "PATH" => string(stat_bin, ":", get(ENV, "PATH", "")),
+                "SOLARSINDY_MONITOR_DIR" => stat_dir,
+                "CLI_TEST_MTIME" => string(floor(Int, time()) - 600),
+            ))
+            stat_out, stat_err = IOBuffer(), IOBuffer()
+            stat_result = run(pipeline(setenv(ignorestatus(`$bash $cli status`), stat_env);
+                                      stdout=stat_out, stderr=stat_err))
+            @test stat_result.exitcode == 2
+            @test occursin("10 min", String(take!(stat_out)))
+            @test isempty(String(take!(stat_err)))
+            write(stat_shim, "#!/bin/bash\nprintf 'failed stat output\\n'\nexit 1\n")
+            stat_result = run(pipeline(setenv(ignorestatus(`$bash $cli status`), stat_env);
+                                      stdout=stat_out, stderr=stat_err))
+            @test stat_result.exitcode == 2
+            @test occursin("? min", String(take!(stat_out)))
+            @test isempty(String(take!(stat_err)))
+        end
+
         lg = run(setenv(ignorestatus(`$bash $cli logs monitor`), env); wait=true)
         @test lg.exitcode != 0                               # no log yet -> error, not success
 

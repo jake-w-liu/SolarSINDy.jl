@@ -3,6 +3,7 @@ module V23KernelTests
 using Test
 using Dates
 using SolarSINDy
+using SHA
 
 const V23_KERNEL_SCRIPT = normpath(joinpath(
     @__DIR__, "..", "validation", "operational", "v2_3_kernel.jl",
@@ -20,6 +21,11 @@ const SLOW = (V = 300.0, Bz = -12.0, By = 2.0, n = 6.0, Pdyn = 2.0)
 const FAST = (V = 800.0, Bz = -9.0, By = 1.0, n = 4.0, Pdyn = 3.0)
 const FUT_SLOW = (V = 320.0, Bz = -24.0, By = 0.0, n = 8.0, Pdyn = 3.0)
 const FUT_FAST = (V = 780.0, Bz = -30.0, By = 3.0, n = 9.0, Pdyn = 5.0)
+
+const PRE_REFACTOR_ORACLE = joinpath(@__DIR__, "fixtures", "v21_before_admission_refactor.jl")
+@test bytes2hex(sha256(read(PRE_REFACTOR_ORACLE))) ==
+      "b4c6b26499bc0f0df8c42bae64a84d0e636f428d9a8c8dc6604e70af01337ff6"
+include(PRE_REFACTOR_ORACLE)
 
 """
 Independent reference rollout for the realized-driver oracle. The L1 standoff, the transit gate,
@@ -58,9 +64,10 @@ function _reference_realized(anchor, issue_drv, future, latest, h, rate)
 end
 
 @testset "V2.1 served forecast is unchanged by the shared-admission refactor" begin
-    # Regression literals captured from `_v2_forecast` before the L1-admission helper was factored
-    # out for reuse by the V2.3 kernel. Any drift in the served numbers changes the deployed
-    # product and must fail here.
+    # Keep the macOS/ARM literal capture on its original platform. BLAS dot
+    # reductions differ between ARM and x86 even for identical input vectors.
+    # Every platform must match the archived pre-refactor implementation exactly;
+    # no approximate comparison or numerical tolerance is used for continuity.
     baseline = [
         (-150.0, SLOW, k -> FUT_SLOW, -148.0, 1, 0.0, false,
          -155.3050264198818, -145.2411342770414),
@@ -89,8 +96,14 @@ end
          -140.22363295283748, -154.75717298531944),
     ]
     for (anchor, drv, future, latest, h, rate, frozen, raw, center) in baseline
-        @test _v2_forecast(LIB, XI, anchor, drv, future, latest, CAL, h, rate;
-                           force_frozen = frozen) === (raw, center)
+        actual = _v2_forecast(LIB, XI, anchor, drv, future, latest, CAL, h, rate;
+                              force_frozen = frozen)
+        @test actual === _v21_before_admission_refactor(
+            LIB, XI, anchor, drv, future, latest, CAL, h, rate; force_frozen = frozen,
+        )
+        if Sys.isapple() && Sys.ARCH === :aarch64
+            @test actual === (raw, center)
+        end
     end
 
     # The factored helpers are the served definitions, checked against hand arithmetic.
@@ -123,6 +136,10 @@ end
                 row = _v2_features(latest, issue_drv; v1_pred_dst = -160.0, model_steps = h)
                 served = _v2_forecast(LIB, XI, anchor, issue_drv, future, latest, CAL, h, rate;
                                       calibration_features = row)
+                @test served === _v21_before_admission_refactor(
+                    LIB, XI, anchor, issue_drv, future, latest, CAL, h, rate;
+                    calibration_features = row,
+                )
                 candidate = _v23_forecast(LIB, XI, anchor, issue_drv, future, latest, CAL, h, rate;
                                           tail_members = [_v23_relaxed_tail_member(rate)],
                                           calibration_features = row)

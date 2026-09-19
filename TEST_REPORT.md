@@ -21,6 +21,14 @@ An earlier local full run rejected a changed Git baseline after an in-run
 commit; it is not passing evidence. Its provenance checks remain unchanged.
 The subsequent full run must keep the checkout revision fixed throughout.
 
+The next GitHub run exposed GNU-stat output contamination and three ARM-only
+golden literals. Their reproduction and repair are recorded under "Linux
+portability checks" in CODE_NOTES.md. The watchdog and CLI regressions cover
+both native stat and GNU stat. Exact forecast continuity is checked against a
+hash-pinned pre-refactor function on ARM and x86; the original ARM numeric pins
+remain. The dated release receipt records the subsequent full local and GitHub
+results without rewriting the earlier failed runs as passes.
+
 Earlier checkpoints below retain their original dates and outcomes.
 
 ## Recovery verification (2026-09-19)

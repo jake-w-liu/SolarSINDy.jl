@@ -2248,7 +2248,7 @@ esac
                 chmod(fake_curl, 0o755)
 
                 webhook_log = joinpath(dir, "webhook.log")
-                run_wd = function (mon; health, data)
+                run_wd = function (mon; health, data, mtime=round(Int, time()))
                     cmd = addenv(`$bash $wd`,
                         "PATH" => string(fake_bin, ":", get(ENV, "PATH", "")),
                         "SOLARSINDY_MONITOR_DIR" => mon,
@@ -2258,8 +2258,9 @@ esac
                         "WD_TEST_WEBHOOK_LOG" => webhook_log,
                         "WD_TEST_HEALTH_OK" => health ? "1" : "0",
                         "WD_TEST_DATA_OK" => data ? "1" : "0",
+                        "WD_TEST_MTIME" => string(mtime),
                     )
-                    run(pipeline(cmd; stdout=devnull, stderr=devnull))
+                    run(pipeline(cmd; stdout=devnull))
                 end
                 fresh_log = function (mon)
                     mkpath(mon)
@@ -2315,6 +2316,46 @@ esac
                 @test state_of(monC) == "DAEMON_OUTAGE"                      # held, not recovered
                 @test !any(occursin("\"kind\":\"recovery\"", l)
                            for l in webhook_lines()[(wh_c + 1):end])
+
+                # GNU stat can write filesystem details before rejecting BSD flags.
+                # Failed-command stdout must not reach integer comparisons or arithmetic.
+                fake_stat = joinpath(fake_bin, "stat")
+                write(fake_stat, raw"""#!/bin/bash
+if [ "$1" = "-f" ]; then
+  printf 'partial filesystem output from a failed stat command\n'
+  exit 1
+fi
+case "$2" in
+  %s) wc -c < "$3" ;;
+  %Y) printf '%s\n' "$WD_TEST_MTIME" ;;
+  *) exit 1 ;;
+esac
+""")
+                chmod(fake_stat, 0o755)
+                monD = joinpath(dir, "monD"); fresh_log(monD)
+                mkpath(joinpath(monD, "logs"))
+                stream = joinpath(monD, "logs", "monitor.out")
+                write(stream, repeat("x", 2097153))
+                run_wd(monD; health=true, data=true)
+                @test state_of(monD) == "OK"
+                @test !isfile(sentinel_of(monD))
+                @test filesize(stream) == 0
+                @test filesize(stream * ".1") == 2097153
+                wh_d = length(webhook_lines())
+                run_wd(monD; health=true, data=true, mtime=0)
+                @test state_of(monD) == "PROBLEM: stale"
+                @test occursin("forecast log stale", read(sentinel_of(monD), String))
+                @test length(webhook_lines()) == wh_d + 1
+                run_wd(monD; health=true, data=true, mtime=0)
+                @test length(webhook_lines()) == wh_d + 1
+                run_wd(monD; health=true, data=true)
+                @test state_of(monD) == "OK"
+                @test !isfile(sentinel_of(monD))
+                @test length(webhook_lines()) == wh_d + 2
+                write(fake_stat, "#!/bin/bash\nprintf 'failed stat output\\n'\nexit 1\n")
+                run_wd(monD; health=true, data=true)
+                @test state_of(monD) == "PROBLEM: stale"
+                @test isfile(sentinel_of(monD))
             end
         end
     end

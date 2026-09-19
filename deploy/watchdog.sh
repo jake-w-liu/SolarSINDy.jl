@@ -39,8 +39,18 @@ mkdir -p "$LOGS_DIR"
 now="$(date -u +%s)"
 iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-_size() { stat -f %z "$1" 2>/dev/null || stat -c %s "$1" 2>/dev/null || echo 0; }
-_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+# GNU stat can print filesystem details before failing on BSD's format flag.
+# Emit only successful output, never the failed probe's partial stdout.
+_size() {
+  local value
+  value=$(stat -f %z "$1" 2>/dev/null) || value=$(stat -c %s "$1" 2>/dev/null) || value=0
+  printf '%s\n' "$value"
+}
+_mtime() {
+  local value
+  value=$(stat -f %m "$1" 2>/dev/null) || value=$(stat -c %Y "$1" 2>/dev/null) || value=0
+  printf '%s\n' "$value"
+}
 
 wd_log() {
   # Bounded watchdog log: trim to the last 500 lines when it exceeds ~256 KB.

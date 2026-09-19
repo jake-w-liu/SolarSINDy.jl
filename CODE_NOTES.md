@@ -1362,3 +1362,26 @@ duplicating an ensemble's size: precursor holdout scores do not establish
 performance of a later served ensemble or its intervals. A focused copy
 regression rejects the old wording. No score, gate, identity or report count
 changes for this correction.
+
+### Linux portability checks
+
+GitHub run 35456015920 exposed two independent portability defects. GNU
+`stat -f` can print filesystem information before failing on BSD format
+arguments. The watchdog then used this mixed output in integer arithmetic;
+the CLI's file-age helper had the same defect. Each helper now captures a
+probe separately and emits only a successful result. Missing metadata still
+causes a stale watchdog state or an unknown CLI age. Network-free regressions
+cover partial stdout, both probes failing, stream rotation, stale detection,
+webhook deduplication, recovery and sentinel ownership. The checks also run
+against the installed GNU stat executable.
+
+Three exact V2.1 forecast literals were captured on macOS/ARM but were being
+treated as architecture-independent. Julia 1.12.7 under x86 reproduces all
+three GitHub values; identical feature and coefficient vectors have different
+last-bit BLAS dot reductions. The pre-refactor function from commit
+`1f337757cd242d4d1a917635b1fb8c83690a647a` gives exactly the current results
+on both architectures. The test retains every original literal assertion on
+its capture platform and adds exact comparisons against that hash-pinned
+archived function on all platforms, including the broader driver/horizon
+matrix. No production numerical code, fitted artifact, scientific gate or
+tolerance changes.

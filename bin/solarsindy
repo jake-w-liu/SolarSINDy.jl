@@ -299,7 +299,7 @@ file_age_min() {
   # Portable mtime age in whole minutes; empty when the file is absent.
   local f="$1" m now
   [ -f "$f" ] || return 0
-  m="$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null || true)"
+  m="$(stat -f %m "$f" 2>/dev/null)" || m="$(stat -c %Y "$f" 2>/dev/null)" || return 0
   [ -n "$m" ] || return 0
   now="$(date +%s)"
   printf '%s\n' $(( (now - m) / 60 ))
