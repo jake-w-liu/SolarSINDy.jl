@@ -1396,3 +1396,6 @@ checks cover all three time-series plots at 320, 390, 768 and 1440 pixels;
 the frontend regression pins tick count and wrapping. No forecast data changes.
 Narrow card headers also wrap their source badge onto the next line rather than
 squeezing the title into a column only a few characters wide.
+The CLI labels its filesystem-age diagnostic as "log updated": scoring an
+observation can update the file without issuing a forecast. The dashboard's
+separate issuance-time display is unchanged.

@@ -504,7 +504,7 @@ cmd_status() {
   local log="$MONITOR_DIR/live_forecast_log.csv" age
   if [ -f "$log" ]; then
     age="$(file_age_min "$log")"
-    say "forecasts: last issuance ${age:-?} min ago ($log)"
+    say "forecasts: log updated ${age:-?} min ago ($log)"
   else
     say "forecasts: no log yet at $log (first cycle pending)"
   fi

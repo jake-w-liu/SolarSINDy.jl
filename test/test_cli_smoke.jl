@@ -74,7 +74,7 @@ printf '%s\n' "$CLI_TEST_MTIME"
             stat_result = run(pipeline(setenv(ignorestatus(`$bash $cli status`), stat_env);
                                       stdout=stat_out, stderr=stat_err))
             @test stat_result.exitcode == 2
-            @test occursin("10 min", String(take!(stat_out)))
+            @test occursin("forecasts: log updated 10 min ago", String(take!(stat_out)))
             @test isempty(String(take!(stat_err)))
             write(stat_shim, "#!/bin/bash\nprintf 'failed stat output\\n'\nexit 1\n")
             stat_result = run(pipeline(setenv(ignorestatus(`$bash $cli status`), stat_env);
