@@ -5,18 +5,30 @@ import JSON3
 
 "Frozen receipt-pair contract accepted by the V2.2-M2 arrival queue."
 const OPERATIONAL_V22_ARRIVAL_PAIR_SCHEMA_VERSION = "v2_2_l1_issue_pair_v2"
+"Schema identifier for serialized receipt-causal arrival queues."
 const OPERATIONAL_V22_ARRIVAL_SCHEMA_VERSION = "operational_v2_2_m2_arrival_v2"
+"Schema identifier for candidate arrival paths."
 const OPERATIONAL_V22_ARRIVAL_PATH_SCHEMA_VERSION =
     "operational_v2_2_m2_arrival_candidate_path_v2"
+"Qualification status attached to candidate arrival paths; not a serving approval."
 const OPERATIONAL_V22_ARRIVAL_PATH_GATE_STATUS = :ungated_candidate
+"Width of each UTC arrival bin, in minutes."
 const OPERATIONAL_V22_ARRIVAL_CADENCE_MINUTES = 30
+"Trailing measurement window used to estimate transport velocity, in minutes."
 const OPERATIONAL_V22_ARRIVAL_TRAILING_MINUTES = 15
+"Number of half-hour history bins supplied to the sparse driver."
 const OPERATIONAL_V22_ARRIVAL_HISTORY_ROWS = 25
+"Number of half-hour forecast steps in a candidate arrival path."
 const OPERATIONAL_V22_ARRIVAL_PATH_STEPS = 14
+"Lower admissible ballistic transport delay, in minutes."
 const OPERATIONAL_V22_ARRIVAL_MIN_DELAY_MINUTES = 20
+"Upper admissible ballistic transport delay, in minutes."
 const OPERATIONAL_V22_ARRIVAL_MAX_DELAY_MINUTES = 120
+"Maximum age of the latest complete arrival bin's end, in minutes."
 const OPERATIONAL_V22_ARRIVAL_MAX_FRESHNESS_MINUTES = 90
+"Target GSE x coordinate for position-based transport, in km."
 const OPERATIONAL_V22_ARRIVAL_X_REF_GSE_KM = 0.0
+"Fixed transport distance used by the V2.1-compatible delay diagnostic, in km."
 const OPERATIONAL_V22_ARRIVAL_V21_COMPATIBILITY_DISTANCE_KM = 1.5e6
 
 const _OPERATIONAL_V22_ARRIVAL_PAIR_PAYLOAD_FIELDS = (

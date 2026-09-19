@@ -1680,3 +1680,37 @@ strict Documenter build exit successfully. The documentation build has no
 Documenter warnings. Dependency precompilation emits existing GeometryBasics
 unused-type-variable warnings, distinct from documentation diagnostics.
 The full package, harness, and final pushed-commit CI checks remain to be run.
+
+### Receipt-time and daily-review verification
+
+The CMO receipt-time study and independent reconstruction complete all twelve
+predeclared period/delay checks. The final reconstruction passes 455,898
+assertions, including training-data hashes and high-precision climatologies.
+The May 2024 ten-minute-delay coverage is 0.8795950985615344, below the fixed
+0.88 floor; all twelve point-accuracy checks pass in both native and log units.
+No cutoff, coefficient, history length, or advancement threshold was retuned.
+The candidate therefore remains disabled; these exposed historical periods
+are development evidence, not prospective confirmation.
+
+A new timestamp-jitter test reproduced a window check that accepted an
+irregular interior interval when total duration was unchanged. The corrected
+check validates every interval; all 341 focused ground assertions pass. Its
+rerun produces the same historical metrics. The separate metric checker does
+not call the new evaluator's feature, target, quantile or metric functions.
+Numerical tolerances allow only floating-point summation/transformation error;
+timestamp, count, rank, hash and qualification comparisons are exact.
+
+The daily-review checks exercise once-per-day publication, concurrency,
+restarts, stale/future input, corruption and failed HTTP responses. Additional
+tests reproduced discarded malformed payloads; their bodies and hashes are
+now preserved while their availability remains false. A real dashboard receipt
+reports CMO adjusted and FRD variation measurements separately, retains all
+48 A3 findings, and reports both A3 claims false. No forecast log or bundle was
+rewritten by the review. Logs are beneath
+`validation/output/operational/live_upgrade_20260919`.
+
+GitHub run `35452903794` passed documentation but stopped at a missing test-only
+`Pkg` declaration introduced by the new version-policy test. That declaration
+is corrected in the test target. Two in-progress local full runs were
+deliberately interrupted after the final reporting fix; they are not passing
+evidence. A fresh full harness and final-commit CI are required for handoff.

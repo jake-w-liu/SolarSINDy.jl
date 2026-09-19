@@ -265,16 +265,17 @@ for known_key in $KNOWN_CONFIG_KEYS; do
   key_applied=0
   for svc in "${SERVICES[@]}"; do
     case "$svc" in
-      dashboard|watchdog)
+      monitor|dashboard|watchdog)
         case "$known_key" in
           SWM_HOST|SWM_PORT) key_applied=1 ;;
         esac
         ;;
     esac
     case "$svc" in
-      watchdog)
+      monitor|watchdog)
         case "$known_key" in
-          SOLARSINDY_WATCHDOG_DASH_URL|SOLARSINDY_WATCHDOG_STALE_SEC) key_applied=1 ;;
+          SOLARSINDY_WATCHDOG_DASH_URL) key_applied=1 ;;
+          SOLARSINDY_WATCHDOG_STALE_SEC) [ "$svc" != watchdog ] || key_applied=1 ;;
         esac
         ;;
     esac

@@ -79,6 +79,8 @@ end
         @test get(PROJECT["extras"], "Sockets", nothing) ==
               "6462fe0b-24de-5631-8697-dd941f90decc"
         @test "Sockets" in PROJECT["targets"]["test"]
+        @test PROJECT["extras"]["Pkg"] == "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+        @test "Pkg" in PROJECT["targets"]["test"]
     end
 
     @testset "no standard library carries a version bound" begin

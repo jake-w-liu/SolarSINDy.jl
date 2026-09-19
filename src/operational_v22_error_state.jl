@@ -8,9 +8,11 @@ import SHA
 
 "Frozen issue offsets of the matured one-hour innovations used by V2.2-M3."
 const OPERATIONAL_V22_ERROR_LAGS_H = (1, 2, 3, 4, 6, 9, 12, 18, 24)
+"Anchor-relative model steps, in hours, supported by the error-state correction."
 const OPERATIONAL_V22_ERROR_SUPPORTED_MODEL_STEPS = OPERATIONAL_V22_MODEL_STEPS
 const OPERATIONAL_V22_ERROR_SCHEMA_VERSION = "operational_v2_2_m3_error_v1"
 const OPERATIONAL_V22_ERROR_PACKAGE_VERSION = "SolarSINDy-0.2.1"
+"Maximum admitted companion spectral radius of a fitted error-state model."
 const OPERATIONAL_V22_ERROR_MAX_SPECTRAL_RADIUS = 0.98
 const _OPERATIONAL_V22_ERROR_BUFFER_H = maximum(OPERATIONAL_V22_ERROR_LAGS_H)
 const _OPERATIONAL_V22_ERROR_FALLBACKS = (
@@ -92,6 +94,25 @@ function OperationalV22H1Innovation(
     )
 end
 
+"""
+    operational_v22_h1_innovation(record::OperationalV22H1Innovation) -> Float64
+
+Return the recorded observation minus the one-hour base prediction, in nT.
+The result is positive when observed Dst exceeds the base prediction. Receipt
+eligibility is checked by [`operational_v22_matured_h1_history`](@ref), not by
+this arithmetic accessor.
+
+# Examples
+```jldoctest
+julia> using Dates
+
+julia> record = OperationalV22H1Innovation(DateTime(2020), DateTime(2020,1,1,1),
+           DateTime(2020,1,1,2), repeat("a",64), -15.0, -12.0);
+
+julia> operational_v22_h1_innovation(record)
+3.0
+```
+"""
 operational_v22_h1_innovation(record::OperationalV22H1Innovation) =
     record.observation_dst_nt - record.base_prediction_dst_nt
 

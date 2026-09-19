@@ -75,6 +75,7 @@ deployed bundle records `guard_applied = false` and therefore keeps [`V24_SERVED
 unchanged.
 """
 const V24_SERVED_GUARD_IDENTITY_TOKEN = "+depthguard(static_v2_2)"
+"Full model identity for a V2.4 bundle with its point-forecast depth guard enabled."
 const V24_SERVED_GUARDED_IDENTITY = V24_SERVED_IDENTITY * V24_SERVED_GUARD_IDENTITY_TOKEN
 
 """
@@ -123,6 +124,7 @@ const V24_SERVING_EXPERTS = (
     :persistence, :burton, :burton_full, :obrien, :direct_gbm, :climatology,
     :static_v2_2,
 )
+"Number of experts in the ordered V2.4 serving ensemble."
 const V24_SERVING_EXPERT_COUNT = length(V24_SERVING_EXPERTS)
 
 "Expert indices carrying the SINDy-family mass floor (served, frozen, analog, static stack)."
@@ -136,6 +138,7 @@ const V24_SERVING_SINDY_FLOOR = 0.60
 
 "Issue-time regimes of `operational_v22_regime`, and the pooled fallback label."
 const V24_SERVING_REGIMES = (:quiet, :active_deepening, :recovery)
+"Fallback regime label used when a more specific serving cell is unavailable."
 const V24_SERVING_POOLED = :pooled
 
 "Ring-current depth bins of the stack cells and the conformal strata."
@@ -152,6 +155,7 @@ Deepening-cell thresholds. They label the deepening state that is logged with ev
 they are the thresholds a bundle's optional point-forecast guard would act in.
 """
 const V24_SERVING_GUARD_RATE_NT_PER_H = -15.0
+"Dst threshold in nT for the coupling-driven branch of the deepening classification."
 const V24_SERVING_GUARD_DEPTH_NT = -50.0
 
 """
@@ -159,6 +163,7 @@ Guard reference the served code path accepts when a bundle enables the point-for
 value `guard.json` must record when it does not.
 """
 const V24_SERVING_GUARD_REFERENCE = "static_v2_2"
+"Guard-reference label required when a bundle disables the point-forecast guard."
 const V24_SERVING_GUARD_REFERENCE_NONE = "none"
 
 "Nominal coverage of the served conformal interval."
@@ -166,6 +171,7 @@ const V24_SERVING_COVERAGE = 0.90
 
 "Physical projection applied to every reported V2.4 Dst center (nT)."
 const V24_SERVING_DST_FLOOR_NT = -2000.0
+"Upper projection bound on the reported V2.4 Dst center, in nT."
 const V24_SERVING_DST_CEIL_NT = 50.0
 
 "Tolerance on the shipped stack weights' unit mass."
@@ -198,6 +204,7 @@ const V24_SERVING_ANALOG_IDENTITY = "v2.4-analog+ADC(magnetic,K25)+T1rcal"
 
 "Analog ensemble configuration of expert E3, fixed by the study."
 const V24_SERVING_ANALOG_K = 25
+"Feature-weight scheme used by the V2.4 analog expert."
 const V24_SERVING_ANALOG_WEIGHT_SET = :magnetic
 
 # ---------------------------------------------------------------------------

@@ -26,7 +26,9 @@ const OPERATIONAL_V22_RESIDUAL_FEATURES = (
     :baseline_spread_nt,
 )
 
+"Candidate ridge penalties for the lead-specific sparse residual."
 const OPERATIONAL_V22_RESIDUAL_RIDGE_GRID = (1.0, 10.0, 100.0, 1000.0)
+"Candidate numbers of ranked features retained by the sparse residual."
 const OPERATIONAL_V22_RESIDUAL_TOP_K_GRID = (2, 4, 6)
 const OPERATIONAL_V22_RESIDUAL_SCHEMA_VERSION = "operational_v2_2_residual_v1"
 

@@ -8,8 +8,18 @@ include(joinpath(@__DIR__, "live_forecast_verify.jl"))
 include(joinpath(@__DIR__, "..", "validation", "operational", "v2_4_interval_upgrade.jl"))
 include(joinpath(@__DIR__, "..", "validation", "operational", "v2_4_point_upgrade.jl"))
 include(joinpath(@__DIR__, "..", "validation", "operational", "v2_4_point_evaluation.jl"))
+include(joinpath(@__DIR__, "..", "validation", "operational", "ground_delay_check.jl"))
 
 function main()
+    ground_model = (;beta=[log(6.),0,0,0,0],mu=zeros(4),sigma=ones(4),
+        calibration_seed=ones(1440),climatology_native=3.,climatology_log=2.)
+    ground_times = collect(DateTime(2020):Minute(1):DateTime(2020)+Minute(99))
+    ground = GroundDelayCheck.evaluate_delay(ground_times,Float64.(1:100),ground_model,10)
+    @assert first(ground.target) == 71
+    @assert first(ground.target_end) == DateTime(2020)+Minute(70)
+    @assert isapprox(first(ground.prediction),5;atol=1e-14)
+    @assert GroundDelayCheck.metrics(ground,ground_model).n == 30
+
     cal = default_operational_v2_calibration()
     latest_dst = -80.0
     drivers = (V=420.0, Bz=-10.0, By=3.0, n=6.0, Pdyn=2.0)

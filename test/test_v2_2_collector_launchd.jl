@@ -500,6 +500,7 @@ const _V22_LAUNCHD_RUNNABLE = Sys.isapple() && Sys.which("plutil") !== nothing
                 "<key>SWM_WEBHOOK_URL</key>\n    <string>$(_v22_xml_text(webhook))</string>", dash)
             @test !occursin("8723", dash)
             @test occursin("<key>LIVE_MONITOR_INTERVAL_SEC</key>\n    <string>1800</string>", mon)
+            @test occursin("<key>SOLARSINDY_REVIEW_DASH_URL</key>\n    <string>http://127.0.0.1:9137/api/health</string>", mon)
             @test occursin("<key>LIVE_MONITOR_PHASE_SAMPLING</key>\n    <string>1</string>", mon)
             @test occursin("<key>LIVE_MONITOR_MAX_LOG_ROWS</key>\n    <string>1234</string>", mon)
             @test occursin(

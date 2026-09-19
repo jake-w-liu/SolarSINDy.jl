@@ -59,6 +59,20 @@ The comparison report scores every listed model on identical matured rows. It re
 pooled cohort and each valid internal model step, including the static V2.2 predecessor when that
 field is present. Step cells with few rows are descriptive rather than model-ranking evidence.
 
+The long-running monitor writes one dated review on its first cycle of each UTC
+day, including cycles where forecast issuance fails. Read
+`var/monitor/reviews/YYYY-MM-DD/review.md`; its JSON receipt retains the claim
+audit, comparison, and dashboard responses with hashes and receipt times.
+Missing or stale sources remain explicitly unavailable. Existing daily reviews
+are checked, not overwritten. The machine must remain awake and connected for
+collection; missed days are not reconstructed as live evidence.
+
+To capture the current day manually from the package directory, run
+`julia --project=. examples/daily_review.jl var/monitor`.
+The launchd installer supplies the configured dashboard health URL. For other
+supervisors, set `SOLARSINDY_REVIEW_DASH_URL` to the dashboard's `/api/health`
+URL when it is not at the default local address.
+
 Use `--poll-seconds=N`, `--timeout-hours=N`, `--horizon-hours=N`, and
 `--log=PATH` to adjust the run. Use `--replay-horizons=1,2,3,6` to emit multiple
 lead times per anchor when building a replay/calibration table, and

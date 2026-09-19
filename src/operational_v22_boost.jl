@@ -5,7 +5,9 @@ import SHA
 
 "Frozen issue-time feature schema for the V2.2 boosted residual."
 const OPERATIONAL_V22_BOOST_FEATURES = OPERATIONAL_V22_RESIDUAL_FEATURES
+"Anchor-relative model steps, in hours, supported by the boosted residual."
 const OPERATIONAL_V22_BOOST_SUPPORTED_MODEL_STEPS = OPERATIONAL_V22_MODEL_STEPS
+"Schema identifier for portable boosted-residual artifacts."
 const OPERATIONAL_V22_BOOST_SCHEMA_VERSION = "operational_v2_2_boost_v1"
 const OPERATIONAL_V22_BOOST_PACKAGE_VERSION = "SolarSINDy-0.2.1"
 const OPERATIONAL_V22_BOOST_EVOTREES_VERSION = "0.18.7"

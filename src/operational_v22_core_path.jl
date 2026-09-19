@@ -1,8 +1,12 @@
 # Hourly frozen-core rollout driven by the 30-minute V2.2-M2 state path.
 
+"Schema identifier for frozen-core forecasts driven by the M2 trajectory."
 const OPERATIONAL_V22_CORE_PATH_SCHEMA_VERSION = "operational_v2_2_core_path_v1"
+"Duration of the frozen-core trajectory, in hours."
 const OPERATIONAL_V22_CORE_PATH_HOURS = 7
+"Number of half-hour M2 driver samples aggregated into each hourly driver."
 const OPERATIONAL_V22_CORE_PATH_SUBSTEPS_PER_HOUR = 2
+"Anchor-relative model steps, in hours, supported by the frozen-core trajectory."
 const OPERATIONAL_V22_CORE_PATH_SUPPORTED_MODEL_STEPS = OPERATIONAL_V22_MODEL_STEPS
 const _OPERATIONAL_V22_CORE_PATH_ROWS =
     OPERATIONAL_V22_CORE_PATH_HOURS * OPERATIONAL_V22_CORE_PATH_SUBSTEPS_PER_HOUR

@@ -1850,6 +1850,7 @@ end
                     nothing
                 end,
                 report_fn=record("report"),
+                daily_review_fn=record("daily_review"),
                 log_path=log_path,
                 report_path=string(log_path, ".md"),
                 calibration_path=L.V2_CALIB,
@@ -1869,7 +1870,7 @@ end
         @test "issue" ∉ outcome.called
         # The observation feed is fetched independently and every later step still runs, in order.
         @test outcome.called ==
-              ["dst", "refresh", "retention", "claim_audit", "snapshot", "report"]
+              ["dst", "refresh", "retention", "claim_audit", "snapshot", "report", "daily_review"]
         # The independently fetched feed actually reaches the steps that consume it, rather than
         # each of them silently refetching or being handed nothing.
         @test outcome.refresh == ([L.DateTime(2026, 7, 1, 2)], [-21.0])
@@ -1886,7 +1887,7 @@ end
         @test "issue" ∉ outcome.called
         # Issuance inputs existed, so their Dst is reused rather than refetched.
         @test outcome.called ==
-              ["refresh", "retention", "claim_audit", "snapshot", "report"]
+              ["refresh", "retention", "claim_audit", "snapshot", "report", "daily_review"]
         @test outcome.refresh == ([L.DateTime(2026, 7, 1, 2)], [-21.0])
         @test outcome.snapshot.observed_dst_nt == [-21.0]
 
@@ -1897,7 +1898,7 @@ end
                             _inputs -> :static)
         @test outcome.issuance == (succeeded=length(L.HORIZONS), complete=true)
         @test outcome.called ==
-              ["issue", "refresh", "retention", "claim_audit", "snapshot", "report"]
+              ["issue", "refresh", "retention", "claim_audit", "snapshot", "report", "daily_review"]
 
         # The narrower verifier is still the fallback when the refresh itself fails.
         called = String[]
@@ -1914,13 +1915,14 @@ end
                 claim_audit_fn=record("claim_audit"),
                 snapshot_fn=record("snapshot"),
                 report_fn=record("report"),
+                daily_review_fn=record("daily_review"),
                 log_path=make_log(joinpath(dir, "fallback.csv")),
                 report_path=joinpath(dir, "fallback.md"),
                 calibration_path=L.V2_CALIB,
                 max_log_rows=length(L.HORIZONS),
             )
         end
-        @test called == ["verify", "retention", "claim_audit", "snapshot", "report"]
+        @test called == ["verify", "retention", "claim_audit", "snapshot", "report", "daily_review"]
     end
 end
 

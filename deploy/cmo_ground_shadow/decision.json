@@ -1,0 +1,11 @@
+{
+  "model_sha256": "c1af43235dfdea8525100227a7649535bfc977b43672be5e994310a14cae6cea",
+  "protocol_sha256": "ca16d9c35fe3b809230b84c73eb357c0e9d82f9b433cec7943fdf0af90f0c3f4",
+  "receipt_time_screen_pass": false,
+  "retrospective_only": true,
+  "prospective_qualification": false,
+  "serving_enabled": false,
+  "evaluated_utc_date": "2026-09-19",
+  "failed_screen": "CMO adjusted May 2024, ten-minute delay: coverage below 0.88.",
+  "metrics_sha256": "abafc04fafe3c86e02356305feee6d3518af60836e91c1bd5daed06191201290"
+}

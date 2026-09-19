@@ -1,5 +1,25 @@
 # Documentation Verification Report
 
+## Julia 1.12 documentation check — 2026-09-19 UTC
+
+All 427 exported bindings now have docstrings; the module itself is also
+documented. The new package test checks all 428 bindings. The 46 missing constant
+docstrings and the one missing function docstring listed in the earlier report
+below are resolved, without changing their numerical definitions. The
+one-hour innovation example executes as a doctest; its return sign and receipt
+eligibility description were checked against the implementation. Arrival-bin
+freshness and the V2.4 deepening threshold were also checked against their
+call sites.
+
+On Julia 1.12.7, the strict build exits successfully with no Documenter errors
+or warnings. The V2.2 reference is split into driver/arrival and error/shadow
+pages so both stay below the existing size warning threshold. Export coverage,
+doctests, reference checks, and warning policy remain enforced. The daily-review
+instructions describe the persisted outputs and the machine-availability
+requirement. This dated result supersedes the missing-docstring count below.
+
+## Earlier verification
+
 Date: 2026-08-19
 
 Supersedes the 2026-08-10 report, whose coverage figures (132 exports, zero missing docstrings,

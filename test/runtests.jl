@@ -805,6 +805,9 @@ using DataFrames
     end
 
     include("test_compat.jl")
+    include("test_ground_delay_check.jl")
+    include("test_daily_review.jl")
+    include("test_documentation.jl")
     include("test_discovery_provenance.jl")
     include("test_storm_lambda_selection.jl")
     include("test_synthetic_equation_recovery.jl")

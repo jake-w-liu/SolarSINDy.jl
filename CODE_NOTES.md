@@ -1309,3 +1309,26 @@ successful deployment or from passing implementation tests.
 | Daily review | Report data freshness, availability, actual forecast errors, interval coverage, and existing A3 failures separately. Persist dated reports automatically; do not clear failure history or label unavailable evidence successful. |
 | A3 and FRD research | Preserve failed candidates. Any further candidate requires a dated protocol, causal inputs, strong same-row controls, independent numerical checks, and unchanged advancement criteria. Exposed historical data remain development evidence. |
 | Reverification | Focused tests, full Pkg.test(), examples/experiments.jl, development harness, strict docs, deployment probes, and final GitHub CI. Commit and push code changes, then verify a clean synchronized codebase. |
+
+The receipt-time study uses the frozen [CMO protocol](validation/operational/ground_shadow_protocol.md).
+Its [dated result](deploy/cmo_ground_shadow/README.md) records the failed
+ten-minute-delay coverage case. No prospective ground service is started.
+`ground_delay_check.jl` validates every one-minute interval, not merely the
+window's total duration; a timestamp-jitter counterexample exercises that
+distinction. The independent checker uses previously checked zero-delay
+targets, separate receipt chronology and high-precision metric arithmetic.
+
+Daily reviews reuse the existing monitor cadence rather than adding another
+daemon. A per-day directory is published atomically under an exclusive lock;
+later cycles verify its hashes without replacing it. Missing, malformed,
+stale, future-dated, non-200 and oversized inputs remain distinguishable.
+Malformed bounded payloads retain their bytes and hashes. Source capture is
+bounded by file/response size and network deadlines; only one day's report is
+read during subsequent cycles. Tests cover concurrent writers, restart,
+interrupted staging, corruption and source failures. This adds no new package
+dependency or public scientific API.
+
+The documentation check now tests every exported binding explicitly, because
+Documenter's `checkdocs=:exports` does not detect an export that has no docstring.
+The compatibility tests declare their `Pkg` standard-library dependency in the
+test target so they also run in CI's isolated environment.

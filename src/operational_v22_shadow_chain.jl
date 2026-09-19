@@ -2,9 +2,13 @@
 
 import SHA
 
+"Schema identifier for checksum-bound offline shadow-chain artifacts."
 const OPERATIONAL_V22_SHADOW_SCHEMA_VERSION = "operational_v2_2_shadow_chain_v1"
+"Product identity carried by the offline V2.2 shadow chain."
 const OPERATIONAL_V22_SHADOW_PRODUCT_VERSION = "v2.2-shadow"
+"Forecast horizons in hours admitted by the offline shadow chain."
 const OPERATIONAL_V22_SHADOW_SUPPORTED_HORIZONS_H = OPERATIONAL_V22_MODEL_STEPS
+"Ordered matured-innovation feature names used by the default shadow-chain error model."
 const OPERATIONAL_V22_SHADOW_DEFAULT_FEATURE_SCHEMA = ntuple(
     index -> "matured_h1_innovation_lag_" *
              string(OPERATIONAL_V22_ERROR_LAGS_H[index]) * "h",

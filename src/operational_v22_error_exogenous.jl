@@ -48,6 +48,7 @@ const OPERATIONAL_V22_ERROR_EXOGENOUS_GROUPS = (
     :m2_core_center_dst_nt,
 )
 
+"Group index for each entry of [`OPERATIONAL_V22_ERROR_EXOGENOUS_FEATURES`](@ref)."
 const OPERATIONAL_V22_ERROR_EXOGENOUS_FEATURE_GROUPS = let
     groups = collect(1:length(OPERATIONAL_V22_RESIDUAL_FEATURES))
     first_lag_group = length(OPERATIONAL_V22_RESIDUAL_FEATURES) + 1
@@ -64,13 +65,17 @@ const OPERATIONAL_V22_ERROR_EXOGENOUS_FEATURE_GROUPS = let
     Tuple(groups)
 end
 
+"Anchor-relative model steps, in hours, supported by the exogenous error model."
 const OPERATIONAL_V22_ERROR_EXOGENOUS_SUPPORTED_MODEL_STEPS =
     OPERATIONAL_V22_ERROR_SUPPORTED_MODEL_STEPS
+"Candidate ridge penalties for exogenous error-model fitting."
 const OPERATIONAL_V22_ERROR_EXOGENOUS_RIDGE_GRID =
     OPERATIONAL_V22_DRIVER_RIDGE_GRID
+"Candidate group thresholds for exogenous error-model fitting."
 const OPERATIONAL_V22_ERROR_EXOGENOUS_THRESHOLD_GRID =
     OPERATIONAL_V22_DRIVER_THRESHOLD_GRID
 const OPERATIONAL_V22_ERROR_EXOGENOUS_MAX_THRESHOLD_ITERATIONS = 20
+"Maximum admitted companion spectral radius of a fitted exogenous error model."
 const OPERATIONAL_V22_ERROR_EXOGENOUS_MAX_SPECTRAL_RADIUS =
     OPERATIONAL_V22_ERROR_MAX_SPECTRAL_RADIUS
 const OPERATIONAL_V22_ERROR_EXOGENOUS_SCHEMA_VERSION =

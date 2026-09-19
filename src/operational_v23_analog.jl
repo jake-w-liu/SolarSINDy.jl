@@ -31,6 +31,7 @@ const V23_MEMBER_MIN_V_KMS = 200.0
 
 "Physical bounds on a continued proton density (cm^-3)."
 const V23_MEMBER_MIN_N_CM3 = 0.05
+"Upper projection bound on continued proton density, in cm^-3."
 const V23_MEMBER_MAX_N_CM3 = 200.0
 
 "Default number of queries whose distances are formed per BLAS block."

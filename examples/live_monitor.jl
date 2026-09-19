@@ -36,6 +36,7 @@ include(joinpath(@__DIR__, "..", "app", "src", "forecast_api.jl"))
 include(joinpath(@__DIR__, "external_dst_snapshot_collector.jl"))
 include(joinpath(@__DIR__, "..", "validation", "operational",
                  "v2_4_live_claim_audit.jl"))
+include(joinpath(@__DIR__, "daily_review.jl"))
 
 using CSV
 using DataFrames
@@ -680,6 +681,7 @@ function cycle!(; prepare_fn::Function=cfg -> prepare_issue_inputs(cfg;
                   snapshot_fn::Function=capture_and_score_external_dst_snapshot!,
                   claim_audit_fn::Function=V24LiveClaimAudit.run_claim_audit,
                   report_fn::Function=write_live_comparison_report,
+                  daily_review_fn::Function=DailyOperationalReview.write_daily_review,
                   log_path::AbstractString=LOG,
                   report_path::AbstractString=REPORT,
                   calibration_path::AbstractString=V2_CALIB,
@@ -763,6 +765,7 @@ function cycle!(; prepare_fn::Function=cfg -> prepare_issue_inputs(cfg;
         pend = count(ismissing, df.observation_dst_nt)
         logln("log rows=", nrow(df), " pending=", pend)
     end)
+    guarded("daily_operational_review", () -> daily_review_fn(dirname(abspath(log_path))))
     return issuance
 end
 

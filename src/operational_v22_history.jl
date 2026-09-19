@@ -12,8 +12,10 @@ const OPERATIONAL_V22_HISTORY_TERMS = (
 "Dst-anchor lags admitted by the hourly V2.2-M1 trajectory kernel."
 const OPERATIONAL_V22_HISTORY_SUPPORTED_ANCHOR_LAGS = (0, 1)
 
+"Schema identifier for the one-memory sparse-history artifact."
 const OPERATIONAL_V22_HISTORY_SCHEMA_VERSION = "operational_v2_2_m1_v1"
 const OPERATIONAL_V22_HISTORY_PACKAGE_VERSION = "SolarSINDy-0.2.1"
+"Default upper bound on rectified solar-wind coupling, in mV/m."
 const OPERATIONAL_V22_HISTORY_DEFAULT_COUPLING_BOUND_MVM = 50.0
 const _OPERATIONAL_V22_HISTORY_STATE_MIN_NT = -2000.0
 const _OPERATIONAL_V22_HISTORY_STATE_MAX_NT = 50.0

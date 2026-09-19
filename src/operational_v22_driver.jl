@@ -8,10 +8,15 @@ const OPERATIONAL_V22_DRIVER_STATES = (:Bx, :By, :Bz, :logV, :logn)
 "Frozen V2.2-M2 delay coordinates in 30-minute samples."
 const OPERATIONAL_V22_DRIVER_LAGS = (0, 1, 2, 6, 12, 24)
 
+"Time between sparse-driver state samples, in minutes."
 const OPERATIONAL_V22_DRIVER_CADENCE_MINUTES = 30
+"Number of half-hour steps in the sparse-driver rollout."
 const OPERATIONAL_V22_DRIVER_ROLLOUT_STEPS = 14
+"Numerical allowance above unit companion spectral radius in driver validation."
 const OPERATIONAL_V22_DRIVER_STABILITY_TOLERANCE = 1.0e-8
+"Candidate ridge penalties for sparse-driver fitting."
 const OPERATIONAL_V22_DRIVER_RIDGE_GRID = Tuple(10.0 .^ (-6:2))
+"Candidate group thresholds for sparse-driver fitting."
 const OPERATIONAL_V22_DRIVER_THRESHOLD_GRID =
     (0.0, 1.0e-3, 3.0e-3, 1.0e-2, 3.0e-2, 1.0e-1, 3.0e-1)
 const OPERATIONAL_V22_DRIVER_MAX_THRESHOLD_ITERATIONS = 20

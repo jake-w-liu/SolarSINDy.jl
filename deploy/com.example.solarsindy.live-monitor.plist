@@ -21,6 +21,7 @@
                       deletes version directories and would leave a silent 60 s crash loop.
     __CLONE_DIR__     absolute path to the SolarSINDy.jl clone (the --project environment)
     __MONITOR_DIR__   output/state directory (default __CLONE_DIR__/var/monitor)
+    __WATCHDOG_DASH_URL__ dashboard health URL used by the daily review
     EXTRA_ENV marker  the commented marker line inside EnvironmentVariables. The install
                       script replaces that line with the allow-listed solarsindy.env keys this
                       service reads (SOLARSINDY_V2_CALIBRATION, LIVE_MONITOR_*,
@@ -51,6 +52,8 @@
 
   <key>EnvironmentVariables</key>
   <dict>
+    <key>SOLARSINDY_REVIEW_DASH_URL</key>
+    <string>__WATCHDOG_DASH_URL__</string>
     <key>SOLARSINDY_MONITOR_DIR</key>
     <string>__MONITOR_DIR__</string>
     <key>JULIA_NUM_THREADS</key>
