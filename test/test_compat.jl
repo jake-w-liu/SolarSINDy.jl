@@ -68,6 +68,8 @@ end
             @test registry !== nothing
             @test registry !== nothing && first(registry) < first(resolve)
         end
+        @test occursin("if: matrix.julia-version == '1.10'", workflow)
+        @test occursin("run: mv Manifest.toml", workflow)
     end
 
     @testset "bundled socket fixtures are available to Pkg.test" begin

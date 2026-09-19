@@ -32,6 +32,11 @@ jobs:
         with:
           version: ${{ matrix.julia-version }}
       - uses: julia-actions/cache@v2
+      - name: Resolve minimum Julia from Project.toml
+        if: matrix.julia-version == '1.10'
+        # The deployment lockfile contains Julia 1.12-only standard libraries.
+        # Preserve it, but resolve the declared package compat natively on 1.10.
+        run: mv Manifest.toml "$RUNNER_TEMP/Manifest-julia1.12.toml"
       - name: Resolve the declared compat on this Julia
         # The failure this repeats: a `[compat]` bound on a standard library pins the package to one
         # Julia release, and resolution — not the test suite — is where that shows.

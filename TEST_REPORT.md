@@ -1652,8 +1652,16 @@ no installed registries; Julia 1.10 reported the first unregistered dependency.
 The original command reproduced the missing-registry failure in a fresh local
 depot and clean archive. Adding General before resolution then installed and
 resolved that same package successfully on Julia 1.12.6. The focused environment
-contract suite passes 65 assertions, including a check for registry bootstrap
+contract suite passes 67 assertions, including a check for registry bootstrap
 in both workflow environments. Logs are in
 `validation/output/operational/live_upgrade_20260919/ci_empty_depot_{before,after}.log`.
 Full matrix and documentation results must be checked on the subsequent pushed
 commit; successful local bootstrap alone is not a completed CI verdict.
+
+After registry initialization, the Julia 1.10 reproduction exposed a second
+startup failure: the Julia 1.12 deployment manifest pins
+`JuliaSyntaxHighlighting` to the standard-library version 1.12.0, which cannot
+resolve as a package on Julia 1.10. The minimum-version CI job now preserves that
+lockfile in runner scratch and resolves the unchanged Project.toml natively.
+The same clean archive then resolves and instantiates successfully on Julia
+1.10.11. The Julia 1.12 job retains the deployment lockfile.
