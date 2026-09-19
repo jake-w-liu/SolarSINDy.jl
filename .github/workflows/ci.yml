@@ -52,3 +52,34 @@ jobs:
         # `docs/make.jl` runs with checkdocs=:exports, doctest=true and warnonly=false, so this step
         # fails on a missing manual entry or a stale doctest, not only on a broken page.
         run: julia --project=docs docs/make.jl
+
+  containers:
+    name: Julia 1.12 deployment images
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build both images
+        run: |
+          docker build --tag solarsindy-monitor:ci --file deploy/Dockerfile.monitor .
+          docker build --tag solarsindy-dashboard:ci --file app/Dockerfile .
+      - name: Load the monitor and frozen artifacts as the runtime user
+        run: |
+          test "$(docker run --rm solarsindy-monitor:ci id -u)" = 10001
+          docker run --rm solarsindy-monitor:ci julia --project=. -e 'using SolarSINDy; include("examples/live_monitor.jl"); @assert length(load_operational_core().coefficients) == 20; @assert isfile("deploy/cmo_ground_shadow/decision.json")'
+      - name: Start the dashboard as the runtime user
+        run: |
+          docker run --detach --name solarsindy-dashboard-ci --publish 127.0.0.1:8723:8723 solarsindy-dashboard:ci
+          ready=0
+          for attempt in $(seq 1 90); do
+            if curl --fail --silent --max-time 3 http://127.0.0.1:8723/api/health >/dev/null; then
+              ready=1
+              break
+            fi
+            test "$(docker inspect --format '{{.State.Running}}' solarsindy-dashboard-ci)" = true || break
+            sleep 2
+          done
+          docker logs solarsindy-dashboard-ci
+          test "$ready" = 1
+          test "$(docker exec solarsindy-dashboard-ci id -u)" = 10001
+          curl --fail --silent --max-time 5 http://127.0.0.1:8723/ >/dev/null

@@ -7,6 +7,7 @@
 #     -e SOLARSINDY_LOG=/data/live_forecast_log.csv swmonitor
 # For a supervised daemon+dashboard pair, prefer deploy/docker-compose.yml.
 FROM julia:1.12.7-bookworm
+ENV JULIA_DEPOT_PATH=/opt/julia-depot JULIA_NUM_PRECOMPILE_TASKS=2
 
 # Dedicated non-root runtime user (shared uid with the monitor image so a log written mode-600 by
 # the daemon is readable by the dashboard over the shared volume).
@@ -30,7 +31,7 @@ COPY data/operational_validation ./data/operational_validation
 # cdn.plot.ly at runtime. This removes the builder-state dependence on a gitignored asset: the build
 # fails loudly if the asset cannot be produced, instead of silently shipping a chartless dashboard.
 ENV PLOTLY_VERSION=2.35.2
-RUN bash vendor-plotly.sh && chown -R swm:swm /app
+RUN bash vendor-plotly.sh && chown -R swm:swm /app /opt/julia-depot
 
 ENV SWM_HOST=0.0.0.0 SWM_PORT=8723 SOLARSINDY_LOG=/data/live_forecast_log.csv \
     SOLARSINDY_OPERATIONAL_EVIDENCE_DIR=/app/data/operational_validation JULIA_NUM_THREADS=4

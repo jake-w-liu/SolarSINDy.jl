@@ -83,6 +83,21 @@ end
         @test "Pkg" in PROJECT["targets"]["test"]
     end
 
+    @testset "deployment images carry their runtime environment" begin
+        for path in ("app/Dockerfile","deploy/Dockerfile.monitor")
+            source = read(joinpath(PACKAGE_ROOT,path),String)
+            @test occursin("ENV JULIA_DEPOT_PATH=/opt/julia-depot",source)
+            @test occursin(r"chown -R swm:swm .* /opt/julia-depot",source)
+            @test occursin("USER swm",source)
+        end
+        monitor = read(joinpath(PACKAGE_ROOT,"deploy/Dockerfile.monitor"),String)
+        @test first(findfirst("COPY src ./src",monitor)) < first(findfirst("Pkg.precompile()",monitor))
+        @test occursin("COPY data ./data",monitor)
+        @test occursin("COPY validation/operational/v2_4_live_claim_audit.jl",monitor)
+        compose = read(joinpath(PACKAGE_ROOT,"deploy/docker-compose.yml"),String)
+        @test occursin("SOLARSINDY_REVIEW_DASH_URL=http://dashboard:8723/api/health",compose)
+    end
+
     @testset "no standard library carries a version bound" begin
         # `Logging = \"1.11.0\"` with `julia = \"1.10\"` made the package unresolvable on its own
         # declared minimum: Julia 1.10 ships Logging without a version at all.

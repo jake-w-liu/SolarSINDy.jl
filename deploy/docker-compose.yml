@@ -20,6 +20,7 @@ services:
       - monitor-state:/data
     environment:
       - SOLARSINDY_MONITOR_DIR=/data
+      - SOLARSINDY_REVIEW_DASH_URL=http://dashboard:8723/api/health
       - JULIA_NUM_THREADS=2
 
   dashboard:

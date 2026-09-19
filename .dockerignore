@@ -1,0 +1,11 @@
+.git
+var
+validation/output
+logs
+tmp
+solarsindy.env
+docs/build
+docs/site
+app/server.log
+data/omni_hourly_raw.dat
+data/omni_extracted.csv
