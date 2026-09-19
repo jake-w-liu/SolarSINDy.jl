@@ -194,7 +194,7 @@ main { max-width: var(--content-max); margin: 0 auto; padding: 18px 20px 8px; }
     text-align: center;
     white-space: normal;
   }
-  .card-head { gap: 12px; align-items: flex-start; }
+  .card-head { gap: 12px; align-items: flex-start; flex-wrap: wrap; }
   .card-head h2 { min-width: 0; overflow-wrap: anywhere; }
   .src-badge { flex: 0 0 auto; }
   .upstream, .dbdt-stats {

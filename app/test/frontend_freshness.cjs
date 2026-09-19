@@ -193,4 +193,5 @@ test("wrapped chart legends stay above the data and date labels reserve space", 
   for (const selector of ["calib", "footer"]) {
     assert.match(styles, new RegExp(`\\.${selector}\\s*\\{[^}]*overflow-wrap:\\s*anywhere`));
   }
+  assert.match(styles, /\.card-head\s*\{[^}]*flex-wrap:\s*wrap/);
 });
