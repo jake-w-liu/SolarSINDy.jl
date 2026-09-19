@@ -55,6 +55,10 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --s
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --comparison-report
 ```
 
+The comparison report scores every listed model on identical matured rows. It reports both the
+pooled cohort and each valid internal model step, including the static V2.2 predecessor when that
+field is present. Step cells with few rows are descriptive rather than model-ranking evidence.
+
 Use `--poll-seconds=N`, `--timeout-hours=N`, `--horizon-hours=N`, and
 `--log=PATH` to adjust the run. Use `--replay-horizons=1,2,3,6` to emit multiple
 lead times per anchor when building a replay/calibration table, and
@@ -290,6 +294,15 @@ different minute therefore changes which model steps the cycle needs:
 | Issue minute before the hourly Dst publication | 1 h | `2,3,4,7` |
 | Issue minute after it | 0 h | `1,2,3,6` |
 
+The prospective A3 gate requires support at every admitted internal step. A
+fixed hourly phase would generally accrue only one of these step sets, so the
+production monitor can set `LIVE_MONITOR_PHASE_SAMPLING=1`. After its immediate
+startup cycle it issues once per UTC hour, at minute 05 in even-numbered hours
+and minute 55 in odd-numbered hours. This samples both publication phases
+without issuing two cycles in one issue hour. The logged Dst anchor and internal
+model step remain authoritative; the scheduled minute is not treated as proof
+that a source value was or was not available.
+
 The batch interval policy is chosen once per cycle and applies to all four rows: the adaptive
 band is used only when both the baseline-center and served-center residual streams are mature
 (at least 35 verified residuals) for *every* required step. The two step sets have separate
@@ -326,6 +339,52 @@ Then fit the calibration on that multi-horizon table (`--fit-v2-calibration
 `_scored.csv` / comparison report. This is the run that establishes whether the
 operational 90% interval actually covers at the nominal rate; it requires live
 or archived OMNI data and is the data-dependent step, not a code step.
+
+## Prospective V2.4e interval shadow
+
+The deployed A3 shadow evaluates a causal location correction without changing
+the served V2.4e point or interval. For each supported internal model step it
+uses the median of the trailing 24 matured, exact-identity signed residuals and
+requires 30 residuals before emitting endpoints. It scales the served lower and
+upper half-widths by 1.50 at step 1 and 1.20 at steps 2, 3, 4, 6, and 7. The
+configuration is logged under its own identity and SHA-256 digest and is bound
+to served-manifest digest
+`057aec0df488314cd682e212e9ba64233e2674a7c641d68b72aa729982093ede`.
+A row in warm-up records its history count and no endpoints.
+
+The dashboard can show collection progress, but the persisted audit is the
+source of truth for claim readiness. Regenerate it with:
+
+```bash
+julia --project=. validation/operational/v2_4_live_claim_audit.jl
+```
+
+The audit writes `var/monitor/v2_4_live_claim_status.json` and
+`var/monitor/v2_4_live_claim_status.md` atomically. It accepts only rows with
+the exact V2.4e served identity and bundle manifest, the exact A3 shadow
+identity and digest, an `ok` V2.4e stage, unchanged V2.4e served values, causal
+timestamps, a supported public horizon and internal step, and endpoints that
+reproduce the frozen A3 formula. Retries are deduplicated by issue hour and
+target, retaining the latest issue attempt. Any identity, bundle, chronology,
+fallback, status, served-value, warm-up, or formula violation keeps the
+integrity gate closed.
+
+Marginal calibration requires at least 30 consecutive issuance days, 500
+complete matured cycles, 2,000 matured rows, and 400 rows at every supported
+step. It also requires pooled 90% coverage of 0.88–0.92; a day-block 95%
+interval that contains 0.90 and has a lower bound of at least 0.85; per-step
+coverage of at least 0.85; no complete seven-day window below 0.80; a mean width
+ratio no greater than 1.25; and a nonpositive paired interval-score mean and
+upper confidence bound.
+
+Storm skill additionally requires five independent events separated by 72
+contiguous observed hours above -30 nT, 200 same-row matched storm forecasts,
+and at least 30 rows spanning all five events at every supported step. Every step must have a positive event-block lower confidence
+bound for gain over static V2.2. Loss to the strongest matched comparator may
+not exceed 0.5 nT, absolute bias may not exceed 10 nT, and shadow storm coverage
+must be at least 0.80. The marginal gate must also pass. Neither report flag
+changes the served product; promotion requires a new versioned bundle and a
+separate serving decision.
 
 ## Online Assimilation (Research)
 
@@ -420,7 +479,41 @@ concatenation of the segments in index order. Without the rollover a single colu
 addition made every subsequent trim fail, so rows were never pruned again and the
 hot log grew past its cap without bound.
 
+### External Dst receipt timing
+
+The external collector preserves source-issue-relative forecast rows and raw-response
+hashes. Its prospective scores use only rows whose response completed strictly before
+target, with source issue and fetch-start both at or before completion. The completion
+timestamp is recorded after the forecast body and any source-run metadata request have
+returned. Timestamps retain milliseconds.
+
+The older fetch-start timestamp is not a completion receipt. Existing logs gain a
+nullable completion column without reconstructing historical values. Targets already
+at or before fetch-start are known late; other legacy rows have unknown completion.
+Both groups remain archived, including existing observation/error fields, but neither
+enters prospective RMSE or MAE. Repeated retrieval keeps the first record's timestamps;
+it does not certify an earlier legacy receipt.
+
+Collector and readiness reports show the receipt-future subset separately from late,
+unknown-completion, and invalid-chronology records. Reported receipt lead is target
+minus completion, not target minus source issue. These external scores do not feed
+the served forecast or A3 interval calculation.
+
 ### Cycle contract under a feed outage
+
+The monitor preserves issuance inputs under `source_cache/issue_inputs/` beside
+the live log. `responses/` contains exact, content-addressed HTTP bodies;
+`retrievals/` records their URLs, hashes, sizes, and request/completion times;
+`issues/` links completed preparation to its decision timestamp. Normal decision
+timestamps follow all input retrievals. Explicit replay timestamps do not establish
+historical availability.
+
+Receipts are written before issuance and are retained even if preparation later
+fails or an existing pending forecast is reused. They are input evidence, not proof
+that a new forecast was issued. Older forecasts without receipts are not backfilled.
+The archive is append-only and needs disk-capacity monitoring; raw responses are not
+silently discarded with rotating diagnostic logs. A conflicting or unwritable
+receipt prevents that preparation from issuing forecasts.
 
 A cycle's issuance step depends on the L1 solar-wind feeds; its remaining steps do
 not. Kyoto verification, hot-log retention, the prospective external Dst snapshot

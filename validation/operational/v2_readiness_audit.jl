@@ -4,6 +4,7 @@ using CSV
 using DataFrames
 using Dates
 using HTTP
+using MbedTLS
 using JSON3
 using Printf
 using SHA
@@ -11,6 +12,8 @@ using SolarSINDy
 using Statistics
 
 include(joinpath(@__DIR__, "paths.jl"))
+include(joinpath(OPERATIONAL_PACKAGE_ROOT, "examples", "external_dst_timing.jl"))
+using .ExternalDstTiming: external_dst_timing, external_dst_summary, write_external_dst_metrics
 
 const REPO_ROOT = OPERATIONAL_WORKSPACE_ROOT
 const LIVE_DIR = OPERATIONAL_EVIDENCE_DIR
@@ -221,9 +224,7 @@ AuditState() = AuditState(
               rmse_temerin_valid = Float64[], rmse_v2_1 = Float64[],
               rmse_v2_0 = Float64[], rmse_persistence = Float64[],
               v2_1_minus_temerin = Float64[], max_gap_min = Float64[]),
-    DataFrame(source = String[], n_rows = Int[], n_scored = Int[],
-              n_issues = Int[], max_lead_h = Float64[],
-              rmse_nt = Union{Missing, Float64}[], mae_nt = Union{Missing, Float64}[]),
+    external_dst_summary(DataFrame()),
     DataFrame(axis = String[], lead = Int[], regime = String[], n = Int[],
               rmse_v2_0 = Float64[], rmse_v2_1 = Float64[], rmse_persistence = Float64[],
               delta_vs_v2_0 = Float64[], delta_vs_best = Float64[]),
@@ -1341,35 +1342,17 @@ function audit_temerin_dst_archive!(state::AuditState)
     end
 end
 
-function _external_dst_summary_from_log(df::DataFrame)
-    out = DataFrame(source = String[], n_rows = Int[], n_scored = Int[],
-                    n_issues = Int[], max_lead_h = Float64[],
-                    rmse_nt = Union{Missing, Float64}[], mae_nt = Union{Missing, Float64}[])
-    for source in sort(unique(String.(df.source)))
-        sub = df[String.(df.source) .== source, :]
-        scored = .!ismissing.(sub.observed_dst_nt)
-        if any(scored)
-            err = Float64.(sub.forecast_dst_nt[scored]) .- Float64.(sub.observed_dst_nt[scored])
-            rmse_val = sqrt(mean(err .^ 2))
-            mae_val = mean(abs.(err))
-        else
-            rmse_val = missing
-            mae_val = missing
-        end
-        push!(out, (source, nrow(sub), count(scored), length(unique(String.(sub.issue_utc))),
-                    maximum(Float64.(sub.lead_h)), rmse_val, mae_val))
-    end
-    return out
-end
+_external_dst_summary_from_log(df::DataFrame) = external_dst_summary(df)
 
-function audit_external_dst_snapshots!(state::AuditState)
-    path = EXTERNAL_DST_LOG_PATH
-    df = read_csv_checked!(state, path, "prospective external Dst forecast snapshot log")
+function audit_external_dst_snapshots!(state::AuditState;
+                                      path=EXTERNAL_DST_LOG_PATH,
+                                      report=EXTERNAL_DST_REPORT_PATH)
+    df = read_csv_checked!(state, path, "external Dst forecast snapshot log")
     df === nothing && return
     require_columns!(state, df, REQUIRED_EXTERNAL_DST_COLS, "prospective external Dst forecast snapshot log") || return
 
     if nrow(df) > 0
-        pass!(state, "external Dst snapshot rows", "n=$(nrow(df)) future forecast rows")
+        pass!(state, "external Dst snapshot rows", "n=$(nrow(df)) source-issue-relative forecast rows")
     else
         fail!(state, "external Dst snapshot rows", "collector log is empty")
         return
@@ -1433,30 +1416,55 @@ function audit_external_dst_snapshots!(state::AuditState)
         pass!(state, "external Dst issue-time basis", "source issue bases=$(join(basis, ", "))")
     end
 
-    max_lead = maximum(Float64.(df.lead_h))
-    if max_lead >= 1.0
-        pass!(state, "external Dst prospective lead coverage", @sprintf("max lead %.2f h", max_lead))
+    timing = external_dst_timing.(eachrow(df))
+    eligible = timing .== :eligible
+    legacy_count = count(==(:legacy), timing)
+    late_count = count(==(:late), timing)
+    invalid_count = count(==(:invalid), timing)
+    if invalid_count > 0
+        fail!(state, "external Dst receipt chronology",
+              "$invalid_count invalid timestamp or completion-order records; excluded from prospective scores")
+    else
+        pass!(state, "external Dst receipt chronology",
+              "$(count(eligible)) receipt-future rows; prospective scores require issue/fetch-start at or before completion strictly before target")
+    end
+    if legacy_count + late_count > 0
+        warn!(state, "external Dst timing exclusions",
+              "$late_count known-late and $legacy_count unknown-completion legacy rows excluded; historical records retained")
+    end
+    summary = _external_dst_summary_from_log(df)
+    receipt_leads = collect(skipmissing(summary.max_receipt_lead_h))
+    if !isempty(receipt_leads) && maximum(receipt_leads) >= 1.0
+        pass!(state, "external Dst prospective lead coverage",
+              @sprintf("max receipt lead %.2f h", maximum(receipt_leads)))
     else
         warn!(state, "external Dst prospective lead coverage",
-              @sprintf("current public rows max lead %.2f h; collector active but not yet a 1--6 h baseline", max_lead))
+              isempty(receipt_leads) ? "no receipt-future rows with recorded completion" :
+              @sprintf("max receipt lead %.2f h; not yet a 1--6 h baseline", maximum(receipt_leads)))
     end
 
     scored = df[.!ismissing.(df.observed_dst_nt), :]
-    if nrow(scored) == 0
-        warn!(state, "external Dst scored rows", "no external snapshot rows have matured against observed Dst yet")
-    else
+    unsupported_scores = has_col(df, :receipt_completed_utc) ?
+        count(.!eligible .& .!ismissing.(df.receipt_completed_utc) .&
+              .!ismissing.(df.observed_dst_nt)) : 0
+    if unsupported_scores > 0
+        fail!(state, "external Dst prospective score provenance",
+              "$unsupported_scores scored rows carry completion metadata but lack receipt-future eligibility")
+    end
+    if sum(summary.n_scored) == 0
+        warn!(state, "external Dst scored rows", "no receipt-future rows have matured against observed Dst yet")
+    end
+    if nrow(scored) > 0
         err_ok = true
         for r in eachrow(scored)
             err_ok &= abs(abs(Float64(r.forecast_dst_nt) - Float64(r.observed_dst_nt)) -
                           Float64(r.abs_error_nt)) <= 1e-9
         end
-        err_ok ? pass!(state, "external Dst scored-row CRC", "checked $(nrow(scored)) scored rows") :
+        err_ok ? pass!(state, "external Dst scored-row CRC", "checked $(nrow(scored)) stored errors, including excluded historical records") :
                  fail!(state, "external Dst scored-row CRC", "stored absolute errors disagree with forecast/observation values")
     end
 
-    summary = _external_dst_summary_from_log(df)
     append!(state.external_dst_metrics, summary; cols = :union)
-    report = EXTERNAL_DST_REPORT_PATH
     isfile(report) ? pass!(state, "external Dst report", "external_dst_forecast_report.md exists") :
                      warn!(state, "external Dst report", "external_dst_forecast_report.md missing")
 end
@@ -2500,7 +2508,8 @@ function audit_dashboard_api!(state::AuditState, api_url::Union{Nothing, String}
 
     payload = nothing
     try
-        resp = HTTP.get(api_url; connect_timeout = 2, readtimeout = 5, status_exception = false)
+        resp = HTTP.get(api_url; socket_type_tls=MbedTLS.SSLContext,
+                        connect_timeout = 2, readtimeout = 5, status_exception = false)
         if resp.status != 200
             msg = "HTTP status $(resp.status) from $api_url"
             require_api ? fail!(state, "dashboard API reachable", msg) : warn!(state, "dashboard API reachable", msg)
@@ -3748,16 +3757,8 @@ function write_report(state::AuditState, path::AbstractString)
 
         if nrow(state.external_dst_metrics) > 0
             println(io, "\n## Prospective External Dst Snapshot Metrics\n")
-            println(io, "The prospective collector stores public same-unit Dst products as issue-time snapshots with raw-response hashes. It starts the missing issue-time archive going forward; it does not backfill unavailable historical issue snapshots.\n")
-            println(io, "| Source | rows | scored | issues | max lead [h] | RMSE [nT] | MAE [nT] |")
-            println(io, "|---|---:|---:|---:|---:|---:|---:|")
-            for r in eachrow(state.external_dst_metrics)
-                rmse_s = ismissing(r.rmse_nt) ? "pending" : @sprintf("%.2f", r.rmse_nt)
-                mae_s = ismissing(r.mae_nt) ? "pending" : @sprintf("%.2f", r.mae_nt)
-                @printf(io, "| %s | %d | %d | %d | %.3f | %s | %s |\n",
-                        r.source, r.n_rows, r.n_scored, r.n_issues,
-                        r.max_lead_h, rmse_s, mae_s)
-            end
+            println(io, "The collector retains source-issue-relative Dst rows and raw-response hashes. Only the receipt-future subset supports prospective metrics; missing historical completion receipts are not backfilled.\n")
+            write_external_dst_metrics(io, state.external_dst_metrics)
         end
 
         if nrow(state.regime_metrics) > 0

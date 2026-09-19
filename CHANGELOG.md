@@ -13,13 +13,23 @@ arithmetic. This pass closes them without touching the served center, the bands,
 the conformal strata, the SINDy family floor, the fallback chain, or the served identity
 `v2.4+sindy20x11+superlearner10floor+conformal`.
 
+The dashboard launchd template and ad-hoc CLI now use Julia's default compilation. The previous
+minimal-compilation launch generated five unplanned macOS crash reports and a sixth when the old
+process exited during replacement, and it reproduced the same runtime-fault path under concurrent
+mixed-endpoint traffic on an isolated port. With the minimal-compilation argument removed, the
+isolated server and the deployed dashboard each completed 6,000 mixed requests without a restart.
+This changes the dashboard process only; forecast values, the served bundle, and the monitor process
+are unchanged.
+
 Reader-facing output changes without moving a served number. Alert text and the webhook body now
 render a storm depth as an integer ("-37 nT" where the previous build printed "-37.0 nT"), matching
 the dashboard. The forecast chart now connects the observed anchor directly to the issued V2.4e
 target-hour centers and no longer publishes the V2.1 sub-hour diagnostic as a product trajectory.
 Readiness and live-comparison reports name the exact effective served identity and keep predecessor
-rows separate. The dashboard also distinguishes the shaded served interval from the conservative
-alerting edge retained across predecessor safety stages. The readiness duplicate oracle now matches
+rows separate. The live-comparison report now repeats its matched model table by internal step and
+includes the static V2.2 predecessor, so pooled RMSE cannot conceal a weak step; small cells are
+labelled descriptive. The dashboard also distinguishes the shaded served interval from the
+conservative alerting edge retained across predecessor safety stages. The readiness duplicate oracle now matches
 the append contract's issue-hour key, so a legitimate next-hour forecast can reuse a delayed Kyoto
 Dst anchor while incorporating newer L1 measurements. The values, tiers, and numerical payload
 fields are unchanged; a consumer that parses a decimal out of the alert sentence needs to accept an
@@ -444,10 +454,10 @@ User operation and startup:
 - dashboard startup banner and warm-up lines are explicitly flushed, so nohup/launchd log
   files capture them immediately instead of losing them to block buffering (crash forensics
   and readiness checks read these lines).
-- CLI dashboard launch parity: `bin/solarsindy start dashboard` runs the server with
-  `--compile=min` (matching the supervised launchd deployment), so a first cold upstream
-  refresh cannot monopolize Julia code generation and stall every HTTP route after start;
-  the numerical-kernel monitor daemon is intentionally left at full compilation.
+- Previous CLI dashboard launch parity: `bin/solarsindy start dashboard` was aligned with
+  the supervised launchd service's minimal-compilation mode. The normal-compilation change
+  above supersedes that mode after the concurrency crash reproduction; the numerical-kernel
+  monitor daemon remains unchanged.
 
 Causality and leakage:
 

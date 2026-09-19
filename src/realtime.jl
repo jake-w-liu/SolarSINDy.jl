@@ -1,6 +1,7 @@
 # Real-time solar wind data fetching from NOAA SWPC
 
 using HTTP
+using MbedTLS
 using JSON3
 
 # Real-time solar wind (RTSW) products. The former /products/solar-wind/{plasma,mag}-7-day.json
@@ -91,7 +92,9 @@ function _fetch_swpc_json(url::String;
     for (ui, u) in enumerate(urls)
         for attempt in 1:max_retries
             try
-                resp = http_get(u; connect_timeout=15, readtimeout=30)
+                # OpenSSL stream GC cleanup can yield after a late TLS connect timeout.
+                resp = http_get(u; connect_timeout=15, readtimeout=30, retries=0,
+                                socket_type_tls=MbedTLS.SSLContext)
                 status = getproperty(resp, :status)
                 status == 200 || error("HTTP status $status")
                 # NOAA RTSW occasionally emits bare NaN tokens for missing measurements.
@@ -120,28 +123,26 @@ end
 # time_tag; `active=true` marks the currently-designated primary L1 source. We keep only active,
 # physically-valid rows so a secondary/sentinel record cannot masquerade as the primary reading.
 
-# `active` flag: true when the key is absent (schema surprise -> keep, so a change never silently
-# drops every row). Parse the common serializations explicitly so a schema change that serializes
-# the flag as a string ("true"/"false") or integer (1/0) still honors an explicit NOT-active row
-# instead of admitting a secondary/sentinel spacecraft record into the hourly driver means.
-# Only a value that is present but in an UNRECOGNIZED encoding falls back to active (with a warning).
+# NOAA defines `active` as the spacecraft selected by its forecasters at that
+# timestamp. Missing or malformed selection is unknown, not permission to use
+# every spacecraft. Retain recognized Boolean serializations only.
 function _rtsw_active(obj)::Bool
-    (obj isa AbstractDict || obj isa JSON3.Object) || return true
-    haskey(obj, :active) || return true
+    (obj isa AbstractDict || obj isa JSON3.Object) || return false
+    haskey(obj, :active) || return false
     a = obj[:active]
-    a === nothing && return true
+    a === nothing && return false
     a isa Bool && return a
     if a isa Integer
-        return a != 0                       # 1 -> active, 0 -> inactive
+        return a == 1
     elseif a isa AbstractString || a isa Symbol
         s = lowercase(strip(String(string(a))))
         (s == "true"  || s == "1" || s == "t" || s == "yes") && return true
         (s == "false" || s == "0" || s == "f" || s == "no")  && return false
     elseif a isa Real
-        isfinite(a) && return a != 0        # numeric truthiness for a finite flag
+        return isfinite(a) && a == 1
     end
-    @warn "RTSW 'active' flag has an unrecognized encoding; treating the row as active" value=a maxlog=1
-    return true
+    @warn "RTSW row excluded: unrecognized active-spacecraft flag" value=a maxlog=1
+    return false
 end
 
 # Named-key numeric field parsed to Float64, or NaN when the key is missing/null/unparseable or

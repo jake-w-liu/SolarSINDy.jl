@@ -57,6 +57,12 @@ function _loaded_modules(directory::AbstractString)
 end
 
 @testset "Declared environment contract" begin
+    @testset "bundled socket fixtures are available to Pkg.test" begin
+        @test get(PROJECT["extras"], "Sockets", nothing) ==
+              "6462fe0b-24de-5631-8697-dd941f90decc"
+        @test "Sockets" in PROJECT["targets"]["test"]
+    end
+
     @testset "no standard library carries a version bound" begin
         # `Logging = \"1.11.0\"` with `julia = \"1.10\"` made the package unresolvable on its own
         # declared minimum: Julia 1.10 ships Logging without a version at all.

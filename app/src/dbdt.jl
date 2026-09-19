@@ -12,7 +12,7 @@
 #
 # Depends on jnum/jdt from forecast_api.jl (included before this file).
 
-using HTTP, JSON3, Dates
+using HTTP, JSON3, Dates, MbedTLS
 
 const USGS_BASE = "https://geomag.usgs.gov/ws/data/"
 const USGS_LIVE_DATA_TYPE = "adjusted"  # provisional near-real-time observatory product
@@ -108,21 +108,77 @@ function _dbdt_series(times, xv, yv)
     return dbdt
 end
 
-function _fetch_usgs(station::AbstractString, minutes::Int)
+function _fetch_usgs(station::AbstractString, minutes::Int; http_get::Function=HTTP.get,
+                     data_type::AbstractString=USGS_LIVE_DATA_TYPE)
+    data_type in ("adjusted", "variation") || throw(ArgumentError("unsupported live USGS product"))
     t1 = now(UTC); t0 = t1 - Minute(minutes)
     f(t) = Dates.format(t, "yyyy-mm-ddTHH:MM:SS") * "Z"
     url = string(USGS_BASE, "?id=", station, "&starttime=", f(t0), "&endtime=", f(t1),
-                 "&elements=X,Y&format=json&sampling_period=60&type=", USGS_LIVE_DATA_TYPE)
+                 "&elements=X,Y&format=json&sampling_period=60&type=", data_type)
     try
-        # Fail fast when USGS throttles or stalls. The dashboard is single-process, so
-        # a slow third-party dB/dt nowcast must not block status/forecast endpoints.
-        r = HTTP.get(url; readtimeout=3, connect_timeout=2, retries=0, status_exception=true)
+        # Valid USGS responses can exceed a few seconds. Retrieval runs behind the bounded
+        # background worker; API callers retain their separate, nonblocking wait budget.
+        r = http_get(url; socket_type_tls=MbedTLS.SSLContext,
+                     readtimeout=15, connect_timeout=5, retries=0, status_exception=true)
         return JSON3.read(r.body)
     catch e
         e isa InterruptException && rethrow()
         @warn "USGS dB/dt fetch failed" station exception=e
         return nothing
     end
+end
+
+# The raw variation product is not geographically calibrated. Its reported X/Y
+# changes can support an explicitly uncorrected indicator, never a calibrated
+# forecast or geoelectric estimate. Do not splice products within one series.
+function _usgs_product(d)
+    metadata = get(d, :metadata, nothing)
+    metadata === nothing && return nothing
+    intermagnet = get(metadata, :intermagnet, nothing)
+    intermagnet === nothing && return nothing
+    product = get(intermagnet, :data_type, nothing)
+    return product in ("adjusted", "variation") ? String(product) : nothing
+end
+
+function _usable_usgs_response(d, station, product; reference=now(UTC))
+    d === nothing && return false
+    try
+        _usgs_product(d) == product || return false
+        metadata = d.metadata.intermagnet
+        String(metadata.imo.iaga_code) == station || return false
+        String(metadata.reported_orientation) == "XY" || return false
+        metadata.sampling_period == 60 || return false
+        times = d.times; length(times) >= 2 || return false
+        parsed = parse_dt.(times)
+        any(ismissing, parsed) && return false
+        all(i -> parsed[i] > parsed[i-1], 2:length(parsed)) || return false
+        channels = Dict{String,Any}()
+        for channel in d.values
+            element = String(channel.metadata.element)
+            element in ("X", "Y") || continue
+            String(channel.metadata.station) == station || return false
+            haskey(channels, element) && return false
+            channels[element] = channel.values
+        end
+        haskey(channels, "X") && haskey(channels, "Y") || return false
+        series = _dbdt_series(times, channels["X"], channels["Y"])
+        last_good = findlast(isfinite, series)
+        last_good === nothing && return false
+        return !_source_freshness(parsed[last_good], DBDT_MAX_AGE_MIN; reference).stale
+    catch err
+        err isa InterruptException && rethrow()
+        return false
+    end
+end
+
+function _fetch_usgs_best(station::AbstractString, minutes::Int;
+                          http_get::Function=HTTP.get, reference=nothing)
+    for product in (USGS_LIVE_DATA_TYPE, "variation")
+        response = _fetch_usgs(station, minutes; http_get, data_type=product)
+        _usable_usgs_response(response, station, product;
+            reference=something(reference, now(UTC))) && return response
+    end
+    return nothing
 end
 
 # Linear-interpolate `nothing` gaps in a numeric vector -> Float64 vector (edge gaps held flat).
@@ -188,9 +244,12 @@ function _geoe_nowcast(xv, yv, dt_s; rho=1000.0, window_minutes=120.0,
 end
 
 function _compute_dbdt(station::AbstractString, minutes::Int;
-                       fetch_fn=_fetch_usgs, reference::DateTime=now(UTC))
+                       fetch_fn=_fetch_usgs_best, reference::Union{Nothing,DateTime}=nothing)
     d = fetch_fn(station, minutes)
+    reference = something(reference, now(UTC))
     d === nothing && return (station=station, available=false)
+    product = _usgs_product(d)
+    product === nothing && return (station=station, available=false)
     times = get(d, :times, nothing)
     (times === nothing || length(times) < 2) && return (station=station, available=false)
     values = get(d, :values, nothing)
@@ -242,7 +301,7 @@ function _compute_dbdt(station::AbstractString, minutes::Int;
             step_seconds)
     geoe = nothing
     try
-        uniform_step &&
+        product == "adjusted" && uniform_step &&
             (geoe = _geoe_nowcast(xv, yv, first(step_seconds)))
     catch e
         e isa InterruptException && rethrow()
@@ -268,7 +327,9 @@ function _compute_dbdt(station::AbstractString, minutes::Int;
     end
 
     ct = dbdt_tier(current); mt = dbdt_tier(max30)
-    return (station = station, data_type = USGS_LIVE_DATA_TYPE, available = true,
+    return (station = station, data_type = product, available = true,
+            product_fallback = product != USGS_LIVE_DATA_TYPE,
+            calibrated = product == "adjusted",
             stale = false, invalid_future = false, age_minutes = freshness.age_min,
             current_dbdt = round(current; digits=2), current_tier = ct,
             current_time_utc = jdt_str(times[cur_i]),
@@ -301,10 +362,10 @@ function _checked_station(station::AbstractString)
     return code
 end
 
-function _current_dbdt_result(val; reference::DateTime=now(UTC), cached::Bool=false)
+function _current_dbdt_result(val; reference::Union{Nothing,DateTime}=nothing, cached::Bool=false)
     !get(val, :available, false) && return val
     f = _source_freshness(get(val, :current_time_utc, nothing), DBDT_MAX_AGE_MIN;
-                          reference=reference)
+                          reference=something(reference, now(UTC)))
     return merge(val, (available=!f.stale, stale=f.stale,
                        invalid_future=f.invalid_future, age_minutes=f.age_min,
                        cached=cached))
@@ -315,7 +376,7 @@ function _observation_time(val, field::Symbol)
     return dt === missing ? nothing : dt
 end
 
-function _refresh_dbdt(key::Tuple{String,Int}, compute_fn, reference::DateTime)
+function _refresh_dbdt(key::Tuple{String,Int}, compute_fn, reference::Union{Nothing,DateTime})
     code, minutes = key
     cached_entry = lock(_DBDT_LOCK) do
         get(_DBDT_CACHE, key, nothing)
@@ -380,7 +441,7 @@ function _refresh_dbdt(key::Tuple{String,Int}, compute_fn, reference::DateTime)
 end
 
 function usgs_dbdt(; station::AbstractString = "FRD", minutes::Int = 120,
-                   compute_fn=_compute_dbdt, reference::DateTime=now(UTC),
+                   compute_fn=_compute_dbdt, reference::Union{Nothing,DateTime}=nothing,
                    wait_timeout::Real=USGS_REFRESH_WAIT_S)
     code = _checked_station(station)
     2 <= minutes <= 1440 || throw(ArgumentError("minutes must be in 2:1440"))
@@ -420,5 +481,6 @@ function usgs_dbdt(; station::AbstractString = "FRD", minutes::Int = 120,
         )
         return (station=code, available=false, error=string(err))
     end
-    return outcome.value
+    return _current_dbdt_result(outcome.value; reference=reference,
+                                cached=get(outcome.value, :cached, false))
 end

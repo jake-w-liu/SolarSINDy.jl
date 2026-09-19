@@ -289,6 +289,54 @@ function conformal_interval(cal::ConformalCalibration, point::Real,
     return (point_float - hw, point_float + hw)
 end
 
+"""
+    _v24_calibration_shadow_interval(point, static_lo, static_hi, residuals;
+                                     window=24, warmup=30, width_scale=1.5)
+
+Translate the deployed interval by the median of the trailing matured signed
+residuals and scale each deployed half-width. This is the frozen V2.4e A3
+prospective-shadow rule; it never changes the point forecast. Returns an
+explicit unavailable result until `warmup` residuals exist.
+"""
+function _v24_calibration_shadow_interval(point::Real, static_lo::Real,
+                                          static_hi::Real,
+                                          residuals::AbstractVector{<:Real};
+                                          window::Integer=24,
+                                          warmup::Integer=30,
+                                          width_scale::Real=1.5)
+    values = Float64.((point, static_lo, static_hi, width_scale))
+    all(isfinite, values) || throw(ArgumentError(
+        "V2.4e calibration-shadow point, endpoints, and width scale must be finite",
+    ))
+    center, lo, hi, scale = values
+    lo <= center <= hi || throw(ArgumentError(
+        "V2.4e calibration-shadow point must lie inside the deployed interval",
+    ))
+    window >= 1 || throw(ArgumentError("V2.4e calibration-shadow window must be positive"))
+    warmup >= 1 || throw(ArgumentError("V2.4e calibration-shadow warmup must be positive"))
+    scale > 0 || throw(ArgumentError("V2.4e calibration-shadow width scale must be positive"))
+    history = Float64.(residuals)
+    all(isfinite, history) || throw(ArgumentError(
+        "V2.4e calibration-shadow residual history must be finite",
+    ))
+    n = length(history)
+    if n < warmup
+        return (available=false, lo=missing, hi=missing, location=missing, history_n=n)
+    end
+    first_index = max(1, n - Int(window) + 1)
+    location = median(@view history[first_index:end])
+    shadow_lo = center + location - scale * (center - lo)
+    shadow_hi = center + location + scale * (hi - center)
+    all(isfinite, (shadow_lo, shadow_hi, location)) || throw(ArgumentError(
+        "V2.4e calibration-shadow output exceeds the supported finite range",
+    ))
+    shadow_lo <= shadow_hi || throw(ArgumentError(
+        "V2.4e calibration-shadow endpoints are reversed",
+    ))
+    return (available=true, lo=shadow_lo, hi=shadow_hi,
+            location=location, history_n=n)
+end
+
 # ---------------------------------------------------------------------------
 # Adaptive Conformal Inference (ACI; Gibbs & Candès, 2021)
 #

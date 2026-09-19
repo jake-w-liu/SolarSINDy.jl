@@ -6,6 +6,7 @@ DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+MbedTLS = "739be429-bea8-5141-9913-cc70e7f3736d"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [compat]
@@ -13,4 +14,5 @@ CSV = "0.10"
 DataFrames = "1"
 HTTP = "1"
 JSON3 = "1"
+MbedTLS = "1.1"
 julia = "1.12.6"

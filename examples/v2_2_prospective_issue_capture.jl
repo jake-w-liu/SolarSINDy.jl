@@ -4,6 +4,7 @@ module V22ProspectiveIssueCapture
 
 using Dates
 using HTTP
+using MbedTLS
 using JSON3
 using SHA
 
@@ -698,6 +699,7 @@ function _capture_dst_unlocked(storage::AbstractString;
     try
         response = http_get(
             V22_DST_SOURCE.url;
+            socket_type_tls=MbedTLS.SSLContext,
             connect_timeout=15,
             readtimeout=30,
             retries=0,

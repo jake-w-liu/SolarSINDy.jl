@@ -12,6 +12,12 @@ if isfile(EXTERNAL_DST_COLLECTOR_SCRIPT)
     include(EXTERNAL_DST_COLLECTOR_SCRIPT)
 end
 
+# Storage fixtures simulate an instantaneous response. Delayed-response tests inject a
+# separately advancing clock into the production entry point.
+capture_fixture(cfg; fetched_utc=DateTime(2026, 7, 1, 5), kwargs...) =
+    capture_and_score_external_dst_snapshot!(cfg;
+        fetched_utc, receipt_clock=() -> fetched_utc, kwargs...)
+
 end
 
 module LiveMonitorRetentionTestHarness
@@ -19,6 +25,48 @@ using Test
 const TEST_MONITOR_DIR = mktempdir()
 withenv("SOLARSINDY_MONITOR_DIR" => TEST_MONITOR_DIR) do
     include(joinpath(@__DIR__, "..", "examples", "live_monitor.jl"))
+end
+
+const RETENTION_FAULT = Ref{Any}(nothing)
+struct RetentionShortReadIO <: IO
+    bytes::IOBuffer
+    reads::Base.RefValue{Int}
+end
+function Base.read(io::RetentionShortReadIO, count::Integer)
+    io.reads[] += 1
+    # Bound the test even if the production EOF guard is removed: a retry is a different failure.
+    io.reads[] > 3 && throw(EOFError())
+    return read(io.bytes, count)
+end
+function _retention_fault!(boundary, path)
+    fault = RETENTION_FAULT[]
+    fault === nothing && return
+    fault == (boundary, path) || return
+    RETENTION_FAULT[] = nothing
+    error("injected retention failure: $boundary at $path")
+end
+function _live_atomic_replace(source::String, target::String)
+    _retention_fault!(:replace_before, target)
+    result = invoke(_live_atomic_replace, Tuple{AbstractString,AbstractString}, source, target)
+    _retention_fault!(:replace_after, target)
+    return result
+end
+function _append_row_bytes(path::String, bytes::Vector{UInt8})
+    _retention_fault!(:append_before, path)
+    if RETENTION_FAULT[] == (:append_partial, path)
+        invoke(_append_row_bytes, Tuple{AbstractString,Vector{UInt8}}, path,
+               bytes[1:max(1, length(bytes) ÷ 2)])
+        _retention_fault!(:append_partial, path)
+    end
+    result = invoke(_append_row_bytes, Tuple{AbstractString,Vector{UInt8}}, path, bytes)
+    _retention_fault!(:append_after, path)
+    return result
+end
+function _clear_retention_transaction!(path::String)
+    _retention_fault!(:clear_before, path)
+    result = invoke(_clear_retention_transaction!, Tuple{AbstractString}, path)
+    _retention_fault!(:clear_after, path)
+    return result
 end
 end
 
@@ -93,6 +141,16 @@ end
 @testset "Prospective external Dst snapshot collector" begin
     @test isfile(ExternalDstCollectorTestHarness.EXTERNAL_DST_COLLECTOR_SCRIPT)
     C = ExternalDstCollectorTestHarness
+    @testset "external HTTP transport" begin
+        get_request(url; kwargs...) = begin
+            @test kwargs[:socket_type_tls] === C.MbedTLS.SSLContext
+            @test !haskey(kwargs, :require_ssl_verification)
+            @test (kwargs[:connect_timeout], kwargs[:readtimeout], kwargs[:retries]) == (15, 30, 1)
+            (; status=200, headers=Pair{String,String}[], body="observations")
+        end
+        body, _ = C._http_text("https://example.invalid/observations"; http_get=get_request)
+        @test body == "observations"
+    end
     @test C._parse_http_last_modified(["Last-Modified" => "Sat, 27 Jun 2026 05:10:00 GMT"]) ==
           C.DateTime(2026, 6, 27, 5, 10, 0)
     @test C._parse_external_time("2026-06-27T05:10:00.123456Z") ==
@@ -148,7 +206,7 @@ end
             "2026-07-01T06:00:00Z", 1.0, -30.0, 60.0, "fetch_time",
             "forecast", repeat("a", 64), "raw/mock.raw", missing, missing,
             "2026-07-01T06:00:00Z", "future_forecast", missing, missing,
-            missing, missing, missing,
+            missing, missing, missing, "2026-07-01T05:00:00Z",
         ))
         observations = C.DataFrame(
             observed_time_utc=[C.DateTime(2026, 7, 1, 6, 45)],
@@ -201,12 +259,15 @@ end
             "2026-07-01T06:00:00Z", 1.0, -30.0, 60.0, "fetch_time",
             "forecast", repeat("a", 64), "raw/mock.raw", missing, missing,
             "2026-07-01T06:00:00Z", "future_forecast", missing, missing,
-            missing, missing, "2026-07-01T06:00:00Z",
+            missing, missing, "2026-07-01T06:00:00Z", "2026-07-01T05:00:00Z",
         ))
         @test_throws ErrorException C._validate_external_dst_log(unscored_partial)
 
         wide = C.DataFrame(
             source=["mock"], issue_utc=["2026-07-01T05:00:00Z"],
+            fetched_utc=["2026-07-01T05:00:00Z"],
+            receipt_completed_utc=["2026-07-01T05:00:01Z"],
+            target_utc=["2026-07-01T06:00:00Z"],
             lead_h=[1.0], forecast_dst_nt=[floatmax(Float64) / 2],
             observed_dst_nt=Union{Missing, Float64}[0.0],
         )
@@ -230,7 +291,7 @@ end
             "2026-07-01T06:00:00Z", 1.0, -30.0, 60.0, "fetch_time",
             "forecast", repeat("a", 64), "raw/mock.raw", missing, missing,
             "2026-07-01T06:00:00Z", "future_forecast", missing, missing,
-            missing, missing, missing,
+            missing, missing, missing, "2026-07-01T05:00:00Z",
         ))
         observations = C.DataFrame(
             observed_time_utc=[C.DateTime(2026, 7, 1, 6)],
@@ -364,10 +425,10 @@ end
                 end
                 return C._mock_response(obs_body)
             end
-            task1 = @async C.capture_and_score_external_dst_snapshot!(
+            task1 = @async C.capture_fixture(
                 cfg; fetched_utc=C.DateTime(2026, 7, 1, 5), http_get=fake_get(1),
             )
-            task2 = @async C.capture_and_score_external_dst_snapshot!(
+            task2 = @async C.capture_fixture(
                 cfg; fetched_utc=C.DateTime(2026, 7, 1, 6), http_get=fake_get(2),
             )
             take!(ready); take!(ready)
@@ -396,7 +457,7 @@ end
                 sources=[source], obs_url="obs", max_log_rows=10,
                 max_raw_snapshots=10,
             )
-            C.capture_and_score_external_dst_snapshot!(
+            C.capture_fixture(
                 cfg; fetched_utc=C.DateTime(2026, 7, 1, 5), http_get=fake_get,
             )
             alias_root = joinpath(dir, "root-alias")
@@ -408,7 +469,7 @@ end
                 sources=[source], obs_url="obs", max_log_rows=10,
                 max_raw_snapshots=10,
             )
-            alias_result = C.capture_and_score_external_dst_snapshot!(
+            alias_result = C.capture_fixture(
                 alias_cfg; fetched_utc=C.DateTime(2026, 7, 1, 5), http_get=fake_get,
             )
             @test alias_result.rows_total == 1
@@ -431,7 +492,7 @@ end
                 max_raw_snapshots=10,
             )
             log_failure = try
-                C.capture_and_score_external_dst_snapshot!(
+                C.capture_fixture(
                     conflicting_log; fetched_utc=C.DateTime(2026, 7, 1, 6),
                     http_get=fake_get,
                 )
@@ -452,7 +513,7 @@ end
                 max_log_rows=10, max_raw_snapshots=10,
             )
             raw_failure = try
-                C.capture_and_score_external_dst_snapshot!(
+                C.capture_fixture(
                     conflicting_raw; fetched_utc=C.DateTime(2026, 7, 1, 7),
                     http_get=fake_get,
                 )
@@ -472,7 +533,7 @@ end
                 max_log_rows=10, max_raw_snapshots=10,
             )
             root_failure = try
-                C.capture_and_score_external_dst_snapshot!(
+                C.capture_fixture(
                     conflicting_root; fetched_utc=C.DateTime(2026, 7, 1, 8),
                     http_get=fake_get,
                 )
@@ -519,7 +580,7 @@ end
             end
             run_capture = function (cfg, hour)
                 try
-                    return C.capture_and_score_external_dst_snapshot!(
+                    return C.capture_fixture(
                         cfg; fetched_utc=C.DateTime(2026, 7, 1, hour),
                         http_get=fake_get,
                     )
@@ -578,7 +639,7 @@ end
             end
             run_capture = function (cfg, hour)
                 try
-                    return C.capture_and_score_external_dst_snapshot!(
+                    return C.capture_fixture(
                         cfg; fetched_utc=C.DateTime(2026, 7, 1, hour),
                         http_get=fake_get,
                     )
@@ -637,7 +698,7 @@ end
                 else
                     mkdir(marker)
                 end
-                @test_throws ArgumentError C.capture_and_score_external_dst_snapshot!(
+                @test_throws ArgumentError C.capture_fixture(
                     cfg; fetched_utc=C.DateTime(2026, 7, 1, 5), http_get=fake_get,
                 )
                 @test !ispath(cfg.log_path)
@@ -665,7 +726,7 @@ end
                     repo_root=dir, sources=[source], obs_url="obs",
                     max_log_rows=10, max_raw_snapshots=10,
                 )
-                C.capture_and_score_external_dst_snapshot!(
+                C.capture_fixture(
                     cfg; fetched_utc=C.DateTime(2026, 7, 1, 5), http_get=fake_get,
                 )
                 marker = marker_side == :raw ?
@@ -675,7 +736,7 @@ end
                 old_log = read(cfg.log_path)
                 old_report = read(cfg.report_path)
                 old_raw = Set(readdir(raw_dir))
-                @test_throws ArgumentError C.capture_and_score_external_dst_snapshot!(
+                @test_throws ArgumentError C.capture_fixture(
                     cfg; fetched_utc=C.DateTime(2026, 7, 1, 6), http_get=fake_get,
                 )
                 @test read(cfg.log_path) == old_log
@@ -715,7 +776,7 @@ end
                     old_log = isfile(cfg.log_path) ? read(cfg.log_path) : nothing
 
                     failure = try
-                        C.capture_and_score_external_dst_snapshot!(
+                        C.capture_fixture(
                             cfg; fetched_utc=C.DateTime(2026, 7, 1, 5),
                             http_get=fake_get,
                         )
@@ -750,7 +811,7 @@ end
                 sources=[source], obs_url="obs", max_log_rows=10,
                 max_raw_snapshots=10,
             )
-            result = C.capture_and_score_external_dst_snapshot!(
+            result = C.capture_fixture(
                 cfg; fetched_utc=C.DateTime(2026, 7, 1, 5), http_get=fake_get,
             )
             @test result.rows_total == 1
@@ -785,11 +846,11 @@ end
                 sources=[source], obs_url="obs", max_log_rows=10,
                 max_raw_snapshots=1,
             )
-            C.capture_and_score_external_dst_snapshot!(
+            C.capture_fixture(
                 cfg; fetched_utc=C.DateTime(2026, 7, 1, 5), http_get=fake_get,
             )
             generation[] = 2
-            result = C.capture_and_score_external_dst_snapshot!(
+            result = C.capture_fixture(
                 cfg; fetched_utc=C.DateTime(2026, 7, 1, 6), http_get=fake_get,
             )
             out = C.CSV.read(cfg.log_path, C.DataFrame)
@@ -820,12 +881,12 @@ end
                 sources=[source], obs_url="obs", max_log_rows=10,
                 max_raw_snapshots=1,
             )
-            first_result = C.capture_and_score_external_dst_snapshot!(
+            first_result = C.capture_fixture(
                 cfg; fetched_utc=C.DateTime(2026, 7, 1, 5, 1), http_get=fake_get,
             )
             first_log = C.CSV.read(cfg.log_path, C.DataFrame)
             first_raw = String(only(first_log.raw_path))
-            second_result = C.capture_and_score_external_dst_snapshot!(
+            second_result = C.capture_fixture(
                 cfg; fetched_utc=C.DateTime(2026, 7, 1, 5, 2), http_get=fake_get,
             )
             second_log = C.CSV.read(cfg.log_path, C.DataFrame)
@@ -856,7 +917,7 @@ end
             successful_get = (url; kwargs...) -> C._mock_response(
                 String(url) == "good" ? forecast_body : obs_body,
             )
-            C.capture_and_score_external_dst_snapshot!(
+            C.capture_fixture(
                 good_cfg; fetched_utc=C.DateTime(2026, 7, 1, 5),
                 http_get=successful_get,
             )
@@ -875,7 +936,7 @@ end
                 return C._mock_response(String(url) == "good" ? forecast_body : obs_body)
             end
             for hour in 6:10
-                @test_throws ErrorException C.capture_and_score_external_dst_snapshot!(
+                @test_throws ErrorException C.capture_fixture(
                     failing_cfg; fetched_utc=C.DateTime(2026, 7, 1, hour),
                     http_get=failing_get,
                 )
@@ -890,7 +951,7 @@ end
                 return C._mock_response(forecast_body)
             end
             for hour in 11:15
-                @test_throws ErrorException C.capture_and_score_external_dst_snapshot!(
+                @test_throws ErrorException C.capture_fixture(
                     good_cfg; fetched_utc=C.DateTime(2026, 7, 1, hour),
                     http_get=failing_obs_get,
                 )
@@ -927,7 +988,7 @@ end
                 sources=[source], obs_url="obs", max_log_rows=10,
                 max_raw_snapshots=2,
             )
-            C.capture_and_score_external_dst_snapshot!(
+            C.capture_fixture(
                 cfg; fetched_utc=C.DateTime(2026, 7, 1, 5), http_get=fake_get,
             )
             first_log = C.CSV.read(cfg.log_path, C.DataFrame)
@@ -939,7 +1000,7 @@ end
 
             generation[] = 2
             failure = try
-                C.capture_and_score_external_dst_snapshot!(
+                C.capture_fixture(
                     cfg; fetched_utc=C.DateTime(2026, 7, 1, 6), http_get=fake_get,
                 )
                 nothing
@@ -978,7 +1039,7 @@ end
                 sources=[source], obs_url="obs", max_log_rows=10,
                 max_raw_snapshots=10,
             )
-            C.capture_and_score_external_dst_snapshot!(
+            C.capture_fixture(
                 cfg; fetched_utc=C.DateTime(2026, 7, 1, 5), http_get=fake_get,
             )
             first_log = C.CSV.read(cfg.log_path, C.DataFrame)
@@ -987,7 +1048,7 @@ end
             old_report = read(cfg.report_path)
             generation[] = 2
             failure = try
-                C.capture_and_score_external_dst_snapshot!(
+                C.capture_fixture(
                     cfg; fetched_utc=C.DateTime(2026, 7, 1, 6), http_get=fake_get,
                 )
                 nothing
@@ -1006,7 +1067,7 @@ end
     end
 
     bad_cfg = C.ExternalDstCollectorConfig(max_log_rows=0)
-    @test_throws ArgumentError C.capture_and_score_external_dst_snapshot!(
+    @test_throws ArgumentError C.capture_fixture(
         bad_cfg; http_get=(args...; kwargs...) -> error("must not fetch"),
     )
 end
@@ -1028,6 +1089,23 @@ end
           (deadline=340.0, skipped=0)
     @test_throws ArgumentError L._advance_cycle_deadline(0.0, 1.0, 0.0)
     @test_throws ArgumentError L._advance_cycle_deadline(0.0, Inf, 1.0)
+    phase_base = L.DateTime(2026, 1, 1)
+    @test L._phase_sampling_minute(phase_base) == 5
+    @test L._phase_sampling_minute(phase_base + L.Hour(1)) == 55
+    @test L._next_phase_sampling_slot(phase_base, phase_base + L.Minute(30)) ==
+          (time=phase_base + L.Hour(1) + L.Minute(55), skipped=0)
+    @test L._next_phase_sampling_slot(
+        phase_base + L.Hour(1), phase_base + L.Hour(2) + L.Minute(3),
+    ) == (time=phase_base + L.Hour(2) + L.Minute(5), skipped=0)
+    @test L._next_phase_sampling_slot(
+        phase_base + L.Hour(1), phase_base + L.Hour(2) + L.Minute(6),
+    ) == (time=phase_base + L.Hour(3) + L.Minute(55), skipped=1)
+    @test L._next_phase_sampling_slot(
+        phase_base + L.Hour(23), phase_base + L.Day(1),
+    ) == (time=phase_base + L.Day(1) + L.Minute(5), skipped=0)
+    @test_throws ArgumentError L._next_phase_sampling_slot(
+        phase_base + L.Minute(1), phase_base,
+    )
     mkpath(dirname(L.LOG))
     write(L.LOG, "issue_time_utc\n2026-08-24T08:00:00.123garbage\n")
     @test L.newest_issuance_age_hours() === nothing
@@ -1179,6 +1257,276 @@ end
         @test L._retain_live_forecast_log!(path, 4) == 0
         @test_throws ArgumentError L._retain_live_forecast_log!(path, 0)
         @test_throws ArgumentError L._retain_live_forecast_log!(path, 3)
+    end
+    mktempdir() do dir
+        path = joinpath(dir, "live.csv")
+        base = L.DateTime(2026, 8, 25)
+        rows = L.DataFrame(
+            issue_time_utc=string.([base + L.Hour(i) for i in 0:5]),
+            latest_dst_time_utc=string.([base + L.Hour(i) for i in 0:5]),
+            target_time_utc=string.([base + L.Hour(i + 1) for i in 0:5]),
+            observation_dst_nt=fill(-20.0, 6),
+            v24_cal_shadow_model_version=fill("wrong-identity", 6),
+        )
+        L.CSV.write(path, rows)
+        before = L.V24LiveClaimAudit.prospective_status(path; bootstrap_reps=100)
+        @test !before.integrity.gate_pass
+        @test before.integrity.deployment_rows == 6
+        @test L._retain_live_forecast_log!(path, 4) == 2
+        after = L.V24LiveClaimAudit.prospective_status(path; bootstrap_reps=100)
+        @test after.integrity == before.integrity
+        @test !after.marginal.claim_ready
+        @test !after.storm.claim_ready
+    end
+end
+
+@testset "Live monitor retention transaction recovery" verbose=true begin
+    L = LiveMonitorRetentionTestHarness
+    base = L.DateTime(2026, 7, 1)
+    fixture = () -> L.DataFrame(
+        issue_time_utc=string.([base + L.Hour(i) for i in 0:5]),
+        latest_dst_time_utc=string.([base + L.Hour(i) for i in 0:5]),
+        target_time_utc=string.([base + L.Hour(i + 1) for i in 0:5]),
+        model_version=fill("v2", 6), observation_dst_nt=fill(missing, 6),
+        pred_dst_nt=fill(-10.0, 6), pred_dst_ci05_nt=fill(-30.0, 6),
+        pred_dst_ci95_nt=fill(10.0, 6), marker=collect(1:6),
+    )
+
+    @testset "prefix hashing fails on short reads" begin
+        abc_sha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        # Standard SHA-256 vector, bounded to the requested prefix rather than the entire stream.
+        @test L._retention_prefix_sha256(IOBuffer("abcdef"), 3, "fixture") == abc_sha256
+        for (available, requested, reads) in ((3, 4, 1), (0, 1, 1), (65536, 65537, 2))
+            io = L.RetentionShortReadIO(IOBuffer(fill(UInt8('a'), available)), Ref(0))
+            # A concurrent truncation must fail promptly, including EOF after a full first block.
+            @test_throws ErrorException L._retention_prefix_sha256(io, requested, "fixture")
+            @test io.reads[] == reads
+        end
+    end
+
+    @testset "each commit boundary" begin
+        for (boundary, target_kind, installed) in (
+            (:replace_before, :stage, false), (:replace_after, :stage, false),
+            (:replace_before, :journal, false), (:replace_after, :journal, false),
+            (:append_before, :archive, false), (:append_partial, :archive, false),
+            (:append_after, :archive, false),
+            (:replace_before, :manifest, false), (:replace_after, :manifest, false),
+            (:replace_before, :hot, false), (:replace_after, :hot, true),
+            (:replace_before, :state, true), (:replace_after, :state, true),
+            (:clear_before, :hot, true), (:clear_after, :hot, true),
+        )
+            mktempdir() do dir
+                path = joinpath(dir, "live.csv")
+                archive = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+                manifest_path = string(archive, ".manifest.json")
+                targets = (; stage=string(path, ".retention.csv"),
+                           journal=string(path, ".retention.json"), archive,
+                           manifest=manifest_path, hot=path, state=string(path, ".state.json"))
+                L.CSV.write(path, fixture())
+                L._load_or_rebuild_live_state!(path)
+                L.RETENTION_FAULT[] = (boundary, getproperty(targets, target_kind))
+                try
+                    # Each fault must occur at its selected boundary, not an unrelated exception.
+                    @test_throws ErrorException L._retain_live_forecast_log!(path, 4)
+                    @test L.RETENTION_FAULT[] === nothing
+                finally
+                    L.RETENTION_FAULT[] = nothing
+                end
+                # The atomic hot replacement has only the original or retained whole frame.
+                @test L.CSV.read(path, L.DataFrame).marker ==
+                      (installed ? [3, 4, 5, 6] : collect(1:6))
+                @test L._retain_live_forecast_log!(path, 4) == (installed ? 0 : 2)
+                # Six append occurrences must partition into two archived and four hot rows.
+                @test L.CSV.read(archive, L.DataFrame).marker == [1, 2]
+                @test L.CSV.read(path, L.DataFrame).marker == [3, 4, 5, 6]
+                manifest = L.JSON3.read(read(manifest_path, String))
+                @test manifest.archived_rows == 2
+                @test manifest.archive_bytes == filesize(archive)
+                @test manifest.last_segment_sha256 == L.bytes2hex(L.sha256(read(archive)))
+                state = L._read_live_state(path)
+                @test state["row_count"] == 4
+                @test L._state_matches_log(state, path)
+                @test isempty(state["aci_streams"])
+                @test !ispath(targets.stage)
+                @test !ispath(targets.journal)
+                archive_bytes = read(archive)
+                # Completed recovery is idempotent and does not append another segment.
+                @test L._retain_live_forecast_log!(path, 4) == 0
+                @test read(archive) == archive_bytes
+            end
+        end
+    end
+
+    @testset "verification and appends recover before editing" begin
+        for boundary in (:replace_before, :replace_after)
+            mktempdir() do dir
+                path = joinpath(dir, "live.csv")
+                archive = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+                rows = fixture()
+                L.CSV.write(path, rows)
+                L.RETENTION_FAULT[] = (boundary, path)
+                @test_throws ErrorException L._retain_live_forecast_log!(path, 4)
+                archive_bytes = read(archive)
+                # Recovery precedes scoring, so a later observation on retained row 3 survives.
+                @test L.verify_pending!(L.LiveVerifyConfig(log_path=path);
+                    dst_times=[base + L.Hour(3)], dst_vals=[-30.0]) == 1
+                @test !ispath(string(path, ".retention.json"))
+                scored = L.CSV.read(path, L.DataFrame)
+                @test scored.marker == [3, 4, 5, 6]
+                @test scored.observation_dst_nt[1] == -30.0
+                @test scored.residual_dst_nt[1] == -20.0
+                row = copy(rows[6:6, :])
+                row.issue_time_utc[1] = string(base + L.Hour(6))
+                row.target_time_utc[1] = string(base + L.Hour(7))
+                row.marker[1] = 7
+                @test L._append_forecast!(path, row) == 5
+                @test L._retain_live_forecast_log!(path, 4) == 1
+                # Scoring added columns: its archived row rolls forward without rewriting cold rows.
+                segment = joinpath(dir, "archive", "live_forecast_log_archive.1.csv")
+                @test read(archive) == archive_bytes
+                @test L.CSV.read(segment, L.DataFrame).marker == [3]
+                @test L.CSV.read(segment, L.DataFrame).observation_dst_nt == [-30.0]
+                @test L.CSV.read(path, L.DataFrame).marker == [4, 5, 6, 7]
+            end
+        end
+    end
+
+    @testset "identical resolved occurrences are not deduplicated" begin
+        mktempdir() do dir
+            path = joinpath(dir, "live.csv")
+            archive = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+            rows = fixture()[fill(1, 6), :]
+            rows.observation_dst_nt = fill(-12.0, 6)
+            L.CSV.write(path, rows)
+            L.RETENTION_FAULT[] = (:replace_before, path)
+            @test_throws ErrorException L._retain_live_forecast_log!(path, 4)
+            # A resolved identity may be appended again; this is a new occurrence, not a retry.
+            @test L._append_forecast!(path, rows[1:1, :]) == 5
+            @test L._retain_live_forecast_log!(path, 4) == 1
+            @test L.nrow(L.CSV.read(archive, L.DataFrame)) == 3
+            @test L.nrow(L.CSV.read(path, L.DataFrame)) == 4
+            @test L.CSV.read(archive, L.DataFrame).marker == [1, 1, 1]
+        end
+    end
+
+    @testset "ambiguous external rewrites fail closed" begin
+        mktempdir() do dir
+            path = joinpath(dir, "live.csv")
+            archive = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+            rows = fixture()[fill(1, 6), :]
+            L.CSV.write(path, rows)
+            L.RETENTION_FAULT[] = (:replace_after, path)
+            @test_throws ErrorException L._retain_live_forecast_log!(path, 4)
+            # An out-of-protocol writer restores the old bytes on the replacement inode. Content
+            # alone cannot tell these appended occurrences from a never-completed truncation.
+            L.CSV.write(path, rows)
+            archive_bytes, hot_bytes = read(archive), read(path)
+            @test_throws ErrorException L._retain_live_forecast_log!(path, 4)
+            @test read(archive) == archive_bytes
+            @test read(path) == hot_bytes
+            @test isfile(string(path, ".retention.json"))
+        end
+        mktempdir() do dir
+            path = joinpath(dir, "live.csv")
+            archive = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+            rows = fixture()
+            L.CSV.write(path, rows)
+            L.RETENTION_FAULT[] = (:replace_before, path)
+            @test_throws ErrorException L._retain_live_forecast_log!(path, 4)
+            # Extra cold rows are not a partial append owned by the receipt and must not be removed.
+            L.CSV.write(archive, rows[6:6, :]; append=true, header=false)
+            archive_bytes, hot_bytes = read(archive), read(path)
+            @test_throws ErrorException L._retain_live_forecast_log!(path, 4)
+            @test read(archive) == archive_bytes
+            @test read(path) == hot_bytes
+        end
+    end
+
+    @testset "changed transaction inputs remain untouched" begin
+        for changed in (:archive_prefix, :archive_payload, :manifest, :stage, :journal, :missing_hot)
+            mktempdir() do dir
+                path = joinpath(dir, "live.csv")
+                archive = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+                manifest = string(archive, ".manifest.json")
+                journal = string(path, ".retention.json")
+                staged = string(path, ".retention.csv")
+                rows = fixture()
+                L.CSV.write(path, rows)
+                # A preexisting cold prefix is never owned by the pending append.
+                L._archive_pruned_rows!(rows[6:6, :]; archive_path=archive, manifest_path=manifest)
+                L.RETENTION_FAULT[] = (:replace_before, path)
+                @test_throws ErrorException L._retain_live_forecast_log!(path, 4)
+                if changed in (:archive_prefix, :archive_payload)
+                    bytes = read(archive)
+                    bytes[changed == :archive_prefix ? 1 : end] = UInt8('X')
+                    write(archive, bytes)
+                elseif changed == :manifest
+                    write(manifest, "{\"archived_rows\":999}")
+                elseif changed == :stage
+                    L.CSV.write(staged, rows[1:4, :])
+                elseif changed == :journal
+                    write(journal, "not-json")
+                else
+                    mv(path, joinpath(dir, "removed-live.csv"))
+                end
+                paths = [archive, manifest, journal, staged, path]
+                snapshots = [isfile(p) ? read(p) : nothing for p in paths]
+                # Both writers must reject the receipt before installing, appending, or deleting.
+                @test_throws ErrorException L._retain_live_forecast_log!(path, 4)
+                @test_throws ErrorException L._append_forecast!(path, rows[6:6, :])
+                @test [isfile(p) ? read(p) : nothing for p in paths] == snapshots
+            end
+        end
+        mktempdir() do dir
+            path = joinpath(dir, "live.csv")
+            archive = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+            journal = string(path, ".retention.json")
+            L.CSV.write(path, fixture())
+            L.RETENTION_FAULT[] = (:replace_before, path)
+            @test_throws ErrorException L._retain_live_forecast_log!(path, 4)
+            transaction = L.JSON3.read(read(journal, String), Dict{String,Any})
+            transaction["archive_index"] = 1
+            L._atomic_json(journal, transaction)
+            cold_bytes, hot_bytes = read(archive), read(path)
+            # The archive path and the manifest's segment receipt must describe the same append.
+            @test_throws ErrorException L._retain_live_forecast_log!(path, 4)
+            @test read(archive) == cold_bytes
+            @test read(path) == hot_bytes
+            @test !isfile(joinpath(dir, "archive", "live_forecast_log_archive.1.csv"))
+        end
+    end
+
+    @testset "process death after archive commit" begin
+        mktempdir() do dir
+            path = joinpath(dir, "live.csv")
+            archive = joinpath(dir, "archive", "live_forecast_log_archive.csv")
+            L.CSV.write(path, fixture())
+            script = joinpath(@__DIR__, "..", "examples", "live_monitor.jl")
+            code = """
+                include($(repr(script)))
+                function _live_atomic_replace(source::String, target::String)
+                    target == $(repr(path)) && ccall(:_exit, Cvoid, (Cint,), 85)
+                    invoke(_live_atomic_replace, Tuple{AbstractString,AbstractString}, source, target)
+                end
+                _retain_live_forecast_log!($(repr(path)), 4)
+                """
+            command = `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(@__DIR__)) -e $code`
+            proc = withenv("SOLARSINDY_MONITOR_DIR" => dir) do
+                run(pipeline(ignorestatus(command); stdout=devnull, stderr=devnull))
+            end
+            # _exit bypasses Julia cleanup; the next owner must finish from files alone.
+            @test proc.exitcode == 85
+            @test L.CSV.read(archive, L.DataFrame).marker == [1, 2]
+            @test L.CSV.read(path, L.DataFrame).marker == collect(1:6)
+            @test isfile(string(path, ".retention.json"))
+            L._with_forecast_log_lock(path; stale_after_sec=0.001, poll_sec=0.005) do
+                L._recover_append_transaction!(path)
+            end
+            @test L.CSV.read(archive, L.DataFrame).marker == [1, 2]
+            @test L.CSV.read(path, L.DataFrame).marker == [3, 4, 5, 6]
+            @test !ispath(string(path, ".retention.json"))
+            @test L._state_matches_log(L._read_live_state(path), path)
+        end
     end
 end
 
@@ -1495,6 +1843,7 @@ end
                 end,
                 verify_fn=record("verify"),
                 retention_fn=record("retention"),
+                claim_audit_fn=record("claim_audit"),
                 snapshot_fn=(cfg; observations=nothing) -> begin
                     push!(called, "snapshot")
                     seen_snapshot[] = observations
@@ -1519,7 +1868,8 @@ end
         @test outcome.issuance == (succeeded=0, complete=false)
         @test "issue" ∉ outcome.called
         # The observation feed is fetched independently and every later step still runs, in order.
-        @test outcome.called == ["dst", "refresh", "retention", "snapshot", "report"]
+        @test outcome.called ==
+              ["dst", "refresh", "retention", "claim_audit", "snapshot", "report"]
         # The independently fetched feed actually reaches the steps that consume it, rather than
         # each of them silently refetching or being handed nothing.
         @test outcome.refresh == ([L.DateTime(2026, 7, 1, 2)], [-21.0])
@@ -1535,7 +1885,8 @@ end
         @test outcome.issuance == (succeeded=0, complete=false)
         @test "issue" ∉ outcome.called
         # Issuance inputs existed, so their Dst is reused rather than refetched.
-        @test outcome.called == ["refresh", "retention", "snapshot", "report"]
+        @test outcome.called ==
+              ["refresh", "retention", "claim_audit", "snapshot", "report"]
         @test outcome.refresh == ([L.DateTime(2026, 7, 1, 2)], [-21.0])
         @test outcome.snapshot.observed_dst_nt == [-21.0]
 
@@ -1545,7 +1896,8 @@ end
                                      dst=([L.DateTime(2026, 7, 1, 2)], [-21.0])),
                             _inputs -> :static)
         @test outcome.issuance == (succeeded=length(L.HORIZONS), complete=true)
-        @test outcome.called == ["issue", "refresh", "retention", "snapshot", "report"]
+        @test outcome.called ==
+              ["issue", "refresh", "retention", "claim_audit", "snapshot", "report"]
 
         # The narrower verifier is still the fallback when the refresh itself fails.
         called = String[]
@@ -1559,6 +1911,7 @@ end
                 refresh_fn=(args...; kwargs...) -> error("refresh failed"),
                 verify_fn=record("verify"),
                 retention_fn=record("retention"),
+                claim_audit_fn=record("claim_audit"),
                 snapshot_fn=record("snapshot"),
                 report_fn=record("report"),
                 log_path=make_log(joinpath(dir, "fallback.csv")),
@@ -1567,7 +1920,7 @@ end
                 max_log_rows=length(L.HORIZONS),
             )
         end
-        @test called == ["verify", "retention", "snapshot", "report"]
+        @test called == ["verify", "retention", "claim_audit", "snapshot", "report"]
     end
 end
 

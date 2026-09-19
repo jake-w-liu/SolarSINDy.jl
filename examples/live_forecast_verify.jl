@@ -12,6 +12,7 @@ using CSV
 using DataFrames
 using Dates
 using HTTP
+using MbedTLS
 using JSON3
 using SHA
 using Statistics
@@ -356,7 +357,8 @@ function _fetch_dst(; max_retries::Int=3, retry_delay_sec::Real=1.0,
     last_error = nothing
     for attempt in 1:max_retries
         try
-            resp = fetch_fn(KYOTO_DST_JSON_URL; connect_timeout=15, readtimeout=30)
+            resp = fetch_fn(KYOTO_DST_JSON_URL; socket_type_tls=MbedTLS.SSLContext,
+                           connect_timeout=15, readtimeout=30, retries=0)
             resp.status == 200 || error("Kyoto Dst HTTP status $(resp.status)")
             rows = JSON3.read(String(resp.body))
             times = DateTime[]; dst = Float64[]
@@ -670,6 +672,22 @@ const V2_3_SHADOW_DRIVER_ASSUMPTION = V23_SERVING_DRIVER_ASSUMPTION
 # produced the center.
 const V2_4_SERVED_TAIL_VERSION = V24_SERVED_IDENTITY
 const V2_4_DRIVER_ASSUMPTION = V24_SERVED_DRIVER_ASSUMPTION
+# Separately identified interval shadow selected by the 2026-08-25 A3 causal replay. It never
+# supplies the served band, the severity center, the watch edge or the served product identity.
+const V2_4_CALIBRATION_SHADOW_VERSION =
+    "v2.4e-cal-shadow-A3+median24+width1h1.50+widthOther1.20+warm30"
+const V2_4_CALIBRATION_SHADOW_CONFIG_SHA256 =
+    "31d67e5077ae6fe69cee133fa07dceec3aa639903a17861d179d3877ed0c21af"
+const V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256 =
+    "057aec0df488314cd682e212e9ba64233e2674a7c641d68b72aa729982093ede"
+const V2_4_CALIBRATION_SHADOW_WINDOW = 24
+const V2_4_CALIBRATION_SHADOW_WARMUP = 30
+
+function _v2_4_calibration_shadow_width_scale(model_steps::Integer)
+    model_steps == 1 && return 1.50
+    model_steps in V24_SERVING_MODEL_STEPS && return 1.20
+    throw(ArgumentError("unsupported V2.4e calibration-shadow model step: $model_steps"))
+end
 
 function _served_driver_assumption(model_version::AbstractString)
     model_version == OPERATIONAL_V2_1_MODEL_VERSION && return V2_DRIVER_ASSUMPTION
@@ -956,99 +974,7 @@ function _subhour_trajectory(template::ForecastState,
     return pts
 end
 
-# Does the lock pidfile still have a live local owner? Answering `true` short-circuits the
-# `trymkpidlock` call in `_with_forecast_log_lock`, which is the only place Pidfile's own staleness
-# rule can run — so this predicate must apply that rule itself, not just a liveness test. The
-# contract is exactly `!Pidfile.stale_pidfile(path, stale_age, refresh)` for a local live PID, and
-# `test_live_forecast_verify.jl` pins that as a differential oracle against the stdlib.
-#
-# `Pidfile.stale_pidfile` declares a refreshed lock stale once its mtime is older than
-# `5 * stale_age`, EVEN for a live PID, precisely because a PID can be recycled. Without the age
-# clause here, a lock left behind by a SIGKILLed daemon whose PID is later reused by an unrelated
-# long-lived process is reported as owned forever: every locked step (four issuances, refresh,
-# retention, the ACI query) then burns its full 30 s timeout and no restart can clear it.
-# `parse_pidfile` already returns the age, so this costs nothing extra.
-#
-# A FUTURE-dated pidfile (`age < -stale_age`, from a backwards clock step or a skewed filesystem) is
-# deliberately NOT treated as stale here, because the stdlib does not treat it as stale either: on
-# the pinned Julia, `stale_pidfile` only emits "filesystem time skew detected" for that case and
-# returns `false`, so the lock is never reclaimed by age. Reporting it stale would diverge from the
-# authority without clearing anything — `trymkpidlock` would still fail. What the short-circuit DOES
-# swallow is the stdlib's warning, which would leave the resulting wedge as a silent 30 s stall per
-# locked step, so this predicate raises the skew itself and the lock timeout reports the pidfile
-# state that caused it.
-function _forecast_pidfile_has_local_live_owner(lock_path::AbstractString;
-                                                stale_after_sec::Real=900.0)
-    isfile(lock_path) && !islink(lock_path) || return false
-    try
-        pid, hostname, age = Pidfile.parse_pidfile(String(lock_path))
-        local_owner = isempty(hostname) || hostname == gethostname()
-        (local_owner && Pidfile.isvalidpid(hostname, pid)) || return false
-        if age < -Float64(stale_after_sec)
-            @warn "forecast log lock is future-dated; neither Pidfile nor this mirror can " *
-                  "reclaim it by age until the clock catches up" lock_path age_sec=age maxlog=1
-        end
-        # stale_age == 0 disables Pidfile's staleness rule entirely; mirror that.
-        stale_after_sec > 0 || return true
-        return age <= 5 * Float64(stale_after_sec)
-    catch error
-        # A concurrent release can make the read fail. The subsequent exclusive
-        # open remains the authority, so a transient read failure is not ownership.
-        error isa IOError || error isa EOFError || rethrow()
-        return false
-    end
-end
-
-# One-line pidfile state for the lock-timeout message, so a wedge names its cause (dead PID, foreign
-# host, future-dated mtime) instead of only the path.
-function _forecast_pidfile_diagnosis(lock_path::AbstractString)
-    isfile(lock_path) || return isdir(lock_path) ? "lock path is a directory" :
-                                (islink(lock_path) ? "lock path is a symlink" : "no pidfile present")
-    try
-        pid, hostname, age = Pidfile.parse_pidfile(String(lock_path))
-        owner = isempty(hostname) ? "this host" : hostname
-        skew = age < 0 ? "; mtime is $(round(-age; digits=1)) s in the FUTURE (clock skew)" : ""
-        return "pid=$(pid) host=$(owner) age=$(round(age; digits=1)) s" *
-               " valid_pid=$(Pidfile.isvalidpid(hostname, pid))" * skew
-    catch error
-        error isa IOError || error isa EOFError || rethrow()
-        return "pidfile unreadable"
-    end
-end
-
-function _with_forecast_log_lock(f, log_path::String; timeout_sec::Float64=30.0,
-                                 stale_after_sec::Float64=900.0, poll_sec::Float64=0.05)
-    timeout_sec >= 0 || throw(ArgumentError("timeout_sec must be nonnegative"))
-    stale_after_sec >= 0 || throw(ArgumentError("stale_after_sec must be nonnegative"))
-    poll_sec > 0 || throw(ArgumentError("poll_sec must be positive"))
-    lock_path = log_path * ".lock"
-    parent = dirname(lock_path)
-    !isempty(parent) && mkpath(parent)
-    deadline = time() + timeout_sec
-    owner = false
-    while owner === false
-        if !isdir(lock_path) && !islink(lock_path) &&
-           !_forecast_pidfile_has_local_live_owner(
-               lock_path; stale_after_sec=stale_after_sec,
-           )
-            owner = Pidfile.trymkpidlock(
-                lock_path; stale_age=stale_after_sec,
-                refresh=stale_after_sec == 0 ? 0.0 : stale_after_sec / 2,
-            )
-        end
-        owner === false || break
-        time() < deadline || error(
-            "timed out waiting for forecast log lock: $lock_path " *
-            "[$(_forecast_pidfile_diagnosis(lock_path))]",
-        )
-        sleep(min(poll_sec, max(deadline - time(), 0.0)))
-    end
-    try
-        return f()
-    finally
-        close(owner)
-    end
-end
+include(joinpath(@__DIR__, "live_log_lock.jl"))
 
 const _LIVE_STATE_VERSION = 3
 const _LIVE_STATE_TAIL_BYTES = 4096
@@ -1060,6 +986,8 @@ const _LIVE_ACI_STREAM_LIMIT = 32
 
 _live_state_path(log_path::AbstractString) = string(log_path, ".state.json")
 _append_transaction_path(log_path::AbstractString) = string(log_path, ".append.json")
+_retention_transaction_path(log_path::AbstractString) = string(log_path, ".retention.json")
+_retention_table_path(log_path::AbstractString) = string(log_path, ".retention.csv")
 
 function _tail_digest(path::AbstractString; upto::Integer=filesize(path))
     stop = Int(upto)
@@ -1309,7 +1237,156 @@ function _append_row_bytes(path::AbstractString, bytes::Vector{UInt8})
     return nothing
 end
 
+# Retention owns two files, so its write-ahead receipt must be recovered before any subsequent
+# append or observation rewrite. File identity distinguishes the original and installed hot logs
+# even when repeated forecast occurrences have identical contents.
+function _retention_prefix_sha256(io::IO, count::Integer, path::AbstractString)
+    count >= 0 || error("invalid retention digest boundary at $path")
+    ctx = SHA.SHA2_256_CTX()
+    remaining = count
+    while remaining > 0
+        requested = min(remaining, 64 * 1024)
+        bytes = read(io, requested)
+        length(bytes) == requested || error(
+            "retention file ended while hashing $path; expected $requested bytes, read $(length(bytes))",
+        )
+        SHA.update!(ctx, bytes)
+        remaining -= length(bytes)
+    end
+    return bytes2hex(SHA.digest!(ctx))
+end
+
+function _retention_prefix_sha256(path::AbstractString, count::Integer)
+    count >= 0 || error("invalid retention digest boundary at $path")
+    count == 0 && return bytes2hex(sha256(UInt8[]))
+    isfile(path) && filesize(path) >= count || error("retention file is truncated at $path")
+    return open(io -> _retention_prefix_sha256(io, count, path), path, "r")
+end
+
+function _retention_file_receipt(path::AbstractString)
+    st = stat(path)
+    return Dict{String,Any}(
+        "size" => Int(st.size), "device" => string(st.device), "inode" => string(st.inode),
+        "sha256" => _retention_prefix_sha256(path, st.size),
+    )
+end
+
+function _retention_file_matches(path::AbstractString, receipt)
+    isfile(path) && !islink(path) || return false
+    receipt isa AbstractDict || return false
+    st = stat(path)
+    get(receipt, "size", nothing) == st.size || return false
+    get(receipt, "device", nothing) == string(st.device) || return false
+    get(receipt, "inode", nothing) == string(st.inode) || return false
+    return get(receipt, "sha256", nothing) == _retention_prefix_sha256(path, st.size)
+end
+
+function _clear_retention_transaction!(path::AbstractString)
+    staged = _retention_table_path(path)
+    isfile(staged) && rm(staged)
+    rm(_retention_transaction_path(path))
+    _sync_parent_directory(path)
+    return nothing
+end
+
+function _recover_retention_transaction!(log_path::AbstractString)
+    path = abspath(log_path)
+    transaction_path = _retention_transaction_path(path)
+    isfile(transaction_path) || return 0
+    _live_require_regular_target(transaction_path)
+    isfile(_append_transaction_path(path)) && error(
+        "conflicting append and retention transactions at $path; inspect both receipts before retrying",
+    )
+    transaction = try
+        JSON3.read(read(transaction_path, String), Dict{String,Any})
+    catch e
+        e isa InterruptException && rethrow()
+        error("corrupt forecast retention transaction $transaction_path: $(sprint(showerror, e))")
+    end
+    get(transaction, "version", nothing) == 1 || error(
+        "unsupported forecast retention transaction in $transaction_path",
+    )
+    pruned_rows = get(transaction, "pruned_rows", nothing)
+    index = get(transaction, "archive_index", nothing)
+    pre_size = get(transaction, "archive_pre_size", nothing)
+    pruned_rows isa Integer && pruned_rows > 0 || error("invalid retention row count")
+    index isa Integer && index >= 0 || error("invalid retention archive index")
+    pre_size isa Integer && pre_size >= 0 || error("invalid retention archive boundary")
+    archive = joinpath(dirname(path), "archive", index == 0 ?
+        "live_forecast_log_archive.csv" : "live_forecast_log_archive.$index.csv")
+    manifest_path = string(archive, ".manifest.json")
+    staged = _retention_table_path(path)
+    for target in (path, staged, archive, manifest_path)
+        _live_require_regular_target(target)
+    end
+    before = get(transaction, "pre_log", nothing)
+    after = get(transaction, "post_log", nothing)
+    original = _retention_file_matches(path, before)
+    installed = _retention_file_matches(path, after)
+    original || installed || error(
+        "forecast log changed outside pending retention at $path; inspect $transaction_path before retrying",
+    )
+    (original || isfile(staged)) && !_retention_file_matches(staged, after) && error(
+        "staged retention table is missing or changed at $staged; inspect $transaction_path before retrying",
+    )
+    payload = try
+        hex2bytes(transaction["archive_hex"])
+    catch e
+        e isa InterruptException && rethrow()
+        error("invalid archive payload in $transaction_path: $(sprint(showerror, e))")
+    end
+    bytes2hex(sha256(payload)) == get(transaction, "archive_sha256", nothing) ||
+        error("retention archive payload checksum mismatch in $transaction_path")
+    manifest = get(transaction, "manifest", nothing)
+    manifest isa AbstractDict || error("invalid retention manifest in $transaction_path")
+    get(manifest, "archive_bytes", nothing) == pre_size + length(payload) ||
+        error("retention manifest byte count mismatch in $transaction_path")
+    get(manifest, "segment_index", nothing) == index &&
+        get(manifest, "last_segment_rows", nothing) == pruned_rows &&
+        get(manifest, "last_segment_sha256", nothing) == transaction["archive_sha256"] ||
+        error("retention manifest segment receipt mismatch in $transaction_path")
+    manifest_ok = if isfile(manifest_path)
+        old_digest = get(transaction, "pre_manifest_sha256", nothing)
+        _retention_prefix_sha256(manifest_path, filesize(manifest_path)) == old_digest ||
+            try
+                JSON3.read(read(manifest_path, String), Dict{String,Any}) == manifest
+            catch e
+                e isa InterruptException && rethrow()
+                false
+            end
+    else
+        get(transaction, "pre_manifest_sha256", nothing) === nothing
+    end
+    manifest_ok || error(
+        "cold archive manifest changed during retention at $manifest_path; inspect $transaction_path before retrying",
+    )
+    archive_size = isfile(archive) ? filesize(archive) : 0
+    pre_size <= archive_size <= pre_size + length(payload) ||
+        error("cold archive size changed during retention at $archive")
+    _retention_prefix_sha256(archive, pre_size) == transaction["archive_pre_sha256"] ||
+        error("cold archive prefix changed during retention at $archive")
+    written = archive_size - pre_size
+    if written > 0
+        prefix_matches = open(archive, "r") do io
+            seek(io, pre_size)
+            read(io, written) == @view(payload[1:written])
+        end
+        prefix_matches || error("cold archive append changed during retention at $archive")
+    end
+    written < length(payload) && _append_row_bytes(archive, payload[(written + 1):end])
+    _atomic_json(manifest_path, manifest)
+    if original
+        _live_atomic_replace(staged, path)
+        _sync_parent_directory(path)
+    end
+    # This streaming rebuild does not call either transaction-recovery entry point.
+    _write_live_state!(path, _rebuild_live_state(path))
+    _clear_retention_transaction!(path)
+    return original ? Int(pruned_rows) : 0
+end
+
 function _recover_append_transaction!(path::AbstractString)
+    _recover_retention_transaction!(path)
     transaction_path = _append_transaction_path(path)
     isfile(transaction_path) || return false
     transaction = try
@@ -1411,6 +1488,7 @@ function _append_forecast!(log_path::String, row::DataFrame; return_status::Bool
     dir = dirname(log_path)
     !isempty(dir) && mkpath(dir)
     return _with_forecast_log_lock(log_path) do
+        _recover_append_transaction!(log_path)
         if !isfile(log_path)
             _atomic_csv(log_path, row)
             key = _incoming_pending_key(row)
@@ -1426,7 +1504,6 @@ function _append_forecast!(log_path::String, row::DataFrame; return_status::Bool
             return return_status ? (; row_idx=1, appended=true) : 1
         end
 
-        _recover_append_transaction!(log_path)
         state = _load_or_rebuild_live_state!(log_path)
         _assert_append_model_compatibility(log_path, state, row)
         key = _incoming_pending_key(row)
@@ -1568,6 +1645,21 @@ function _score_row!(df::DataFrame, row_idx::Int, observed_dst::Float64)
         s95 = _optional_float(df, row_idx, :served_pred_dst_ci95_nt)
         (!ismissing(s05) && !ismissing(s95)) &&
             _set_value!(df, row_idx, :served_observed_in_90ci, min(s05, s95) <= observed_dst <= max(s05, s95))
+    end
+
+    # The calibration shadow is scored only when that row was issued with an available shadow band.
+    # It remains a separate prospective evidence stream and never overwrites the served score.
+    shadow_status = String(:v24_cal_shadow_status) in names(df) ?
+                    df[row_idx, :v24_cal_shadow_status] : missing
+    if shadow_status isa AbstractString && shadow_status == "ok"
+        shadow_lo = _optional_float(df, row_idx, :v24_cal_shadow_ci05_nt)
+        shadow_hi = _optional_float(df, row_idx, :v24_cal_shadow_ci95_nt)
+        if !ismissing(shadow_lo) && !ismissing(shadow_hi)
+            _set_value!(
+                df, row_idx, :v24_cal_shadow_observed_in_90ci,
+                min(shadow_lo, shadow_hi) <= observed_dst <= max(shadow_lo, shadow_hi),
+            )
+        end
     end
 
     for (pred_col, residual_col) in (
@@ -2936,6 +3028,91 @@ function _aci_interval_from_log(log_path::AbstractString, center::Real,
     end
 end
 
+function _v2_4_calibration_shadow_from_log(log_path::AbstractString,
+                                            point::Real, static_lo::Real,
+                                            static_hi::Real, model_steps::Integer,
+                                            latest_dst_time::DateTime,
+                                            issue_time::DateTime;
+                                            dst_times=nothing, dst_vals=nothing)
+    unavailable(status::AbstractString; history_n::Integer=0) =
+        (status=String(status), lo=missing, hi=missing, location=missing,
+         history_n=Int(history_n))
+    try
+        isfile(log_path) || return unavailable("unavailable:no_log")
+        (dst_times === nothing) == (dst_vals === nothing) ||
+            throw(ArgumentError("Dst times and values must be provided together"))
+        dst_times === nothing || length(dst_times) == length(dst_vals) ||
+            throw(DimensionMismatch("Dst times and values must have equal length"))
+        current_dst = dst_times === nothing ? Dict{DateTime,Float64}() :
+                      _dst_lookup(dst_times, dst_vals)
+        all(isfinite, values(current_dst)) ||
+            throw(ArgumentError("current Dst snapshot contains a non-finite value"))
+        history = _with_forecast_log_lock(String(log_path)) do
+            _recover_append_transaction!(String(log_path))
+            required = (:issue_time_utc, :latest_dst_time_utc, :target_time_utc,
+                        :model_step_hours, :observation_dst_nt, :served_pred_dst_nt,
+                        :sub_hourly_model_version, :v24_status, :v24_manifest_sha256)
+            df = CSV.read(log_path, DataFrame; select=collect(required))
+            all(String(column) in names(df) for column in required) || return nothing
+            chosen = Dict{Tuple{DateTime,DateTime,String},NamedTuple}()
+            for row_idx in 1:nrow(df)
+                identity = df[row_idx, :sub_hourly_model_version]
+                status = df[row_idx, :v24_status]
+                (identity isa AbstractString && String(identity) == V2_4_SERVED_TAIL_VERSION) ||
+                    continue
+                (status isa AbstractString && String(status) == V2_4_STATUS_OK) || continue
+                manifest = df[row_idx, :v24_manifest_sha256]
+                (manifest isa AbstractString &&
+                 String(manifest) == V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256) || continue
+                center = _optional_float(df, row_idx, :served_pred_dst_nt)
+                step = _optional_float(df, row_idx, :model_step_hours)
+                issue = _parse_dt(df[row_idx, :issue_time_utc])
+                issue < issue_time || continue
+                target = _parse_dt(df[row_idx, :target_time_utc])
+                observation = get(current_dst, target,
+                                  _optional_float(df, row_idx, :observation_dst_nt))
+                (ismissing(observation) || ismissing(center) || ismissing(step)) && continue
+                isfinite(observation) && isfinite(center) && isfinite(step) || continue
+                step == model_steps || continue
+                row_latest = _parse_dt(df[row_idx, :latest_dst_time_utc])
+                row_latest <= issue < target || continue
+                target - row_latest == Hour(model_steps) || continue
+                target <= latest_dst_time || continue
+                key = (_floor_hour(issue), target, V2_4_SERVED_TAIL_VERSION)
+                record = (issue=issue, target=target,
+                          residual=Float64(observation) - Float64(center))
+                isfinite(record.residual) || continue
+                previous = get(chosen, key, nothing)
+                if previous === nothing || record.issue > previous.issue
+                    chosen[key] = record
+                elseif record.issue == previous.issue && record.residual != previous.residual
+                    error("conflicting exact-time V2.4e calibration-shadow duplicate for $key")
+                end
+            end
+            ordered = sort!(collect(values(chosen));
+                            by=record -> (record.target, record.issue))
+            return Float64[record.residual for record in ordered]
+        end
+        history === nothing && return unavailable("unavailable:log_schema")
+        result = SolarSINDy._v24_calibration_shadow_interval(
+            point, static_lo, static_hi, history;
+            window=V2_4_CALIBRATION_SHADOW_WINDOW,
+            warmup=V2_4_CALIBRATION_SHADOW_WARMUP,
+            width_scale=_v2_4_calibration_shadow_width_scale(model_steps),
+        )
+        result.available || return unavailable(
+            "warmup:$(result.history_n)/$(V2_4_CALIBRATION_SHADOW_WARMUP)";
+            history_n=result.history_n,
+        )
+        return (status="ok", lo=Float64(result.lo), hi=Float64(result.hi),
+                location=Float64(result.location), history_n=result.history_n)
+    catch e
+        e isa InterruptException && rethrow()
+        @warn "V2.4e calibration shadow unavailable; the served interval is unchanged" exception=(e, catch_backtrace())
+        return unavailable("unavailable:history_error")
+    end
+end
+
 const _ISSUE_INTERVAL_POLICIES = (:auto, :static, :aci)
 
 function _checked_interval_policy(policy::Symbol)
@@ -4198,25 +4375,77 @@ function _latest_causal_index(times::AbstractVector{<:DateTime},
     return best_idx
 end
 
+function _persist_issue_bytes(path::AbstractString, bytes)
+    SolarSINDy._require_regular_output_target(path)
+    if isfile(path)
+        read(path) == bytes || error("issue-input evidence conflicts at $path")
+        return path
+    end
+    mkpath(dirname(path))
+    mktemp(dirname(path)) do temporary, io
+        write(io, bytes)
+        flush(io)
+        close(io)
+        mv(temporary, path; force=false)
+    end
+    return path
+end
+
 function prepare_issue_inputs(cfg::LiveVerifyConfig;
-                              issue_time::DateTime=now(UTC),
-                              plasma_fn::Function=() -> fetch_swpc_plasma(; max_retries=3,
-                                                                         retry_delay_sec=1.0),
-                              mag_fn::Function=() -> fetch_swpc_mag(; max_retries=3,
-                                                                    retry_delay_sec=1.0),
-                              dst_fn::Function=_fetch_dst)
+                              issue_time::Union{Nothing,DateTime}=nothing,
+                              plasma_fn::Union{Nothing,Function}=nothing,
+                              mag_fn::Union{Nothing,Function}=nothing,
+                              dst_fn::Union{Nothing,Function}=nothing,
+                              snapshot_dir::Union{Nothing,AbstractString}=nothing,
+                              http_get::Function=HTTP.get)
     calibration = _load_calibration_for_model(cfg)
     conformal = _load_conformal_for_model(cfg; calibration=calibration)
-    return (
-        issue_time=issue_time,
-        plasma=plasma_fn(),
-        mag=mag_fn(),
-        dst=dst_fn(),
+    receipts = NamedTuple[]
+    capture_get(url; kwargs...) = begin
+        started = now(UTC)
+        response = http_get(url; kwargs...)
+        received = now(UTC)
+        if snapshot_dir !== nothing
+            bytes = Vector{UInt8}(codeunits(String(copy(response.body))))
+            digest = bytes2hex(sha256(bytes))
+            relative = joinpath("responses", digest * ".body")
+            _persist_issue_bytes(joinpath(snapshot_dir, relative), bytes)
+            push!(receipts, (; url=String(url), status=response.status,
+                started_utc=string(started), received_utc=string(received),
+                sha256=digest, bytes=length(bytes), path=relative))
+            # Persist each response before parsing: failed or partial preparation remains
+            # diagnosable even when there will be no issued forecast or completed receipt.
+            receipt_bytes = Vector{UInt8}(codeunits(JSON3.write(last(receipts))))
+            receipt_name = Dates.format(received, "yyyymmddTHHMMSSsss") * "-" * digest * ".json"
+            _persist_issue_bytes(joinpath(snapshot_dir, "retrievals", receipt_name), receipt_bytes)
+        end
+        response
+    end
+    plasma = plasma_fn === nothing ? fetch_swpc_plasma(; http_get=capture_get) : plasma_fn()
+    mag = mag_fn === nothing ? fetch_swpc_mag(; http_get=capture_get) : mag_fn()
+    dst = dst_fn === nothing ? _fetch_dst(; fetch_fn=capture_get) : dst_fn()
+    # The normal decision clock must follow receipt of every input. An explicitly supplied
+    # timestamp remains available for deterministic, causally filtered historical replay.
+    prepared = (
+        issue_time=something(issue_time, now(UTC)),
+        plasma=plasma,
+        mag=mag,
+        dst=dst,
         calibration=calibration,
         conformal=conformal,
         model=cfg.model,
         calibration_path=abspath(cfg.v2_calibration_path),
     )
+    if snapshot_dir !== nothing
+        length(receipts) >= 3 || error("issue-input capture requires the real HTTP fetch paths")
+        receipt = (; issue_time_utc=string(prepared.issue_time), model=string(cfg.model),
+            explicit_replay_time=issue_time !== nothing, responses=receipts,
+            calibration_path=prepared.calibration_path)
+        bytes = Vector{UInt8}(codeunits(JSON3.write(receipt)))
+        name = Dates.format(prepared.issue_time, "yyyymmddTHHMMSSsss") * ".json"
+        _persist_issue_bytes(joinpath(snapshot_dir, "issues", name), bytes)
+    end
+    return prepared
 end
 
 function issue_forecast(cfg::LiveVerifyConfig;
@@ -4702,6 +4931,21 @@ function issue_forecast(cfg::LiveVerifyConfig;
     served_pred_dst = sub_hourly_pred_dst
     served_ci05_dst = sub_hourly_ci05
     served_ci95_dst = sub_hourly_ci95
+    v2_4_calibration_shadow = if served_tail_version != V2_4_SERVED_TAIL_VERSION
+        (status="unavailable:served_identity_mismatch", lo=missing, hi=missing,
+         location=missing, history_n=0)
+    elseif !(v2_4_served.manifest_sha256 isa AbstractString &&
+             v2_4_served.manifest_sha256 ==
+                 V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256)
+        (status="unavailable:served_manifest_mismatch", lo=missing, hi=missing,
+         location=missing, history_n=0)
+    else
+        _v2_4_calibration_shadow_from_log(
+            cfg.log_path, served_pred_dst, served_ci05_dst, served_ci95_dst,
+            model_steps, latest_dst_time, issue_time;
+            dst_times, dst_vals,
+        )
+    end
     driver_audit = _driver_audit_fields(anchor_drivers, served_target_drivers)
 
     row = DataFrame(
@@ -4831,6 +5075,15 @@ function issue_forecast(cfg::LiveVerifyConfig;
         v24_t1r_pred_dst_nt=[v2_4_served.t1r_analog],
         direct_gbm_pred_dst_nt=[v2_4_served.direct_gbm],
         climatology_pred_dst_nt=[v2_4_served.climatology],
+        # Prospective A3 calibration shadow. These endpoints are logged at issuance under a separate
+        # immutable identity and never replace the served V2.4e interval or enter alerting.
+        v24_cal_shadow_model_version=[V2_4_CALIBRATION_SHADOW_VERSION],
+        v24_cal_shadow_config_sha256=[V2_4_CALIBRATION_SHADOW_CONFIG_SHA256],
+        v24_cal_shadow_status=[v2_4_calibration_shadow.status],
+        v24_cal_shadow_ci05_nt=[v2_4_calibration_shadow.lo],
+        v24_cal_shadow_ci95_nt=[v2_4_calibration_shadow.hi],
+        v24_cal_shadow_history_n=[v2_4_calibration_shadow.history_n],
+        v24_cal_shadow_location_shift_nt=[v2_4_calibration_shadow.location],
         # Shadow columns: computed on the live information set, never served, never used for severity.
         v23_shadow_model_version=[V2_3_SHADOW_TAIL_VERSION],
         v23_manifest_sha256=[v2_3_shadow.manifest_sha256],
@@ -5437,6 +5690,10 @@ function _standard_model_columns(df::DataFrame;
             (identity == :v2_1 ? "V2.1" : "Historical V2.0") : served_label
         push!(specs, product_label => :served_pred_dst_nt)
     end
+    if identity == :v2_1 && served_label != "V2.2" &&
+       String(:v2_2_stack_pred_dst_nt) in names(df)
+        push!(specs, "Static V2.2 predecessor" => :v2_2_stack_pred_dst_nt)
+    end
     base_label = identity == :v2_1 ? "V2.1" : "Historical V2.0"
     v2_label = has_served_product ? "$base_label frozen-tail ablation" : base_label
     append!(specs, Pair{String,Symbol}[
@@ -5722,6 +5979,40 @@ function write_live_comparison_report(
     for spec in model_specs
         preds, obs = _metric_rows_for_indices(df, last(spec), comparison_rows)
         push!(lines, _metric_markdown_row(first(spec), preds, obs))
+    end
+
+    # Pooled live skill can hide a weak model step. Keep every comparator on the same rows within
+    # each recorded internal step and omit malformed step values instead of assigning them a bin.
+    step_rows = Dict{Int,Vector{Int}}()
+    if String(:model_step_hours) in names(df)
+        for row_idx in comparison_rows
+            value = df[row_idx, :model_step_hours]
+            (ismissing(value) || value isa Bool || !(value isa Real)) && continue
+            numeric = Float64(value)
+            (isfinite(numeric) && numeric > 0 && isinteger(numeric)) || continue
+            push!(get!(step_rows, round(Int, numeric), Int[]), row_idx)
+        end
+    end
+    if !isempty(step_rows)
+        push!(lines, "")
+        push!(lines, "## Same-Row Model Comparison by Internal Step")
+        push!(lines, "")
+        push!(lines, "Each step uses its own matched comparison rows. Bias is observation minus prediction; small cells remain descriptive.")
+        push!(lines, "")
+        push!(lines, "| model step h | model | n | RMSE nT | MAE nT | bias nT |")
+        push!(lines, "| ---: | --- | ---: | ---: | ---: | ---: |")
+        for step in sort!(collect(keys(step_rows)))
+            rows = step_rows[step]
+            for spec in model_specs
+                preds, obs = _metric_rows_for_indices(df, last(spec), rows)
+                metric = _metric_values(preds, obs)
+                metric === nothing && continue
+                push!(lines,
+                    "| $step | $(first(spec)) | $(metric.n) | $(_fmt2(metric.rmse)) | " *
+                    "$(_fmt2(metric.mae)) | $(_fmt2(metric.bias)) |",
+                )
+            end
+        end
     end
 
     push!(lines, "")

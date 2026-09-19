@@ -1,6 +1,7 @@
 using Test
 
 const _V22_LAUNCHD_PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
+const _V22_LAUNCHD_PACKAGE_ROOT_PHYSICAL = realpath(_V22_LAUNCHD_PACKAGE_ROOT)
 const _V22_LAUNCHD_INSTALLER = joinpath(
     _V22_LAUNCHD_PACKAGE_ROOT, "deploy", "install_launchd.sh",
 )
@@ -37,7 +38,8 @@ end
 # rendered plist depends only on what the test passes and never on the developer's shell.
 const _V22_CONFIG_KEYS = (
     "SWM_HOST", "SWM_PORT", "SWM_WEBHOOK_URL",
-    "LIVE_MONITOR_INTERVAL_SEC", "LIVE_MONITOR_DEADMAN_CYCLES", "LIVE_MONITOR_MAX_LOG_ROWS",
+    "LIVE_MONITOR_INTERVAL_SEC", "LIVE_MONITOR_PHASE_SAMPLING",
+    "LIVE_MONITOR_DEADMAN_CYCLES", "LIVE_MONITOR_MAX_LOG_ROWS",
     "LIVE_MONITOR_LOG_MAX_BYTES", "LIVE_MONITOR_LOG_MAX_FILES",
     "SOLARSINDY_V2_CALIBRATION", "SOLARSINDY_V2_4_DEPLOY_DIR", "SOLARSINDY_V2_3_SHADOW_DIR",
     "SOLARSINDY_V2_2_STACK", "SOLARSINDY_V2_2_STACK_SHA256", "SOLARSINDY_ALLOW_UNPINNED_STACK",
@@ -209,6 +211,32 @@ const _V22_LAUNCHD_RUNNABLE = Sys.isapple() && Sys.which("plutil") !== nothing
         end
     end
 
+    @testset "relative clone paths are canonicalized for launchd" begin
+        mktempdir() do root
+            home = joinpath(root, "home")
+            monitor = joinpath(root, "monitor")
+            receipts = joinpath(root, "receipts")
+            logs = joinpath(root, "receipt-logs")
+            mkpath(home)
+            tools = _v22_fake_launchd_tools(root)
+            relative_clone = relpath(_V22_LAUNCHD_PACKAGE_ROOT, pwd())
+            command = _v22_launchd_command(
+                home, monitor, receipts, logs, tools, "monitor";
+                clone=relative_clone, load="0",
+            )
+            @test _v22_command_succeeds(command)
+            body = read(_v22_plist(home, "live-monitor"), String)
+            @test occursin(
+                "<key>WorkingDirectory</key>\n  <string>$(_v22_xml_text(_V22_LAUNCHD_PACKAGE_ROOT_PHYSICAL))</string>",
+                body,
+            )
+            @test occursin(
+                "<string>--project=$(_v22_xml_text(_V22_LAUNCHD_PACKAGE_ROOT_PHYSICAL))</string>",
+                body,
+            )
+        end
+    end
+
     @testset "a failed render leaves no staging file beside the real plists" begin
         # `set -euo pipefail` aborts the script the moment `plutil -lint` fails. Staging inside
         # ~/Library/LaunchAgents therefore left `.env`/`.pre`/`.tmp` files sitting next to the live
@@ -233,7 +261,7 @@ const _V22_LAUNCHD_RUNNABLE = Sys.isapple() && Sys.which("plutil") !== nothing
         end
     end
 
-    @testset "the live clock-skew band is validated at install time" begin
+    @testset "live timing settings are validated at install time" begin
         mktempdir() do root
             home = joinpath(root, "home")
             monitor = joinpath(root, "monitor")
@@ -262,6 +290,10 @@ const _V22_LAUNCHD_RUNNABLE = Sys.isapple() && Sys.which("plutil") !== nothing
             @test !inconsistent.ok
             @test occursin("must be at least", inconsistent.text)
 
+            bad_phase = reject(Dict("LIVE_MONITOR_PHASE_SAMPLING" => "yes"))
+            @test !bad_phase.ok
+            @test occursin("LIVE_MONITOR_PHASE_SAMPLING must be 0 or 1", bad_phase.text)
+
             @test !ispath(joinpath(home, "Library", "LaunchAgents",
                                    "com.empire.solarsindy.live-monitor.plist"))
             @test isempty(_v22_launchctl_events(tools))
@@ -282,7 +314,7 @@ const _V22_LAUNCHD_RUNNABLE = Sys.isapple() && Sys.which("plutil") !== nothing
     end
 
     @testset "V2.1 defaults remain collector-free" begin
-        mktempdir() do root
+        mktempdir(; prefix="live-monitor-dashboard-watchdog-") do root
             home = joinpath(root, "home")
             monitor = joinpath(root, "monitor & # <state>")
             receipts = joinpath(root, "receipts")
@@ -321,8 +353,15 @@ const _V22_LAUNCHD_RUNNABLE = Sys.isapple() && Sys.which("plutil") !== nothing
                 ["bootout", "bootstrap", "enable", "kickstart"], 3,
             )
             @test all(!occursin("v22-receipt-collector", event) for event in events)
-            for suffix in ("live-monitor", "dashboard", "watchdog")
-                @test count(event -> occursin(suffix, event), events) == 4
+            domain = "gui/$(readchomp(`id -u`))"
+            for (index, suffix) in enumerate(("live-monitor", "dashboard", "watchdog"))
+                label = "com.empire.solarsindy.$suffix"
+                @test events[(4index - 3):(4index)] == [
+                    "bootout $domain/$label",
+                    "bootstrap $domain $(_v22_plist(home, suffix))",
+                    "enable $domain/$label",
+                    "kickstart $domain/$label",
+                ]
             end
         end
     end
@@ -356,11 +395,12 @@ const _V22_LAUNCHD_RUNNABLE = Sys.isapple() && Sys.which("plutil") !== nothing
             @test isdir(logs)
 
             text = read(plist, String)
+            physical_clone = realpath(clone)
             expected_arguments = (
                 tools.julia_bin,
                 "--startup-file=no",
-                "--project=$clone",
-                joinpath(clone, "examples", "v2_2_l1_receipt_collector.jl"),
+                "--project=$physical_clone",
+                joinpath(physical_clone, "examples", "v2_2_l1_receipt_collector.jl"),
                 "--root=$receipts",
                 "--interval-sec=60",
             )
@@ -370,7 +410,7 @@ const _V22_LAUNCHD_RUNNABLE = Sys.isapple() && Sys.which("plutil") !== nothing
                 )
             end
             @test occursin(
-                "<string>$(_v22_xml_text(clone))</string>", text,
+                "<string>$(_v22_xml_text(physical_clone))</string>", text,
             )
             @test occursin(
                 "<string>$(_v22_xml_text(logs))/launchd.out</string>", text,
@@ -442,6 +482,7 @@ const _V22_LAUNCHD_RUNNABLE = Sys.isapple() && Sys.which("plutil") !== nothing
                     "SWM_PORT" => "9137",
                     "SWM_WEBHOOK_URL" => webhook,
                     "LIVE_MONITOR_INTERVAL_SEC" => "1800",
+                    "LIVE_MONITOR_PHASE_SAMPLING" => "1",
                     "LIVE_MONITOR_MAX_LOG_ROWS" => "1234",
                     "SOLARSINDY_V2_4_DEPLOY_DIR" => deploy_dir,
                     "SOLARSINDY_V2_2_STACK" => stack_path,
@@ -459,6 +500,7 @@ const _V22_LAUNCHD_RUNNABLE = Sys.isapple() && Sys.which("plutil") !== nothing
                 "<key>SWM_WEBHOOK_URL</key>\n    <string>$(_v22_xml_text(webhook))</string>", dash)
             @test !occursin("8723", dash)
             @test occursin("<key>LIVE_MONITOR_INTERVAL_SEC</key>\n    <string>1800</string>", mon)
+            @test occursin("<key>LIVE_MONITOR_PHASE_SAMPLING</key>\n    <string>1</string>", mon)
             @test occursin("<key>LIVE_MONITOR_MAX_LOG_ROWS</key>\n    <string>1234</string>", mon)
             @test occursin(
                 "<key>SOLARSINDY_V2_4_DEPLOY_DIR</key>\n    <string>$(_v22_xml_text(deploy_dir))</string>",
@@ -474,6 +516,7 @@ const _V22_LAUNCHD_RUNNABLE = Sys.isapple() && Sys.which("plutil") !== nothing
             @test occursin("<key>SWM_WEBHOOK_URL</key>", wd)
             # Each key reaches only the services that read it.
             @test !occursin("LIVE_MONITOR_INTERVAL_SEC", dash)
+            @test !occursin("LIVE_MONITOR_PHASE_SAMPLING", dash)
             @test !occursin("SOLARSINDY_V2_4_DEPLOY_DIR", dash)
             @test !occursin("SWM_WEBHOOK_URL", mon)
             @test !occursin("SOLARSINDY_V2_4_DEPLOY_DIR", wd)
@@ -504,6 +547,7 @@ const _V22_LAUNCHD_RUNNABLE = Sys.isapple() && Sys.which("plutil") !== nothing
             @test occursin("<key>SWM_PORT</key>\n    <string>8723</string>", dash)
             @test !occursin("<key>SWM_WEBHOOK_URL</key>", dash)
             @test !occursin("<key>LIVE_MONITOR_INTERVAL_SEC</key>", mon)
+            @test !occursin("<key>LIVE_MONITOR_PHASE_SAMPLING</key>", mon)
             @test occursin(
                 "<key>SOLARSINDY_WATCHDOG_DASH_URL</key>\n    <string>http://127.0.0.1:8723/api/health</string>",
                 wd)

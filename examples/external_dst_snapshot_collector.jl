@@ -20,11 +20,16 @@ using CSV
 using DataFrames
 using Dates
 using HTTP
+using MbedTLS
 using JSON3
 using Printf
 using SHA
 using Statistics
 using FileWatching: Pidfile
+
+include(joinpath(@__DIR__, "external_dst_timing.jl"))
+using .ExternalDstTiming: _parse_external_time, _external_stable_rmse,
+    external_dst_timing, external_dst_summary, write_external_dst_metrics
 
 const EXTERNAL_DST_PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
 const DEFAULT_EXTERNAL_DST_DIR = joinpath(EXTERNAL_DST_PACKAGE_ROOT, "var", "monitor")
@@ -57,6 +62,7 @@ const EXTERNAL_DST_SCHEMA = [
     :forecast_cadence_min, :issue_basis, :source_url, :raw_sha256, :raw_path,
     :source_run_utc, :source_last_modified_utc, :source_max_target_utc, :row_role,
     :observed_dst_nt, :observed_time_utc, :observed_gap_min, :abs_error_nt, :scored_utc,
+    :receipt_completed_utc,
 ]
 
 Base.@kwdef struct ExternalDstCollectorConfig
@@ -95,31 +101,12 @@ function _external_empty_log()
         observed_gap_min = Union{Missing, Float64}[],
         abs_error_nt = Union{Missing, Float64}[],
         scored_utc = Union{Missing, String}[],
+        receipt_completed_utc = Union{Missing, String}[],
     )
 end
 
-_fmt_utc(t::DateTime) = Dates.format(t, dateformat"yyyy-mm-ddTHH:MM:SS") * "Z"
+_fmt_utc(t::DateTime) = string(t) * "Z"
 _slug(s::AbstractString) = replace(lowercase(String(s)), r"[^a-z0-9]+" => "_")
-
-function _parse_external_time(x)
-    (x === missing || x === nothing) && return missing
-    s = strip(String(string(x)))
-    isempty(s) && return missing
-    s = replace(s, " " => "T")
-    m = match(r"^(.{19})(?:\.(\d+))?Z?$", s)
-    m === nothing && return missing
-    base = m.captures[1]
-    parsed = nothing
-    for fmt in (dateformat"yyyy-mm-ddTHH:MM:SS", dateformat"yyyy/mm/dd-HH:MM:SS")
-        parsed = tryparse(DateTime, base, fmt)
-        parsed !== nothing && break
-    end
-    parsed === nothing && return missing
-    fraction = m.captures[2]
-    fraction === nothing && return parsed
-    digits = first(fraction, min(length(fraction), 3))
-    return parsed + Millisecond(parse(Int, rpad(digits, 3, '0')))
-end
 
 function _parse_http_last_modified(headers)
     month_map = Dict("Jan" => 1, "Feb" => 2, "Mar" => 3, "Apr" => 4,
@@ -516,7 +503,8 @@ function _with_external_dst_collector_locks(f::Function,
 end
 
 function _http_text(url::AbstractString; http_get::Function = HTTP.get)
-    resp = http_get(String(url); connect_timeout = 15, readtimeout = 30,
+    resp = http_get(String(url); socket_type_tls=MbedTLS.SSLContext,
+                    connect_timeout = 15, readtimeout = 30,
                     retries = 1, status_exception = true)
     body = String(getproperty(resp, :body))
     last_modified = _parse_http_last_modified(getproperty(resp, :headers))
@@ -672,6 +660,7 @@ function _median_cadence_min(times::Vector{DateTime})
 end
 
 function _staged_future_rows_for_source(source; fetched_utc::DateTime = now(UTC),
+                                        receipt_clock::Function = () -> now(UTC),
                                         http_get::Function = HTTP.get)
     body, last_modified = _http_text(source.url; http_get = http_get)
     sha = _sha256_hex(body)
@@ -687,6 +676,10 @@ function _staged_future_rows_for_source(source; fetched_utc::DateTime = now(UTC)
     else
         error("unknown external Dst source kind: $(source.kind)")
     end
+    # Source-run metadata can arrive after the body, so both requests must finish first.
+    receipt_completed_utc = receipt_clock()
+    receipt_completed_utc isa DateTime || throw(ArgumentError("receipt clock must return a DateTime"))
+    receipt_completed_utc >= fetched_utc || throw(ArgumentError("receipt completion precedes fetch-start"))
     isempty(forecast) && error("$(source.name) produced no parseable Dst rows")
     issue = source_run !== missing ? source_run :
             last_modified !== missing ? last_modified : fetched_utc
@@ -711,7 +704,7 @@ function _staged_future_rows_for_source(source; fetched_utc::DateTime = now(UTC)
             source_run === missing ? missing : _fmt_utc(source_run),
             last_modified === missing ? missing : _fmt_utc(last_modified),
             _fmt_utc(source_max), "future_forecast",
-            missing, missing, missing, missing, missing,
+            missing, missing, missing, missing, missing, _fmt_utc(receipt_completed_utc),
         ))
     end
     return (; rows=out, source=String(source.name), fetched_utc,
@@ -721,11 +714,12 @@ end
 # Compatibility wrapper for callers that request one source directly. The long-running
 # collector uses the staged helper so no raw file is installed before every fetch succeeds.
 function _future_rows_for_source(source; fetched_utc::DateTime = now(UTC),
+                                 receipt_clock::Function = () -> now(UTC),
                                  http_get::Function = HTTP.get,
                                  raw_dir::AbstractString = EXTERNAL_DST_RAW_DIR,
                                  repo_root::AbstractString = EXTERNAL_DST_REPO_ROOT)
     staged = _staged_future_rows_for_source(
-        source; fetched_utc=fetched_utc, http_get=http_get,
+        source; fetched_utc=fetched_utc, receipt_clock=receipt_clock, http_get=http_get,
     )
     raw_path = _write_raw_snapshot(
         raw_dir, staged.source, staged.fetched_utc, staged.sha, staged.body, repo_root,
@@ -737,8 +731,11 @@ end
 function _load_external_log(path::AbstractString)
     isfile(path) || return _external_empty_log()
     df = CSV.read(path, DataFrame; missingstring = "")
-    for col in EXTERNAL_DST_SCHEMA
+    for col in EXTERNAL_DST_SCHEMA[1:end-1]
         col in propertynames(df) || error("external Dst log missing column $col")
+    end
+    if !hasproperty(df, :receipt_completed_utc)
+        df[!, :receipt_completed_utc] = Union{Missing, String}[missing for _ in 1:nrow(df)]
     end
     return df
 end
@@ -808,10 +805,20 @@ function score_external_dst_rows!(df::DataFrame, obs::DataFrame;
         "max_obs_gap_min must be finite and nonnegative",
     ))
     isempty(df) && return 0
+    # CSV infers an entirely unscored column as MissingVector, which cannot accept
+    # the first matured value after a round trip.
+    for (column, T) in ((:observed_dst_nt, Float64), (:observed_time_utc, String),
+                        (:observed_gap_min, Float64), (:abs_error_nt, Float64),
+                        (:scored_utc, String))
+        if eltype(df[!, column]) === Missing
+            df[!, column] = Vector{Union{Missing, T}}(df[!, column])
+        end
+    end
     sort!(obs, :observed_time_utc)
     scored = 0
     for i in 1:nrow(df)
         ismissing(df.observed_dst_nt[i]) || continue
+        external_dst_timing(df[i, :]) == :eligible || continue
         target = _parse_external_time(df.target_utc[i])
         target === missing && continue
         target <= scored_utc || continue
@@ -841,7 +848,7 @@ function _validate_external_dst_log(
     isfinite(max_obs_gap_min) && max_obs_gap_min >= 0 || throw(ArgumentError(
         "max_obs_gap_min must be finite and nonnegative",
     ))
-    for col in EXTERNAL_DST_SCHEMA
+    for col in EXTERNAL_DST_SCHEMA[1:end-1]
         col in propertynames(df) || error("external Dst log missing column $col")
     end
     for i in 1:nrow(df)
@@ -852,6 +859,8 @@ function _validate_external_dst_log(
         fetched === missing && error("external Dst row $i has unparsable fetched_utc")
         target === missing && error("external Dst row $i has unparsable target_utc")
         target > issue || error("external Dst row $i is not a future forecast row")
+        timing = external_dst_timing(df[i, :])
+        timing == :invalid && error("external Dst row $i has invalid receipt chronology")
         lead = Float64(df.lead_h[i])
         expected_lead = Dates.value(target - issue) / 3_600_000
         isfinite(lead) && lead > 0 &&
@@ -873,6 +882,9 @@ function _validate_external_dst_log(
             "external Dst row $i has partially populated score fields",
         )
         if all(score_present)
+            if hasproperty(df, :receipt_completed_utc) && !ismissing(df.receipt_completed_utc[i])
+                timing == :eligible || error("external Dst row $i was not future at receipt completion")
+            end
             observed_time = _parse_external_time(df.observed_time_utc[i])
             scored_time = _parse_external_time(df.scored_utc[i])
             observed_time === missing && error(
@@ -905,46 +917,6 @@ function _validate_external_dst_log(
     return true
 end
 
-function _external_stable_rmse(values::AbstractVector{<:Real})
-    isempty(values) && return missing
-    scale = maximum(abs, values)
-    isfinite(scale) || throw(ArgumentError("external Dst residuals must be finite"))
-    scale == 0 && return 0.0
-    normalized = Float64.(values) ./ Float64(scale)
-    result = Float64(scale) * sqrt(mean(abs2, normalized))
-    isfinite(result) || throw(ArgumentError(
-        "external Dst RMSE exceeds the supported Float64 range",
-    ))
-    return result
-end
-
-function external_dst_summary(df::DataFrame)
-    out = DataFrame(source = String[], n_rows = Int[], n_scored = Int[],
-                    n_issues = Int[], max_lead_h = Float64[],
-                    rmse_nt = Union{Missing, Float64}[], mae_nt = Union{Missing, Float64}[])
-    for source in sort(unique(String.(df.source)))
-        sub = df[String.(df.source) .== source, :]
-        scored_mask = .!ismissing.(sub.observed_dst_nt)
-        if any(scored_mask)
-            absolute_errors = abs.(
-                Float64.(sub.forecast_dst_nt[scored_mask]) .-
-                Float64.(sub.observed_dst_nt[scored_mask]),
-            )
-            all(isfinite, absolute_errors) || throw(ArgumentError(
-                "external Dst residual exceeds the supported Float64 range",
-            ))
-            rmse_val = _external_stable_rmse(absolute_errors)
-            mae_val = mean(absolute_errors)
-        else
-            rmse_val = missing
-            mae_val = missing
-        end
-        push!(out, (source, nrow(sub), count(scored_mask), length(unique(String.(sub.issue_utc))),
-                    maximum(Float64.(sub.lead_h)), rmse_val, mae_val))
-    end
-    return out
-end
-
 function _emit_external_dst_report(
     io::IO,
     df::DataFrame;
@@ -955,17 +927,9 @@ function _emit_external_dst_report(
     ))
     summary = external_dst_summary(df)
     println(io, "# Prospective external Dst forecast snapshots\n")
-    println(io, "This log captures public same-unit Dst forecast/nowcast products as issue-time snapshots. Rows are written only when the product target time is after the inferred issue time. The collector stores raw-response SHA-256 hashes and scores rows later against the SWPC-served Kyoto Dst product within $(Float64(max_obs_gap_min)) min.\n")
-    println(io, "| Source | Rows | Scored | Issues | Max lead [h] | RMSE [nT] | MAE [nT] |")
-    println(io, "|---|---:|---:|---:|---:|---:|---:|")
-    for r in eachrow(summary)
-        rmse_s = ismissing(r.rmse_nt) ? "pending" : @sprintf("%.2f", r.rmse_nt)
-        mae_s = ismissing(r.mae_nt) ? "pending" : @sprintf("%.2f", r.mae_nt)
-        @printf(io, "| %s | %d | %d | %d | %.3f | %s | %s |\n",
-                r.source, r.n_rows, r.n_scored, r.n_issues, r.max_lead_h,
-                rmse_s, mae_s)
-    end
-    println(io, "\nBoundary: this starts a prospective issue-time-resolved external Dst archive. It does not backfill missing historical issue snapshots, and current public products may provide sub-hour future Dst rows rather than the full 1--6 h V2 lead set.")
+    println(io, "This archive retains public same-unit Dst product rows after the inferred source issue, including rows already past target when collected. Raw-response SHA-256 hashes preserve payload provenance. Eligible forecasts are scored later against the SWPC-served Kyoto Dst product within $(Float64(max_obs_gap_min)) min.\n")
+    write_external_dst_metrics(io, summary)
+    println(io, "\nBoundary: collection does not backfill missing historical completion receipts. Public products may provide only sub-hour receipt-future rows rather than the full 1--6 h V2 lead set.")
     return nothing
 end
 
@@ -1038,6 +1002,7 @@ end
 
 function capture_and_score_external_dst_snapshot!(cfg::ExternalDstCollectorConfig = ExternalDstCollectorConfig();
                                                   fetched_utc::DateTime = now(UTC),
+                                                  receipt_clock::Function = () -> now(UTC),
                                                   http_get::Function = HTTP.get,
                                                   observations=nothing)
     isfinite(cfg.max_obs_gap_min) && cfg.max_obs_gap_min >= 0 ||
@@ -1051,7 +1016,7 @@ function capture_and_score_external_dst_snapshot!(cfg::ExternalDstCollectorConfi
     # timestamped raw file per failed cycle and bypass the success-path retention policy.
     staged_sources = [
         _staged_future_rows_for_source(
-            source; fetched_utc=fetched_utc, http_get=http_get,
+            source; fetched_utc=fetched_utc, receipt_clock=receipt_clock, http_get=http_get,
         ) for source in cfg.sources
     ]
     obs = observations === nothing ?
@@ -1221,6 +1186,7 @@ function _selftest_external_dst_collector()
         )
         result = capture_and_score_external_dst_snapshot!(cfg;
             fetched_utc = DateTime(2026, 6, 27, 5, 12),
+            receipt_clock = () -> DateTime(2026, 6, 27, 5, 12, 1),
             http_get = fake_get,
         )
         @assert result.rows_total == 4 "future-row filtering should keep 4 rows"
@@ -1230,13 +1196,19 @@ function _selftest_external_dst_collector()
                     DateTime.(replace.(df.issue_utc, "Z" => "")))
         @assert all(length.(String.(df.raw_sha256)) .== 64)
         @assert all(!isabspath(String(p)) for p in df.raw_path)
-        @assert count(.!ismissing.(df.observed_dst_nt)) == 1
+        @assert count(.!ismissing.(df.observed_dst_nt)) == 0
+        @assert count(external_dst_timing.(eachrow(df)) .== :eligible) == 3
         @assert isfile(cfg.report_path)
         result2 = capture_and_score_external_dst_snapshot!(cfg;
             fetched_utc = DateTime(2026, 6, 27, 5, 13),
+            receipt_clock = () -> DateTime(2026, 6, 27, 5, 13, 1),
             http_get = fake_get,
         )
         @assert result2.rows_total == 4 "dedupe should not append duplicate source issue/target/hash rows"
+        @assert isequal(CSV.read(cfg.log_path, DataFrame), df)
+        @assert score_external_dst_rows!(df, _parse_observed_dst_json(obs);
+            scored_utc=DateTime(2026, 6, 27, 6)) == 3
+        @assert _validate_external_dst_log(df)
     end
     println("  ✓ external Dst snapshot collector self-test: future rows, raw hashes, scoring CRC")
     return true

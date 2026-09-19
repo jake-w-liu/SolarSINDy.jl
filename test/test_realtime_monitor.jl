@@ -1,7 +1,32 @@
 using HTTP
 using Dates
+using Sockets
 
 @testset "Realtime And Monitor" begin
+
+    @testset "Outer retry limits bound actual HTTP requests" begin
+        requests = Threads.Atomic{Int}(0)
+        success_at = Ref(typemax(Int))
+        body = """[{"time_tag":"2026-01-01T00:00:00","active":true,"proton_speed":400,"proton_density":5},
+                   {"time_tag":"2026-01-01T00:01:00","active":true,"proton_speed":401,"proton_density":5}]"""
+        server = HTTP.serve!((request -> begin
+            count = Threads.atomic_add!(requests, 1) + 1
+            count >= success_at[] ? HTTP.Response(200, body) : HTTP.Response(503)
+        end), ip"127.0.0.1", 0; verbose=false)
+        port = Sockets.getsockname(server.listener.server)[2]
+        try
+            @test_throws ErrorException fetch_swpc_plasma(; url="http://127.0.0.1:$port/wind",
+                max_retries=3, retry_delay_sec=0)
+            @test requests[] == 3
+            requests[] = 0; success_at[] = 2
+            result = fetch_swpc_plasma(; url="http://127.0.0.1:$port/wind",
+                max_retries=3, retry_delay_sec=0)
+            @test requests[] == 2
+            @test result.speed == [400.0, 401.0]
+        finally
+            close(server)
+        end
+    end
 
     @testset "Dst refresh retains the last successful feed" begin
         refreshed = ([DateTime(2026, 1, 1)], [-40.0])
@@ -134,6 +159,7 @@ using Dates
         plasma_calls = Ref(0)
         function flaky_plasma_get(url; kwargs...)
             plasma_calls[] += 1
+            @test kwargs[:retries] == 0
             if plasma_calls[] == 1
                 return (; status=200, body="""[{"time_tag":"2026-01-01T00:00:00",""")  # truncated
             end
@@ -861,9 +887,20 @@ using Dates
         @test act(Dict(:active => "FALSE")) == false       # case-insensitive
         @test act(Dict(:active => 1)) == true
         @test act(Dict(:active => 0)) == false             # integer 0 -> inactive
-        @test act(Dict(:source => "ACE")) == true          # key absent -> keep (schema safety)
-        @test act(Dict(:active => nothing)) == true        # null -> keep
-        @test act("not-a-dict") == true                    # non-object -> keep
+        @test act(Dict(:source => "ACE")) == false
+        @test act(Dict(:active => nothing)) == false
+        @test act("not-a-dict") == false
+        for value in (NaN, Inf, -1, 2, 0.5, "unknown", [], Dict())
+            @test !act(Dict(:active => value))
+        end
+        @test act(Dict(:active => 1.0))
+        @test !act(Dict(:active => 0.0))
+        unselected(url;kwargs...) = (;status=200,body="""
+            [{"time_tag":"2026-01-01T00:00:00","proton_speed":400,"proton_density":5,"bz_gsm":-5},
+             {"time_tag":"2026-01-01T00:01:00","active":null,"proton_speed":401,"proton_density":5,"bz_gsm":-6}]
+            """)
+        @test_throws ErrorException fetch_swpc_plasma(;http_get=unselected,max_retries=1,retry_delay_sec=0)
+        @test_throws ErrorException fetch_swpc_mag(;http_get=unselected,max_retries=1,retry_delay_sec=0)
     end
 
     @testset "Ballistic L1->Earth propagation shifts driver bins by transit lag" begin

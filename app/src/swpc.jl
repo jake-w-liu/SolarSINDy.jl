@@ -9,7 +9,7 @@
 #
 # Depends on jnum/jdt helpers from forecast_api.jl (included before this file).
 
-using HTTP, JSON3, Dates
+using HTTP, JSON3, Dates, MbedTLS
 
 const SWPC_BASE = "https://services.swpc.noaa.gov"
 const SWPC_TTL = 50.0                       # seconds; SWPC products update ~1/min
@@ -75,7 +75,8 @@ end
 function _swpc_get(path; readtimeout=1, connect_timeout=1,
                    http_get::Function=HTTP.get)
     try
-        r = http_get(SWPC_BASE * path; readtimeout=readtimeout,
+        # Avoid OpenSSL's I/O-capable stream finalizer after a late TLS connection.
+        r = http_get(SWPC_BASE * path; socket_type_tls=MbedTLS.SSLContext, readtimeout=readtimeout,
                      connect_timeout=connect_timeout, retries=0, status_exception=true)
         # NOAA RTSW occasionally emits bare NaN tokens for missing measurements. Accept that
         # non-standard spelling here; _rtsw_field/jnum still reject non-finite physical inputs.

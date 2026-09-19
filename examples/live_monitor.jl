@@ -25,6 +25,8 @@
 #                              falls back to the package-bundled calibration when absent)
 #   SOLARSINDY_MONITOR_ONCE=1  run exactly one cycle, then exit (also --once)
 #   LIVE_MONITOR_INTERVAL_SEC  seconds between cycles (default 3600)
+#   LIVE_MONITOR_PHASE_SAMPLING 1 alternates UTC issue minutes 05/55 by hour parity so both
+#                              admitted Dst-anchor cadence phases accrue (default 0)
 #   LIVE_MONITOR_MAX_CYCLES    stop after N cycles (default 0 = run forever; testing)
 #   LIVE_MONITOR_DEADMAN_CYCLES consecutive incomplete cycles before the issuance dead-man trips
 #   LIVE_MONITOR_MAX_LOG_ROWS   maximum hot-log rows; must hold a full cycle (default 50000)
@@ -32,6 +34,8 @@
 include(joinpath(@__DIR__, "live_forecast_verify.jl"))
 include(joinpath(@__DIR__, "..", "app", "src", "forecast_api.jl"))
 include(joinpath(@__DIR__, "external_dst_snapshot_collector.jl"))
+include(joinpath(@__DIR__, "..", "validation", "operational",
+                 "v2_4_live_claim_audit.jl"))
 
 using CSV
 using DataFrames
@@ -134,6 +138,10 @@ end
 const V2_CALIB = _resolve_v2_calibration()
 
 const INTERVAL = parse(Int, get(ENV, "LIVE_MONITOR_INTERVAL_SEC", "3600"))
+const PHASE_SAMPLING_SETTING = get(ENV, "LIVE_MONITOR_PHASE_SAMPLING", "0")
+PHASE_SAMPLING_SETTING in ("0", "1") ||
+    error("LIVE_MONITOR_PHASE_SAMPLING must be 0 or 1")
+const PHASE_SAMPLING = PHASE_SAMPLING_SETTING == "1"
 const RUN_ONCE = get(ENV, "SOLARSINDY_MONITOR_ONCE", "0") == "1" || ("--once" in ARGS)
 const MAX_CYCLES = RUN_ONCE ? 1 : parse(Int, get(ENV, "LIVE_MONITOR_MAX_CYCLES", "0"))
 const HORIZONS = LIVE_CYCLE_HORIZONS  # one shared monitor/API product contract
@@ -234,15 +242,11 @@ function _resolve_archive_segment(archive_path::AbstractString, manifest_path::A
     return (path=next_path, manifest=next_manifest, index=next_index, existed=false)
 end
 
-# Append rows about to be dropped by FIFO retention to the cold archive BEFORE they leave the hot
-# log, so the locked-live record is never destroyed by the row cap. Runs inside the same forecast-log
-# lock as retention, so the archive and the hot-log truncation commit together. Returns the count of
-# rows archived; throws on an integrity mismatch so the caller aborts the truncation and the rows
-# stay safely in the hot log for the next attempt.
-function _archive_pruned_rows!(pruned::DataFrame;
-                               archive_path::AbstractString=FORECAST_ARCHIVE,
-                               manifest_path::AbstractString=FORECAST_ARCHIVE_MANIFEST)
-    nrow(pruned) == 0 && return 0
+# Prepare an append without changing archive bytes. Retention journals this payload together with
+# its hot-log replacement so an interrupted commit can finish before the next log writer runs.
+function _archive_append_plan(pruned::DataFrame;
+                              archive_path::AbstractString=FORECAST_ARCHIVE,
+                              manifest_path::AbstractString=FORECAST_ARCHIVE_MANIFEST)
     # Normalize to absolute paths at entry so a bare relative log path (dirname("live.csv")=="")
     # cannot silently land the archive/manifest under a cwd-relative "archive/" directory.
     archive_path = abspath(archive_path)
@@ -293,32 +297,34 @@ function _archive_pruned_rows!(pruned::DataFrame;
         "archive ($(filesize(segment_path)) bytes) at $segment_path; refusing to append without a " *
         "verified byte baseline")
 
-    # Serialize the segment once (header only when creating), hash it, append, flush.
+    # Serialize the segment once (header only when creating).
     buf = IOBuffer()
     CSV.write(buf, pruned; append=existed, header=!existed)
     seg = take!(buf)
     seg_sha = bytes2hex(sha256(seg))
-    open(segment_path, "a") do io
-        write(io, seg)
-        flush(io)
-    end
     base_bytes = existed ? prev_bytes : 0
-    new_bytes = filesize(segment_path)
-    new_bytes == base_bytes + length(seg) || error(
-        "cold archive append incomplete: expected $(base_bytes + length(seg)) bytes, " *
-        "found $new_bytes at $segment_path")
-
     total_rows = prev_rows + nrow(pruned)
-    tmp = string(segment_manifest, ".tmp")
-    open(tmp, "w") do io
-        JSON3.write(io, (archived_rows = total_rows,
-                         archive_bytes = new_bytes,
-                         segment_index = segment.index,
-                         last_segment_rows = nrow(pruned),
-                         last_segment_sha256 = seg_sha,
-                         updated_utc = stamp()))
-    end
-    mv(tmp, segment_manifest; force=true)
+    manifest = Dict{String,Any}(
+        "archived_rows" => total_rows,
+        "archive_bytes" => base_bytes + length(seg),
+        "segment_index" => segment.index,
+        "last_segment_rows" => nrow(pruned),
+        "last_segment_sha256" => seg_sha,
+        "updated_utc" => stamp(),
+    )
+    return (; path=segment_path, manifest_path=segment_manifest, index=segment.index,
+             base_bytes, bytes=seg, manifest)
+end
+
+function _archive_pruned_rows!(pruned::DataFrame;
+                               archive_path::AbstractString=FORECAST_ARCHIVE,
+                               manifest_path::AbstractString=FORECAST_ARCHIVE_MANIFEST)
+    nrow(pruned) == 0 && return 0
+    plan = _archive_append_plan(pruned; archive_path, manifest_path)
+    _append_row_bytes(plan.path, plan.bytes)
+    filesize(plan.path) == plan.manifest["archive_bytes"] ||
+        error("cold archive append incomplete at $(plan.path)")
+    _atomic_json(plan.manifest_path, plan.manifest)
     return nrow(pruned)
 end
 
@@ -453,6 +459,22 @@ function _advance_cycle_deadline(previous_deadline::Real, now_seconds::Real,
     return (deadline=deadline, skipped=skipped)
 end
 
+_phase_sampling_minute(issue_hour::DateTime) = iseven(Dates.hour(issue_hour)) ? 5 : 55
+
+"Next one-per-hour UTC issue slot for balanced zero/one-hour Dst-anchor phase sampling."
+function _next_phase_sampling_slot(last_issue_hour::DateTime, current_time::DateTime)
+    last_issue_hour == floor(last_issue_hour, Hour) ||
+        throw(ArgumentError("last_issue_hour must be an exact hour"))
+    issue_hour = last_issue_hour + Hour(1)
+    skipped = 0
+    while true
+        candidate = issue_hour + Minute(_phase_sampling_minute(issue_hour))
+        candidate > current_time && return (time=candidate, skipped=skipped)
+        issue_hour += Hour(1)
+        skipped += 1
+    end
+end
+
 _cycle_clock_seconds() = time_ns() / 1.0e9
 
 _monitor_aci_ready(log_path::AbstractString, model_steps::Integer,
@@ -551,17 +573,17 @@ function _retain_live_forecast_log!(log_path::AbstractString, max_rows::Int)
         "max_rows must be at least $(length(HORIZONS)) to retain one complete " *
         "$(join(HORIZONS, '/')) h product cycle",
     ))
-    isfile(log_path) || return 0
-    path = String(log_path)
+    isfile(log_path) || isfile(_retention_transaction_path(log_path)) || return 0
+    path = abspath(log_path)
     return _with_forecast_log_lock(path) do
+        recovered = _recover_retention_transaction!(path)
         _recover_append_transaction!(path)
         _live_require_regular_target(path)
         state = _valid_live_state(path)
-        state !== nothing && Int(state["row_count"]) <= max_rows && return 0
+        state !== nothing && Int(state["row_count"]) <= max_rows && return recovered
         df = CSV.read(path, DataFrame)
         n = nrow(df)
-        n <= max_rows && return 0
-        previous_state = _valid_live_state(path)
+        n <= max_rows && return recovered
         retained = df[(n - max_rows + 1):n, :]
         # Durability: cold-archive the oldest rows about to be dropped BEFORE the hot log is
         # rewritten, so the locked-live record survives the FIFO cap. A failed/short archive throws
@@ -569,14 +591,33 @@ function _retain_live_forecast_log!(log_path::AbstractString, max_rows::Int)
         # The archive lives beside the log it protects (a non-default log path archives to its own
         # sibling directory, never the module-const production archive).
         archive_path = joinpath(dirname(path), "archive", "live_forecast_log_archive.csv")
-        _archive_pruned_rows!(df[1:(n - max_rows), :];
-                              archive_path=archive_path,
-                              manifest_path=string(archive_path, ".manifest.json"))
-        _atomic_csv(path, retained)
-        _persist_live_state_after_table_write!(
-            path, previous_state, retained, Int[]; revised=true,
-        )
-        return n - max_rows
+        plan = _archive_append_plan(df[1:(n - max_rows), :];
+                                   archive_path=archive_path,
+                                   manifest_path=string(archive_path, ".manifest.json"))
+        transaction_path = _retention_transaction_path(path)
+        staged = _retention_table_path(path)
+        try
+            _atomic_csv(staged, retained)
+            transaction = Dict{String,Any}(
+                "version" => 1, "pruned_rows" => n - max_rows,
+                "pre_log" => _retention_file_receipt(path),
+                "post_log" => _retention_file_receipt(staged),
+                "archive_index" => plan.index,
+                "archive_pre_size" => plan.base_bytes,
+                "archive_pre_sha256" => _retention_prefix_sha256(plan.path, plan.base_bytes),
+                "archive_hex" => bytes2hex(plan.bytes),
+                "archive_sha256" => plan.manifest["last_segment_sha256"],
+                "pre_manifest_sha256" => isfile(plan.manifest_path) ?
+                    _retention_prefix_sha256(plan.manifest_path, filesize(plan.manifest_path)) : nothing,
+                "manifest" => plan.manifest,
+            )
+            _atomic_json(transaction_path, transaction)
+        catch
+            # An installed receipt owns the stage, including an error after the receipt's rename.
+            !isfile(transaction_path) && isfile(staged) && rm(staged)
+            rethrow()
+        end
+        return recovered + _recover_retention_transaction!(path)
     end
 end
 
@@ -618,16 +659,18 @@ end
 #   * Kyoto verification (`refresh_observations!` / `verify_pending!`) closes out targets whose
 #     hour has already been published,
 #   * hot-log retention keeps the row cap and the cold archive current,
+#   * the prospective V2.4e claim audit refreshes its fail-closed persisted status,
 #   * the prospective external Dst snapshot is an independent hourly scientific record — the
 #     hour it misses is lost, it cannot be backfilled,
 #   * the comparison report is the operator-facing summary.
-# Before this split a solar-wind feed outage returned early and skipped all four (observed in
-# production on 2026-07-29, cycles 15/16, ECONNRESET), so an L1 outage silently stalled Dst
+# Before this split a solar-wind feed outage returned early and skipped every observation-side step
+# then present. In production on 2026-07-29 (cycles 15/16, ECONNRESET), an L1 outage stalled Dst
 # verification and destroyed external-snapshot hours. The returned issuance status is unchanged
 # and still drives dead-man accounting only.
 #
 # Every collaborator is injectable so the skip-nothing contract is testable without the network.
-function cycle!(; prepare_fn::Function=prepare_issue_inputs,
+function cycle!(; prepare_fn::Function=cfg -> prepare_issue_inputs(cfg;
+                      snapshot_dir=joinpath(dirname(cfg.log_path), "source_cache", "issue_inputs")),
                   policy_fn::Function=_monitor_interval_policy,
                   issue_cycle_fn::Function=_issue_horizon_cycle!,
                   dst_fn::Function=_fetch_dst,
@@ -635,6 +678,7 @@ function cycle!(; prepare_fn::Function=prepare_issue_inputs,
                   verify_fn::Function=verify_pending!,
                   retention_fn::Function=_retain_live_forecast_log!,
                   snapshot_fn::Function=capture_and_score_external_dst_snapshot!,
+                  claim_audit_fn::Function=V24LiveClaimAudit.run_claim_audit,
                   report_fn::Function=write_live_comparison_report,
                   log_path::AbstractString=LOG,
                   report_path::AbstractString=REPORT,
@@ -695,6 +739,11 @@ function cycle!(; prepare_fn::Function=prepare_issue_inputs,
     )
     guarded("forecast_log_retention",
             () -> retention_fn(String(log_path), Int(max_log_rows)))
+    guarded("v2_4_live_claim_audit", () -> claim_audit_fn(
+        String(log_path),
+        joinpath(dirname(abspath(log_path)), "v2_4_live_claim_status.json"),
+        joinpath(dirname(abspath(log_path)), "v2_4_live_claim_status.md"),
+    ))
     observations = dst === nothing ? nothing : DataFrame(
         observed_time_utc=DateTime.(dst_times),
         observed_dst_nt=Float64.(dst_vals),
@@ -724,8 +773,12 @@ function main_live_monitor()
     isdir(LOG_DIR) || mkpath(LOG_DIR)
     _rotate_launchd_stream!(LAUNCHD_OUT)
     _rotate_launchd_stream!(LAUNCHD_ERR)
+    schedule_description = PHASE_SAMPLING ?
+        "phase-balanced UTC minutes 05(even hour)/55(odd hour)" :
+        "fixed interval $(INTERVAL)s"
     logln("start: dir=", MONITOR_DIR, " calibration=", V2_CALIB,
-          " interval=", INTERVAL, "s horizons=", HORIZONS,
+          " interval=", INTERVAL, "s schedule=", schedule_description,
+          " horizons=", HORIZONS,
           " max_cycles=", MAX_CYCLES, " deadman_cycles=", ISSUE_DEADMAN_THRESHOLD,
           " max_log_rows=", MAX_LOG_ROWS)
     cycles = 0
@@ -733,6 +786,7 @@ function main_live_monitor()
     first_failure = ""
     cycle_deadline = _cycle_clock_seconds()
     while true
+        cycle_started_utc = now(UTC)
         cycles += 1
         logln("cycle ", cycles, " begin")
         issuance = cycle!()
@@ -773,15 +827,26 @@ function main_live_monitor()
 
         logln("cycle ", cycles, " done")
         (0 < MAX_CYCLES <= cycles) && break
-        schedule = _advance_cycle_deadline(
-            cycle_deadline, _cycle_clock_seconds(), INTERVAL,
-        )
-        cycle_deadline = schedule.deadline
-        schedule.skipped > 0 && logln(
-            "WARN cycle runtime passed ", schedule.skipped,
-            " fully elapsed scheduled slot(s); cadence remains fixed-rate",
-        )
-        remaining = cycle_deadline - _cycle_clock_seconds()
+        remaining = if PHASE_SAMPLING
+            schedule = _next_phase_sampling_slot(
+                floor(cycle_started_utc, Hour), now(UTC),
+            )
+            schedule.skipped > 0 && logln(
+                "WARN cycle runtime passed ", schedule.skipped,
+                " phase-sampling issue hour(s)",
+            )
+            (schedule.time - now(UTC)) / Millisecond(1_000)
+        else
+            schedule = _advance_cycle_deadline(
+                cycle_deadline, _cycle_clock_seconds(), INTERVAL,
+            )
+            cycle_deadline = schedule.deadline
+            schedule.skipped > 0 && logln(
+                "WARN cycle runtime passed ", schedule.skipped,
+                " fully elapsed scheduled slot(s); cadence remains fixed-rate",
+            )
+            cycle_deadline - _cycle_clock_seconds()
+        end
         remaining > 0 && sleep(remaining)
     end
     logln("stop after ", cycles, " cycle(s)")

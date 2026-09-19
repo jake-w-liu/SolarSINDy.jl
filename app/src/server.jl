@@ -44,14 +44,59 @@ include(joinpath(@__DIR__, "dbdt.jl"))
 include(joinpath(@__DIR__, "forecaster.jl"))
 include(joinpath(@__DIR__, "network.jl"))
 
-function dashboard_dbdt_nowcast(; wait_timeout::Real=0.0)
+function dashboard_dbdt_nowcast(; wait_timeout::Real=0.0,
+                                nowcast_fn=usgs_dbdt, network_fn=usgs_network)
     first_result = nothing
     for station in FORECASTER_STATIONS
-        candidate = usgs_dbdt(; station=station, wait_timeout=wait_timeout)
+        candidate = nowcast_fn(; station=station, wait_timeout=wait_timeout)
         first_result === nothing && (first_result = candidate)
         get(candidate, :available, false) && return candidate
     end
+    # Ground observations do not require a fitted forecast model. Only try fallback locations
+    # with fresh network observations, avoiding eight additional blind requests during an outage.
+    network = network_fn(; wait_timeout=0.0)
+    current = Set(String(row.station) for row in get(network, :stations, []))
+    for station in NET_STATIONS
+        station in FORECASTER_STATIONS && continue
+        station in current || continue
+        candidate = nowcast_fn(; station=station, wait_timeout=wait_timeout)
+        get(candidate, :available, false) && return merge(candidate,
+            (station_selection="network_fallback", preferred_stations=collect(FORECASTER_STATIONS)))
+    end
     return first_result
+end
+
+function claim_audit_status(log_path::AbstractString; reference::DateTime=now(UTC))
+    path = joinpath(dirname(log_path), "v2_4_live_claim_status.json")
+    isfile(path) || return (available=false, reason="assessment not yet available")
+    try
+        filesize(path) <= 1_048_576 || error("assessment exceeds size limit")
+        assessment = JSON3.read(read(path, String))
+        assessment.shadow_identity == V2_4_CALIBRATION_SHADOW_MODEL_VERSION &&
+            assessment.shadow_config_sha256 == V2_4_CALIBRATION_SHADOW_CONFIG_SHA256 &&
+            assessment.served_manifest_sha256 == V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256 ||
+            error("assessment identity does not match this deployment")
+        freshness = _source_freshness(assessment.generated_utc, 180.0; reference=reference)
+        freshness.stale && return (available=false, reason="assessment is stale or future-dated")
+        assessment.integrity.gate_pass isa Bool &&
+            assessment.integrity.violations isa AbstractVector &&
+            all(x -> x isa AbstractString, assessment.integrity.violations) &&
+            assessment.marginal.claim_ready isa Bool &&
+            assessment.storm.claim_ready isa Bool || error("malformed assessment")
+        !isempty(assessment.integrity.violations) && assessment.integrity.gate_pass &&
+            error("integrity verdict contradicts recorded findings")
+        for section in (assessment.marginal, assessment.storm)
+            gates = collect(values(section.gates))
+            !isempty(gates) && all(x -> x isa Bool, gates) &&
+                section.claim_ready == all(gates) &&
+                section.gates.integrity == assessment.integrity.gate_pass ||
+                error("claim verdict contradicts its checks")
+        end
+        return (available=true, assessment=assessment)
+    catch e
+        e isa InterruptException && rethrow()
+        return (available=false, reason="assessment cannot be verified")
+    end
 end
 
 include(joinpath(@__DIR__, "notify.jl"))
@@ -165,7 +210,8 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
     if path == "/api/status"
         snap = swpc_snapshot_cached_or_refresh()
         return json_response(merge(build_status(get_log(log_path)),
-                                   (upstream = snap, upstream_status = upstream_assessment(snap))))
+                                   (upstream = snap, upstream_status = upstream_assessment(snap),
+                                    claim_audit = claim_audit_status(log_path))))
     elseif path == "/api/swpc"
         # Dashboard requests must not inherit third-party latency. A cold or expired cache starts
         # exactly one background refresh and returns the last snapshot (or unavailable) immediately;
@@ -184,9 +230,8 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
         if requested_station !== nothing && !(station in NET_STATIONS)
             return json_response((available=false, error="unsupported station"); status=400)
         end
-        # The default dashboard selects the first available FRD/CMO ground nowcast so a
-        # station-specific outage does not blank the panel. An explicit station query remains
-        # exact and never falls back silently.
+        # Prefer FRD/CMO; when both are unavailable, use a separately identified location
+        # with fresh network observations. An explicit station query never substitutes locations.
         nc = requested_station === nothing ?
              dashboard_dbdt_nowcast(; wait_timeout=0.0) :
              usgs_dbdt(; station=station, wait_timeout=0.0)
@@ -482,19 +527,30 @@ function start_server(; host::AbstractString = bind_setting_from_env("SWM_HOST",
     # Keep the block-buffered file-backed streams draining while the server runs, so request-time
     # `@error`/`@warn` forensics (and HTTP.jl's readiness line) reach the log within seconds
     # instead of only at process exit, where a SIGKILL/OOM-kill would otherwise lose them entirely.
-    @async while true
-        sleep(2)
+    flush_timer = Timer(2; interval=2) do timer
+        isopen(timer) || return
         try
             flush(stdout)
             flush(stderr)
         catch
         end
     end
-    start_notify_loop(log_path)          # no-op unless SWM_WEBHOOK_URL is set
-    if blocking
-        HTTP.serve(handler, host, port)
-    else
-        return HTTP.serve!(handler, host, port)
+    server = nothing
+    notify_timer = nothing
+    shutdown = () -> begin
+        close(flush_timer)
+        notify_timer === nothing || close(notify_timer)
+    end
+    try
+        notify_timer = start_notify_loop(log_path) # no-op unless SWM_WEBHOOK_URL is set
+        if blocking
+            return HTTP.serve(handler, host, port; on_shutdown=shutdown)
+        end
+        server = HTTP.serve!(handler, host, port; on_shutdown=shutdown)
+        return server
+    finally
+        # A failed bind has no HTTP.Server to run the shutdown callback.
+        (blocking || server === nothing) && shutdown()
     end
 end
 

@@ -375,8 +375,14 @@ path depends on external NOAA SWPC availability.
 
 [`examples/live_monitor.jl`](examples/live_monitor.jl) is the long-running accrual daemon. Each
 cycle it issues immutable V2 forecasts at 1/2/3/6 h leads, refreshes observations from the live
-Dst feed, scores any pending rows whose target hour has arrived, captures a prospective external
-Dst snapshot, and rewrites the comparison report. The managed path is
+Dst feed, scores any pending rows whose target hour has arrived, captures an external
+Dst snapshot, and rewrites the comparison report. External prospective scores require a recorded
+response completion before target; late rows and legacy rows without completion evidence remain
+archived but are excluded from those scores. See the
+[external snapshot timing contract](docs/src/live-verification.md#external-dst-receipt-timing).
+The comparison report gives pooled and internal-step
+same-row scores for the served product, the static V2.2 predecessor and the listed comparators;
+small step cells remain descriptive. The managed path is
 `bin/solarsindy start monitor` (pidfile, readiness check, then `stop` / `status` /
 `logs monitor -f`); the daemon can also be run directly from a fresh clone:
 
@@ -416,9 +422,15 @@ Configuration is by environment variable:
   set ({1,2,3,6} at lag 0, {2,3,4,7} at lag 1), and the two step sets have independent residual
   streams with independent maturities, so a restart at a different minute can flip the batch policy
   between `aci` and `static` and change the fallback-row and frozen-tail band widths by roughly a
-  factor of four. The phase is anchored at process start, so a restart re-anchors it. Every
+  factor of four. Under the default fixed interval, the phase is anchored at process start, so a
+  restart re-anchors it. Every
   `:static` selection now records the anchor lag, the required step set, and each immature stream
   with its verified-residual counts, so a flip is attributable from the daemon log alone.
+- `LIVE_MONITOR_PHASE_SAMPLING=1` — replace the fixed interval after the immediate startup cycle
+  with one issue per UTC hour: minute 05 in even-numbered hours and minute 55 in odd-numbered
+  hours. This alternation is intended to accrue both admitted Dst-anchor lag phases for the
+  prospective V2.4e calibration gate. The actual logged anchor and internal step determine the
+  evidence stratum; the schedule never assumes that an hourly Dst value has been published.
 - `LIVE_MONITOR_MAX_LOG_ROWS` — maximum retained hot-log rows (default 50,000). Values below
   four are rejected so retention cannot delete part of the latest product cycle. Pruned rows
   are cold-archived first; when the hot log's columns differ from the newest archive segment's
@@ -430,8 +442,10 @@ Configuration is by environment variable:
   minutes ahead of the local clock is reported with its skew and excluded-sample count while
   issuance continues on the causal remainder; beyond the sanity limit issuance fails closed.
 - A cycle's issuance depends on the L1 feeds; Kyoto verification, retention, the prospective
-  external Dst snapshot and the comparison report do not, and run on every cycle regardless of
-  whether forecasts were issued.
+  V2.4e claim audit, the external Dst snapshot and the comparison report do not, and run on every
+  cycle regardless of whether forecasts were issued. The A3 claim audit accepts only the frozen
+  V2.4e bundle manifest and exact served/shadow identities, recomputes the A3 endpoint formula,
+  and keeps storm skill blocked unless all five independent events appear at every supported step.
 
 ### macOS launchd service (production)
 
@@ -489,8 +503,11 @@ frozen-center distribution-free guarantee. The dashboard therefore labels covera
 empirical, reports every point comparator on one common target cohort, and withholds
 best-method highlighting until at least 48 matched live rows have matured.
 
-The ground-d*B*/d*t* panel uses the provisional USGS adjusted near-real-time product and is a
-GIC-hazard indicator; archival quality control can revise the live magnetic vectors. The bundled
+The ground-d*B*/d*t* panel prefers the provisional USGS adjusted near-real-time product.
+When it is unavailable, the panel can show the same station's uncorrected variation data,
+with an explicit product label and no electric-field estimate. This is a GIC-hazard indicator;
+archival quality control can revise the magnetic vectors. See the
+[ground-data contract](app/README.md) for product and station fallback behavior. The bundled
 retrospective forecaster uses quasi-definitive ground data and bow-shock-shifted OMNI drivers, so
 it is not served from the newest unshifted L1 observation. Its
 18/42/66/90 nT/min lines are the unit-converted threshold magnitudes used by

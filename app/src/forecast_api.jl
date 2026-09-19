@@ -61,6 +61,13 @@ const ACCEPTED_V2_SERVED_MODEL_VERSIONS =
 # so it never reaches the served center, the threat level or an alert.
 const V2_3_SHADOW_MODEL_VERSION =
     "v2.3-shadow+sindy20x11+L1A+ADC(magnetic,K25)+T1rcal+LAT+E"
+const V2_4_CALIBRATION_SHADOW_MODEL_VERSION =
+    "v2.4e-cal-shadow-A3+median24+width1h1.50+widthOther1.20+warm30"
+const V2_4_CALIBRATION_SHADOW_CONFIG_SHA256 =
+    "31d67e5077ae6fe69cee133fa07dceec3aa639903a17861d179d3877ed0c21af"
+const V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256 =
+    "057aec0df488314cd682e212e9ba64233e2674a7c641d68b72aa729982093ede"
+const V2_4_CALIBRATION_SHADOW_SUPPORTED_STEPS = (1, 2, 3, 4, 6, 7)
 const LIVE_SKILL_MIN_VERIFIED = 48
 
 # Reader-facing product name of a served-pipeline label. The selected V2.4e variant keeps its suffix;
@@ -619,6 +626,156 @@ end
 
 _prefer_metric(primary, fallback) = primary === nothing ? fallback : primary
 
+_calibration_shadow_collecting_status(status::AbstractString) =
+    status == "ok" || startswith(status, "warmup:")
+
+function _calibration_shadow_time(row, parsed_name::Symbol, raw_name::Symbol)
+    parsed = _rowget(row, parsed_name)
+    return parsed isa DateTime ? parsed : parse_dt(_rowget(row, raw_name))
+end
+
+function _max_consecutive_days(days::Vector{Date})
+    ordered = sort!(unique(days))
+    isempty(ordered) && return 0
+    best = 1
+    current = 1
+    for index in 2:length(ordered)
+        current = ordered[index] == ordered[index - 1] + Day(1) ? current + 1 : 1
+        best = max(best, current)
+    end
+    return best
+end
+
+function _calibration_shadow_summary(v::AbstractDataFrame, cyc::DataFrame)
+    current_identity = _common_cycle_field(cyc, :v24_cal_shadow_model_version)
+    current_digest = _common_cycle_field(cyc, :v24_cal_shadow_config_sha256)
+    current_manifest = _common_cycle_field(cyc, :v24_manifest_sha256)
+    status_values = hasproperty(cyc, :v24_cal_shadow_status) ?
+        String[String(value) for value in cyc.v24_cal_shadow_status
+               if value isa AbstractString] : String[]
+    current_status = isempty(status_values) ? "not_logged" :
+                     length(unique(status_values)) == 1 ? first(status_values) :
+                     "mixed:" * join(sort(unique(status_values)), ",")
+    configured = current_identity == V2_4_CALIBRATION_SHADOW_MODEL_VERSION &&
+                 current_digest == V2_4_CALIBRATION_SHADOW_CONFIG_SHA256 &&
+                 current_manifest == V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256
+    collecting = configured && !isempty(status_values) &&
+                 all(_calibration_shadow_collecting_status, status_values)
+    current_cycle_ready = configured && !isempty(status_values) && all(==("ok"), status_values)
+
+    required = (:v24_cal_shadow_model_version, :v24_cal_shadow_config_sha256,
+                :v24_cal_shadow_status, :v24_cal_shadow_ci05_nt,
+                :v24_cal_shadow_ci95_nt, :observation_dst_nt, :model_step_hours,
+                :sub_hourly_model_version, :v24_status, :v24_manifest_sha256)
+    has_issue_time = hasproperty(v, :issue_time_utc_dt) || hasproperty(v, :issue_time_utc)
+    has_target_time = hasproperty(v, :target_time_utc_dt) || hasproperty(v, :target_time_utc)
+    chosen = Dict{Tuple{DateTime,DateTime,String},Tuple{DateTime,Int}}()
+    if has_issue_time && has_target_time && all(hasproperty(v, column) for column in required)
+        for row_idx in 1:nrow(v)
+            row = v[row_idx, :]
+            identity = _rowget(row, :v24_cal_shadow_model_version)
+            digest = _rowget(row, :v24_cal_shadow_config_sha256)
+            status = _rowget(row, :v24_cal_shadow_status)
+            served_model = _rowget(row, :sub_hourly_model_version)
+            v24_status = _rowget(row, :v24_status)
+            manifest = _rowget(row, :v24_manifest_sha256)
+            lo = jnum(_rowget(row, :v24_cal_shadow_ci05_nt))
+            hi = jnum(_rowget(row, :v24_cal_shadow_ci95_nt))
+            obs = jnum(_rowget(row, :observation_dst_nt))
+            valid = identity isa AbstractString &&
+                    identity == V2_4_CALIBRATION_SHADOW_MODEL_VERSION &&
+                    digest isa AbstractString &&
+                    digest == V2_4_CALIBRATION_SHADOW_CONFIG_SHA256 &&
+                    served_model isa AbstractString &&
+                    served_model == CURRENT_V2_SERVED_MODEL_VERSION &&
+                    manifest isa AbstractString &&
+                    manifest == V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256 &&
+                    v24_status isa AbstractString && v24_status == "ok" &&
+                    status isa AbstractString && status == "ok" &&
+                    lo !== nothing && hi !== nothing &&
+                    obs !== nothing && lo <= hi
+            valid || continue
+            issue = _calibration_shadow_time(row, :issue_time_utc_dt, :issue_time_utc)
+            target = _calibration_shadow_time(row, :target_time_utc_dt, :target_time_utc)
+            (issue isa DateTime && target isa DateTime) || continue
+            key = (floor(issue, Hour), target, V2_4_CALIBRATION_SHADOW_MODEL_VERSION)
+            previous = get(chosen, key, nothing)
+            (previous === nothing || issue > previous[1]) && (chosen[key] = (issue, row_idx))
+        end
+    end
+    indices = sort!([record[2] for record in values(chosen)];
+                    by=index -> (_calibration_shadow_time(v[index, :], :issue_time_utc_dt,
+                                                          :issue_time_utc),
+                                 _calibration_shadow_time(v[index, :], :target_time_utc_dt,
+                                                          :target_time_utc)))
+    n = length(indices)
+    observations = n == 0 ? Float64[] : Float64[v[index, :observation_dst_nt] for index in indices]
+    covered = n == 0 ? Bool[] : Bool[
+        Float64(v[index, :v24_cal_shadow_ci05_nt]) <= observations[position] <=
+        Float64(v[index, :v24_cal_shadow_ci95_nt])
+        for (position, index) in enumerate(indices)
+    ]
+    issues = DateTime[]
+    horizons = Int[]
+    steps = Int[]
+    for index in indices
+        issue = _calibration_shadow_time(v[index, :], :issue_time_utc_dt, :issue_time_utc)
+        target = _calibration_shadow_time(v[index, :], :target_time_utc_dt, :target_time_utc)
+        if issue isa DateTime && target isa DateTime
+            push!(issues, issue)
+            push!(horizons, round(Int, (target - floor(issue, Hour)) / Hour(1)))
+        end
+        step = jnum(_rowget(v[index, :], :model_step_hours))
+        step === nothing || push!(steps, round(Int, step))
+    end
+    cycle_horizons = Dict{DateTime,Set{Int}}()
+    if length(horizons) == length(issues)
+        for (issue, horizon) in zip(issues, horizons)
+            push!(get!(cycle_horizons, floor(issue, Hour), Set{Int}()), horizon)
+        end
+    end
+    required_horizons = Set(Int.(LIVE_CYCLE_HORIZONS))
+    complete_cycles = sort!([issue_hour for (issue_hour, observed) in cycle_horizons
+                             if observed == required_horizons])
+    issue_cycles = length(complete_cycles)
+    issue_days = unique(Date.(complete_cycles))
+    consecutive_days = _max_consecutive_days(issue_days)
+    by_step = NamedTuple[]
+    if n > 0 && length(steps) == n
+        for step in sort(unique(steps))
+            step_mask = steps .== step
+            push!(by_step, (model_step_hours=step, n=count(step_mask),
+                            coverage_90=round(mean(covered[step_mask]); digits=3)))
+        end
+    end
+    step_counts = Dict(row.model_step_hours => row.n for row in by_step)
+    supported_step_min_rows = minimum([
+        get(step_counts, step, 0) for step in V2_4_CALIBRATION_SHADOW_SUPPORTED_STEPS
+    ])
+    return (
+        model_version=(current_identity isa AbstractString ? String(current_identity) : nothing),
+        config_sha256=(current_digest isa AbstractString ? String(current_digest) : nothing),
+        served_manifest_sha256=(current_manifest isa AbstractString ?
+                                String(current_manifest) : nothing),
+        current_status, configured, collecting, current_cycle_ready,
+        scope="prospective_shadow_only_not_served",
+        n_verified=n,
+        coverage_90=n == 0 ? nothing : round(mean(covered); digits=3),
+        issue_cycles, calendar_days=length(issue_days), consecutive_days,
+        first_issue_utc=isempty(issues) ? nothing : jdt(minimum(issues)),
+        latest_issue_utc=isempty(issues) ? nothing : jdt(maximum(issues)),
+        supported_steps=collect(V2_4_CALIBRATION_SHADOW_SUPPORTED_STEPS),
+        supported_step_min_rows, by_step,
+        deepest_obs_dst_nt=n == 0 ? nothing : round(minimum(observations); digits=1),
+        n_storm_rows=count(value -> value <= -50.0, observations),
+        marginal_minimums=(consecutive_days=30, issue_cycles=500, rows=2000,
+                           rows_per_supported_step=400),
+        storm_minimums=(independent_events=5, rows=200, rows_per_reported_step=30),
+        marginal_claim_ready=false,
+        storm_skill_claim_ready=false,
+    )
+end
+
 function _compute_calibration_summary(df::DataFrame, cyc::DataFrame)
     # Live interval method = the method of the cycle this build publishes, read the way the forecast
     # payload reads it. Two readings were wrong here. Taking the newest issue hour described a cycle
@@ -650,6 +807,7 @@ function _compute_calibration_summary(df::DataFrame, cyc::DataFrame)
 
     v = verified_rows(df)
     n = nrow(v)
+    calibration_shadow = _calibration_shadow_summary(v, cyc)
     n == 0 && return (n_verified=0, coverage_90=nothing, rmse_nt=nothing,
                       v2_n_verified=0, v2_coverage_90=nothing, v2_rmse_nt=nothing,
                       frozen_tail_ablation_rmse_nt=nothing,
@@ -675,7 +833,8 @@ function _compute_calibration_summary(df::DataFrame, cyc::DataFrame)
                       n_verified_current_source=0,
                       current_served_model=live_served, n_verified_current_served_model=0,
                       by_served_model=[],
-                      deepest_obs_dst_nt=nothing, n_storm_verified=0, by_source=[])
+                      deepest_obs_dst_nt=nothing, n_storm_verified=0, by_source=[],
+                      calibration_shadow)
     obs   = Float64.(v.observation_dst_nt)
     pred  = Float64.(_v2_pred.(eachrow(v)))
     ci05  = Float64.(_v2_ci05.(eachrow(v)))
@@ -799,8 +958,9 @@ function _compute_calibration_summary(df::DataFrame, cyc::DataFrame)
             n_verified_current_served_model=n_live_served,
             by_served_model=by_served_model,
             deepest_obs_dst_nt=jnum(round(minimum(obs[product_mask]); digits=1)),
-            n_storm_verified=count(obs[product_mask] .< -50),
-            by_source=by_source)
+            n_storm_verified=count(obs[product_mask] .<= -50),
+            by_source=by_source,
+            calibration_shadow)
 end
 
 _compute_calibration_summary(df::DataFrame) =
@@ -1085,6 +1245,17 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
                                                  v isa Bool ? v : nothing),
                          v24_regime_cell=(v = _rowget(r, :v24_regime_cell);
                                           v isa AbstractString ? String(v) : nothing),
+                         # Prospective interval shadow: disclosed beside the served band, but never
+                         # substituted into `pred_dst_nt`, `ci05_dst_nt`, `ci95_dst_nt` or alerting.
+                         v24_cal_shadow_model_version=(v = _rowget(r, :v24_cal_shadow_model_version);
+                                                       v isa AbstractString ? String(v) : nothing),
+                         v24_cal_shadow_status=(v = _rowget(r, :v24_cal_shadow_status);
+                                                v isa AbstractString ? String(v) : nothing),
+                         v24_cal_shadow_ci05_nt=jnum(_rowget(r, :v24_cal_shadow_ci05_nt)),
+                         v24_cal_shadow_ci95_nt=jnum(_rowget(r, :v24_cal_shadow_ci95_nt)),
+                         v24_cal_shadow_history_n=jnum(_rowget(r, :v24_cal_shadow_history_n)),
+                         v24_cal_shadow_location_shift_nt=
+                             jnum(_rowget(r, :v24_cal_shadow_location_shift_nt)),
                          frozen_tail_ablation_dst_nt=jnum(_audit_pred(r)),
                          audit_baseline_dst_nt=jnum(_audit_pred(r))))
     end

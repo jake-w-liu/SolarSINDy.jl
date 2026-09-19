@@ -69,8 +69,8 @@ compatibility with older clients.
 | `GET /api/forecast` | latest forecast cycle: per-horizon point + 90% target band |
 | `GET /api/history?hours=72` | recent scored forecasts (observed vs predicted) |
 | `GET /api/swpc` | NOAA SWPC upstream: L1 solar wind, Kp, G/S/R scales, alerts |
-| `GET /api/dbdt` | live ground dB/dt nowcast from the provisional USGS adjusted product; selects the first available FRD/CMO feed and reports why the retrospective forecast is disabled |
-| `GET /api/dbdt?station=FRD` | exact station-specific dB/dt response, without automatic fallback; unsupported stations or malformed query encodings return HTTP 400 |
+| `GET /api/dbdt` | measured ground dB/dt; prefers adjusted data, then labeled uncorrected variation at the same station; chooses FRD/CMO or a separately identified available network location |
+| `GET /api/dbdt?station=FRD` | exact station-specific response, allowing disclosed product fallback but never another station; unsupported stations or malformed query encodings return HTTP 400 |
 | `GET /api/network` | current multi-station USGS dB/dt map |
 | `GET /api/storm_replay` | storm-replay results from regenerated outputs or the bundled snapshot |
 | `GET /api/alerts` | active alerts + combined overall alert level/reasons |
@@ -130,7 +130,13 @@ These thresholds follow the classifications used by
 - **Solar wind (L1)**: NOAA SWPC real-time products (`rtsw_wind_1m`, `rtsw_mag_1m`) for live
   issuance; the NASA OMNI archive (CDAWeb) is used for offline calibration and historical replay.
   **Dst**: Kyoto WDC (via NOAA SWPC `kyoto-dst`). **Ground dB/dt**: the provisional USGS
-  adjusted near-real-time observatory product. The fixed-historical-residual FRD and CMO
+  adjusted near-real-time observatory product, with a same-station uncorrected variation
+  fallback when adjusted measurements are missing, stale, malformed, or unreachable.
+  `data_type`, `calibrated`, and `product_fallback` identify the selected product;
+  products are never spliced into one series. Variation data do not produce a
+  geoelectric estimate or a calibrated forecast. See the
+  [USGS product descriptions](https://www.usgs.gov/tools/geomag-plots).
+  The fixed-historical-residual FRD and CMO
   forecasts were trained on archival quasi-definitive ground data and bow-shock-shifted OMNI
   drivers. They are bundled for reproducibility but are not served against the newest unshifted
   L1 values. This fail-closed boundary avoids an unvalidated time-reference and ground-product

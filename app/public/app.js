@@ -83,7 +83,7 @@ async function fetchJSON(path) {
   try {
     const r = await fetch(path, { cache: "no-store", signal: controller.signal });
     if (!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
-    return r.json();
+    return await r.json();
   } finally {
     clearTimeout(timeout);
   }
@@ -246,10 +246,14 @@ function renderThreat(st) {
   const staleNote = st.stale
     ? ` · STALE: issued ${st.age_hours != null ? fmt(st.age_hours, 1) + " h" : ""} ago`
     : "";
+  const calibrationShadow = st.calibration && st.calibration.calibration_shadow;
+  const shadowNote = calibrationShadow && calibrationShadow.collecting === true
+    ? " · calibration shadow active (prospective, not served)" : "";
   $("model-line").textContent =
     `Forecast: ${productName(st)} (${identityText}) · `
     + `live interval method: ${intervalMethodText(st.calibration)} · `
-    + `status generated ${relTime(st.generated_utc)} · latest solar wind ${relTime(st.latest_solar_wind_utc)}${staleNote}.`;
+    + `status generated ${relTime(st.generated_utc)} · latest solar wind ${relTime(st.latest_solar_wind_utc)}`
+    + `${shadowNote}${staleNote}.`;
 }
 
 function thresholdShapes(ymin, ymax) {
@@ -269,9 +273,9 @@ const PLOT_LAYOUT = () => ({
   paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
   font: { color: "#9fb0cc", size: 12 },
   margin: { l: 52, r: 16, t: 10, b: 40 },
-  xaxis: { type: "date", gridcolor: "rgba(120,140,180,0.12)", zeroline:false, title:{text:"UTC", font:{size:11}} },
+  xaxis: { type: "date", automargin:true, nticks:5, tickangle:0, gridcolor: "rgba(120,140,180,0.12)", zeroline:false, title:{text:"UTC", font:{size:11}} },
   yaxis: { title: { text: "Dst [nT]" }, gridcolor: "rgba(120,140,180,0.12)", zerolinecolor:"rgba(120,140,180,0.25)" },
-  showlegend: true, legend: { orientation:"h", x:0, y:1.12, font:{size:11}, bgcolor:"rgba(0,0,0,0)" },
+  showlegend: true, legend: { orientation:"h", x:0, y:1.12, yanchor:"bottom", font:{size:11}, bgcolor:"rgba(0,0,0,0)" },
   hovermode: "x unified",
 });
 
@@ -451,17 +455,23 @@ async function renderForecast(forecast, history, status) {
   // autorange spans recent observations, locked past forecasts, and the current
   // issued forecast; users can zoom manually without refresh forcing a narrow
   // forecast-window range.
-  await Plotly.react("forecast-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
+  await Plotly.react("forecast-plot", traces, layout, {displayModeBar:"hover", displaylogo:false, scrollZoom:true, responsive:true});
 
   renderSeverityLine(H);
 
   const src = forecast.interval_source || "—";
+  const shadowCollecting = H.length > 0 && H.every(h =>
+    h.v24_cal_shadow_status === "ok" || String(h.v24_cal_shadow_status || "").startsWith("warmup:"));
+  const shadowReady = shadowCollecting && H.every(h => h.v24_cal_shadow_status === "ok");
+  const shadowNote = shadowCollecting
+    ? ` A separately identified calibration shadow is being logged prospectively${shadowReady ? "" : "; some internal steps are still warming up"}; it is not drawn, served, or used for alerts.`
+    : "";
   cap.innerHTML = `Dark markers: ${esc(product)} issued <span data-reltime="${esc(forecast.issue_time_utc)}">${esc(relTime(forecast.issue_time_utc))}</span> from solar wind through `
     + `<span data-reltime="${esc(forecast.latest_solar_wind_utc)}">${esc(relTime(forecast.latest_solar_wind_utc))}</span>. L1 look-ahead drives target hours already measured upstream; beyond the L1-known window, Bz/By relax toward quiet with a longer timescale during rapid Dst deepening. `
     + `Solid blue connects the anchor observation and the ${esc(product)} issued centers as a visual guide; no sub-hour ${esc(product)} values are claimed. `
     + `Shaded: the served 90% target interval (${esc(src)}); served-center coverage is assessed empirically and no distribution-free guarantee is claimed. A watch appears when the conservative alerting edge—the deepest 90% lower edge across the served and predecessor safety stages—enters a stronger Dst range than the point forecast. `
     + `Dotted blue: previously issued forecasts for hours that now have observed Dst (orange). `
-    + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Genuine new-disturbance lead is the L1 transit (~30–60 min).`;
+    + `The vertical dashed line marks the latest issue time; horizontal dotted lines mark Dst storm tiers. Genuine new-disturbance lead is the L1 transit (~30–60 min).${shadowNote}`;
 }
 
 async function renderHistory(history) {
@@ -494,7 +504,7 @@ async function renderHistory(history) {
   const { shapes, anns } = thresholdShapes(ymin, ymax);
   const layout = Object.assign(PLOT_LAYOUT(), { shapes, annotations: anns });
   layout.margin.t = 10;
-  await Plotly.react("history-plot", traces, layout, {displayModeBar:true, displaylogo:false, scrollZoom:true, responsive:true});
+  await Plotly.react("history-plot", traces, layout, {displayModeBar:"hover", displaylogo:false, scrollZoom:true, responsive:true});
 
   cap.innerHTML = `Last ${fmt(history.hours,0)} h of issued forecasts, scored after observation (n=${rows.length}). `
     + `Green = observation fell inside the 90% interval, red = outside. `
@@ -504,6 +514,7 @@ async function renderHistory(history) {
 function renderCalib(status) {
   const c = (status && status.calibration) || {};
   const el = $("calib");
+  if (!status) { el.innerHTML = `<p class="caption">Live verification status unavailable; retrying automatically.</p>`; return; }
   if (!c || c.n_verified == null || c.n_verified === 0) { el.innerHTML = `<p class="caption">Empirical coverage and matched skill accrue once forecasts are verified.</p>`; return; }
   const bse = (v) => v == null ? "—" : `${fmt(v,2)}`;
   const v2Rmse = c.v2_rmse_nt != null ? c.v2_rmse_nt : c.rmse_nt;
@@ -580,11 +591,40 @@ function renderCalib(status) {
     for (const b of c.by_source) html += `<tr><td>${esc(b.source)}</td><td>${esc(b.n)}</td><td>${fmt(b.coverage_90,3)}</td></tr>`;
     html += `</tbody></table>`;
   }
+  const shadow = c.calibration_shadow || null;
+  if (shadow && shadow.current_status !== "not_logged") {
+    const active = shadow.collecting === true;
+    const marginal = shadow.marginal_minimums || {};
+    const storm = shadow.storm_minimums || {};
+    const shadowCoverage = shadow.coverage_90 == null ? "—" : fmt(shadow.coverage_90, 3);
+    html += `<div class="note"><strong>Calibration shadow — prospective, not served.</strong> `
+      + `${active ? "Collection is active" : `Current status: ${esc(shadow.current_status)}`}; `
+      + `${esc(shadow.n_verified || 0)} matured rows across ${esc(shadow.issue_cycles || 0)} complete issue cycles `
+      + `and a ${esc(shadow.consecutive_days || 0)}-day consecutive run; provisional empirical coverage ${shadowCoverage}. `
+      + `The marginal-calibration claim remains unverified until the full gate passes, including `
+      + `${esc(marginal.consecutive_days || 30)} consecutive days, ${esc(marginal.issue_cycles || 500)} complete cycles, `
+      + `${esc(marginal.rows || 2000)} rows and ${esc(marginal.rows_per_supported_step || 400)} at every supported internal step. `
+      + `The storm-skill claim remains blocked: ${esc(shadow.n_storm_rows || 0)} shadow rows at Dst ≤ −50 nT `
+      + `versus minimums of ${esc(storm.rows || 200)} rows and ${esc(storm.independent_events || 5)} independent events.</div>`;
+    const assessment = status.claim_audit && status.claim_audit.available
+      ? status.claim_audit.assessment : null;
+    if (assessment) {
+      const findings = (assessment.integrity.violations || []).length;
+      const failed = Object.entries(assessment.marginal.gates || {}).filter(([, passed]) => passed === false).map(([name]) => name.replaceAll("_", " "));
+      html += `<div class="note"><strong>Recorded validation assessment:</strong> ${esc(findings)} historical integrity findings. `
+        + (findings ? `Collecting more days does not remove these findings. ` : "")
+        + `Marginal claim: ${assessment.marginal.claim_ready ? "qualified" : "not qualified"}. `
+        + (failed.length ? `Unmet checks: ${esc(failed.join(", "))}. ` : "")
+        + `Assessment time: ${esc(assessment.generated_utc)}.</div>`;
+    } else {
+      html += `<div class="note">The recorded validation assessment is unavailable or stale; collection counts alone do not establish qualification.</div>`;
+    }
+  }
   el.innerHTML = html;
 }
 
 function renderUpstream(status) {
-  const up = status.upstream, us = status.upstream_status;
+  const up = status && status.upstream, us = status && status.upstream_status;
   const badge = $("upstream-badge"), stats = $("upstream-stats"), alertsEl = $("swpc-alerts"), cap = $("upstream-caption");
   if (!up || up.available === false || !us || us.available === false) {
     const stale = up && up.available && us && us.available === false;
@@ -592,27 +632,31 @@ function renderUpstream(status) {
     stats.innerHTML = ""; alertsEl.innerHTML = "";
     cap.textContent = stale
       ? "NOAA SWPC readings are too old or future-dated to assess current upstream conditions."
-      : "NOAA SWPC feeds are currently unreachable; the Dst forecast above is unaffected.";
+      : !status ? "Upstream status unavailable; retrying automatically."
+      : "No current usable NOAA SWPC readings; the Dst forecast above is unaffected.";
     return;
   }
   const sw = up.solar_wind || {};
-  const kp = up.kp ? up.kp.value : null;
-  const g = up.scales ? up.scales.G : null;
+  const kp = us.kp_stale === false && up.kp ? up.kp.value : null;
+  const g = us.scales_stale === false && up.scales ? up.scales.G : null;
+  const magCurrent = us.mag_stale === false;
+  const plasmaCurrent = us.plasma_stale === false;
+  const partial = !magCurrent || !plasmaCurrent || kp == null || g == null;
   const elevated = us && us.elevated;
-  badge.textContent = elevated ? "ELEVATED" : "quiet";
-  badge.style.color = elevated ? "var(--t2)" : "var(--good)";
+  badge.textContent = elevated ? "ELEVATED" : partial ? "partial" : "quiet";
+  badge.style.color = elevated ? "var(--t2)" : partial ? "var(--ink-mute)" : "var(--good)";
 
-  const bz = sw.bz_gsm_nt;
+  const bz = magCurrent ? sw.bz_gsm_nt : null;
   // Highlight Bz only when strongly southward (< -10 nT, the geoeffective threshold) — mild
   // southward is not alarming, so do not color it like a storm.
   const bzStyle = (bz != null && bz < -10) ? "color:var(--t2)" : "";
   const stat = (v, k, unit = "", style = "") =>
     `<div class="ustat"><span class="v" style="${style}">${v == null ? "—" : esc(v)}${unit}</span><span class="k">${k}</span></div>`;
   stats.innerHTML =
-    stat(fmt(sw.speed_kms, 0), "L1 wind", " km/s") +
+    stat(fmt(plasmaCurrent ? sw.speed_kms : null, 0), "L1 wind", " km/s") +
     stat(fmt(bz, 1), "Bz GSM", " nT", bzStyle) +
-    stat(fmt(sw.bt_nt, 1), "Bt", " nT") +
-    stat(fmt(sw.density_cm3, 1), "density", " cm⁻³") +
+    stat(fmt(magCurrent ? sw.bt_nt : null, 1), "Bt", " nT") +
+    stat(fmt(plasmaCurrent ? sw.density_cm3 : null, 1), "density", " cm⁻³") +
     stat(fmt(kp, 1), "Kp", "") +
     stat(g == null ? "—" : "G" + g, "NOAA scale", "");
 
@@ -622,9 +666,16 @@ function renderUpstream(status) {
         `<div class="arow"><span class="apid">${esc(a.product_id || "")}</span><span class="atime">${esc(relTime(a.issue_utc))}</span><span class="asum">${esc(a.summary || "")}</span></div>`).join("")
     : "";
 
-  let c = `L1 solar wind <span data-reltime="${esc(sw.mag_time_utc)}">${esc(relTime(sw.mag_time_utc))}</span> (DSCOVR, ~30–60 min upstream of Earth). `;
+  const reading = (label, current, source, time) => current
+    ? `${label} (${esc(source || "source unspecified")}) <span data-reltime="${esc(time)}">${esc(relTime(time))}</span>. `
+    : `${label} stale or unavailable. `;
+  let c = reading("L1 magnetic field", magCurrent, sw.mag_source, sw.mag_time_utc)
+    + reading("L1 plasma", plasmaCurrent, sw.plasma_source, sw.plasma_time_utc);
   if (elevated) c += `<strong style="color:var(--t2)">Elevated:</strong> ${esc((us.reasons || []).join("; "))}.`;
+  else if (partial) c += "No elevated signal in the available current readings; other readings are stale or unavailable.";
   else c += `Quiet by NOAA scales (G${esc(g)}, Kp ${fmt(kp, 1)}); strong southward Bz or high wind speed would raise this.`;
+  if (kp == null) c += " Kp stale or unavailable.";
+  if (g == null) c += " NOAA scales stale or unavailable.";
   cap.innerHTML = c;
 }
 
@@ -634,13 +685,15 @@ async function renderDbdt(dbdt) {
     const stale = dbdt && dbdt.stale;
     badge.textContent = stale ? "stale" : "unavailable"; badge.style.color = "var(--ink-mute)";
     stats.innerHTML = ""; $("dbdt-forecast").innerHTML = "";
+    stn.textContent = "";
     if (window.Plotly) Plotly.purge("dbdt-plot");
     cap.textContent = stale
       ? "The latest USGS ground-magnetometer sample is too old or future-dated for a live dB/dt assessment."
-      : "USGS ground-magnetometer feed currently unreachable — it throttles intermittently; this panel fills in automatically on the next refresh once the feed responds. The Dst forecast above is unaffected.";
+      : "No current usable USGS ground-magnetometer data; this panel retries automatically. The Dst forecast above is unaffected.";
     return;
   }
-  stn.textContent = "· USGS " + dbdt.station + " adjusted (provisional)";
+  const variation = dbdt.data_type === "variation";
+  stn.textContent = "· USGS " + dbdt.station + (variation ? " variation (uncorrected)" : " adjusted (provisional)");
   const ct = dbdt.current_tier, mt = dbdt.max30_tier;
   const col = (lvl) => lvl == null ? "var(--ink-soft)" : TIER_COLORS[lvl];
   badge.textContent = ct.label; badge.style.color = col(ct.level);
@@ -686,9 +739,12 @@ async function renderDbdt(dbdt) {
     layout.yaxis.title.text = "dB/dt [nT/min]"; layout.yaxis.range = [0, ymax]; layout.margin.t = 8;
     await Plotly.react("dbdt-plot", [{ x, y, mode:"lines", line:{ color:"#4ea1ff", width:2 }, fill:"tozeroy", fillcolor:"rgba(78,161,255,0.12)" }], layout, { displayModeBar:false, responsive:true });
   }
-  let capHtml = `Observed horizontal ground d<i>B</i>/d<i>t</i> = √(Δ<i>X</i>²+Δ<i>Y</i>²)/Δ<i>t</i>, with Δ<i>t</i> in minutes, at USGS ${esc(dbdt.station)}. The adjusted near-real-time product is provisional and can be revised during archival quality control. `
+  let capHtml = `Observed horizontal ground d<i>B</i>/d<i>t</i> = √(Δ<i>X</i>²+Δ<i>Y</i>²)/Δ<i>t</i>, with Δ<i>t</i> in minutes, at USGS ${esc(dbdt.station)}. `
+    + (variation ? `Adjusted measurements are unavailable; this is the same station's uncorrected variation product, in the sensor reference frame. Calibration, alignment, and instrument artifacts can affect the indicator. No geoelectric estimate or calibrated forecast is produced from it. `
+                 : `The adjusted near-real-time product is provisional and can be revised during archival quality control. `)
     + `Dotted lines are the four unit-converted Pulkkinen et al. (2013) threshold magnitudes (18/42/66/90 nT/min); this display does not reproduce that study's nonoverlapping 20-min validation protocol. `
     + `The plotted series is an observed <strong>nowcast</strong> and a GIC-hazard indicator, not a GIC measurement or grid-impact forecast.`;
+  if (dbdt.station_selection === "network_fallback") capHtml += ` FRD and CMO are unavailable; this is a separate observed location, not a replacement measurement for either station.`;
   if (ge) capHtml += ` Estimated <i>E</i> uses a 1-D uniform reference ground (ρ = ${fmt(ge.rho_ohm_m, 0)} Ω·m); `
     + `it is not a site-specific field measurement, GIC estimate, or grid-risk category.`;
   if (fc) capHtml += ` The next-30-min forecast combines a ridge point model trained on archival USGS quasi-definitive data with a fixed historical normalized-residual distribution, while the live input is the provisional adjusted product; `
@@ -699,7 +755,8 @@ async function renderDbdt(dbdt) {
 
 function renderPipeline(status, dbdt) {
   const sw = (status && status.upstream && status.upstream.solar_wind) || {};
-  const l1 = sw.available ? `Bz ${fmt(sw.bz_gsm_nt, 1)} nT · ${fmt(sw.speed_kms, 0)} km/s` : "DSCOVR/ACE · OMNI";
+  const us = (status && status.upstream_status) || {};
+  const l1 = us.available ? `Bz ${fmt(us.mag_stale === false ? sw.bz_gsm_nt : null, 1)} nT · ${fmt(us.plasma_stale === false ? sw.speed_kms : null, 0)} km/s` : "L1 readings unavailable";
   const dbdtIndicator = (dbdt && dbdt.available) ? `${fmt(dbdt.current_dbdt, 1)} nT/min · ${dbdt.current_tier.label}` : "USGS ground mag";
   const hasForecastIdentity = status && (status.served_product || status.served_model_version || status.model_version);
   const forecastLabel = hasForecastIdentity ? `${productName(status)} forecast` : "forecast identity unavailable";
@@ -722,7 +779,7 @@ async function renderNetwork(net) {
   if (!net || !net.stations || net.stations.length === 0) {
     badge.textContent = "unavailable"; badge.style.color = "var(--ink-mute)";
     if (window.Plotly) Plotly.purge("network-plot");
-    cap.textContent = "USGS network feed currently unreachable — it throttles intermittently and the map fills in automatically on the next refresh once it responds; the single-station panel above is independent.";
+    cap.textContent = "No current usable USGS network data; the map retries automatically. The single-station panel above is independent.";
     return;
   }
   if (!(await ensurePlotly())) return;
@@ -738,7 +795,7 @@ async function renderNetwork(net) {
     marker: { size: S.map(s => 10 + Math.min(s.max_dbdt, 60) / 3),
               color: S.map(s => TIER_COLORS[s.tier.level || 0]),
               line: { width: 1, color: "rgba(255,255,255,0.5)" }, opacity: 0.9 },
-    hovertext: S.map(s => `${escPlot(s.name)} (${escPlot(s.station)})<br>${escPlot(s.max_dbdt)} nT/min · ${escPlot(s.tier.label)}`),
+    hovertext: S.map(s => `${escPlot(s.name)} (${escPlot(s.station)})<br>${escPlot(s.max_dbdt)} nT/min · ${escPlot(s.tier.label)}<br>${s.data_type === "variation" ? "Variation (uncorrected)" : "Adjusted (provisional)"}`),
     hoverinfo: "text",
   };
   const layout = {
@@ -751,6 +808,7 @@ async function renderNetwork(net) {
   };
   await Plotly.react("network-plot", [trace], layout, { displayModeBar: false, responsive: true });
   cap.innerHTML = `Thirty-minute maximum ground d<i>B</i>/d<i>t</i> across available USGS observatories; marker size shows magnitude and colour shows the threshold-magnitude band. `
+    + `Product quality is shown on hover; ${S.filter(s => s.data_type === "variation").length} station(s) use uncorrected variation measurements because adjusted data are unavailable. `
     + `The map is a spatial magnetic-variation indicator, not a GIC measurement or grid-impact map; local electric fields and network topology are required for those quantities.`;
 }
 
@@ -810,6 +868,9 @@ async function refresh() {
     if (status.available === false) $("health-dot").className = "dot dot-bad";
   } else {
     renderThreat(null);
+    renderUpstream(null);
+    renderCalib(null);
+    renderPipeline(null, dbdt);
     const upd = $("updated");
     delete upd.dataset.reltime; delete upd.dataset.relprefix;
     upd.textContent = "forecast unavailable";

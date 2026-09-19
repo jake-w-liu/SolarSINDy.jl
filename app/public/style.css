@@ -213,6 +213,6 @@ main { max-width: var(--content-max); margin: 0 auto; padding: 18px 20px 8px; }
   }
   .apid, .atime { min-width: 0; }
   .asum { min-width: 0; overflow-wrap: anywhere; }
-  .plot { height: 340px; min-width: 0; }
+  .plot { height: 440px; min-width: 0; }
   .plot-sm { height: 280px; }
 }

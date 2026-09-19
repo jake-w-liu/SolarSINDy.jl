@@ -22,6 +22,8 @@ const NET_STATIONS = ["SJG", "FRD", "BSL", "TUC", "BOU", "NEW", "CMO", "BRW"]
 function _station_parse(station::AbstractString, d; reference::DateTime=now(UTC))
     d === nothing && return nothing
     try
+        product = _usgs_product(d)
+        product === nothing && return nothing
         times = d.times
         (times === nothing || length(times) < 2) && return nothing
         xv = nothing; yv = nothing
@@ -45,7 +47,8 @@ function _station_parse(station::AbstractString, d; reference::DateTime=now(UTC)
         mx = isempty(recent) ? cur : maximum(recent)
         coords = d.metadata.intermagnet.imo.coordinates    # [lon, lat, elev]
         name = String(d.metadata.intermagnet.imo.name)
-        return (station = station, name = name, data_type = USGS_LIVE_DATA_TYPE,
+        return (station = station, name = name, data_type = product,
+                calibrated = product == "adjusted", product_fallback = product != USGS_LIVE_DATA_TYPE,
                 lon = Float64(coords[1]), lat = Float64(coords[2]),
                 current_dbdt = round(cur; digits=2), max_dbdt = round(mx; digits=2),
                 tier = dbdt_tier(mx), time_utc = jdt_str(times[cur_i]),
@@ -57,9 +60,10 @@ function _station_parse(station::AbstractString, d; reference::DateTime=now(UTC)
     end
 end
 
-_station_brief(station::AbstractString) = _station_parse(station, _fetch_usgs(station, 40))
+_station_brief(station::AbstractString) = _station_parse(station, _fetch_usgs_best(station, 40))
 
-function _current_stations(rows; reference::DateTime=now(UTC))
+function _current_stations(rows; reference::Union{Nothing,DateTime}=nothing)
+    reference = something(reference, now(UTC))
     return [merge(row, (age_minutes=f.age_min, stale=false, invalid_future=false))
             for row in rows
             for f in (_source_freshness(get(row, :time_utc, nothing), DBDT_MAX_AGE_MIN;
@@ -103,7 +107,7 @@ function _merge_station_rows(fetched, cached, codes)
 end
 
 function _refresh_usgs_network(key::Tuple, codes::Vector{String}, brief_fn,
-                               reference::DateTime)
+                               reference::Union{Nothing,DateTime})
     cached_entry = lock(_NET_LOCK) do
         get(_NET_CACHE, key, nothing)
     end
@@ -150,7 +154,7 @@ function _refresh_usgs_network(key::Tuple, codes::Vector{String}, brief_fn,
 end
 
 function usgs_network(; stations::Vector{String} = NET_STATIONS,
-                      brief_fn=_station_brief, reference::DateTime=now(UTC),
+                      brief_fn=_station_brief, reference::Union{Nothing,DateTime}=nothing,
                       wait_timeout::Real=USGS_REFRESH_WAIT_S)
     isempty(stations) && throw(ArgumentError("stations must not be empty"))
     length(stations) <= 32 || throw(ArgumentError("at most 32 stations are allowed"))

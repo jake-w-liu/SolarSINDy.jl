@@ -5,6 +5,9 @@ using DataFrames
 using SolarSINDy
 
 include(joinpath(@__DIR__, "live_forecast_verify.jl"))
+include(joinpath(@__DIR__, "..", "validation", "operational", "v2_4_interval_upgrade.jl"))
+include(joinpath(@__DIR__, "..", "validation", "operational", "v2_4_point_upgrade.jl"))
+include(joinpath(@__DIR__, "..", "validation", "operational", "v2_4_point_evaluation.jl"))
 
 function main()
     cal = default_operational_v2_calibration()
@@ -93,7 +96,33 @@ function main()
 
     serve_deployed_v24_row()
 
+    # The development-only interval layer keeps the point at zero. Hand values:
+    # median(2,4)=3; static half-widths 2/4; the standardized upper score is 2.
+    translated = V24IntervalUpgrade.candidate_interval(
+        "L24", 0.0, -2.0, 4.0, [2.0, 4.0], Float64[]; warmup=2)
+    standardized = V24IntervalUpgrade.candidate_interval(
+        "S48", 0.0, -2.0, 4.0, [2.0, 4.0], [0.5, 2.0]; warmup=2)
+    @assert (translated.lo, translated.hi) == (0.5, 8.0)
+    @assert (standardized.lo, standardized.hi) == (-1.0, 11.0)
+
+    correction_history = [fill(1.0,29);31.0]
+    mean_point = V24PointUpgrade.corrected_point("Mean24",-10,-12,-6,1,correction_history)
+    median_point = V24PointUpgrade.corrected_point("Median24",-10,-12,-6,1,correction_history)
+    @assert (mean_point.point,mean_point.lower,mean_point.upper) == (-7.75,-10.25,-2.75)
+    @assert (median_point.point,median_point.lower,median_point.upper) == (-9.0,-11.5,-4.0)
+    names=collect(V24PointUpgrade.POINT_CANDIDATES)
+    gates=DataFrame(candidate=names,condition=fill("worked_example",6),dataset=fill("toy",6),
+        delay_hours=zeros(Int,6),cell=fill("all",6),model_step_hours=zeros(Int,6),pass=falses(6))
+    ranks=DataFrame(candidate=names,worst_step_gain_nt=ones(6),live_rmse_nt=ones(6))
+    @assert V24PointEvaluation.choose_candidate(gates,ranks)===nothing
+    gates.pass.=true
+    gates.pass[1]=false
+    @assert V24PointEvaluation.choose_candidate(gates,ranks)=="Mean48"
+
     println("SolarSINDy experiments: V2.4e serving and predecessor smoke PASS")
+    println("Interval-development arithmetic smoke PASS; served policy unchanged")
+    println("Point-development arithmetic smoke PASS; served policy unchanged")
+    println("Point-development no-winner and all-gate selection smoke PASS")
     return true
 end
 
@@ -136,7 +165,12 @@ function serve_deployed_v24_row()
     @assert !row.projection_applied
     @assert row.center == row.l1_center
     @assert row.depth_bin === v24_serving_depth_bin(latest_dst)
-    @assert row.deepening_cell == v24_serving_deepening(latest_dst, vbsouth, rate)
+    @assert row.deepening_cell
+    # A deep but flat, uncoupled state is not a deepening cell. This distinguishes
+    # the observed Dst from its hourly rate in the label's argument mapping.
+    flat = v24_serving_center(artifacts; model_steps=step, latest_dst=latest_dst,
+                              dst_delta_1h_nt=0.0, vbsouth_mvm=0.0, experts=experts)
+    @assert !flat.deepening_cell
     half = artifacts.conformal[(step, row.cell_depth)].half_width_nt
     @assert row.half_width_nt == half
     @assert isapprox(row.ci05_nt, row.center - half; atol=1e-12)

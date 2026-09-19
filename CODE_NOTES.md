@@ -1,5 +1,75 @@
 # V2.2 Research Development Ledger
 
+## Ground-data recovery and renewed candidate checks (2026-09-19)
+
+The [recovery contract and oracles](validation/output/operational/deep_debug_20260919/remediation/PLAN.md)
+cover same-station USGS product fallback, explicit calibration provenance,
+fail-closed NOAA source selection, and separate ground-only and constrained
+expert-weight studies. Original A3 endpoints, identities, cumulative findings,
+and criteria remain immutable. New candidate evidence is not prospective proof.
+The [dated remediation report](validation/output/operational/deep_debug_20260919/remediation/REPORT.md)
+owns the verification and deployment results, including the separately specified
+additional storm checks with unchanged candidate coefficients.
+
+## Point-error development study (2026-09-08)
+
+The separate six-candidate residual study is specified in
+[its frozen protocol](validation/output/operational/v2_4_point_upgrade_20260908/PROTOCOL.md).
+The original V2.4e weights, A3, and serving path remain unchanged. This stage
+uses the complete archived rolling panel for retrospective storm/recovery
+checks and the frozen live snapshot for the distinct witness-limited replay.
+
+| Item | Record |
+|---|---|
+| Objective | Test bounded causal mean/median residual corrections against the full strongest-component panel |
+| Contract | Six fixed windows/estimators, step-separated witnessed histories, explicit warmup fallback, existing residual cap and physical range, unchanged family weights, one evaluation per chronological validation partition |
+| Independent oracles | Hand means/medians and projection; independent chronology replay, raw component mappings, frozen-core/ridge arithmetic, paired point and interval metrics, day/week/event resampling |
+| Test plan | Mutation-sensitive causal boundaries, delayed/revised values, duplicate keys, sparse steps, annual identity resets, event separation gaps, nonfinite input, matched masks, persistence identity, no-winner decision |
+| Regeneration | Only new point-study evidence under validation/output/operational/v2_4_point_upgrade_20260908; no manuscript data or submitted artifacts |
+| Harness | Focused tests, full Pkg.test(), deterministic experiments, development harness, source digests, independent complete-output checks |
+| Risk | Reanalysis availability is not historical live receipt evidence; the live L1-admitting V2.1 column is not the frozen expert; both chronological partitions have prior development exposure |
+| State | Both partitions and both historical feedback delays are complete and independently reconstructed. All 1,632 criteria are independently checked; none of the six candidates qualifies. Full package tests, experiments, and the 295/1/0 harness pass; all 198 tested scientific-source entries match. No shadow or serving change was made |
+
+The complete outcome is in [the point-study result](validation/output/operational/v2_4_point_upgrade_20260908/RESULTS.md).
+The complete comparator set and identical scored-row identities are checked
+before selection. A deliberately removed summary row exposed the need for
+this guard; the missing-comparator, changed-row, and mismatched-count cases now
+raise errors. Sixteen replay/metric mutations and ten comparison/selection
+mutations are caught. Independent checker fixtures pass 322,780 prediction and
+statistics assertions and 9,838 decision assertions. Those counts describe the
+earlier fixtures. After the independent reader's Date-label correction, the
+round-trip fixture passes 322,784 assertions, the old/new regression passes 78,
+and both complete study-output checks pass. Current package and oracle totals
+belong in TEST_REPORT.md; fixture assertions are not candidate performance data.
+
+The archive contains three 2024 V2.4e baselines above 50 nT. The frozen protocol
+projects corrected outputs and preserves sparse-history baselines; it does not
+restrict the range of archived inputs. The newly added input restriction and
+two tests that shared it were corrected, with exact fallback/projection tests
+for every candidate and both signs. All 12 folds now pass the full panel guards
+and 36 additional interval/comparator assertions. The output projection, residual
+cap, original data, and scientific criteria are unchanged. See
+[the correction record](validation/output/operational/v2_4_point_upgrade_20260908/base_range_correction.md).
+
+## Interval-first development study (2026-09-08)
+
+| Item | Record |
+|---|---|
+| Objective | Evaluate the newly authorized six-candidate interval study without changing served points, static bands, A3, or the submitted tree |
+| Contract | The frozen grid, input digest, 2026-09-01 split, issue-time witness stream, common-row comparisons, 1.25 width ceiling, and deterministic selection are specified in ../V2_4_LIVE_UPGRADE_PLAN.md |
+| Independent oracles | Hand-ranked signed/absolute residuals, asymmetric-width arithmetic, exact future-witness/revision invariance, delayed-observation cases, per-step isolation, direct coverage/width/score sums, independently enumerated day blocks |
+| Baselines | Actually issued static and A3 bands on the same rows; no recomputed A3 endpoints or altered point forecasts |
+| Test plan | Guards, chronology, duplicates, unknown target witnesses, pending outcomes, conservative availability support, no-winner selection, mutation checks, persisted-output replay, and full package suite |
+| Regeneration | New study data only beneath validation/output/operational/v2_4_interval_upgrade_20260908; no manuscript or publication data/figure regeneration is needed unless a later authorized change affects them |
+| Harness | Focused Julia tests; Pkg.test with all local-data oracles; examples/experiments.jl; .agents/scripts/dev-harness-audit.sh .; source hashes; independent full-output oracle |
+| Risk | The observed archive is development evidence, not untouched confirmation. Logged anchors preserve only a subset of historical Dst vintages. The study uses that subset explicitly and cannot infer storm skill without events |
+| State | Interval stage implemented and independently verified; no candidate advances. Full package tests, experiments, and harness pass. The separate point-error study is also complete with no selection; no serving or shadow change was made |
+
+The complete dated outcome and verification receipts are in
+[the interval-study result](validation/output/operational/v2_4_interval_upgrade_20260908/RESULTS.md).
+The sections below preserve the earlier V2.2 development history; statements
+about its stopped research services are historical, not current runtime status.
+
 ## Development Ledger
 
 | Item | Record |
@@ -996,3 +1066,231 @@ collector. Subhourly trajectory output is formatted from the parsed time, preven
 Malformed external records continue to be skipped or represented as unavailable according to the
 existing caller contract. `InterruptException` is still rethrown. No forecast equation, fitted
 coefficient, deployment bundle or scientific data product changes in this patch.
+
+## V2.4e prospective live-calibration shadow (2026-08-25)
+
+### Development Ledger — causal interval replay and shadow policy
+
+| Item | Record |
+|---|---|
+| Objective | Determine whether a strictly causal, V2.4e-identity-specific recalibration can repair the observed live 90% interval undercoverage without changing the served V2.4e center or interval; if and only if a candidate clears the frozen development gates, log it as a separately identified shadow product for prospective evaluation |
+| Contract | At issue time `t`, a shadow interval may use only matured rows from the exact served identity `v2.4+sindy20x11+superlearner10floor+conformal` and served-manifest digest `057aec0df488314cd682e212e9ba64233e2674a7c641d68b72aa729982093ede`, with `target_time_utc <= latest_dst_time_utc` recorded on the issue row; histories are separated by model step and deduplicated by issue hour, target and served identity; the served V2.4e fields and deployment bundle remain inputs, never outputs, of this study |
+| Frozen evidence | `validation/input/operational/v2_4_live_calibration_dev_20260824T213044Z.csv`, 856 data rows, SHA-256 `b8355c7f41dfc3e308fc92f7135f76d8d3417c6cb7b02baee07f528143a516a2`; exact-current cohort after strict-future filtering and deduplication: 652 matured rows, 0.661 observed coverage, 11.62 nT RMSE, minimum observed Dst -47 nT and therefore no qualifying storm row |
+| Candidates | Static deployed interval control; bounded ACI by step at learning rates 0.01 and 0.03 with a 500-residual window; rolling symmetric conformal, rolling median-centered symmetric conformal, and rolling equal-tail signed-residual intervals with 48- and 96-residual windows; adaptive candidates require 30 matured residuals in their own step and otherwise remain explicitly unavailable rather than borrowing future or cross-step outcomes |
+| Independent oracles | Hand-indexed finite-sample order statistics; hand-computed interval-score fixtures; a future-observation mutation that must leave every earlier endpoint unchanged; duplicate and input-order perturbations that must leave the canonical replay unchanged; exact-identity contamination fixtures that must be excluded; static endpoints recomputed directly from the logged served center and endpoints |
+| Development gates | On the common candidate-eligible rows: pooled coverage 0.88–0.95; coverage at least 0.85 for each step with at least 40 rows; mean width no more than 1.50 times the static control; mean 90% interval score no greater than the static control; all endpoints finite and ordered; every causality/oracle test passes |
+| Prospective calibration gate | A shadow identity remains non-serving until it has at least 30 consecutive days, 500 issue cycles, 2,000 matured rows and 400 rows per primary step; pooled coverage 0.88–0.92 with a day-block 95% interval containing 0.90 and lower bound at least 0.85; per-step coverage at least 0.85; no seven-day window below 0.80; width no more than 1.25 times static; paired interval-score upper confidence bound no greater than zero; no chronology, identity or fallback failure |
+| Prospective storm gate | Strong storm-skill language remains blocked until at least five independent events (separated by at least 72 h above -30 nT), 200 rows with observed Dst no greater than -50 nT, and 30 rows spanning all five events at every reported step accrue; event-block bootstrap gain over V2.2 must be positive at every reported step, loss to the strongest matched comparator must not exceed 0.5 nT, absolute bias must not exceed 10 nT and storm interval coverage must be at least 0.80; deeper thresholds and storm phases are reported only when their own support is adequate |
+| Test plan | `test/test_v2_4_live_calibration.jl` pins the order statistics, scores, identity and manifest filters, availability boundary, mutation invariance, duplicate/order invariance, chronology, Boolean/non-finite rejection, exact A3 selection and digest, and gate classification; the real-data runner emits a receipt, row-level replay, candidate summary and decision with the frozen input hash |
+| Baselines | The same eligible rows are scored for the deployed static V2.4e interval; point-skill tables retain V2.2, V2.3, GBM, V2.1, persistence, Burton, BurtonFull and O'Brien where logged, but calibration may not be promoted into a point-skill claim |
+| Data regeneration trigger | Any change to candidate arithmetic, minimum history, identity filtering, time parsing, deduplication, scoring or a source log requires a new versioned receipt and a fresh replay; development gates may not be tuned on prospective rows |
+| Harness | Narrow unit suite; full `Pkg.test()`; `examples/experiments.jl`; `.agents/scripts/dev-harness-audit.sh .`; live scratch issuance and readiness audit if a shadow logger is added; submitted-tree SHA-256 invariant before and after |
+| Risk | The development stream is short, nonstationary and contains no Dst <= -50 nT outcome; repeated overlapping leads are dependent; provisional Kyoto Dst differs from the offline final-OMNI target; a development winner can justify prospective shadow collection only, never nominal live calibration or storm skill |
+
+### Amendment A1 — adapt location, retain the deployed scale
+
+The initial eight-candidate replay returned `NO_SHADOW_WINNER`. C3 with a
+48-residual window was the closest admissible shape: its causal coverage was
+0.932 and its interval score improved by 8.59, but its mean width was 1.663 times
+the static control and therefore failed the frozen 1.50 cap. The gate is retained.
+
+A1 adds one post-hoc development candidate. For each model step it takes the
+median of the trailing 24 matured signed residuals, translates the deployed lower
+and upper half-widths by that location, and scales those half-widths by exactly
+1.50. It is unavailable before 30 matured residuals. This is the minimum causal
+change suggested by the failure: it does not fit a new point center, quantile
+model, scale distribution, regime boundary, or hyperparameter grid. Its unit
+oracle hand-computes the translated asymmetric endpoints, and the same future-
+mutation and canonical-order checks apply. Because the frozen record informed
+the amendment, an A1 pass licenses prospective shadow collection only.
+
+### Amendment A2 — align the shadow with the frozen prospective width gate
+
+Before a calibration-shadow row entered the production log, a contract audit
+found that A1's exact 1.50 width multiplier made the prospective sharpness gate
+(`mean shadow width / mean static width <= 1.25`) impossible by construction.
+The claim gate is retained. A2 adds exactly one candidate: the same trailing-24
+median residual translation and 30-residual warm-up with both deployed
+half-widths multiplied by 1.25. This value is fixed by the pre-existing claim
+gate rather than selected from a new grid. It is replayed once on the unchanged
+development receipt with all existing causality, score and order-statistic
+oracles. A pass creates a new shadow identity and digest before collection; a
+failure leaves A1 diagnostic-only and the strong marginal-calibration claim
+structurally blocked.
+
+### Amendment A3 — spend width at the failing lead only
+
+C6 produced 0.866 pooled coverage. Its 2, 3 and 6 h coverages passed the 0.85
+step floor, while 1 h coverage was 0.798. Before any production shadow row was
+written, A3 fixes one internal-step map: 1.50 at step 1 and 1.20 at every other
+supported step (2, 3, 4, 6 and 7), with the same trailing-24 residual median and
+30-row warm-up. Steps 4 and 7 are too sparse for an eligible development score
+and therefore remain prospective-only. This is a single data-informed
+development candidate, not a scale grid. The unchanged
+development gates decide whether it can replace A1, and the future mean-width
+ratio must still clear the independently frozen 1.25 prospective cap. The
+candidate configuration, including the complete lead map, enters its digest.
+
+### A3 decision, production start, and claim auditor
+
+The unchanged development receipt selected A3 on 499 eligible rows: pooled
+coverage 0.8838, mean width ratio 1.2387, and paired mean interval-score
+difference -9.3198 relative to the served static interval. Coverage was 0.8824,
+0.8806, 0.8788, and 0.8947 at eligible steps 1, 2, 3, and 6. Steps 4 and 7
+remain prospective-only because the receipt did not contain enough matured
+history to score them under the frozen development gate.
+
+The production identity is
+`v2.4e-cal-shadow-A3+median24+width1h1.50+widthOther1.20+warm30`, with
+configuration digest
+`31d67e5077ae6fe69cee133fa07dceec3aa639903a17861d179d3877ed0c21af`.
+The shadow is also pinned to served-bundle manifest
+`057aec0df488314cd682e212e9ba64233e2674a7c641d68b72aa729982093ede`.
+The first four-row issue cycle, at `2026-08-24T23:15:51.419Z`, retained the exact
+served V2.4e identity and exact numeric equality between the served and V2.4e
+point and interval columns. Internal steps 2 and 3 emitted A3 endpoints at the
+fixed 1.20 width ratio; steps 4 and 7 recorded `warmup:16/30` and
+`warmup:13/30` without endpoints.
+
+`validation/operational/v2_4_live_claim_audit.jl` is the fail-closed prospective
+decision implementation. It canonicalizes only the exact served identity,
+served-bundle manifest, and shadow identity/digest; verifies the unchanged
+served V2.4e values, timestamp geometry, warm-up state, and frozen A3 endpoint
+formula; retains the latest retry
+per issue hour and target, and writes atomic JSON and Markdown status files.
+The marginal decision implements every frozen sample, day-block coverage,
+per-step coverage, seven-day stability, width, paired-score, and integrity gate.
+The storm decision groups events only after 72 contiguous observed hours above
+-30 nT and requires exact same-row comparators, event-block inference at every
+supported step with all five events represented, the frozen bias and coverage limits, and a passing marginal
+decision. Its positive-path test constructs all minimum evidence and must make
+both flags true; mutation tests keep malformed identity, chronology, horizon,
+numeric, bundle, served-value, A3-formula, warm-up, and duplicate states closed.
+
+The monitor refreshes the audit after each collection cycle. The initial status
+contained four deployment rows, two warm-up rows, no matured shadow outcome,
+no complete matured cycle, and no storm event. Both claim flags were therefore
+false. The audit cannot modify a served forecast or authorize promotion.
+
+A fixed hourly issue minute would normally expose only one Dst-anchor lag and
+could never satisfy the frozen 400-row minimum at all six supported steps.
+`LIVE_MONITOR_PHASE_SAMPLING=1` replaces the post-startup fixed interval with
+one issue per UTC hour, at minute 05 in even hours and minute 55 in odd hours.
+The alternation targets both admitted cadence phases without duplicate issue
+hours. Tests pin the hour parity, midnight transition, elapsed-slot skip, and
+observation-side audit call. Evidence is still classified by the logged anchor
+and step; the schedule itself proves no source state and changes no forecast.
+
+## V2.4e shadow issuance-snapshot repair (2026-08-30)
+
+### Development Ledger — current causal outcomes at issuance
+
+| Item | Record |
+|---|---|
+| Objective | Explain the unexpectedly low prospective A3 coverage and verify that every shadow endpoint uses the complete causal Dst information already available at its issue time |
+| Contract | The A3 history contains exact-identity, exact-manifest rows from earlier issuances at the same internal step whose target is no later than the current causal Dst anchor; the served V2.4e center, interval, identity, alert path, and frozen A3 parameters remain unchanged |
+| Reproduction | The monitor issues all four horizons before `refresh_observations!`. Before this repair, `_v2_4_calibration_shadow_from_log` read only `observation_dst_nt` from that pre-refresh log, so newly matured outcomes and Kyoto revisions present in the already-fetched issuance snapshot could be absent or stale |
+| Root cause | The current causal Dst snapshot stopped at `issue_forecast`; the A3 history helper had no snapshot input and therefore observed a one-cycle-older verification state |
+| Fix | Pass the issuance snapshot into the A3 history helper and use its finite value for each historical target when available, falling back to the logged observation when the snapshot does not contain that target |
+| Independent oracle | On 422 matured prospective rows, direct endpoint arithmetic has zero maximum absolute disagreement with the recorded A3 formula. Coverage is 312/422 = 0.7393, with 45 misses below and 65 above; all endpoints and scores are finite. Replaying against the current snapshot changes only eight historical hit states, so the freshness defect does not explain the main undercoverage |
+| Regression | A fixture corrupts and removes matured log outcomes while supplying the correct current snapshot. The old helper errors on the new keyword arguments; the repaired helper reproduces the clean-log interval exactly. Identity, manifest, strict issue cutoff, future-target exclusion, warm-up, and scoring cases remain covered |
+| Resource and performance boundary | The production hot log is capped at 50,000 rows with append-before-prune cold archival. This repair adds one in-memory timestamp lookup over the already-fetched Dst snapshot; it adds no network request, persistent resource, or unbounded state. On the 1,332-row production log, seven warm calls took a median 39.37 ms (maximum 223.19 ms) and allocated a median 27.96 MiB. The hourly issue calls remained 0.5--0.8 s. Monitor RSS returned from a transient 1.18 GiB post-cycle working set to 177 MiB after six idle minutes, with 206 open descriptors at both samples; this observation falsifies simple monotonic growth but is not a general leak proof |
+| Data regeneration trigger | None for served data or the frozen development receipt. Existing prospective shadow rows remain immutable evidence from their recorded issuance implementation; the repaired code applies only after deployment and does not authorize retuning or promotion |
+| Verification | Focused live-workflow regression and both dedicated V2.4e calibration/claim-audit suites; full package, deterministic experiment, development harness, strict readiness, and a post-restart live-cycle replay are required before completion |
+| Risk | Kyoto may revise provisional outcomes after issuance, so the current retained log cannot reconstruct every historical issuance-time snapshot exactly. This limits retrospective derivation audits but does not alter the recorded endpoints or the prospective claim auditor's exact endpoint checks |
+
+## Live validation audit (2026-09-07)
+
+### Development Ledger
+
+| Item | Record |
+|---|---|
+| Objective | Continue exact-identity prospective collection, independently verify weak interval results, repair confirmed defects, and measure the operational history/scoring paths before optimizing |
+| Contract | Preserve issued forecasts, the frozen A3 rule and cohort, deployed identities, thresholds, and submitted artifacts. The claim auditor must reject inconsistent time/step geometry and malformed evidence, deduplicate identical pending records, and keep claims false on integrity failures |
+| Independent oracles | Hand-constructed timestamp/step and pending-duplicate cases; direct endpoint, coverage, width, score, and same-row metric calculations; fixed-seed block resampling; baseline equation and serving-identity checks |
+| Confirmed reproductions | Inconsistent step/anchor geometry and pre-deployment records enter the claim cohort; pending duplicates raise `TypeError: non-boolean (Missing)`; invalid observations become pending; malformed fields and contradictory observations abort reports. Rounded fractional steps enter operational history. Interrupted retention duplicates archived occurrences; a hot-only audit forgets archived failures/events; empty post-freeze identities silently disappear |
+| Live integrity evidence | Rows 1745–1768 are six V2.2 fallback cycles from 2026-09-03T23:55 through 2026-09-04T04:05, with missing-driver-lag statuses and no A3 interval. They are retained as fallback evidence; no bundle replacement was found |
+| Test plan | Add independent boundary/error cases, rerun focused calibration/live/API tests, `Pkg.test()`, `examples/experiments.jl`, the development harness, strict readiness, and an independent live-row replay |
+| Performance evidence | Final paired benchmark, Julia 1.12.6 with two threads: four calls on a fixed 2,100-row/129-column snapshot, three warmups and eleven alternating pairs. Selecting nine consumed columns preserves every output, reduces median time from 260.95 to 118.51 ms (2.20 times faster), and reduces allocations from 187,966,064 to 25,456,496 bytes (86.46%) |
+| Data regeneration trigger | Auditor reports must be regenerated after auditor fixes. Forecast receipts and retrospective publication data must not be rewritten. Any future policy improvement requires a new development record and shadow identity |
+| Independent live evidence | At the immutable 2026-09-07T16:05 snapshot, 13,484 assertions reproduce the old/new audit identically, 1,178 A3 interval formulas and coverage flags, all four newest causal histories, and 1,892 served centers from the pinned weights. The maximum 256-bit aggregation difference is 7.11e-15 nT. A3 coverage remains 0.7843803 |
+| Recovered replay evidence | Hash-matching base/hourly inputs were restored from the earlier worktree. Fresh V2.2, V2.3, and V2.4e identity runs pass; V2.3 reproduces 4,206 rows and V2.4e reproduces 4,518 rows with zero output difference |
+| Repair verification | Final Pkg.test passes 284,024 assertions with all six local-data oracles exercised and zero skips. Deterministic experiments pass; development harness: 226 PASS / 1 reviewed tolerance WARN / 0 FAIL. Claim audit 166, recovery 323, live workflow 990, bundled dashboard 1,619. Missing Sockets dependency is declared. Source checksums agree after the run |
+| Source completeness | The claim auditor reads numeric cold segments and hot log under the shared lock, checks row/byte receipts, and persists false flags for incomplete sources or pending transactions. Existing archive receipts hash only the last append; they do not authenticate all historical contents |
+| Deployment verification | Monitor PID 1024, runs 6: its initial reload cycle leaves the 2,108-row CSV byte-identical; the unique 18:05:00.005 cycle adds exactly four rows and preserves all 117 immutable prior columns in 130 assertions. Post-cycle arithmetic passes 13,556 assertions, including the four newest causal histories against identical bracketing NOAA responses. A3 coverage is 931/1,186 = 0.7849915683 |
+| Operational boundary | Strict readiness remains 162 PASS / 9 WARN / 1 FAIL from six historical fallbacks in 96 cycles; cumulative A3 integrity failures cannot age out. The dashboard exited unexpectedly at 18:07:03.892 UTC with a task-switch error and launchd recovered PID 2118, runs 3. The monitor was unaffected. The initiating cause, old frozen-worker cause, and earlier diagnostic native teardown cause remain unproved |
+| Historical outstanding work | At this checkpoint the dashboard cause and separate study approval were unresolved. The later TLS repair and its bounded workload are recorded below; they do not prove the historical crash's precise initiating cause. The later interval-stage authorization and result are recorded at the top of this ledger |
+
+## Outbound TLS cleanup investigation (2026-09-07)
+
+### Development Ledger
+
+| Item | Record |
+|---|---|
+| Objective | Remove forbidden finalizer I/O from outbound HTTP timeout cleanup without changing payload parsing, forecast arithmetic, retries, deadlines, or certificate/hostname verification |
+| Confirmed defect | Installed OpenSSL 1.6.1 performs TLS shutdown from its stream finalizer. An instrumented loopback test records 100 forbidden task-switch errors in 100 GC cleanups on Julia 1.12.6 and 1.12.7; explicit close records zero. HTTP 1.11.0 late handshakes after a one-second connect timeout produce 19 suppressed errors in 20 trials. This verifies the transport defect, not the initiating cause of the dashboard's 18:07 native exit |
+| Independent control | The same 20 late-handshake trials with HTTP's existing MbedTLS backend produce no OpenSSL finalizer writes or errors; both variants check the timeout and server completion independently |
+| Contract | Select MbedTLS per outbound request, leave HTTP's global default untouched, declare the already-installed dependency directly, and retain all existing trust, retry, error, and injection behavior. Do not change the frozen deployment, A3 cohort, scientific inputs, or submitted files |
+| Test plan | Assert backend selection at each request boundary; exercise trusted loopback HTTPS, untrusted certificates, hostname mismatch, normal responses and timeouts; rerun the late-connect reproducer, package tests, deterministic experiments, development harness, source hashes, and supervised real-upstream dashboard load |
+| Harness-test correction | The first post-TLS package run has one failure: the launchd test counts service-name substrings across whole command lines, so a `dashboard` token in `TMPDIR` contaminates the expected count. The focused test reproduces 6 rather than 4 matches. Replace this with exact command/target assertions, put all three service names in the fixture parent path, retain every existing behavioral check, and rerun the full harness. No launchd implementation change is warranted by this failure |
+| Completed verification | Exact launchd command checks pass 193 assertions; restoring the substring check fails three. The renewed full package suite passes 284,139 assertions with all six local-data oracles exercised and no skips; experiments pass; harness 244 PASS / 1 reviewed tolerance WARN / 0 FAIL, exit 0. All 189 source/configuration hashes match after deployment |
+| Workload and deployment | The unsupervised repaired dashboard completes 90 rounds / 4,320 requests without transport failures; 64 dB/dt and eight network responses report unavailable data. The tested source is deployed under unchanged plists. All 2,120 forecasts and 117 immutable columns survive reload (120 assertions); all 49,667 prior external receipts and 15 immutable fields survive (17 assertions), with 38 new rows. The deployed dashboard completes 240 requests without failures or unavailable data |
+| Post-reload science | Four newly matured observations and four revisions are recorded, without changing forecasts. The independent replay passes 13,648 assertions and reproduces A3 coverage 941/1,198. Claim flags remain false, with 24 historical integrity violations. Strict readiness reports 162/9/1 at its documented status endpoint; the external timing omission is a separate outstanding issue |
+| Data regeneration trigger | No forecast or publication data regeneration: this changes transport only. Recheck immutable live receipts and collect the next scheduled cycle without adding issues or resetting history |
+| Risk | Changing a TLS backend can alter trust/configuration behavior or expose timing differences. The isolated one-of-480 health-request timeout and historical native exits remain unresolved until directly traced; passing short controls does not prove their repair |
+
+## External receipt-time boundary (2026-09-07)
+
+| Item | Record |
+|---|---|
+| Observed semantics | External rows are selected by target after source issue, while the summary includes every scored row. Neither that summary nor the readiness auditor requires target after retrieval |
+| Live evidence | The 20:12:57 lock-protected receipt has 4,040 of 49,667 rows at/after target retrieval, including 4,025 scored rows. Five example raw-response hashes match. Another 35 source issues are later than their recorded retrieval times; their precise historical cause is unproved |
+| Independent reproduction | A source issue at 09:00, fetch at 10:30, and targets 10:00/11:00 retain and score both rows. The single receipt-future row has error 3 nT, while the current two-row RMSE is 70.7424908 nT. Three receipt-causal assertions fail |
+| Timestamp boundary | The current default fetched_utc is evaluated before HTTP I/O. It must not be relabeled as a completion receipt or used to invent historical completion times |
+| Proposed correction | Preserve all raw history, distinguish source-issue-relative/legacy rows from receipt-causal rows, record response completion for new captures, and align scoring and readiness eligibility with the supported chronology |
+| Authority and verification | The user approved the timing correction on 2026-09-08. Implementation and verification are tracked below; the earlier failed reproducer and raw receipts remain preserved |
+| Scientific separation | External baseline snapshots do not feed the served V2.4e/A3 formulas. The independently verified 20:05 A3 coverage remains 936/1,194 |
+
+### Approved implementation contract (2026-09-08)
+
+| Item | Record |
+|---|---|
+| Objective | Exclude externally collected targets that were not demonstrably future at response completion from prospective scores, without rewriting historical provenance or changing served forecasts |
+| Inputs and outputs | Accept the existing 20-column external log. Append a nullable `receipt_completed_utc` column; missing values denote historical absence of completion evidence, not a reconstructed time. Record new completion times after both forecast-body and source-run metadata requests, preserving milliseconds |
+| Eligibility | Require valid issue, fetch-start, completion, and target timestamps with issue at/before completion, fetch-start at/before completion, and completion strictly before target. Preserve source-issue-future late rows, but do not newly score them. Keep existing historical observation/error fields unchanged and exclude them from prospective summary metrics when receipt eligibility is absent |
+| Classification | Separate eligible, known-late, unknown-completion legacy, and invalid-chronology records. Legacy target-at/before-fetch rows are demonstrably late; other legacy rows remain uncertain. Invalid newly supplied completion metadata fails validation. Collector and readiness use one timing/metric contract |
+| Identity and preservation | Keep the first source/issue/target/raw-hash record and its original timestamps on repeated retrieval. Do not certify a legacy first receipt with a later fetch time. Existing raw retention limits and frozen V2.4e/A3 policies, gates, start, and schedule stay unchanged. Preserve a full pre-change raw-history copy before ordinary rotation |
+| Independent expectations | The 09:00 issue / 10:30 receipt fixture keeps both 10:00 and 11:00 raw records but scores only the 11:00 row, with RMSE and MAE exactly 3 nT. Test exact equality at target, millisecond crossings, delayed source metadata, missing/invalid/backwards receipts, maturity, mixed legacy scores, deduplication, migration rollback, and separately calculated readiness metrics |
+| Mutation checks | Removing receipt eligibility, accepting target equality, stamping before source metadata, or substituting fetch-start for completion must make independent tests fail |
+| Required verification | Focused collector/readiness tests; immutable pre-change replay and migration oracle; full Pkg.test with local-artifact oracles, deterministic experiments, development harness, source hashes, supervised monitor reload, and unchanged main-forecast/A3 identities. No scientific improvement verdict follows from an unverified scorer |
+| Confirmed round-trip edge | The first renewed collector run passes 271 assertions but errors when its self-test matures an entirely unscored CSV round trip: CSV infers score columns as SentinelArrays.MissingVector, which cannot accept a Float64. The scoring entry point must give all-missing score columns their existing nullable numeric/string types before assignment; preserve values and rerun the exact self-test and explicit round-trip regression |
+| Completed focused checks | Receipt suite 75, collector 272, readiness 27, isolated archive migration 3,821, and fresh boundary/repeatability audit 765 assertions pass. Seven deliberate regressions are caught. The all-missing CSV score-column defect is corrected without changing existing values. Full harness and production reload remain separate gates |
+| Final verification and deployment | Full Pkg.test passes 284,230 assertions with six exercised local-data oracles and no skips; experiments pass; harness 255 PASS / 1 reviewed tolerance WARN / 0 FAIL. All 191 source hashes match. Monitor PID 69932 / runs 8 completes the deployed collector, preserving all 2,152 forecasts and 49,968 prior external records in 120 and 3,937 assertions. Its 29 new external records contain 21 receipt-future and eight late rows. No record was deleted |
+| Post-deployment science | Independent replay passes 13,936 assertions and reproduces A3 coverage 964/1,230. The same 24 historical violations remain. Readiness is 163/12/0 because its trailing fallback window is clear, not because cumulative A3 failures were erased. The model-development proposal was still unapproved at this repair checkpoint; the later authorized interval-stage result is at the top of this ledger |
+| Preserved evidence | `validation/output/operational/deep_debug_20260908_external_timing/pre_change/raw_history/` contains 49,941 rows and all 1,878 current raw responses, captured under collector locks with copied hashes checked. The earlier 49,911-row snapshot contains 4,075 known-late rows, 4,060 already scored; 35 source issues exceed fetch-start, with historical completion unknown |
+
+
+## Dashboard runtime compilation mode (2026-08-26)
+
+| Item | Record |
+|---|---|
+| Objective | Prevent the supervised dashboard from crashing during concurrent API traffic and third-party timeout activity without changing the forecast monitor, served V2.4e arithmetic, alert thresholds, or calibration-shadow policy |
+| Contract | Both the launchd template and ad-hoc CLI start the dashboard with Julia's default compilation; no dashboard launcher may pass `--compile=min`; the monitor launch remains unchanged |
+| Failure evidence | The minimal-compilation dashboard launchd coalition generated five unplanned crash reports (`SIGSEGV` or `SIGBUS`) and one `SIGBUS` report when the old process exited during replacement; their faulting stacks entered Julia's interpreted execution path. An isolated server with the production `--compile=min` argument reproduced exit 139 under the mixed-endpoint load below, including the same `attempt to switch to exited task` diagnostic |
+| Independent oracle | The same app, log, two-thread setting, endpoint mix, and host on an isolated port, with only `--compile=min` removed, completed 6,000 requests and remained healthy. The deployed launchd job then completed another 6,000 requests with one unchanged PID and no restart |
+| Regression tests | The app suite requires the launchd template to omit every `--compile=` argument; the CLI smoke suite requires the dashboard command to use `--startup-file=no --project=...` and rejects every `--compile=` argument in the script |
+| Narrow verification | `bash -n bin/solarsindy`; `plutil -lint deploy/com.example.solarsindy.dashboard.plist`; CLI smoke 54/54; app suite 1,581/1,581; three health probes and all primary API endpoints after the production load |
+| Memory use | The isolated normal-compilation server used approximately 1.1 GiB RSS after the load, versus approximately 0.5 GiB immediately before the reproduced minimal-compilation crash. Production therefore trades memory for stable compiled execution; the dashboard service continues to record live resource use |
+| Data regeneration trigger | None. This changes process compilation only; it does not read, fit, regenerate, or replace the deployment bundle, forecast log, paper data, or figures |
+| Broader harness | Full `Pkg.test()`; `examples/experiments.jl`; development-harness and readiness audits; exact live identity/manifest checks; submitted-tree digest invariant |
+
+## Step-resolved live robustness reporting (2026-08-26)
+
+| Item | Record |
+|---|---|
+| Objective | Make a weak live model step visible when a pooled same-row RMSE looks acceptable |
+| Contract | The locked-live comparison report retains its exact-current-served-identity cohort, requires every listed model on every reported row, groups only finite positive integer `model_step_hours`, and includes the static V2.2 predecessor whenever a V2.1-base log records that stage and V2.2 is not itself the current product |
+| Independent oracle | A two-row fixture assigns one row to step 1 and one to step 2, gives the two V2.4e residuals opposite signs, and hand-pins pooled and per-step RMSE, MAE and observation-minus-prediction bias for both V2.4e and static V2.2 |
+| Live finding | On 784 matured exact-V2.4e rows, the step counts are 162, 198, 196, 35, 160 and 33 at internal steps 1, 2, 3, 4, 6 and 7. V2.4e has lower RMSE than static V2.2 at steps 1, 2, 3, 4 and 6 but is 0.23 nT higher at step 7; BurtonFull and O'Brien have lower pooled RMSE. These short, quiet, highly overlapping cohorts support continued monitoring, not a real-world superiority claim |
+| Scope | Report generation only. No logged row, forecast, fitted object, bundle, interval, alert or serving identity changes |
+| Verification | Focused live-workflow suite; full package suite and development harness; regenerated production report; strict live readiness and claim audits |

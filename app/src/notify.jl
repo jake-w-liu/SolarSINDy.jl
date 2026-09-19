@@ -20,7 +20,7 @@
 # Config: SWM_WEBHOOK_URL (empty = disabled), SWM_ALERT_STATE (optional state-file override).
 # Depends on HTTP, JSON3, Dates.
 
-using HTTP, JSON3, Dates
+using HTTP, JSON3, Dates, MbedTLS
 
 # A stale status (issue time beyond the staleness threshold, or an expired cycle) must not
 # escalate the webhook: its threat reflects a forecast issued hours-to-days ago, not now.
@@ -177,8 +177,8 @@ end
 
 # Injectable transport so the success path is unit-testable without a network. Returns on
 # success, throws on delivery failure (2xx enforced via status_exception).
-_default_post(url, headers, body) =
-    HTTP.post(url, headers, body;
+_default_post(url, headers, body; http_post::Function=HTTP.post) =
+    http_post(url, headers, body; socket_type_tls=MbedTLS.SSLContext,
               readtimeout = 10, connect_timeout = 10, retries = 1, status_exception = true)
 
 # Compose the operator-facing message for a delivered transition.
@@ -326,9 +326,14 @@ end
 
 # Background loop: re-evaluate the alert state every `interval` s and notify on transitions.
 # No-op (returns nothing) when no webhook is configured, so it costs nothing by default.
-function start_notify_loop(log_path::AbstractString; interval::Int = 300)
+# Close the returned Timer to stop polling. Cycles run sequentially; a cycle already
+# in progress finishes normally, and elapsed ticks coalesce while it runs.
+function start_notify_loop(log_path::AbstractString; interval::Real = 300,
+                           cycle_fn::Function = notify_cycle!)
     url = get(ENV, "SWM_WEBHOOK_URL", "")
     isempty(url) && return nothing
+    isfinite(interval) && interval > 0 ||
+        throw(ArgumentError("notification interval must be finite and positive"))
     host = try
         HTTP.URI(url).host
     catch e
@@ -338,19 +343,17 @@ function start_notify_loop(log_path::AbstractString; interval::Int = 300)
     state_path = _default_alert_state_path(log_path)
     _load_alert_state!(state_path)        # restore delivered-state before the first poll
     @info "alert webhook enabled" url_host=host interval_s=interval state_path=state_path
-    return @async begin
-        while true
-            try
-                cycle = notify_cycle!(log_path; url = url, state_path = state_path,
-                                      now_utc = string(now(UTC)) * "Z")
-                st, r = cycle.state, cycle.result
-                getproperty(r, :fired) == true &&
-                    @info "alert webhook fired" level=st.level stale=st.stale kind=get(r, :kind, "")
-            catch e
-                e isa InterruptException && rethrow()
-                @warn "notify loop iteration failed" exception = (e, catch_backtrace())
-            end
-            sleep(interval)
+    return Timer(0; interval=interval) do timer
+        isopen(timer) || return
+        try
+            cycle = cycle_fn(log_path; url = url, state_path = state_path,
+                             now_utc = string(now(UTC)) * "Z")
+            st, r = cycle.state, cycle.result
+            getproperty(r, :fired) == true &&
+                @info "alert webhook fired" level=st.level stale=st.stale kind=get(r, :kind, "")
+        catch e
+            e isa InterruptException && rethrow()
+            @warn "notify loop iteration failed" exception = (e, catch_backtrace())
         end
     end
 end

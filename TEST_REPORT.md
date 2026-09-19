@@ -1,4 +1,521 @@
-# V2.2 Research Test Report
+# SolarSINDy Research Test Report
+
+## Recovery verification (2026-09-19)
+
+The [remediation report](validation/output/operational/deep_debug_20260919/remediation/REPORT.md)
+contains independent USGS finite differences, source-selection boundary tests,
+ground-only model and causal expert-weight oracles, three storm-window checks,
+calendar-day uncertainty, browser checks, and the complete development harness.
+No historical forecast or acceptance tolerance is changed. Numerical model
+failures remain separate from successful software tests.
+
+## Bounded upgrade studies completed — 2026-09-08 UTC
+
+The point-error and preceding interval-only studies are complete. Neither
+selects a candidate, and no new shadow or serving change is authorized.
+The [point-study result](validation/output/operational/v2_4_point_upgrade_20260908/RESULTS.md)
+contains all six candidates, annual folds, feedback-delay comparisons, support,
+storm/state results, tails, uncertainty, and measured execution costs.
+
+| Current verification | Result |
+|---|---|
+| Complete input/baseline audit | 3,350,062 assertions |
+| Focused point/comparison tests | 633 assertions |
+| Mutation sensitivity | All 16 kernel/metric and ten comparison/selection mutations detected |
+| Full package regression after scientific-source repair | 285,056 assertions; all six required local-data oracles, zero skipped |
+| Development harness / deterministic experiments | 295 PASS / 1 existing tolerance WARN / 0 FAIL; experiments pass |
+| Development prediction / summary reconstruction | 60,785,135 / 3,875,252 assertions |
+| Validation prediction / summary reconstruction | 60,301,687 / 3,866,424 assertions |
+| Independent decision | 4,917 assertions; 1,632 criteria; no candidate selected |
+| Post-checker-repair full package regression | 285,056 assertions in 21m41.5s; experiments pass again |
+| Date-label regression / round-trip fixtures | 78 / 322,784 assertions |
+| Exact diagnostic projections / displayed report tables | 495 per partition / 65 assertions |
+
+The two-expression hashing repair preserves exact outputs; the scientific
+source manifest still matches all 198 entries. All nine CSVs from the
+interrupted development attempt are byte-identical to the completed run.
+The independent summary check initially stopped because CSV inferred Date
+labels. The normalization repair passed the old/new regression, full fixtures,
+both complete study partitions, and another package regression. No numerical
+formula, input, candidate, tolerance, or scientific criterion changed for it.
+See the [hashing record](validation/output/operational/v2_4_point_upgrade_20260908/OPTIMIZATION_REPORT.md)
+and [checker repair record](validation/output/operational/v2_4_point_upgrade_20260908/DEBUG_LOG.md).
+
+At the 12:06:13 UTC operational capture, both service PIDs and plists are
+unchanged. Forty-eight dashboard requests have zero errors or unavailable
+responses; four served static assets match disk. Readiness reports 163 PASS /
+11 WARN / 0 FAIL. Independent A3 arithmetic passes 6,296 assertions and
+reproduces 985/1,258 covered outcomes. Both claim flags remain false, and all
+24 historical integrity violations remain. Preservation checks pass 312
+assertions over the original 117 immutable fields and seven normal added cycles.
+Submitted-tree and upstream-main checks remain unchanged. No restart, extra
+issuance, pull, push, or dependency update occurred. The earlier 11:58 workload
+had eight unavailable dB/dt responses despite healthy core endpoints; USGS
+timeouts were logged. The panel recovered without intervention. That record
+is preserved separately from the latest all-available workload.
+
+The convention scan's 19 imaginary-unit flags are reviewed false positives:
+five bound loop indices and fourteen string/identifier matches. The Python
+figure guard passes. No manuscript, figure, or publication data was changed.
+Three optional generated historical comparisons lack their separate local
+inputs; their paths are retained in the transcript. This does not describe
+the complete archive audit or the six required local-data oracles as skipped.
+The existing tolerance warning remains disclosed, not suppressed.
+
+## Point-study implementation history
+
+The dated records below preserve the earlier verification sequence and counts.
+Their descriptions of unfinished work refer to those earlier checkpoints;
+the completed outcome and current checks are above.
+
+The [point-study protocol](validation/output/operational/v2_4_point_upgrade_20260908/PROTOCOL.md)
+is frozen. Input and baseline verification passes 3,350,062 assertions over
+623,184 historical forecasts, 103,864 anchors, 216 published summary rows, and
+the 1,944-row live panel. The live frozen V2.1 expert is independently rebuilt
+with 256-bit core/ridge arithmetic and checked against the ten-expert sum. It
+differs from the logged L1-admitting ablation on all 1,944 rows; both quantities
+remain separately identified. The live panel has zero storm target outcomes,
+although eight issue-anchor rows are at or below -50 nT.
+
+The point replay, metric arithmetic, and event grouping have 561 focused passing
+assertions. Means, medians, caps, projected centers, asymmetric bands, warmup,
+future/revised/delayed witnesses, model-epoch and step isolation, input guards,
+historical column mapping, and unequal bootstrap-block sizes have independent
+expectations. Point-error bias is observation minus prediction. Tolerances are
+1e-12 nT for elementary independent summations and 1e-9 nT for the established
+serving-identity comparison against separately ordered high-precision arithmetic.
+Integer, timestamp, count, sign, rank, and deliberately representable worked
+examples use exact equality.
+
+The first input-audit run exposed a reversed bias convention in the new audit
+code; no source data or model was changed. A focused test fixture initially
+converted a Boolean to Float64 before the input guard saw it; the corrected
+fixture preserves its type. The model-epoch expected count was rederived as four
+targets, including the current anchor. A surviving storm-gap mutation exposed
+a weak test; five longer gapped sequences now distinguish 72 known quiet hours
+from 72 consecutive quiet hours. Earlier transcripts remain preserved.
+
+The separate comparison/selection layer adds 68 passing assertions. A missing
+comparator-row test exposed an incomplete decision-input check; selection now
+requires every comparator and candidate, unique entries, equal scored counts,
+equal row-key digests, and valid corrected counts. The initial thirteen
+replay/metric mutations and ten comparison/selection mutations cause assertion failures.
+The independent prediction/statistics checker passes 322,780 fixture assertions;
+the independent decision checker passes 9,838 fixture assertions. No production
+calculation functions are called by these checkers when verifying study outputs.
+
+The first full package run passes 284,934/284,934 assertions in 22m43.9s, with
+experiments and a 276 PASS / 1 existing tolerance WARN / 0 FAIL harness. Its 195
+source entries still matched afterward. The comparison/selection suite was
+then registered in Pkg.test and its no-winner smoke added to experiments.
+The integrated run on the earlier 198-entry source tree was deliberately stopped
+after a further input check exposed an erroneous baseline-range restriction.
+Three archived 2024 V2.4e values exceed 50 nT, while the frozen protocol restricts
+corrected outputs and explicitly retains sparse-history baselines. The input
+restriction and two mistaken test expectations were replaced by exact
+fallback/projection checks for every candidate and both signs. Finite-width
+guards were also applied before fallback. The original source and interrupted
+transcripts remain preserved. No source data, residual cap, corrected-output
+projection, numerical tolerance, candidate, or advancement threshold changed.
+
+All 12 source folds now pass the panel guards and 36 extra interval/comparator
+assertions. Focused tests pass 629 assertions. All 16 kernel/metric mutations
+and all ten comparison/selection mutations are caught. Independent prediction
+and statistics fixtures again pass 322,780 assertions with out-of-range inputs
+in both sparse and corrected states. The integrated run passes 285,052/285,052
+assertions in 23m17.6s, all six required local-data oracles (zero skipped), and
+deterministic experiments. Its harness reports 287 PASS / 1 existing tolerance
+WARN / 0 FAIL. The three optional generated historical-artifact comparisons
+still lack their separate local inputs; this does not describe the complete
+archived-input audit above as skipped or substitute for those missing checks.
+
+The first development command stopped before creating its output directory.
+The launcher's cutoff variable shadowed Base.split; the new direct preflight
+regression also exposed a parent-directory error caused by a trailing slash.
+Both launcher-only defects are corrected without changing any of the other
+197 frozen files. Ten boundary/source checks pass. The required full rerun
+passes 285,051 assertions in 22m12.4s, experiments, and a 293/1/0 harness.
+All six local-data oracles ran, with zero skipped. The one-count difference
+from the preceding run is its optional empty-skips ledger assertion: the
+latest invocation omitted SOLARSINDY_REQUIRE_LOCAL_ARTIFACTS. The full printed
+ledger verifies the same six-oracle coverage; no test was removed. Previous
+passing evidence and the failed launch remain preserved with explicit suffixes.
+Strict syntax passes 279 assertions over 278 files; sealed-source preflight
+passes ten. Its first boundary test expected ENOTDIR, but Julia's recursive
+mkpath correctly raises EEXIST on the regular-file parent, independently
+reproduced against the standard library. Development evaluation started at
+10:15 UTC, then stopped for the hashing repair recorded above; validation and
+whole-output reconstruction were not yet complete at that checkpoint.
+No point candidate has been selected or promoted. Results, input receipts, and test logs
+belong under validation/output/operational/v2_4_point_upgrade_20260908; the
+historical completed interval-stage receipt below remains a separate result.
+
+At the 2026-09-08T09:05 UTC capture the dashboard API reports status ok, a complete cycle,
+no outage, and no cached-log fallback. Monitor PID 69932 and dashboard PID 89275
+are unchanged. The scheduled 08:05 cycle completed at 08:05:26 with 2,168 log
+rows and 16 pending outcomes. Neither service was restarted in this study.
+Readiness passes 163/11/0; those warnings remain distinct from scientific
+claims. The 48-request dashboard check has zero errors or unavailable responses.
+Independent A3 arithmetic passes 6,216 assertions and reproduces coverage
+969/1,242, both claim flags false, and all 24 historical violations. The original
+117 immutable forecast fields survive all three additional normal cycles
+(204 passing preservation assertions). Submitted-tree and launchd-plist hashes
+remain unchanged. Remote-main checks at 09:16 show no missing upstream commits;
+the tested dependencies and existing local changes were preserved.
+
+## Completed interval-development stage — 2026-09-08 UTC
+
+The bounded six-candidate study is now authorized. Its protocol and input are
+frozen in validation/output/operational/v2_4_interval_upgrade_20260908.
+No serving or A3 change is authorized by a retrospective result.
+
+The new module has 193 passing focused assertions; the existing calibration
+module retains all 49 passing assertions. Independent hand calculations cover
+translated asymmetric bands, finite-sample ranks, all six trailing windows,
+issued-location standardization, and paired interval scores. Five-seed scaling
+checks, chronology/revision mutations, per-step isolation, pending observations,
+duplicate records, invalid inputs, uneven day-block weights, fixed selection,
+and immutable persisted outputs cover the remaining public behavior. Roundoff
+tolerances are limited to 1e-12 absolute / 1e-14 relative for independently
+ordered floating-point arithmetic. Exact integer/rank and timestamp checks do
+not use tolerances. A 32-ulp allowance at the 1.25 width boundary accommodates
+mean-of-width rounding and does not change the statistical gate.
+
+The one-time validation and independent oracle select no candidate. No change
+was made after opening validation. The coverage/width failures and missing
+step-7 witness support are documented in
+[the study result](validation/output/operational/v2_4_interval_upgrade_20260908/RESULTS.md).
+The interval stage is complete. The separate point-error study subsequently
+completed with no qualifying candidate, as recorded above.
+
+| Verification | Result |
+|---|---|
+| Independent development / validation replay | 242,418 / 332,969 assertions pass |
+| Independent development / validation witness and control diagnostics | 18,667 / 30,885 assertions pass |
+| Pre-miss location/scale diagnostic | 11,484 assertions pass |
+| Mutation sensitivity | Nine deliberate faults cause actual assertion failures |
+| Repeated development replay | Five runs; all 15 output-byte checks pass |
+| Full Pkg.test | 284,423 / 284,423 in 23m20.4s |
+| Required local-data oracle ledger | Six exercised, zero skipped |
+| Deterministic experiments | Serving/predecessor and new interval arithmetic checks pass |
+| Development harness | 265 PASS / 1 reviewed tolerance WARN / 0 FAIL; exit 0 |
+| Source/configuration receipt | All 193 entries match after the harness |
+| Latest normal-cycle preservation | 130 assertions; four new forecasts, 117 prior immutable columns unchanged |
+| Current A3 claim and issued-band arithmetic | 6,176 assertions pass |
+
+Two diagnostic-runner failures were corrected: include_string did not resolve
+a relative helper include from the simulated source path, and a source-manifest
+reader retained leading whitespace in paths. Corrected runs pass; failed
+transcripts remain. The valid manifest is verified_source_2.sha256. The initial
+empty verified_source.sha256 is not verification evidence. The source capture
+was corrected while the unchanged package suite was already running.
+
+The one harness warning is the existing, reviewed tolerance scan. Three
+optional historical generated-artifact comparisons were unavailable, distinct
+from the six required local-data oracles that all executed. The convention
+scan's 18 matches are reviewed false positives. No tolerance was loosened,
+and no manuscript, bibliography, or figure appearance was revalidated.
+
+The external archive cross-check passes 51,976 assertions over 50,000 rows and
+1,883 raw-response hashes. Its 21 eligible SWPC scores share one target outcome
+and one receipt, not 21 independent forecasts. Strict readiness at the start
+passes 163 checks with 12 existing warnings and zero failures; the end check
+passes 163/11/0. Start and end dashboard checks each have 48 successful
+responses with no reported unavailability. Monitor PID 69932 / runs 8 and
+dashboard PID 89275 / runs 4 were not restarted, and their plists are unchanged.
+The end external archive again passes 51,976 independent checks. A3's current
+966/1,234 coverage and 24 cumulative violations do not change either false
+claim flag. Complete start/end captures and detailed limitations are retained
+with the study result. Neither repository is missing upstream main commits;
+the package remains one local commit ahead, with existing dirty work preserved.
+
+Development harness complete for the interval implementation: 2 diagnostic
+issues detected → 2 confirmed → 2 fixed, 0 require user repair action.
+No candidate qualifies; a new prospective shadow or serving promotion remains
+unauthorized. The upgrade goal continues with the separate point-error study.
+
+## Historical external timing repair — 2026-09-08 04:47 UTC
+
+The user approved the external scoring/provenance correction. Two confirmed
+defects are fixed: prospective summaries admitted late-retrieved targets, and
+entirely unscored CSV columns could not accept their first numeric score after
+reload. The earlier approval blocker is resolved. The model-development study
+was still unapproved at that repair's completion; the later study authorization
+is recorded above. Served V2.4e, A3, its cohort, and all gates are unchanged.
+
+New external rows carry a millisecond-preserving receipt_completed_utc sampled
+after the forecast body and any source-run metadata request. Prospective scores
+require issue/fetch-start at or before completion, strictly before target.
+Historical timestamps are not reconstructed. All original records and existing
+score values remain preserved; legacy rows lacking completion evidence and
+known-late rows are excluded from prospective metrics. Repeated retrieval keeps
+the first record's timestamps. Collector and readiness share this rule and its
+reporting; the separate test oracles use hand-derived expectations.
+
+| Verification | Result |
+|---|---|
+| Original defect reproduction before editing | Three failed assertions; two-row RMSE 70.7424908 nT instead of the receipt-future row's 3 nT |
+| Receipt, collector, readiness regressions | 75 / 272 / 27 assertions pass |
+| Mutation sensitivity | All seven deliberately removed safeguards cause regression-test failures |
+| Isolated full-archive migration | 3,821 assertions; all 49,941 old rows, all 20 columns, and 1,878 raw hashes preserved |
+| Fresh boundary/resource pass | 765 assertions; 750 clock-boundary cases and seven identical, input-preserving real-archive summaries |
+| Real-source preflight | 93 assertions; SWPC 24 eligible / 2 late, Temerin–Li 0 eligible / 3 late |
+| Full Pkg.test | 284,230 / 284,230 in 25m27.6s; six local-data oracles exercised, zero skipped |
+| Deterministic experiments | PASS on the frozen V2.4e operator |
+| Development harness | 255 PASS / 1 reviewed tolerance WARN / 0 FAIL, exit 0 |
+| Source/configuration receipt | All 191 hashes match after the harness and before deployment |
+| Main forecast preservation after reload | 120 assertions; all 2,152 rows and 117 immutable columns preserved |
+| External deployment preservation | 3,937 assertions; all 49,968 prior rows and all 20 original columns preserved, 29 new rows, no deletion |
+| Post-reload independent live arithmetic | 13,936 assertions; claim payload, A3 endpoints and histories, and 1,940 exact-served rows agree |
+| Strict post-reload readiness | 163 PASS / 12 WARN / 0 FAIL at the documented status endpoint |
+| Deployed dashboard workload | 240 requests before the monitor reload and 48 afterward; zero failures or unavailable responses; same dashboard PID |
+
+The first renewed collector run passed 271 assertions but errored on the
+all-missing CSV column case. Its transcript is retained; the corrected self-test
+and explicit round-trip regression pass. The original pre-fix reproducer is
+also retained unchanged. Its row-deletion expectation is not the approved
+repair contract: the new tests preserve both raw records and exclude only the
+unsupported prospective score.
+
+The harness's tolerance warning is the existing scan requiring review of
+documented statistical, optimization, quadrature, and roundoff tolerances; no
+tolerance was loosened. The convention scan's 18 imaginary-unit warnings are
+false positives: integer indices, join calls, a JavaScript string variable,
+and malformed timestamp test text. The Python figure guard passes. No figures
+or manuscript text were changed or visually revalidated.
+
+The monitor was deliberately restarted through launchd at 04:45:45 UTC and
+completed its startup cycle at 04:47:32. It runs as PID 69932 / runs 8 under the
+unchanged plist, Julia 1.12.6, and two-thread setting. All four pending issue-hour
+duplicates were skipped. Four outcomes matured and four prior observations were
+revised; no forecast changed. Dashboard PID 89275 / runs 4 was not restarted.
+The next normal cycle at that checkpoint was 05:55 UTC; no extra issuance was required.
+
+External records now total 49,997: 21 receipt-future, 4,092 known-late, and
+45,884 unknown-completion legacy rows, with zero invalid chronology. The 29
+new records include 21 eligible and eight late rows. No new prospective score
+had yet been recorded; old numerical errors remain archived, not prospective
+evidence. The complete before/after copies preserve 1,879 and 1,881 raw
+responses. Existing rolling retention limits are unchanged.
+
+A3 covers 964 of 1,230 outcomes (78.37398%), with day-block interval
+[0.697019773, 0.857816236], width ratio 1.219118670, and mean paired
+interval-score difference -12.147034645 nT. There are 297 complete cycles,
+14 consecutive days, zero qualifying storms, and the same 24 cumulative
+integrity violations. Both claim flags remain false. The maximum independent
+256-bit stack difference is 7.11e-15 nT. The newest-history cross-check uses a
+separately captured later Kyoto body that reproduces the stored medians; it is
+not a contemporaneous 04:05 issuance receipt. Historical revision vintages and
+the exact cause of earlier native process failures remain unproved.
+
+The six historical fallback cycles have left readiness's trailing 96-cycle
+window. They have not disappeared from the cumulative A3 record. Passing
+operational readiness does not establish calibration or storm skill.
+
+The live CSV SHA-256 is
+74fb77c68fd6e78ad850807da1e6d5f7cc7cd53744e102642720f7f9817958f0.
+The external CSV SHA-256 is
+7261de8fbf6155202b12d3d518635f03fd2aa8934f3f37749247d88220c6831d.
+The submitted-tree aggregate remains
+7dfd4556fe8b6f1ae133be80a9a878d255df4ea1b715ef273d257520e728ca74.
+All evidence, including failed runs, is retained in
+[the dated repair directory](validation/output/operational/deep_debug_20260908_external_timing/).
+
+Development harness complete for this repair: 2 detected → 2 confirmed →
+2 fixed, 0 repair decisions require user action. The bounded fresh pass found
+no further confirmed defect. This is not proof of indefinite uptime, every
+historical crash cause, or universal code optimality.
+
+## Live-validation verification — 2026-09-07 UTC
+
+### TLS repair verification — 19:50 UTC
+
+The current source selects MbedTLS for ten outbound HTTP request boundaries.
+Focused verification passes: trusted/untrusted/hostname HTTPS cases (10),
+standalone dashboard (1,635), realtime ingestion (182), live workflow (996),
+external snapshot collector (272), L1 receipts (326), and prospective issue
+capture (299). The real NOAA transport probe passes 15 assertions. Removing
+the backend selection makes two of the ten transport regressions fail.
+
+The first post-change full package run reports 284,138 passes and one failure;
+the harness exits 1 with 236 PASS / 1 WARN / 1 FAIL. The deterministic experiment
+passes. The failure is a path-dependent launchd test assertion, independently
+reproduced under a `TMPDIR` containing `dashboard` and absent under `/tmp`.
+Its replacement checks exact command targets under a deliberately confounding
+fixture path and passes all 193 launchd assertions. The complete new harness
+passes: 284,139 / 284,139 package assertions in 17m38.4s, all six local-data
+oracles exercised with no skips, deterministic experiments successful, and
+244 PASS / 1 reviewed tolerance WARN / 0 FAIL. The harness exits 0 and all
+189 source/configuration hashes still match afterward. This is the
+current-source pass; the earlier failures remain disclosed separately.
+
+The isolated workload and subsequent deployment results are recorded below.
+No runtime upgrade or scientific-policy change was made. Precise historical
+crash causation and indefinite production stability are not established.
+
+### Scheduled cycles and additional evidence finding — 20:18 UTC
+
+The normal 19:55 and 20:05 cycles each preserve all 117 immutable prior columns
+in 130 assertions. Their independent raw-row checks pass 13,612 and 13,628
+assertions; the NOAA bodies bracketing each issuance match. The 20:05 receipt
+contains 2,120 raw / 1,908 exact-V2.4e rows and 1,194 scored A3 outcomes, with
+936 hits (78.39196%). The frozen identities, phase minutes, and 24 historical
+integrity violations are unchanged. The repaired dashboard's ongoing workload
+had passed 72 rounds / 3,456 requests at that checkpoint.
+
+At that checkpoint an additional external-baseline finding was unresolved and was not covered by
+the passing package assertions. The lock-protected 20:12:57 receipt has 4,040
+of 49,667 rows fetched at or after the target; 4,025 have scores. The summary
+includes these source-issue-relative forecasts in its prospective report.
+A two-row fixture fails three receipt-causal assertions and shows the score
+contribution directly. The existing readiness script reports 162/9/1 after
+20:05, but does not check this receipt-time boundary. Its one reported failure
+must not be interpreted as the absence of other evidence problems.
+
+The default fetch timestamp precedes network I/O; historical response-completion
+times are not known. A scoring/provenance correction then awaited the user's decision;
+no external row was removed or reclassified. This separate data source does
+not feed A3's calculation or change its independently reproduced undercoverage.
+See [the receipt-time evidence](validation/output/operational/deep_debug_20260907/external_receipt_timing/).
+The correction request was incomplete at that checkpoint; its later repair is
+recorded in the September 8 section above.
+
+### Completed TLS workload and deployment — 20:48 UTC
+
+The same unsupervised repaired dashboard PID completed 90 rounds / 4,320
+complete-JSON responses from 19:06:14 to 20:35:33 UTC, with zero request
+failures and a maximum latency of 8.005 seconds against the 15-second deadline.
+Health, status, and forecasts remained available. There were 64 unavailable
+dB/dt responses across eight rounds and eight unavailable network responses
+in the first round; all completed with HTTP 200. These data-availability gaps
+are not counted as timeouts or concealed by the successful transport result.
+The server was deliberately stopped afterward, exit 143. Source, process,
+and statistics were not reset during the workload.
+
+The tested source is deployed under the unchanged launchd configuration:
+dashboard PID 89275 / runs 4 and monitor PID 89363 / runs 7. The monitor startup
+cycle completed at 20:43:09, skipping all four pending issue-hour duplicates.
+The 120-assertion preservation check confirms all 2,120 forecast rows and all
+117 immutable columns are unchanged. Four observations matured and four were
+revised. A separate 17-assertion check preserves every prior external receipt's
+15 immutable columns: 49,667 prior rows retained, 38 new rows captured, and
+64 prior observation/score records updated. Scoring and timestamp semantics
+were not changed. Both launchd plist hashes and all 189 source hashes match.
+
+The post-reload independent replay passes 13,648 assertions, reproducing the
+persisted claim payload and the four latest causal histories using their
+preserved issuance-time NOAA vintage. A3 covers 941/1,198 outcomes (78.5476%),
+with 289 complete cycles, 14 days, zero qualifying storms, and the same
+24 integrity violations. The nominal 90% coverage requirements remain unmet.
+The forecast-log SHA-256 is
+`40587084d6e9727a807e16f2c65c9ffb9e881392e3ffe8686c4429ff03681754`.
+
+The deployed dashboard then completed five rounds / 240 requests without
+timeouts, unavailable data, or another restart. The strict readiness run against
+its documented status endpoint reports 162 PASS / 9 WARN / 1 FAIL, exit 1:
+the six historical fallback cycles remain the reported failure. Earlier
+wrong-endpoint diagnostic invocations are retained separately and are not
+product failures or successful audits. The receipt-time omission is still
+outside the readiness script's checks. The protected submission digest matches.
+
+See [deployment receipts](validation/output/operational/deep_debug_20260907/post_tls_reload/)
+and [the completed TLS workload](validation/output/operational/deep_debug_20260907/tls_runtime/).
+Monitoring continued on the frozen cadence; the external timing correction and
+the separate model-upgrade study were still unapproved at that checkpoint.
+Their later authorization and results are recorded above. The finite workload does
+not prove the initiating cause of historical native failures.
+
+### Earlier same-day verification, before the TLS change
+
+Final-source `Pkg.test()` passes **284,024 / 284,024 assertions**, the deterministic
+experiment passes, and the workspace development harness passes **226 checks /
+1 reviewed tolerance warning / 0 failures**. The run completed at approximately
+17:36 UTC with Julia 1.12.6, two threads, and
+`SOLARSINDY_REQUIRE_LOCAL_ARTIFACTS=1`; all six registered oracles ran, with zero
+skips. Package-test elapsed time was 18m22.3s. Source receipts remain unchanged.
+Both the initial missing-Sockets test failure and the earlier native app
+teardown failure are preserved; neither is counted as a pass.
+
+**Operational correction remains incomplete.** After the verified monitor's
+18:05 cycle, the dashboard exited unexpectedly at 18:07:03.892 UTC with a task-
+switch error in stderr. Launchd recovered it as PID 2118, runs 3. The monitor
+remained PID 1024. The initiating cause is unproved; passing tests and the short
+isolated timeout exercises do not establish sustained production stability.
+
+| Completed check | Result |
+|---|---:|
+| Final focused A3 claim suite | 166 assertions, PASS |
+| A3 calibration suite | 49 assertions, PASS |
+| Live forecast workflow | 990 assertions, PASS |
+| Retention recovery cases | 323 assertions, PASS |
+| 129-column / 100,004-occurrence conservation stress test | 407 assertions, PASS |
+| Standalone canonical dashboard | 1,618 assertions, PASS on two clean process exits |
+| Independent raw live-row oracle | 13,484 assertions, PASS |
+| Post-restart raw live-row oracle | 13,556 assertions, PASS |
+| Post-restart forecast preservation | 130 assertions, PASS |
+| Final paired history benchmark equivalence | 11 assertions, PASS |
+| Sockets declaration and compatibility checks | 58 assertions, PASS |
+| Fresh V2.2 serving identity | 832,368 rows, PASS |
+| Fresh V2.3 identity / innovation chain | 4,206 / 51,754 rows, exact agreement |
+| Fresh V2.4e identity | 4,518 rows / 15 fields, exact agreement |
+
+The focused retention/collector integration and final package suite also test
+that archival does not erase a claim failure. Source loading joins numeric cold
+segments with the hot log under the shared lock and rejects incomplete receipts,
+pending transactions, malformed metadata, and post-freeze missing identities.
+Existing receipts establish row/byte completeness, not authentication of all
+historical CSV contents.
+
+The restored base and hourly tables match the prior worktree's manifest digests
+`9dcbe8f2be5e1dcb1ca314628d9d2f900ae7ec73a129dffc10b3fcfe0d3b700b`
+and `1bff81e2da08134fd06f71d0a2e5bcc830f3cd890cc0cebe7823e7b0c7bc9ac3`.
+The final package run exercised all six registered local-data oracles instead
+of retaining the five historical skips. Its bundled dashboard contributes 1,619
+assertions, including the package-level fixture-presence assertion.
+
+On the fixed 2,104-row live snapshot, the independent calculation reproduces
+the complete claim payload, stored interval formulas and hit flags, newest
+causal histories, and pinned-weight centers. A3 coverage is still 0.7843803 on
+1,178 matured rows, with no qualifying storm. The reproduced defects do not
+explain this snapshot's undercoverage; the tests do not prove every possible
+implementation path defect-free.
+
+The history reader's final alternating-pair benchmark (three warmups, eleven
+pairs, four queries on 2,100 rows/129 columns, two threads) reduces median time
+from 260.95 to 118.51 ms and allocations from 187,966,064 to 25,456,496 bytes.
+Outputs are identical. The larger retention test uses one thread and measures
+8.438 s normal-retention and 3.152 s crash-recovery medians, with approximately
+1.91 GB and 0.384 GB allocated, respectively. These working-host measurements
+are not peak-memory or arbitrary-archive scaling guarantees.
+
+Strict live readiness after the 18:05 cycle reports **162 PASS / 9 WARN /
+1 FAIL**: six historical fallback cycles remain in its trailing 96-cycle
+availability window. The A3 audit additionally retains 24 cumulative integrity
+violations and failed coverage/sample gates. No threshold, tolerance, identity,
+cohort, or submitted artifact was changed. The reloaded monitor issued exactly
+four new rows at 18:05:00.005 and completed at 18:05:13. All 117 immutable prior
+columns are preserved. The new independent replay agrees with the deployed
+audit and the four causal histories; NOAA responses bracketing issuance are
+byte-identical. The 2,112-row log has 1,186 matured A3 rows, 931 hits (78.499%),
+and zero qualifying storms. Source/configuration checks pass for all 184 files,
+and the submitted-tree digest matches the initial receipt.
+
+[Evidence and reproducible checks](validation/output/operational/deep_debug_20260907/)
+and [the debug record](DEBUG_LOG.md) retain the exact limits and failure history.
+
+## Historical verification
+
+> **Current verification (2026-08-26).** The package now serves Operational
+> V2.4e and passes **283,460 assertions with 5 registered local-artifact skips
+> (283,465 total)**.
+> This includes **1,582/1,582** bundled-dashboard assertions, **979/979**
+> live-forecast assertions, **47/47** frozen live-calibration assertions, and
+> **51/51** prospective-claim assertions. The deterministic V2.4e experiment
+> passes, and the workspace development harness reports **225 PASS / 1 WARN /
+> 0 FAIL**. The sections below preserve the earlier V2.2 test history; they are
+> not the current served-product summary. The prospective suites verify
+> evidence integrity and conservative gates, not live calibration or storm
+> skill.
 
 ## Coverage
 
@@ -961,3 +1478,169 @@ collector tests cover both supported date layouts and the same complete-input ru
 | `examples/experiments.jl` | V2.4e serving and predecessor smoke completed; center -126.734 nT and band +/-31.857 nT for the bundled probe row |
 | `.agents/scripts/dev-harness-audit.sh .` | 221 checks completed, 1 existing tolerance advisory, 0 failures |
 | `julia --project=docs docs/make.jl` | exit 0; doctests, cross-references and HTML rendering completed |
+
+## Dashboard runtime crash isolation and V2.4e live check (2026-08-26)
+
+### Reproduction and control
+
+The dashboard's previous minimal-compilation launch produced five unplanned macOS crash reports.
+A sixth report was captured when that old process exited during its planned replacement; its
+process had started at 15:55 local time, before the installed launchd property list was updated at
+16:31:57. The five earlier reports ended in either `SIGSEGV` or `SIGBUS`, and all six entered Julia's
+interpreted execution path. The forecast monitor was a separate process and did not restart during
+this work.
+
+An isolated server using the deployed application, live log, two Julia threads and
+`--compile=min` exited 139 during a bounded 1,200-request mixed-endpoint run. Its terminal output
+included `attempt to switch to exited task`. The same server configuration, with only the
+minimal-compilation argument removed, completed 6,000 requests and remained healthy. After the
+normal-compilation launchd property list was installed, the production dashboard also completed
+6,000 mixed requests at concurrency 24 with one unchanged process identifier. No crash report has a
+process launch time at or after the replacement dashboard's 16:32:15 start.
+
+The isolated normal-compilation process used approximately 1.1 GiB RSS after the load; the
+minimal-compilation process used approximately 0.5 GiB shortly before it crashed. This is an
+explicit memory-for-stability tradeoff. The production service remained within the host's 24 GiB
+physical-memory capacity during the load and subsequent checks.
+
+### Verification results
+
+| Check | Result |
+|---|---|
+| CLI syntax and launch assertions | `bash -n` passed; 54 / 54 CLI smoke assertions passed; both CLI and launchd template reject every `--compile=` argument |
+| Launchd property lists | Repository template and installed dashboard property list both passed `plutil -lint`; installed arguments use `--startup-file=no` and the dashboard project without a compilation override |
+| Standalone dashboard suite | 1,581 / 1,581 pass |
+| Full package suite | 283,460 pass, 5 registered local-artifact skips, 283,465 total, 0 failures, 22m12.1s; bundled dashboard suite 1,582 and live-forecast workflow 979 |
+| Deterministic package experiment | PASS; V2.4e bundle probe center -126.734 nT and interval half-width 31.857 nT; predecessor smoke PASS |
+| Full serving-identity replay | Not rerun: the local `validation/output/operational/v2_4_rolling/learn_year_2025.csv` study table is absent and is one of the registered local-artifact skips. The previously recorded 4,518-row zero-difference result remains in this report; the current bundle probe and live digest checks passed |
+| Development harness | PASS 225, WARN 1, FAIL 0; the warning is the existing loose-tolerance advisory |
+| Strict live readiness audit | PASS 166, WARN 6, FAIL 0 with required, fresh dashboard API and strict regime-persistence mode after the 10:05 UTC live cycle |
+| Documentation build | Doctests, cross-references and HTML rendering completed with exit 0 |
+| Production HTTP load | 6,000 mixed requests at concurrency 24; the same dashboard process remained active, and three post-load health probes plus every primary endpoint passed |
+
+The monitor was restarted once at the scheduled 09:55 UTC slot to load the step-resolved reporter.
+Its interrupted predecessor was still selecting the interval policy and had not issued a horizon;
+the replacement process completed one valid four-horizon cycle, refreshed observations, passed the
+claim audit, and wrote the new report before sleeping for the next phase-balanced slot. It then woke
+at 10:05 UTC and completed the next four-horizon cycle on schedule with no monitor error.
+
+The strict readiness audit verified the exact served identity
+`v2.4+sindy20x11+superlearner10floor+conformal` and bundle-manifest digest
+`057aec0df488314cd682e212e9ba64233e2674a7c641d68b72aa729982093ede` in the newest cycle, with no
+fallback among the trailing 96 staged cycles. At the recorded live cutoff, the exact V2.4e cohort
+contained 784 matured rows, RMSE 10.92 nT and empirical 90%-target interval coverage 0.694. The
+separately identified A3 calibration shadow contained 86 matured rows across 11 complete cycles and
+two consecutive days, with provisional coverage 0.907 and width ratio 1.225; its day-block coverage
+interval was 0.692--1.000, its paired interval-score interval crossed zero, and no row reached Dst
+at or below -50 nT. Its integrity gate passed, but both the marginal-calibration and storm-skill
+claim flags remained false.
+
+The step-resolved same-row report used all 784 matured exact-V2.4e rows. V2.4e retained lower RMSE
+than static V2.2 at steps 1, 2, 3, 4, and 6, but not at step 7 (18.15 versus 17.92 nT; 33 rows).
+BurtonFull and O'Brien remained lower than V2.4e in the pooled comparison. These cohorts are short,
+quiet, and highly overlapping, so they are diagnostic evidence rather than a superiority result.
+
+The dashboard and live forecast endpoints named V2.4e as the served product. The `model_version=v2.1`
+field remains base-operator metadata; it is neither the served label nor the plotted forecast. The
+served V2.4e center and interval fields remained unchanged, the calibration shadow remained
+non-serving, and the submitted tree retained aggregate SHA-256
+`7dfd4556fe8b6f1ae133be80a9a878d255df4ea1b715ef273d257520e728ca74`.
+
+## V2.4e A3 issuance-snapshot deep-debug and live deployment (2026-08-30)
+
+### Reproduction and root cause
+
+The prospective A3 shadow reached 422 matured rows with 0.7393 pooled coverage,
+outside its frozen 0.88--0.92 gate, and every supported model step was below the
+0.85 floor. Direct arithmetic reproduced every stored endpoint exactly, but a
+cycle-order audit found one independent implementation defect. `cycle!` issued
+forecasts before `refresh_observations!`; although `issue_forecast` had already
+fetched the current causal Kyoto Dst snapshot, the A3 history helper read only
+the older persisted `observation_dst_nt` values. Newly matured or revised
+outcomes could therefore enter issuance history one cycle late.
+
+The repair passes the already-fetched `dst_times` and `dst_vals` to the helper,
+uses a finite current-snapshot value for a matching historical target, and falls
+back to the persisted value only when the snapshot lacks that target. Paired
+inputs, equal lengths, and finite values are required. The served center,
+served interval, product identity, alert path, A3 identity, widths, location
+rule, warm-up, and gate thresholds are unchanged.
+
+### Independent expectations and anti-false-test controls
+
+The regression fixture supplies correct current outcomes alongside stale and
+missing logged outcomes. The old implementation produced one error because it
+did not accept the causal-snapshot arguments; after the repair, the result is
+exactly equal to a clean-log oracle. Separate cases preserve strict prior-issue,
+target-maturity, served-identity, manifest, warm-up, and score behavior. Direct
+malformed-input checks show that an unpaired snapshot, mismatched vector lengths,
+and a non-finite snapshot value each fail closed as `unavailable:history_error`.
+
+An independent arithmetic oracle over the original 422-row prospective cohort
+gave zero maximum endpoint-formula error, 312 hits, 45 lower misses, and 65 upper
+misses. A current-snapshot retrospective replay changed only eight historical
+hit states. Later Kyoto revisions make that replay an intentionally conservative
+diagnostic rather than an exact reconstruction of every old issuance snapshot,
+but it is sufficient to show that the confirmed freshness defect does not
+explain the main undercoverage.
+
+### Verification results
+
+| Check | Result |
+|---|---|
+| Pre-repair focused reproduction | 973 assertions passed and the new regression errored on the unsupported snapshot arguments; exit 1 |
+| Repaired live-workflow suite | 980 / 980 pass |
+| Dedicated live-calibration suite | 47 / 47 pass |
+| Dedicated live-claim-audit suite | 51 / 51 pass |
+| Malformed snapshot boundary | unpaired, unequal-length, and non-finite cases all fail closed; exit 0 |
+| Source and test parsing | pass |
+| Full `Pkg.test()` | 283,461 pass, 5 registered local-artifact skips, 283,466 total, 0 failures; 30m01.7s |
+| `examples/experiments.jl` | PASS; V2.4e bundle probe center -126.734 nT and interval half-width 31.857 nT; predecessor smoke PASS |
+| `.agents/scripts/dev-harness-audit.sh .` | PASS 225, WARN 1, FAIL 0; the warning is the existing tolerance advisory |
+| Strict fresh/API readiness audit | PASS 166, WARN 6, FAIL 0; warnings are existing evidence boundaries |
+| Diff and debug-artifact checks | `git diff --check` clean; no temporary reproduction code or diagnostic print remained in modified paths |
+
+Five registered suite skips remain because their separately generated local
+identity/study artifacts are absent. The harness reports them explicitly; no
+test, tolerance, experiment, or audit was weakened to obtain a pass.
+
+### Live deployment and fresh-cycle oracle
+
+The prior daemon completed cycles 87 and 88 normally. At the planned 01:55 UTC
+replacement boundary it began cycle 89 and wrote four rows immediately before
+the restart command. The new process recognized that issue hour and skipped all
+four duplicates, so this overlap was not treated as deployment proof. The same
+replacement process then completed its unique cycle 2 at
+`2026-08-30T02:05:00.007Z`, issued all four horizons under exact V2.4e with no
+fallback, refreshed observations, passed retention and claim audits, and
+regenerated the comparison report.
+
+An independent replay of those four fresh rows, without calling the claim-audit
+endpoint helper, matched the recorded A3 history counts, location shifts, and
+both endpoints exactly: maximum location error 0, maximum endpoint error 0, and
+maximum history-count error 0. The current API reports health `ok`, a complete
+cycle, no outage, and zero fallbacks in the latest 24 exact-V2.4e cycles.
+
+At that cutoff, A3 has 480 canonical deployment rows, 438 matured rows, 99
+complete issue cycles, and five consecutive days. Its pooled coverage is
+0.7397, every supported step remains below 0.85, and its marginal and storm
+claims remain false. The current observed minimum is -32 nT, so there are still
+zero qualifying storm rows or events. The repaired implementation therefore
+remains shadow-only and was neither retuned nor promoted.
+
+### Measured resource boundary
+
+On the 1,332-row production log, seven warm helper calls took a median 39.37 ms,
+with a 223.19 ms maximum and 27.96 MiB median allocation. The repair adds one
+bounded in-memory lookup over an existing snapshot, no network call and no
+persistent resource. The old long-lived daemon returned from approximately
+1.18 GiB immediately after cycle work to approximately 177 MiB after six idle
+minutes with 206 open descriptors at both observations. This bounded observation
+rejects simple monotonic growth over that interval; it is not a general proof
+that no resource leak can exist. The replacement daemon held 1,274,752 KiB RSS
+and 203 open descriptors at both approximately four and ten idle minutes after
+its first unique cycle. That short flat sample is an operational observation,
+not a general leak or long-duration stability proof.
+
+The protected `submitted/` aggregate digest remained
+`7dfd4556fe8b6f1ae133be80a9a878d255df4ea1b715ef273d257520e728ca74`.

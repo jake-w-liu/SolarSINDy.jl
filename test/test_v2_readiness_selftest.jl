@@ -37,6 +37,63 @@ const AUDIT_PATH = normpath(joinpath(@__DIR__, "..", "validation", "operational"
     @test audit.SELFTEST_CHECK_COUNT[] >= audit.SELFTEST_MIN_CHECKS
     @test audit.SELFTEST_MIN_CHECKS >= 42
 
+    @testset "external scores require completed receipt before target" begin
+        # Hand-set errors 100, 3, and 4: only 3 and 4 have valid prospective receipts.
+        external = DataFrame(
+            source=fill("fixture", 4), issue_utc=fill("2026-09-07T09:00:00Z", 4),
+            fetched_utc=fill("2026-09-07T09:59:00Z", 4),
+            target_utc=["2026-09-07T10:00:00Z", "2026-09-07T11:00:00Z",
+                        "2026-09-07T12:00:00Z", "2026-09-07T13:00:00Z"],
+            receipt_completed_utc=Union{Missing,String}[
+                "2026-09-07T10:30:00Z", "2026-09-07T10:30:00Z",
+                "2026-09-07T10:30:00Z", missing],
+            lead_h=[1.0, 2.0, 3.0, 4.0], forecast_dst_nt=[100.0, 3.0, -4.0, 1000.0],
+            observed_dst_nt=[0.0, 0.0, 0.0, 0.0], abs_error_nt=[100.0, 3.0, 4.0, 1000.0],
+            forecast_cadence_min=fill(60.0, 4), issue_basis=fill("http_last_modified", 4),
+            source_url=fill("fixture", 4), raw_sha256=fill(repeat("a", 64), 4),
+            raw_path=fill("fixture.raw", 4), source_max_target_utc=fill("2026-09-07T13:00:00Z", 4),
+            row_role=fill("future_forecast", 4),
+            observed_time_utc=["2026-09-07T10:00:00Z", "2026-09-07T11:00:00Z",
+                              "2026-09-07T12:00:00Z", "2026-09-07T13:00:00Z"],
+            observed_gap_min=zeros(4), scored_utc=fill("2026-09-07T14:00:00Z", 4),
+        )
+        summary = only(eachrow(audit._external_dst_summary_from_log(external)))
+        @test (summary.n_rows, summary.n_scored, summary.n_eligible,
+               summary.n_late, summary.n_legacy, summary.n_invalid) == (4, 2, 2, 1, 1, 0)
+        @test summary.rmse_nt ≈ sqrt(25 / 2) rtol=2eps(Float64)
+        @test summary.mae_nt == 3.5
+        @test summary.max_receipt_lead_h == 1.5
+        legacy = select(external, Not(:receipt_completed_utc))
+        legacy_summary = only(eachrow(audit._external_dst_summary_from_log(legacy)))
+        @test legacy_summary.n_scored == 0
+        @test legacy_summary.n_legacy == 4
+        @test ismissing(legacy_summary.rmse_nt)
+        mktempdir() do dir
+            log_path, report_path = joinpath(dir, "external.csv"), joinpath(dir, "audit.md")
+            audit.CSV.write(log_path, external)
+            state = audit.AuditState()
+            audit.audit_external_dst_snapshots!(state; path=log_path, report=report_path)
+            @test any(c -> c.name == "external Dst timing exclusions" &&
+                           c.level == :warn, state.checks)
+            @test any(c -> c.name == "external Dst prospective score provenance" &&
+                           c.level == :fail, state.checks)
+            @test only(state.external_dst_metrics.n_scored) == 2
+            audit.write_report(state, report_path)
+            report = read(report_path, String)
+            @test occursin("Unknown completion", report)
+            @test occursin("strictly before target", report)
+            @test occursin("| fixture | 4 | 2 | 2 | 1.500 | 3.54 | 3.50 |", report)
+            external.receipt_completed_utc[2] = "2026-09-07T09:58:00Z"
+            audit.CSV.write(log_path, external)
+            invalid = audit.AuditState()
+            audit.audit_external_dst_snapshots!(invalid; path=log_path, report=report_path)
+            @test any(c -> c.name == "external Dst receipt chronology" &&
+                           c.level == :fail, invalid.checks)
+            @test only(invalid.external_dst_metrics.n_scored) == 1
+            @test only(invalid.external_dst_metrics.rmse_nt) == 4.0
+        end
+    end
+
     # Kyoto can remain on the same Dst anchor across consecutive issue hours while new L1
     # measurements arrive. Those are distinct forecasts. A repeated row inside one issue hour is
     # still a duplicate, matching the live append key exactly.

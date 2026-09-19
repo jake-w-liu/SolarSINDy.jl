@@ -14,6 +14,22 @@ include(joinpath(@__DIR__, "v2_4_serving_fixture.jl"))
 using .V24ServingFixture
 
 @testset "Live Forecast Verification Workflow" begin
+    @testset "Kyoto transport preserves TLS verification and deadlines" begin
+        calls = Ref(0)
+        response(url; kwargs...) = begin
+            calls[] += 1
+            @test kwargs[:socket_type_tls] === MbedTLS.SSLContext
+            @test !haskey(kwargs, :require_ssl_verification)
+            @test (kwargs[:connect_timeout], kwargs[:readtimeout]) == (15, 30)
+            @test kwargs[:retries] == 0
+            HTTP.Response(200, """[{"time_tag":"2026-01-01T00:00:00","dst":-10}]""")
+        end
+        times, values = _fetch_dst(; max_retries=1, fetch_fn=response)
+        @test calls[] == 1
+        @test times == [DateTime(2026, 1, 1)]
+        @test values == [-10.0]
+    end
+
     @testset "OMNI replay windows preserve independent driver and Dst support" begin
         t0 = DateTime(2026, 1, 1)
         plasma = DataFrame(
@@ -1560,6 +1576,61 @@ using .V24ServingFixture
         @test prepared.dst === dst
     end
 
+    @testset "Issue clock follows retrieval and exact upstream evidence survives parsing" begin
+        cfg = LiveVerifyConfig(; model=:v1)
+        finished = Ref(DateTime(2000))
+        prepared = prepare_issue_inputs(cfg; plasma_fn=() -> nothing, mag_fn=() -> nothing,
+            dst_fn=() -> (sleep(0.02); finished[]=now(UTC); nothing))
+        @test prepared.issue_time >= finished[]
+        fixed = DateTime(2026, 1, 1)
+        prepared = prepare_issue_inputs(cfg; issue_time=fixed,
+            plasma_fn=() -> nothing, mag_fn=() -> nothing, dst_fn=() -> nothing)
+        @test prepared.issue_time == fixed
+        wind = JSON3.write([(; time_tag=string(fixed + Minute(k)), active=true,
+            proton_speed=400.0 + k, proton_density=5.0, proton_temperature=100_000.0)
+            for k in 0:1])
+        mag = JSON3.write([(; time_tag=string(fixed + Minute(k)), active=true,
+            bx_gsm=1.0, by_gsm=2.0, bz_gsm=-3.0, bt=4.0) for k in 0:1])
+        dst = JSON3.write([(; time_tag=string(fixed), dst=-10.0)])
+        calls = String[]
+        response(url; kwargs...) = begin
+            push!(calls, url)
+            body = occursin("wind_1m", url) ? wind : occursin("mag_1m", url) ? mag : dst
+            HTTP.Response(200, body)
+        end
+        mktempdir() do directory
+            result = prepare_issue_inputs(cfg; snapshot_dir=directory, http_get=response)
+            @test result.plasma.speed == [400.0, 401.0]
+            @test result.mag.bz_gsm == [-3.0, -3.0]
+            @test result.dst == ([fixed], [-10.0])
+            @test length(calls) == 3
+            path = only(readdir(joinpath(directory, "issues"); join=true))
+            receipt = JSON3.read(read(path, String))
+            @test DateTime(receipt.issue_time_utc) == result.issue_time
+            @test receipt.explicit_replay_time === false
+            @test length(receipt.responses) == 3
+            for (item, expected) in zip(receipt.responses, (wind, mag, dst))
+                bytes = read(joinpath(directory, item.path))
+                @test bytes == collect(codeunits(expected))
+                @test bytes2hex(sha256(bytes)) == item.sha256
+                @test length(bytes) == item.bytes
+                @test DateTime(item.started_utc) <= DateTime(item.received_utc) <= result.issue_time
+            end
+            @test length(readdir(joinpath(directory, "retrievals"))) == 3
+            # Content-addressed inputs are immutable, and symlinks cannot redirect evidence.
+            raw_path = joinpath(directory, first(receipt.responses).path)
+            original = read(raw_path)
+            @test _persist_issue_bytes(raw_path, original) == raw_path
+            @test_throws ErrorException _persist_issue_bytes(raw_path, UInt8[0x00])
+            @test read(raw_path) == original
+            link = joinpath(directory, "link")
+            symlink(raw_path, link)
+            @test_throws ArgumentError _persist_issue_bytes(link, original)
+            @test_throws ErrorException prepare_issue_inputs(cfg; snapshot_dir=directory,
+                plasma_fn=() -> nothing, mag_fn=() -> nothing, dst_fn=() -> nothing)
+        end
+    end
+
     @testset "Forked forecast states share immutable model data and preserve predictions" begin
         t0 = DateTime(2026, 7, 15, 12)
         coefficients = joinpath(get_data_dir(), "real_sindy_discovery_coefficients.csv")
@@ -3044,6 +3115,7 @@ using .V24ServingFixture
                 latest_dst_time_utc=["2026-06-06T09:00:00", "2026-06-06T10:00:00"],
                 target_time_utc=["2026-06-06T11:00:00", "2026-06-06T12:00:00"],
                 model_version=fill(OPERATIONAL_V2_1_MODEL_VERSION, 2),
+                model_step_hours=[1, 2],
                 wall_clock_lead_hours=[2.0, 2.0],
                 horizon_hours=[2.0, 2.0],
                 pred_dst_nt=[-40.0, -45.0],
@@ -3061,6 +3133,7 @@ using .V24ServingFixture
                 served_pred_dst_ci95_nt=[-37.0, -40.0],
                 served_residual_dst_nt=[-1.0, 1.0],
                 served_observed_in_90ci=[true, true],
+                v2_2_stack_pred_dst_nt=[-46.0, -48.0],
                 sub_hourly_model_version=fill(V2_4_SERVED_TAIL_VERSION, 2),
                 v2_selected_component=["v2", "v2"],
                 persistence_dst_nt=[-39.0, -44.0],
@@ -3074,7 +3147,12 @@ using .V24ServingFixture
             @test occursin("Current served identity: V2.4e (`$(V2_4_SERVED_TAIL_VERSION)`)", text)
             @test occursin("V2.4e 90% interval coverage", text)
             @test occursin("| V2.4e | 2 |", text)
+            @test occursin("| Static V2.2 predecessor | 2 | 1.58 | 1.5 | -1.5 |", text)
             @test occursin("| V2.1 frozen-tail ablation | 2 |", text)
+            @test occursin("## Same-Row Model Comparison by Internal Step", text)
+            @test occursin("| 1 | V2.4e | 1 | 1.0 | 1.0 | -1.0 |", text)
+            @test occursin("| 1 | Static V2.2 predecessor | 1 | 2.0 | 2.0 | -2.0 |", text)
+            @test occursin("| 2 | V2.4e | 1 | 1.0 | 1.0 | 1.0 |", text)
             @test occursin("V2.1 frozen-tail pred", text)
             @test !occursin("V2.1 is the dashboard forecast", text)
 
@@ -3830,6 +3908,128 @@ using .V24ServingFixture
                                      observation_dst_nt=obs, latest_dst_nt=fill(-10.0, n),
                                      issue_time_utc=iss))
             @test _aci_interval_from_log(log, 0.0, 1; latest_dst=-10.0, pred_col=:v1_pred_dst_nt) === nothing
+        end
+    end
+
+    @testset "V2.4e A3 calibration shadow is exact-identity and availability causal" begin
+        @test _v2_4_calibration_shadow_width_scale(1) == 1.50
+        @test _v2_4_calibration_shadow_width_scale(2) == 1.20
+        @test _v2_4_calibration_shadow_width_scale(3) == 1.20
+        @test _v2_4_calibration_shadow_width_scale(4) == 1.20
+        @test _v2_4_calibration_shadow_width_scale(6) == 1.20
+        @test _v2_4_calibration_shadow_width_scale(7) == 1.20
+        @test_throws ArgumentError _v2_4_calibration_shadow_width_scale(5)
+        mktempdir() do dir
+            log = joinpath(dir, "log.csv")
+            base = DateTime(2026, 1, 1)
+            n = 35
+            issues = base .+ Hour.(0:n-1)
+            targets = issues .+ Hour(1)
+            point = fill(-10.0, n)
+            residuals = collect(1.0:n)
+            rows = DataFrame(
+                issue_time_utc=string.(issues),
+                latest_dst_time_utc=string.(issues),
+                target_time_utc=string.(targets),
+                model_step_hours=fill(1.0, n),
+                observation_dst_nt=point .+ residuals,
+                served_pred_dst_nt=point,
+                sub_hourly_model_version=fill(V2_4_SERVED_TAIL_VERSION, n),
+                v24_status=fill("ok", n),
+                v24_manifest_sha256=fill(
+                    V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256, n,
+                ),
+            )
+            CSV.write(log, rows)
+            cutoff = targets[end]
+            issue = cutoff + Hour(1)
+            shadow = _v2_4_calibration_shadow_from_log(
+                log, -10.0, -12.0, -7.0, 1, cutoff, issue,
+            )
+            @test shadow.status == "ok"
+            @test shadow.history_n == n
+            @test shadow.location == 23.5 # median of trailing residuals 12:35
+            @test shadow.lo == 10.5
+            @test shadow.hi == 18.0
+
+            wide = copy(rows)
+            wide[!, :unrelated_payload] = fill("unused,\"quoted\"", n)
+            CSV.write(log, wide)
+            @test _v2_4_calibration_shadow_from_log(
+                log, -10.0, -12.0, -7.0, 1, cutoff, issue,
+            ) == shadow
+
+            for invalid_history in (:fractional_step, :wrong_anchor, :nonfuture)
+                malformed = copy(rows)
+                if invalid_history == :fractional_step
+                    malformed.model_step_hours[1] = 1.1
+                elseif invalid_history == :wrong_anchor
+                    malformed.latest_dst_time_utc[1] = string(issues[1] - Hour(1))
+                else
+                    malformed.issue_time_utc[1] = malformed.target_time_utc[1]
+                end
+                CSV.write(log, malformed)
+                checked = _v2_4_calibration_shadow_from_log(
+                    log, -10.0, -12.0, -7.0, 1, cutoff, issue,
+                )
+                @test checked.status == "ok"
+                @test checked.history_n == n - 1
+                @test checked.location == 23.5 # The excluded first residual is outside the trailing 24.
+            end
+
+            # Issuance already holds the current causal Dst snapshot. Use it for
+            # newly matured and revised outcomes instead of the pre-refresh log.
+            stale = copy(rows)
+            allowmissing!(stale, :observation_dst_nt)
+            stale.observation_dst_nt[end-10:end] .= -1_000.0
+            stale.observation_dst_nt[end] = missing
+            CSV.write(log, stale)
+            current = _v2_4_calibration_shadow_from_log(
+                log, -10.0, -12.0, -7.0, 1, cutoff, issue;
+                dst_times=targets, dst_vals=point .+ residuals,
+            )
+            @test current == shadow
+
+            # A wrong-identity row and an exact-identity outcome beyond the issue-time cutoff cannot
+            # enter the current history, even though both observations are present in the snapshot.
+            contaminated = vcat(rows, rows[1:1, :], rows[2:2, :])
+            contaminated.sub_hourly_model_version[end-1] = V2_SERVED_TAIL_VERSION
+            contaminated.observation_dst_nt[end-1] = 10_000.0
+            contaminated.issue_time_utc[end] = string(issue - Minute(10))
+            contaminated.latest_dst_time_utc[end] = string(issue - Hour(1))
+            contaminated.target_time_utc[end] = string(issue + Hour(6))
+            contaminated.observation_dst_nt[end] = 20_000.0
+            CSV.write(log, contaminated)
+            unchanged = _v2_4_calibration_shadow_from_log(
+                log, -10.0, -12.0, -7.0, 1, cutoff, issue,
+            )
+            @test unchanged == shadow
+
+            wrong_manifest = copy(rows)
+            wrong_manifest.v24_manifest_sha256 .= "0"^64
+            CSV.write(log, wrong_manifest)
+            manifest_blocked = _v2_4_calibration_shadow_from_log(
+                log, -10.0, -12.0, -7.0, 1, cutoff, issue,
+            )
+            @test manifest_blocked.status == "warmup:0/30"
+
+            CSV.write(log, first(rows, 29))
+            warmup = _v2_4_calibration_shadow_from_log(
+                log, -10.0, -12.0, -7.0, 1, targets[29], issue,
+            )
+            @test warmup.status == "warmup:29/30"
+            @test ismissing(warmup.lo)
+
+            scored = DataFrame(
+                pred_dst_nt=[-10.0], pred_dst_ci05_nt=[-12.0], pred_dst_ci95_nt=[-8.0],
+                served_pred_dst_nt=[-10.0], served_pred_dst_ci05_nt=[-12.0],
+                served_pred_dst_ci95_nt=[-8.0],
+                v24_cal_shadow_status=["ok"], v24_cal_shadow_ci05_nt=[-13.0],
+                v24_cal_shadow_ci95_nt=[-7.0],
+            )
+            _score_row!(scored, 1, -12.5)
+            @test scored.v24_cal_shadow_observed_in_90ci[1]
+            @test !scored.served_observed_in_90ci[1]
         end
     end
 

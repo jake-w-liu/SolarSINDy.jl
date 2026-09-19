@@ -8,7 +8,7 @@
 # must equal the exported ridge + historical-residual calculation. Feature, scale, and quantile
 # drift is caught here.
 
-using Test, JSON3, Statistics, HTTP
+using Test, JSON3, Statistics, HTTP, Sockets
 
 const APPSRC = normpath(joinpath(@__DIR__, "..", "src"))
 # server.jl transitively includes forecaster.jl, dbdt.jl, notify.jl, network.jl, ... exactly
@@ -16,8 +16,106 @@ const APPSRC = normpath(joinpath(@__DIR__, "..", "src"))
 # auto-start the HTTP server on include.
 include(joinpath(APPSRC, "server.jl"))
 
+usgs_metadata(station="TST", product="adjusted") =
+    (intermagnet=(imo=(iaga_code=station, coordinates=[-77.0,39.0,0.0], name="Test"),
+        data_type=product, reported_orientation="XY", sampling_period=60),)
+
+@testset "Same-station USGS product fallback preserves quality and fails closed" begin
+    reference = DateTime(2026,9,19,12)
+    times = jdt.(collect(reference-Minute(39):Minute(1):reference))
+    payload(product; values=collect(0.:39.), station="FRD") =
+        (times=times, metadata=usgs_metadata(station,product),
+         values=[(metadata=(element="X",station=station),values=3 .* values),
+                 (metadata=(element="Y",station=station),values=4 .* values)])
+    adjusted = payload("adjusted"); variation = payload("variation")
+    @test _usable_usgs_response(adjusted,"FRD","adjusted";reference)
+    @test !_usable_usgs_response(adjusted,"CMO","adjusted";reference)
+    @test !_usable_usgs_response(variation,"FRD","adjusted";reference)
+    @test !_usable_usgs_response(adjusted,"FRD","adjusted";reference=reference+Minute(11))
+    @test !_usable_usgs_response(adjusted,"FRD","adjusted";reference=reference-Hour(1))
+    missing_data = merge(adjusted,(values=[(metadata=v.metadata,values=fill(nothing,40)) for v in adjusted.values],))
+    responses=Dict("adjusted"=>missing_data,"variation"=>variation)
+    calls=String[]
+    getter(url;kwargs...) = begin
+        push!(calls,url)
+        product=endswith(url,"type=adjusted") ? "adjusted" : "variation"
+        HTTP.Response(200,JSON3.write(responses[product]))
+    end
+    selected=_fetch_usgs_best("FRD",40;http_get=getter,reference)
+    @test _usgs_product(selected)=="variation"
+    @test length(calls)==2
+    nc=_compute_dbdt("FRD",40;fetch_fn=(s,m)->selected,reference)
+    @test nc.available && nc.current_dbdt==5 && nc.max30_dbdt==5
+    @test nc.product_fallback && !nc.calibrated && nc.data_type=="variation"
+    @test nc.geoelectric === nothing
+    @test _station_parse("FRD",selected;reference).data_type=="variation"
+    empty!(calls); responses["adjusted"]=adjusted
+    @test _usgs_product(_fetch_usgs_best("FRD",40;http_get=getter,reference))=="adjusted"
+    @test length(calls)==1
+    responses["adjusted"]=missing_data; responses["variation"]=payload("variation";station="CMO")
+    @test _fetch_usgs_best("FRD",40;http_get=getter,reference)===nothing
+    @test !_compute_dbdt("FRD",40;fetch_fn=(s,m)->merge(adjusted,(metadata=usgs_metadata("FRD","definitive"),)),reference).available
+    duplicate=merge(adjusted,(values=vcat(adjusted.values,[first(adjusted.values)]),))
+    @test !_usable_usgs_response(duplicate,"FRD","adjusted";reference)
+    @test_throws ArgumentError _fetch_usgs("FRD",40;data_type="unknown",http_get=getter)
+end
+
+@testset "Observed-station fallback is independent of forecast-model coverage" begin
+    calls = String[]
+    available = Set(["BRW"])
+    observed(; station, wait_timeout) = begin
+        push!(calls, station)
+        (station=station, available=station in available, current_dbdt=3.0)
+    end
+    network(; wait_timeout) = (stations=[(station="BRW",), (station="BOU",)],)
+    selected = dashboard_dbdt_nowcast(; nowcast_fn=observed, network_fn=network)
+    @test selected.station == "BRW" && selected.available
+    @test selected.station_selection == "network_fallback"
+    @test selected.preferred_stations == ["FRD", "CMO"]
+    @test calls == ["FRD", "CMO", "BOU", "BRW"]
+    empty!(calls); push!(available, "FRD")
+    selected = dashboard_dbdt_nowcast(; nowcast_fn=observed,
+        network_fn=(; kwargs...) -> error("a preferred observation needs no network fallback"))
+    @test selected.station == "FRD" && calls == ["FRD"]
+    empty!(calls); empty!(available)
+    selected = dashboard_dbdt_nowcast(; nowcast_fn=observed,
+        network_fn=(; kwargs...) -> (stations=[],))
+    @test !selected.available && calls == ["FRD", "CMO"]
+end
+
 struct _InterruptingSWPCText end
 Base.String(::_InterruptingSWPCText) = throw(InterruptException())
+
+@testset "Recorded claim assessment fails closed on missing, stale, or mismatched evidence" begin
+    mktempdir() do directory
+        log_path = joinpath(directory, "live_forecast_log.csv")
+        path = joinpath(directory, "v2_4_live_claim_status.json")
+        reference = DateTime(2026, 9, 19, 12)
+        @test !claim_audit_status(log_path; reference=reference).available
+        assessment = Dict(
+            "shadow_identity" => V2_4_CALIBRATION_SHADOW_MODEL_VERSION,
+            "shadow_config_sha256" => V2_4_CALIBRATION_SHADOW_CONFIG_SHA256,
+            "served_manifest_sha256" => V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256,
+            "generated_utc" => jdt(reference),
+            "integrity" => Dict("gate_pass" => false, "violations" => ["historical mismatch"]),
+            "marginal" => Dict("claim_ready" => false, "gates" => Dict("integrity" => false)),
+            "storm" => Dict("claim_ready" => false, "gates" => Dict("integrity" => false)))
+        write(path, JSON3.write(assessment))
+        result = claim_audit_status(log_path; reference=reference)
+        @test result.available && !result.assessment.integrity.gate_pass
+        @test result.assessment.integrity.violations == ["historical mismatch"]
+        @test !claim_audit_status(log_path; reference=reference + Minute(181)).available
+        assessment["marginal"]["claim_ready"] = true
+        write(path, JSON3.write(assessment))
+        @test !claim_audit_status(log_path; reference=reference).available
+        assessment["marginal"]["claim_ready"] = false
+        assessment["shadow_config_sha256"] = "incorrect"
+        write(path, JSON3.write(assessment))
+        @test !claim_audit_status(log_path; reference=reference).available
+        write(path, "{malformed")
+        @test !claim_audit_status(log_path; reference=reference).available
+    end
+end
 
 # ---- independent re-implementation of export_forecaster.jl's documented formula ----
 # forecast = expm1(zhat + q*s(x)); empirical score = mean(rn > cutoff); cap at log(2001).
@@ -49,7 +147,10 @@ function live_cycle_fixture(issue::DateTime;
                             v2_1_served_ci05=nothing, v2_2_stack_ci05=nothing,
                             driver_assumption=nothing, v2_2_status=nothing,
                             v24_status=nothing, v24_pred=nothing, v24_guard_applied=nothing,
-                            v24_projection_applied=nothing, v24_regime_cell=nothing)
+                            v24_projection_applied=nothing, v24_regime_cell=nothing,
+                            cal_shadow_status=nothing, cal_shadow_lo=nothing,
+                            cal_shadow_hi=nothing, cal_shadow_history_n=nothing,
+                            cal_shadow_location=nothing)
     requested = collect(LIVE_CYCLE_HORIZONS)
     targets = floor(issue, Hour) .+ Hour.(requested)
     lead = [(target - issue) / Millisecond(3_600_000) for target in targets]
@@ -111,6 +212,20 @@ function live_cycle_fixture(issue::DateTime;
     v24_projection_applied === nothing ||
         (frame[!, :v24_projection_applied] = expand(v24_projection_applied))
     v24_regime_cell === nothing || (frame[!, :v24_regime_cell] = expand(v24_regime_cell))
+    if cal_shadow_status !== nothing
+        frame[!, :v24_cal_shadow_model_version] =
+            fill(V2_4_CALIBRATION_SHADOW_MODEL_VERSION, length(requested))
+        frame[!, :v24_cal_shadow_config_sha256] =
+            fill(V2_4_CALIBRATION_SHADOW_CONFIG_SHA256, length(requested))
+        frame[!, :v24_manifest_sha256] =
+            fill(V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256, length(requested))
+        frame[!, :v24_cal_shadow_status] = expand(cal_shadow_status)
+        frame[!, :v24_cal_shadow_ci05_nt] = expand(cal_shadow_lo)
+        frame[!, :v24_cal_shadow_ci95_nt] = expand(cal_shadow_hi)
+        frame[!, :v24_cal_shadow_history_n] = expand(cal_shadow_history_n)
+        frame[!, :v24_cal_shadow_location_shift_nt] = expand(cal_shadow_location)
+        frame[!, :model_step_hours] = requested
+    end
     return frame
 end
 
@@ -163,7 +278,15 @@ const PAYLOADS = {
                    by_source: [{ source: MARKER, n: 3, coverage_90: 0.9 },
                                { source: "aci", n: 4, coverage_90: 0.88 }],
                    by_served_model: [{ product: MARKER, n: 3, coverage_90: 0.9, rmse_nt: 4.0 },
-                                     { product: "V2.4e", n: 4, coverage_90: 0.88, rmse_nt: 4.4 }] },
+                                     { product: "V2.4e", n: 4, coverage_90: 0.88, rmse_nt: 4.4 }],
+                   calibration_shadow: { current_status: "ok", collecting: true,
+                     n_verified: 0, issue_cycles: 0, calendar_days: 0, consecutive_days: 0,
+                     coverage_90: null,
+                     n_storm_rows: 0, marginal_claim_ready: false, storm_skill_claim_ready: false,
+                     marginal_minimums: { consecutive_days: 30, issue_cycles: 500, rows: 2000,
+                                          rows_per_supported_step: 400 },
+                     storm_minimums: { independent_events: 5, rows: 200,
+                                       rows_per_reported_step: 30 } } },
     upstream: { available: true,
                 solar_wind: { available: true, speed_kms: 520.0, bz_gsm_nt: -12.0, bt_nt: 14.0,
                               density_cm3: 6.0, mag_time_utc: "@@ISSUE@@" },
@@ -172,6 +295,7 @@ const PAYLOADS = {
                 alerts: [{ product_id: MARKER, issue_utc: "@@ISSUE@@",
                            summary: "geomagnetic storm " + MARKER }] },
     upstream_status: { available: true, elevated: true,
+                       kp_stale: false, scales_stale: false, mag_stale: false, plasma_stale: false,
                        reasons: ["NOAA G" + MARKER + " geomagnetic storm"] },
   },
   "/api/forecast": {
@@ -184,7 +308,8 @@ const PAYLOADS = {
     horizons: [{ target_utc: "2026-06-26T07:00:00Z", horizon_hours: 1.0, pred_dst_nt: -70.0,
                  ci05_dst_nt: -95.0, ci95_dst_nt: -45.0, severity_dst_nt: -75.0,
                  severity_ci05_dst_nt: -105.0, severity_ci05_source: "v2_1_served",
-                 interval_source: MARKER }],
+                 interval_source: MARKER, v24_cal_shadow_status: "ok",
+                 v24_cal_shadow_ci05_nt: -110.0, v24_cal_shadow_ci95_nt: -30.0 }],
   },
   "/api/history": { hours: 72, coverage_90: 0.9, rmse_nt: 4.2,
                     rows: [{ target_utc: "@@ISSUE@@", observed_dst_nt: -40.0, pred_dst_nt: -42.0,
@@ -214,9 +339,10 @@ const V2_1_DRIVER_TOKEN =
     "ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_" *
     "inertia_blend_then_state_inertia_then_extreme_inertia_guard"
 
+# Compile independent groups separately; the outer testset still collects every result.
 @testset verbose=true "operational app" begin
 
-    @testset "forecaster <-> export golden-vector contract (FRD + CMO)" begin
+    @eval @testset "forecaster <-> export golden-vector contract (FRD + CMO)" begin
         # a realistic active-but-not-extreme trailing dB/dt history
         recent = collect(range(2.0, 14.0; length=30)) .+ 0.0
         for (station, V, Bz) in (("FRD", 520.0, -8.0), ("CMO", 600.0, -12.0))
@@ -252,7 +378,7 @@ const V2_1_DRIVER_TOKEN =
         end
     end
 
-    @testset "offline artifact regression vectors and numerical cap" begin
+    @eval @testset "offline artifact regression vectors and numerical cap" begin
         quiet = fill(0.5, 30)
         storm = collect(range(20.0, 120.0; length=30))
         q = forecast_dbdt(quiet, 380.0, 1.0; station="FRD", offline_replay=true)
@@ -270,7 +396,7 @@ const V2_1_DRIVER_TOKEN =
         @test isfinite(b.ub90_dbdt) && b.ub90_dbdt <= 2001.0
     end
 
-    @testset "dB/dt forecast requires a contiguous 30-minute history" begin
+    @eval @testset "dB/dt forecast requires a contiguous 30-minute history" begin
         @test forecast_dbdt(fill(2.0, 29), 420.0, -3.0;
                             station="FRD", offline_replay=true) === nothing
         invalid = fill(2.0, 30); invalid[10] = NaN
@@ -295,7 +421,7 @@ const V2_1_DRIVER_TOKEN =
                                          station="FRD", offline_replay=true) === nothing
     end
 
-    @testset "per-station cache returns the right model" begin
+    @eval @testset "per-station cache returns the right model" begin
         # loading CMO then FRD must not return CMO's model for FRD (the prior Ref-vs-Dict bug)
         cmo = load_forecaster(; station="CMO")
         frd = load_forecaster(; station="FRD")
@@ -304,7 +430,7 @@ const V2_1_DRIVER_TOKEN =
         @test Float64.(cmo.beta) != Float64.(frd.beta)
     end
 
-    @testset "forecaster thresholds are positive, integral, and Int-representable" begin
+    @eval @testset "forecaster thresholds are positive, integral, and Int-representable" begin
         artifact(thresholds) = (
             artifact_schema_version=3,
             station="FRD",
@@ -338,7 +464,7 @@ const V2_1_DRIVER_TOKEN =
         @test !_valid_forecaster_threshold(true)
     end
 
-    @testset "SWPC row parsing tolerates partial public-feed rows" begin
+    @eval @testset "SWPC row parsing tolerates partial public-feed rows" begin
         idx = Dict("speed" => 2, "density" => 3)
         @test _swpc_row_field(idx, ["2026-06-26T00:00:00Z", "460.5", "1.7"], "speed") == 460.5
         @test _swpc_row_field(idx, ["2026-06-26T00:00:00Z", "460.5"], "density") === nothing
@@ -350,7 +476,7 @@ const V2_1_DRIVER_TOKEN =
         @test_throws InterruptException _swpc_dt(_InterruptingSWPCText())
     end
 
-    @testset "external timestamps are exact UTC values" begin
+    @eval @testset "external timestamps are exact UTC values" begin
         @test parse_dt("2026-08-24T01:02:03") == DateTime(2026, 8, 24, 1, 2, 3)
         @test parse_dt("2026-08-24T01:02:03Z") == DateTime(2026, 8, 24, 1, 2, 3)
         @test parse_dt("2026-08-24T01:02:03.1Z") == DateTime(2026, 8, 24, 1, 2, 3, 100)
@@ -365,7 +491,7 @@ const V2_1_DRIVER_TOKEN =
         @test _swpc_dt(Dict("unexpected" => "object")) === missing
     end
 
-    @testset "SWPC alert parsing is UTF-8 safe and isolates malformed records" begin
+    @eval @testset "SWPC alert parsing is UTF-8 safe and isolates malformed records" begin
         # Byte-safe summary extraction: multibyte messages must not throw (StringIndexError) or
         # truncate mid-character. A raw byte index (nl-1) or a character-count slice (length) does.
         @test _alert_summary("WARNING: T² index high") == "WARNING: T² index high"   # no newline, multibyte tail
@@ -398,7 +524,7 @@ const V2_1_DRIVER_TOKEN =
         @test _alerts_from(Any[], 6) == NamedTuple[]
     end
 
-    @testset "forecast API exposes upgraded V2 as the product forecast" begin
+    @eval @testset "forecast API exposes upgraded V2 as the product forecast" begin
         issue = now(UTC) - Minute(10)
         df = live_cycle_fixture(
             issue;
@@ -507,7 +633,7 @@ const V2_1_DRIVER_TOKEN =
         @test nrow(verified_rows(missing_anchor)) == 3
     end
 
-    @testset "bind settings reject an unrendered launchd placeholder" begin
+    @eval @testset "bind settings reject an unrendered launchd placeholder" begin
         # A hand-copied plist whose `__SWM_PORT__` was never replaced reached
         # `parse(Int, "__SWM_PORT__")`, and launchd turned that ArgumentError into a sixty-second
         # crash loop diagnosable only from a stack trace. The failure has to name the setting and
@@ -551,7 +677,7 @@ const V2_1_DRIVER_TOKEN =
         end
     end
 
-    @testset "static file serving is traversal-guarded" begin
+    @eval @testset "static file serving is traversal-guarded" begin
         ok = serve_static("/index.html")
         @test ok.status == 200
         # Any path containing ".." is rejected with 403 before path resolution; an escape must
@@ -576,7 +702,7 @@ const V2_1_DRIVER_TOKEN =
         end
     end
 
-    @testset "exported offline model self-consistency" begin
+    @eval @testset "exported offline model self-consistency" begin
         # The residual grid must be sorted and its empirical 0.90 quantile finite.
         for station in ("FRD", "CMO")
             m = load_forecaster(; station=station)
@@ -594,7 +720,7 @@ const V2_1_DRIVER_TOKEN =
         end
     end
 
-    @testset "geoelectric: layered-earth surface impedance (Wait recursion)" begin
+    @eval @testset "geoelectric: layered-earth surface impedance (Wait recursion)" begin
         mu0 = 4e-7 * pi; w = 2pi * 1e-3
         ha(rho) = sqrt(im * w * mu0 * rho)                  # uniform half-space impedance
         rho_app(Z, ww) = abs2(Z) / (ww * mu0)               # MT apparent resistivity
@@ -617,7 +743,7 @@ const V2_1_DRIVER_TOKEN =
         @test_throws ArgumentError geoelectric_field([0.0, 1.0], [0.0, Inf], 60.0)
     end
 
-    @testset "causal half-space E-field: exact ramp response and sinusoid amplitude" begin
+    @eval @testset "causal half-space E-field: exact ramp response and sinusoid amplitude" begin
         mu0 = 4e-7 * pi
         dt = 60.0; nwin = 121; rho = 1000.0
         tt = collect(0:nwin-1)
@@ -654,7 +780,7 @@ const V2_1_DRIVER_TOKEN =
         @test_throws ArgumentError causal_halfspace_efield([0.0, 1.0], [0.0], 60.0)
     end
 
-    @testset "dB/dt bands preserve published numeric thresholds without risk labels" begin
+    @eval @testset "dB/dt bands preserve published numeric thresholds without risk labels" begin
         expected = [
             (0.0, 0, "Below 18 nT/min"),
             (17.999, 0, "Below 18 nT/min"),
@@ -676,7 +802,7 @@ const V2_1_DRIVER_TOKEN =
         @test !isdefined(@__MODULE__, :geo_tier)
     end
 
-    @testset "Phase D: storm-replay endpoint payload" begin
+    @eval @testset "Phase D: storm-replay endpoint payload" begin
         dir = mktempdir()
         log_path = joinpath(dir, "forecast_log.csv")        # build_storm_replay reads siblings of this
         # No report yet -> available=false, never throws.
@@ -706,7 +832,7 @@ const V2_1_DRIVER_TOKEN =
         end
     end
 
-    @testset "offline dB/dt replay flags out-of-validated-range / saturated inputs" begin
+    @eval @testset "offline dB/dt replay flags out-of-validated-range / saturated inputs" begin
         # A merely quiet-to-mild dB/dt history replays within the validated range.
         normal = forecast_dbdt(fill(2.0, 30), 420.0, -3.0;
                                station="FRD", offline_replay=true)
@@ -739,7 +865,7 @@ const V2_1_DRIVER_TOKEN =
         end
     end
 
-    @testset "RTSW solar-wind parser: named keys, active flag, null/out-of-bounds rejection" begin
+    @eval @testset "RTSW solar-wind parser: named keys, active flag, null/out-of-bounds rejection" begin
         # Captured-schema sample of /json/rtsw/rtsw_mag_1m.json: array of OBJECTS, interleaved
         # spacecraft (SOLAR1/ACE), duplicate time_tags, deliberately out of order. The parser must
         # select by named keys + newest time_tag, prefer active=true, and skip null/out-of-bounds.
@@ -790,7 +916,7 @@ const V2_1_DRIVER_TOKEN =
         @test _rtsw_field(nonfinite_row, :proton_speed) == 461.0
     end
 
-    @testset "latest_cycle keys on issue epoch, not solar-wind vintage (L1 stall)" begin
+    @eval @testset "latest_cycle keys on issue epoch, not solar-wind vintage (L1 stall)" begin
         # Two hourly issue cycles that share ONE frozen solar-wind vintage (the L1-stall pattern):
         # keying on that vintage would merge them; keying on issue time must serve only the newest.
         sw_vintage = now(UTC) - Hour(3)
@@ -833,7 +959,7 @@ const V2_1_DRIVER_TOKEN =
         @test !hasproperty(fc, :subhour_trajectory)
     end
 
-    @testset "latest_cycle does not merge restart cycles across an hour boundary" begin
+    @eval @testset "latest_cycle does not merge restart cycles across an hour boundary" begin
         boundary = floor(now(UTC), Hour)
         old_issue = boundary - Minute(1)
         new_issue = boundary + Minute(1)
@@ -845,7 +971,7 @@ const V2_1_DRIVER_TOKEN =
         @test _valid_live_cycle(cyc)
     end
 
-    @testset "live cycle rejects widely separated retries within one issue hour" begin
+    @eval @testset "live cycle rejects widely separated retries within one issue hour" begin
         issue = DateTime(2026, 7, 15, 12, 1)
         spread = live_cycle_fixture(issue)
         spread.issue_time_utc_dt[end] += Minute(6)
@@ -856,7 +982,7 @@ const V2_1_DRIVER_TOKEN =
         @test !_valid_live_cycle(spread)
     end
 
-    @testset "latest cycle requires the full horizon set and common metadata" begin
+    @eval @testset "latest cycle requires the full horizon set and common metadata" begin
         issue = now(UTC) - Minute(10)
         valid = live_cycle_fixture(issue)
         @test _valid_live_cycle(valid)
@@ -907,7 +1033,7 @@ const V2_1_DRIVER_TOKEN =
         end
     end
 
-    @testset "a per-row-coherent cycle is served; an incoherent one is not" begin
+    @eval @testset "a per-row-coherent cycle is served; an incoherent one is not" begin
         issue = now(UTC) - Minute(10)
         mixed_labels = [CURRENT_V2_SERVED_MODEL_VERSION, CURRENT_V2_SERVED_MODEL_VERSION,
                         CURRENT_V2_SERVED_MODEL_VERSION, STACK_V2_SERVED_MODEL_VERSION]
@@ -952,7 +1078,7 @@ const V2_1_DRIVER_TOKEN =
         end
     end
 
-    @testset "the live interval method names the cycle that is published" begin
+    @eval @testset "the live interval method names the cycle that is published" begin
         # The calibration panel states the interval method the live product is issued under. It read
         # that as one common field across the cycle's horizons and from the newest issue hour, and
         # per-row disclosure invalidated both readings. A cycle whose super-learner stage acted on
@@ -1053,7 +1179,7 @@ const V2_1_DRIVER_TOKEN =
         @test isempty(unpublishable.current_interval_sources)
     end
 
-    @testset "an incomplete newest cycle falls back to the newest complete one" begin
+    @eval @testset "an incomplete newest cycle falls back to the newest complete one" begin
         issue = now(UTC) - Minute(10)
         previous = live_cycle_fixture(issue - Hour(1);
                                       served_pred=-40.0, served_lo=-55.0, served_hi=-25.0)
@@ -1120,7 +1246,7 @@ const V2_1_DRIVER_TOKEN =
         @test build_forecast(stale_fallback).available == false
     end
 
-    @testset "the served cycle's published numbers are the logged ones" begin
+    @eval @testset "the served cycle's published numbers are the logged ones" begin
         # The cycle-selection change alters WHICH cycle is published and WHETHER it is published. It
         # must not touch a published value: every number below is the exact Float64 the log carries.
         issue = now(UTC) - Minute(10)
@@ -1138,7 +1264,7 @@ const V2_1_DRIVER_TOKEN =
         @test st.latest_observation.dst_nt === -20.0
     end
 
-    @testset "staleness gate: expired cycle suppresses live status and alerts" begin
+    @eval @testset "staleness gate: expired cycle suppresses live status and alerts" begin
         old = now(UTC) - Day(10)
         df = DataFrame(
             issue_time_utc_dt = [old], latest_solar_wind_utc_dt = [old],
@@ -1163,7 +1289,7 @@ const V2_1_DRIVER_TOKEN =
         @test st2.available == true && st2.stale == false && st2.expired == false
     end
 
-    @testset "served pipeline labels and depth-safe severity" begin
+    @eval @testset "served pipeline labels and depth-safe severity" begin
         iss = now(UTC) - Minute(20)
         # The super-learner label is the current product label; the two earlier labels remain
         # acceptable because the served stage falls back through them and discloses it per row.
@@ -1216,7 +1342,7 @@ const V2_1_DRIVER_TOKEN =
         @test build_status(legacy).threat.point_min_dst_nt == -40.0
     end
 
-    @testset "the watch tier is taken on the depth-safe center, not the served band" begin
+    @eval @testset "the watch tier is taken on the depth-safe center, not the served band" begin
         # Reproduces the escalation the stack stage could otherwise drop. Same physics, two products:
         # the V2.1 operator warned at -95 nT with a [-105, -85] band, and the stack reports a shallower
         # -88 nT with the band shifted up to [-98, -78]. The point tier is depth-safe already, but a
@@ -1284,7 +1410,7 @@ const V2_1_DRIVER_TOKEN =
         @test !occursin("function v24_serving_depth_safe_center", api_source)
     end
 
-    @testset "the watch edge is the deepest predecessor edge, not the served band shifted" begin
+    @eval @testset "the watch edge is the deepest predecessor edge, not the served band shifted" begin
         # The band changed source with the super-learner: a V2.4e row carries the depth-stratified
         # conformal half-width, which in the shallow bins is narrower than every band the earlier
         # products published. Shifting the served edge down by the amount the point was lowered
@@ -1350,7 +1476,7 @@ const V2_1_DRIVER_TOKEN =
         end
     end
 
-    @testset "the forecast payload exposes the alerting center per horizon" begin
+    @eval @testset "the forecast payload exposes the alerting center per horizon" begin
         iss = now(UTC) - Minute(20)
         df = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
                                 served_pred=-88.0, served_lo=-98.0, served_hi=-78.0,
@@ -1409,7 +1535,91 @@ const V2_1_DRIVER_TOKEN =
         end
     end
 
-    @testset "the product name and driver assumption come from the served row" begin
+    @eval @testset "the calibration shadow is visible but never served" begin
+        iss = now(UTC) - Minute(20)
+        df = live_cycle_fixture(
+            iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            served_pred=-25.0, served_lo=-35.0, served_hi=-15.0,
+            observations=-25.0, v24_status="ok", v24_pred=-25.0,
+            cal_shadow_status="ok", cal_shadow_lo=-40.0, cal_shadow_hi=-10.0,
+            cal_shadow_history_n=100, cal_shadow_location=2.0,
+        )
+        forecast = build_forecast(df)
+        @test forecast.available
+        for horizon in forecast.horizons
+            @test horizon.pred_dst_nt == -25.0
+            @test horizon.ci05_dst_nt == -35.0
+            @test horizon.ci95_dst_nt == -15.0
+            @test horizon.v24_cal_shadow_status == "ok"
+            @test horizon.v24_cal_shadow_ci05_nt == -40.0
+            @test horizon.v24_cal_shadow_ci95_nt == -10.0
+            @test horizon.v24_cal_shadow_history_n == 100.0
+        end
+        shadow = calibration_summary(df).calibration_shadow
+        @test shadow.collecting
+        @test shadow.scope == "prospective_shadow_only_not_served"
+        @test shadow.served_manifest_sha256 ==
+              V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256
+        @test shadow.n_verified == length(LIVE_CYCLE_HORIZONS)
+        @test shadow.coverage_90 == 1.0
+        @test shadow.issue_cycles == 1
+        @test shadow.consecutive_days == 1
+        @test shadow.supported_steps == [1, 2, 3, 4, 6, 7]
+        @test shadow.supported_step_min_rows == 0
+        @test shadow.n_storm_rows == 0
+        @test !shadow.marginal_claim_ready
+        @test !shadow.storm_skill_claim_ready
+
+        shadow_on_fallback = copy(df)
+        shadow_on_fallback.v24_status .= "fallback:deployment_absent"
+        @test calibration_summary(shadow_on_fallback).calibration_shadow.n_verified == 0
+
+        shadow_on_predecessor = copy(df)
+        shadow_on_predecessor.sub_hourly_model_version .= STACK_V2_SERVED_MODEL_VERSION
+        @test calibration_summary(shadow_on_predecessor).calibration_shadow.n_verified == 0
+
+        shadow_on_wrong_manifest = copy(df)
+        shadow_on_wrong_manifest.v24_manifest_sha256 .= "0"^64
+        wrong_manifest_summary = calibration_summary(shadow_on_wrong_manifest).calibration_shadow
+        @test !wrong_manifest_summary.configured
+        @test wrong_manifest_summary.n_verified == 0
+
+        pre_shadow = live_cycle_fixture(
+            iss - Hour(2); served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            served_pred=-25.0, served_lo=-35.0, served_hi=-15.0,
+            observations=-25.0, v24_status="ok", v24_pred=-25.0,
+            cal_shadow_status="ok", cal_shadow_lo=-40.0, cal_shadow_hi=-10.0,
+            cal_shadow_history_n=100, cal_shadow_location=2.0,
+        )
+        for column in (:v24_cal_shadow_model_version, :v24_cal_shadow_config_sha256,
+                       :v24_cal_shadow_status, :v24_cal_shadow_ci05_nt,
+                       :v24_cal_shadow_ci95_nt)
+            allowmissing!(pre_shadow, column)
+            pre_shadow[!, column] .= missing
+        end
+        mixed_schema = vcat(pre_shadow, df)
+        mixed_shadow = calibration_summary(mixed_schema).calibration_shadow
+        @test mixed_shadow.configured
+        @test mixed_shadow.n_verified == length(LIVE_CYCLE_HORIZONS)
+
+        warming = live_cycle_fixture(
+            iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            served_pred=-25.0, served_lo=-35.0, served_hi=-15.0,
+            observations=-25.0, v24_status="ok", v24_pred=-25.0,
+            cal_shadow_status=["ok", "ok", "warmup:16/30", "warmup:13/30"],
+            cal_shadow_lo=[-40.0, -40.0, missing, missing],
+            cal_shadow_hi=[-10.0, -10.0, missing, missing],
+            cal_shadow_history_n=[100, 100, 16, 13],
+            cal_shadow_location=[2.0, 2.0, missing, missing],
+        )
+        warming_shadow = calibration_summary(warming).calibration_shadow
+        @test warming_shadow.collecting
+        @test !warming_shadow.current_cycle_ready
+        @test warming_shadow.n_verified == 2
+        @test warming_shadow.issue_cycles == 0
+    end
+
+    @eval @testset "the product name and driver assumption come from the served row" begin
         iss = now(UTC) - Minute(20)
         served = build_status(live_cycle_fixture(iss;
             served_model=CURRENT_V2_SERVED_MODEL_VERSION,
@@ -1460,7 +1670,7 @@ const V2_1_DRIVER_TOKEN =
         @test occursin("issued centers as a visual guide", app_source)
     end
 
-    @testset "a cycle whose stack stage healed mid-cycle stays available" begin
+    @eval @testset "a cycle whose stack stage healed mid-cycle stays available" begin
         # The stack is loaded per issuance, so the four horizons of one cycle can legitimately carry
         # different accepted labels. Refusing such a cycle would blank the dashboard and suppress its
         # alerts over a per-row degradation that the log discloses, which reads as an all-clear.
@@ -1494,7 +1704,7 @@ const V2_1_DRIVER_TOKEN =
         @test build_forecast(unknown).available == false
     end
 
-    @testset "verified rows are counted per served pipeline" begin
+    @eval @testset "verified rows are counted per served pipeline" begin
         # Verified rows accumulate across served pipelines. Presenting them pooled reports a record
         # earned by the previous pipeline as the current product's record.
         now0 = floor(now(UTC), Hour)
@@ -1521,7 +1731,7 @@ const V2_1_DRIVER_TOKEN =
         @test sum(b.n for b in cal.by_served_model) == cal.n_verified
     end
 
-    @testset "the health endpoint states which product is served" begin
+    @eval @testset "the health endpoint states which product is served" begin
         # A fresh log that has silently reverted to the previous served pipeline is not a healthy
         # deployment, so the identity and the trailing fallback rate belong beside the freshness.
         now0 = floor(now(UTC), Hour)
@@ -1555,7 +1765,7 @@ const V2_1_DRIVER_TOKEN =
         @test build_served_health(DataFrame()).cycles_considered == 0
     end
 
-    @testset "health survives a trailing window that spans the shadow-schema change" begin
+    @eval @testset "health survives a trailing window that spans the shadow-schema change" begin
         # A build carrying the shadow columns is deployed onto a log that is already being appended
         # to, so for as long as the trailing window is, that window straddles the schema change and
         # the earlier cycles carry no shadow columns at all. Those fields read back as `missing`, and
@@ -1610,7 +1820,7 @@ const V2_1_DRIVER_TOKEN =
         @test blind.served_product === nothing
     end
 
-    @testset "a mid-cycle stage change still names the stage the cycle was served by" begin
+    @eval @testset "a mid-cycle stage change still names the stage the cycle was served by" begin
         # The four horizons of one cycle can carry different accepted labels and therefore different
         # driver-assumption tokens. Reading the assumption as a common field of the cycle finds no
         # single value and reports it as never recorded, which describes a logging failure rather than
@@ -1646,7 +1856,7 @@ const V2_1_DRIVER_TOKEN =
         @test occursin("static regime stack", build_status(whole).lead_time.driver_assumption)
     end
 
-    @testset "served pipeline label exposed from sub_hourly_model_version" begin
+    @eval @testset "served pipeline label exposed from sub_hourly_model_version" begin
         iss = now(UTC) - Minute(20)
         df = live_cycle_fixture(iss)
         fc = build_forecast(df); st = build_status(df)
@@ -1658,7 +1868,7 @@ const V2_1_DRIVER_TOKEN =
         @test !build_forecast(df2).available                         # served label is required
     end
 
-    @testset "missing log degrades gracefully; NaN hours falls back to 72" begin
+    @eval @testset "missing log degrades gracefully; NaN hours falls back to 72" begin
         missing_path = joinpath(mktempdir(), "does_not_exist.csv")
         _LOG_CACHE[] = nothing
         g = get_log(missing_path)
@@ -1696,7 +1906,7 @@ const V2_1_DRIVER_TOKEN =
         _LOG_CACHE[] = nothing                                      # leave the cache clean for other tests
     end
 
-    @testset "health endpoint requires one complete, current product cycle" begin
+    @eval @testset "health endpoint requires one complete, current product cycle" begin
         function write_cycle(path, issue; keep=1:length(LIVE_CYCLE_HORIZONS))
             raw = live_cycle_fixture(issue)[collect(keep), :]
             rename!(raw,
@@ -1733,7 +1943,7 @@ const V2_1_DRIVER_TOKEN =
         _LOG_CACHE[] = nothing
     end
 
-    @testset "warmup compiles and caches endpoint paths without throwing" begin
+    @eval @testset "warmup compiles and caches endpoint paths without throwing" begin
         # Present log: warm-up must prime the get_log cache so the first request after
         # the listener opens does not pay the CSV parse while holding _LOG_LOCK.
         dir = mktempdir()
@@ -1777,16 +1987,162 @@ const V2_1_DRIVER_TOKEN =
         _LATEST_CYCLE_CACHE[] = nothing; _HISTORY_CACHE[] = nothing
     end
 
-    @testset "dashboard launch bounds cold-request compilation" begin
+    @eval @testset "server shutdown releases its background timers" begin
+        # Julia retains every timer with a waiting task in uvhandles. Inspecting those
+        # handles catches orphan work independently of the server's cleanup implementation.
+        open_timers() = lock(Base.preserve_handle_lock) do
+            Set(h for h in keys(Base.uvhandles) if h isa Timer && isopen(h))
+        end
+        mktempdir() do dir
+            withenv("SWM_WEBHOOK_URL" => "") do
+                log_path = joinpath(dir, "absent.csv")
+                baseline = open_timers()
+                for stop_server in (close, HTTP.forceclose)
+                    server = start_server(; host="127.0.0.1", port=0,
+                                          log_path=log_path, blocking=false)
+                    owned = setdiff(open_timers(), baseline)
+                    try
+                        @test length(owned) == 1
+                        port = Int(last(getsockname(server.listener.server)))
+                        health = HTTP.get("http://127.0.0.1:$port/api/health";
+                                          readtimeout=30, connect_timeout=2, retries=0)
+                        @test health.status == 200
+                        @test JSON3.read(health.body).status == "no_log"
+                        forecast = HTTP.get("http://127.0.0.1:$port/api/forecast";
+                                            readtimeout=30, connect_timeout=2, retries=0)
+                        @test forecast.status == 200
+                        @test !JSON3.read(forecast.body).available
+                    finally
+                        stop_server(server)
+                    end
+                    @test !isopen(server)
+                    @test all(!isopen, owned)
+                end
+                listener = listen(ip"127.0.0.1", 0)
+                try
+                    port = Int(last(getsockname(listener)))
+                    for blocking in (false, true)
+                        @test_throws Base.IOError start_server(;
+                            host="127.0.0.1", port=port, log_path=log_path,
+                            blocking=blocking,
+                        )
+                        @test isempty(setdiff(open_timers(), baseline))
+                    end
+                finally
+                    close(listener)
+                end
+                GC.gc()
+                sleep(2.05)
+                @test isempty(setdiff(open_timers(), baseline))
+            end
+        end
+    end
+
+    @eval @testset "notification polling can be closed without another cycle" begin
+        previous_loaded = _ALERT_STATE_LOADED[]
+        try
+            mktempdir() do dir
+                withenv("SWM_WEBHOOK_URL" => "https://example.invalid/unused",
+                        "SWM_ALERT_STATE" => joinpath(dir, "alert-state.json")) do
+                    calls = Ref(0)
+                    cycle = function (path; url, state_path, now_utc)
+                        calls[] += 1
+                        return (state=(level=0, stale=false), result=(fired=false,))
+                    end
+                    timer = start_notify_loop(joinpath(dir, "absent.csv");
+                                              interval=0.03, cycle_fn=cycle)
+                    try
+                        @test Base.timedwait(() -> calls[] >= 2, 2.0; pollint=0.01) === :ok
+                    finally
+                        close(timer)
+                    end
+                    @test !isopen(timer)
+                    final_calls = calls[]
+                    sleep(0.08)
+                    @test calls[] == final_calls
+                    @test !isfile(joinpath(dir, "alert-state.json"))
+                    @test_throws ArgumentError start_notify_loop("unused"; interval=0)
+                    @test_throws ArgumentError start_notify_loop("unused"; interval=Inf)
+
+                    # A slow cycle must not overlap the next tick. Closing during that
+                    # cycle cancels queued ticks without interrupting a delivery in progress.
+                    calls[] = 0
+                    release = Channel{Nothing}(1)
+                    finished = Ref(false)
+                    slow_cycle = function (path; url, state_path, now_utc)
+                        calls[] += 1
+                        take!(release)
+                        finished[] = true
+                        return (state=(level=0, stale=false), result=(fired=false,))
+                    end
+                    timer = start_notify_loop(joinpath(dir, "absent.csv");
+                                              interval=0.01, cycle_fn=slow_cycle)
+                    try
+                        @test Base.timedwait(() -> calls[] > 0, 2.0; pollint=0.01) === :ok
+                        sleep(0.04)
+                        @test calls[] == 1
+                        close(timer)
+                        put!(release, nothing)
+                        @test Base.timedwait(() -> finished[], 2.0; pollint=0.01) === :ok
+                        sleep(0.04)
+                        @test calls[] == 1
+                    finally
+                        close(timer)
+                        isready(release) || put!(release, nothing)
+                    end
+                end
+            end
+        finally
+            _ALERT_STATE_LOADED[] = previous_loaded
+        end
+    end
+
+    @eval @testset "desktop readiness stops when an HTTP peer never replies" begin
+        script = read(joinpath(@__DIR__, "..", "desktop.sh"), String)
+        block = match(r"(?s)\n(ready=0\n.*?)(?=\nopen_window\(\))", script)
+        @test block !== nothing
+        @test occursin("readiness_deadline=\$((SECONDS + 60))", block.captures[1])
+        # Run the shipped loop against a real TCP listener that never sends an HTTP
+        # response. Shorten only the test's deadline; a missing curl timeout still hangs.
+        probe = replace(block.captures[1], "SECONDS + 60" => "SECONDS + 3")
+        listener = listen(ip"127.0.0.1", 0)
+        process = nothing
+        try
+            port = Int(last(getsockname(listener)))
+            command = addenv(`bash -c $probe`,
+                             "URL" => "http://127.0.0.1:$port",
+                             "SRV" => string(getpid()), "OUT" => "/dev/null")
+            output = IOBuffer()
+            started = time()
+            process = run(pipeline(ignorestatus(command); stdout=output, stderr=output);
+                          wait=false)
+            finished = Base.timedwait(() -> process_exited(process), 6.0; pollint=0.01)
+            @test finished === :ok
+            if finished === :ok
+                wait(process)
+                @test process.exitcode == 1
+                @test time() - started < 6.0
+                @test occursin("backend did not become ready", String(take!(output)))
+            end
+        finally
+            close(listener)
+            if process !== nothing
+                process_running(process) && kill(process)
+                wait(process)
+            end
+        end
+    end
+
+    @eval @testset "dashboard launch uses normal compilation" begin
         template = read(joinpath(@__DIR__, "..", "..", "deploy",
                                  "com.example.solarsindy.dashboard.plist"), String)
         @test occursin("<string>--startup-file=no</string>", template)
-        @test occursin("<string>--compile=min</string>", template)
-        @test first(findfirst("<string>--compile=min</string>", template)) <
+        @test !occursin("<string>--compile=", template)
+        @test first(findfirst("<string>--startup-file=no</string>", template)) <
               first(findfirst("<string>--project=__APP_DIR__</string>", template))
     end
 
-    @testset "launchd installer retries bootstrap without restart-killing the service" begin
+    @eval @testset "launchd installer retries bootstrap without restart-killing the service" begin
         project_root = normpath(joinpath(@__DIR__, "..", ".."))
         installer_path = joinpath(project_root, "deploy", "install_launchd.sh")
         installer = read(installer_path, String)
@@ -1851,7 +2207,7 @@ esac
         end
     end
 
-    @testset "external watchdog outage state machine" begin
+    @eval @testset "external watchdog outage state machine" begin
         wd = normpath(joinpath(@__DIR__, "..", "..", "deploy", "watchdog.sh"))
         @test isfile(wd)
         wd_src = read(wd, String)
@@ -1963,7 +2319,7 @@ esac
         end
     end
 
-    @testset "geoelectric nowcast keeps the storm ramp and serves the real endpoint" begin
+    @eval @testset "geoelectric nowcast keeps the storm ramp and serves the real endpoint" begin
         tt = collect(1:120)
         xv = Vector{Any}(20.0 .* tt .+ 3.0 .* sin.(tt ./ 3.0))     # rising ramp + wiggle (storm main phase)
         yv = Vector{Any}(fill(5.0, 120))
@@ -1982,7 +2338,7 @@ esac
         @test g.current > 0.5
     end
 
-    @testset "geoelectric current comes from the last real sample, not a flat-filled tail" begin
+    @eval @testset "geoelectric current comes from the last real sample, not a flat-filled tail" begin
         tt = collect(1:120)
         ngap = 4
         xv = Vector{Any}(20.0 .* tt)                               # pure ramp -> monotone rise then decay
@@ -1998,12 +2354,12 @@ esac
         @test g.current > emag[m] + 1e-6                                       # flat-filled tail is biased low
     end
 
-    @testset "geoelectric payload exposes an honest observation time under trailing gaps" begin
+    @eval @testset "geoelectric payload exposes an honest observation time under trailing gaps" begin
         reference = DateTime(2026, 7, 14, 12); n = 40; ngap = 3
         times = [reference - Minute(n - 1) + Minute(i) for i in 0:n-1]         # 1-min cadence ending at reference
         xvals = Vector{Any}(10.0 .* collect(0:n-1))
         for i in (n - ngap + 1):n; xvals[i] = nothing; end                     # last 3 min null-filled
-        payloadd = (times=jdt.(times),
+        payloadd = (times=jdt.(times), metadata=usgs_metadata(),
                     values=[(metadata=(element="X",), values=xvals),
                             (metadata=(element="Y",), values=zeros(n))])
         nc = _compute_dbdt("TST", 120; fetch_fn=(s, m) -> payloadd, reference=reference)
@@ -2013,7 +2369,7 @@ esac
         @test nc.geoelectric.current_vkm > 0.0
     end
 
-    @testset "forecast log cache is schema- and path-safe" begin
+    @eval @testset "forecast log cache is schema- and path-safe" begin
         dir = mktempdir(); p1 = joinpath(dir, "one.csv"); p2 = joinpath(dir, "two.csv")
         write(p1, "value\n1\n"); write(p2, "value\n2\n")
         _LOG_CACHE[] = nothing
@@ -2052,7 +2408,7 @@ esac
         _LOG_CACHE[] = nothing
     end
 
-    @testset "invalid forecast cycles fail closed as unavailable" begin
+    @eval @testset "invalid forecast cycles fail closed as unavailable" begin
         issue = now(UTC) - Minute(10)
         base = DataFrame(
             issue_time_utc_dt=[issue], latest_solar_wind_utc_dt=[issue],
@@ -2083,7 +2439,7 @@ esac
         @test build_forecast(reversed).available == false
     end
 
-    @testset "history and calibration survive finite extreme residuals" begin
+    @eval @testset "history and calibration survive finite extreme residuals" begin
         @test _stable_rmse_or_nothing(
             fill(floatmax(Float64) / 2, 2), zeros(2),
         ) == floatmax(Float64) / 2
@@ -2116,7 +2472,7 @@ esac
         @test history.rmse_nt_all === nothing
     end
 
-    @testset "future forecast cycles fail closed" begin
+    @eval @testset "future forecast cycles fail closed" begin
         future = now(UTC) + Day(1)
         df = DataFrame(
             issue_time_utc_dt=[future], latest_solar_wind_utc_dt=[future],
@@ -2132,7 +2488,7 @@ esac
         @test build_forecast(df).invalid_future == true
     end
 
-    @testset "dB/dt uses elapsed time and cache windows are isolated" begin
+    @eval @testset "dB/dt uses elapsed time and cache windows are isolated" begin
         @test USGS_LIVE_DATA_TYPE == "adjusted"
         reference = now(UTC)
         times = jdt.([reference - Minute(4), reference - Minute(2)])
@@ -2146,7 +2502,7 @@ esac
         d = (times=times,
              values=[(metadata=(element="X",), values=[0.0, 20.0]),
                      (metadata=(element="Y",), values=[0.0, 0.0])],
-             metadata=(intermagnet=(imo=(coordinates=[-77.0, 39.0, 0.0], name="Test"),),))
+             metadata=usgs_metadata())
         station_row = _station_parse("TST", d; reference=reference)
         @test station_row.current_dbdt == 10.0
         @test station_row.data_type == "adjusted"
@@ -2155,7 +2511,7 @@ esac
         # an irregular cadence instead of treating every row as one minute.
         long_times = [reference - Minute(38) + Minute(2i) for i in 0:19]
         long_x = sin.(range(0, 4pi; length=20)) .* 10
-        long_payload = (times=jdt.(long_times),
+        long_payload = (times=jdt.(long_times), metadata=usgs_metadata(),
             values=[(metadata=(element="X",), values=long_x),
                     (metadata=(element="Y",), values=zeros(20))])
         nc2 = _compute_dbdt(
@@ -2168,7 +2524,7 @@ esac
 
         irregular_times = [reference - Minute(21) + Minute(i) +
                            (i >= 10 ? Minute(1) : Minute(0)) for i in 0:19]
-        irregular = (times=jdt.(irregular_times),
+        irregular = (times=jdt.(irregular_times), metadata=usgs_metadata(),
             values=[(metadata=(element="X",), values=long_x),
                     (metadata=(element="Y",), values=zeros(20))])
         irregular_result = _compute_dbdt(
@@ -2200,13 +2556,13 @@ esac
         empty!(_NET_CACHE)
     end
 
-    @testset "live source freshness, timestamp windows, and bounded caches" begin
+    @eval @testset "live source freshness, timestamp windows, and bounded caches" begin
         reference = DateTime(2026, 7, 14, 12)
         payload(times, x) =
             (times=jdt.(times),
              values=[(metadata=(element="X",), values=x),
                      (metadata=(element="Y",), values=zeros(length(x)))],
-             metadata=(intermagnet=(imo=(coordinates=[-77.0, 39.0, 0.0], name="Test"),),))
+             metadata=usgs_metadata())
 
         # Thirty-one two-minute samples span 60 minutes. A spike 58 minutes ago must not
         # leak into the trailing 30-minute maximum merely because it is among the last 30 rows.
@@ -2326,7 +2682,33 @@ esac
         empty!(_DBDT_CACHE); empty!(_NET_CACHE)
     end
 
-    @testset "USGS refreshes coalesce by key and retry after failure" begin
+    @eval @testset "USGS freshness is checked after delayed refreshes" begin
+        empty!(_DBDT_CACHE); empty!(_NET_CACHE)
+        dbdt = usgs_dbdt(station="TST", wait_timeout=30.0,
+            compute_fn=(station, minutes) -> begin
+                observed = now(UTC) - Minute(10) + Millisecond(250)
+                sleep(0.6)
+                (station=station, available=true, current_time_utc=jdt(observed))
+            end)
+        @test _source_freshness(dbdt.current_time_utc, DBDT_MAX_AGE_MIN).stale
+        @test !dbdt.available && dbdt.stale
+        network = usgs_network(stations=["TST"], wait_timeout=30.0,
+            brief_fn=station -> begin
+                observed = now(UTC) - Minute(10) + Millisecond(250)
+                sleep(0.6)
+                (station=station, time_utc=jdt(observed))
+            end)
+        @test !network.available && isempty(network.stations)
+        # A caller-supplied historical reference remains fixed for offline replay.
+        reference = DateTime(2026, 7, 14, 12)
+        fixed = usgs_dbdt(station="HIST", reference=reference, wait_timeout=30.0,
+            compute_fn=(s, m) -> (station=s, available=true, current_time_utc=jdt(reference)))
+        @test fixed.available && fixed.age_minutes == 0.0
+        @test isempty(_DBDT_REFRESH_TASKS) && isempty(_NET_REFRESH_TASKS)
+        empty!(_DBDT_CACHE); empty!(_NET_CACHE)
+    end
+
+    @eval @testset "USGS refreshes coalesce by key and retry after failure" begin
         reference = DateTime(2026, 7, 14, 12)
         sample_time = jdt(reference - Minute(1))
 
@@ -2542,7 +2924,7 @@ esac
         end
     end
 
-    @testset "SWPC assessments require current source timestamps" begin
+    @eval @testset "SWPC assessments require current source timestamps" begin
         reference = DateTime(2026, 7, 14, 12)
         snapshot_at(t) = (
             source="test", available=true,
@@ -2617,7 +2999,7 @@ esac
         end
     end
 
-    @testset "earth model validation rejects unsafe layer shapes and values" begin
+    @eval @testset "earth model validation rejects unsafe layer shapes and values" begin
         @test_throws ArgumentError surface_impedance(1.0, Float64[], Float64[])
         @test_throws ArgumentError surface_impedance(1.0, [100.0, 10.0], Float64[])
         @test_throws ArgumentError surface_impedance(1.0, [0.0], Float64[])
@@ -2627,7 +3009,7 @@ esac
         @test surface_impedance(0.0, [100.0], Float64[]) == 0.0im
     end
 
-    @testset "SWPC refresh entry points share one in-flight task" begin
+    @eval @testset "SWPC refresh entry points share one in-flight task" begin
         gate = Channel{Nothing}(0)
         sentinel = (source="test", available=false)
         held = Threads.@spawn (take!(gate); sentinel)
@@ -2655,7 +3037,7 @@ esac
         end
     end
 
-    @testset "live-source API routes never wait for third-party refreshes" begin
+    @eval @testset "live-source API routes never wait for third-party refreshes" begin
         # A held refresh is a deterministic oracle for the request contract: each route must
         # return its unavailable/cached payload promptly and leave the one in-flight worker intact.
         # Compile the route and JSON parser against a fresh local sentinel before starting the
@@ -2803,7 +3185,7 @@ esac
         @test JSON3.read(String(nonfinite.body)).hours == 72.0
     end
 
-    @testset "NOAA and USGS workers share one upstream execution slot" begin
+    @eval @testset "NOAA and USGS workers share one upstream execution slot" begin
         lock(_SWPC_LOCK) do
             _SWPC_CACHE[] = nothing
             _SWPC_REFRESH_TASK[] = nothing
@@ -2861,7 +3243,7 @@ esac
         end
     end
 
-    @testset "launchers reserve capacity for background refresh" begin
+    @eval @testset "launchers reserve capacity for background refresh" begin
         app_root = normpath(joinpath(@__DIR__, ".."))
         for launcher in ("run.sh", "desktop.sh")
             source = read(joinpath(app_root, launcher), String)
@@ -2891,7 +3273,17 @@ esac
         @test occursin("-f app/Dockerfile .", dockerfile)
     end
 
-    @testset "threat watch remains in layout flow" begin
+    @eval @testset "frontend product freshness and body timeout" begin
+        node = Sys.which("node")
+        if node === nothing
+            @test_skip "node is unavailable; frontend freshness checks need a JS runtime"
+        else
+            script = joinpath(@__DIR__, "frontend_freshness.cjs")
+            @test success(`$node --test $script`)
+        end
+    end
+
+    @eval @testset "threat watch remains in layout flow" begin
         css = read(joinpath(@__DIR__, "..", "public", "style.css"), String)
         js = read(joinpath(@__DIR__, "..", "public", "app.js"), String)
         html = read(joinpath(@__DIR__, "..", "public", "index.html"), String)
@@ -3183,7 +3575,7 @@ esac
         end
     end
 
-    @testset "webhook failures do not expose credentials" begin
+    @eval @testset "webhook failures do not expose credentials" begin
         reset_notify!()
         maybe_notify!((level=0, reasons=String[]))
         secret_url = "bogus://user:supersecret@localhost/hook?token=hunter2"
@@ -3196,7 +3588,7 @@ esac
         reset_notify!()
     end
 
-    @testset "webhook fires once per level transition and never on a repeat" begin
+    @eval @testset "webhook fires once per level transition and never on a repeat" begin
         reset_notify!()
         calls = Any[]
         ok_post = (u, h, b) -> (push!(calls, JSON3.read(b)); nothing)
@@ -3223,7 +3615,7 @@ esac
         reset_notify!()
     end
 
-    @testset "webhook commits the delivered level only on successful delivery" begin
+    @eval @testset "webhook commits the delivered level only on successful delivery" begin
         reset_notify!()
         maybe_notify!((level=0, reasons=String[]); url="https://h", post_fn=(u,h,b)->nothing)
         @test _LAST_ALERT_LEVEL[] == 0
@@ -3238,7 +3630,7 @@ esac
         reset_notify!()
     end
 
-    @testset "stale forecast raises an outage alert, never a false all-clear" begin
+    @eval @testset "stale forecast raises an outage alert, never a false all-clear" begin
         reset_notify!()
         calls = Any[]
         post = (u, h, b) -> (push!(calls, JSON3.read(b)); nothing)
@@ -3266,7 +3658,7 @@ esac
         reset_notify!()
     end
 
-    @testset "an emptied forecast log after a delivered alert is an outage, not an all-clear" begin
+    @eval @testset "an emptied forecast log after a delivered alert is an outage, not an all-clear" begin
         # The status payload of a log that carries no rows at all — emptied, truncated, rotated
         # away, or unreadable — has no cycle and therefore no issue time. Read on payload shape
         # alone that is indistinguishable from a cold start, and the level collapse from a
@@ -3379,7 +3771,7 @@ esac
         rm(cold_dir; recursive = true, force = true)
     end
 
-    @testset "live-layer escalation fires even while the forecast feed is stale" begin
+    @eval @testset "live-layer escalation fires even while the forecast feed is stale" begin
         reset_notify!()
         calls = Any[]
         post = (u, h, b) -> (push!(calls, JSON3.read(b)); nothing)
@@ -3396,7 +3788,7 @@ esac
         reset_notify!()
     end
 
-    @testset "webhook dedup baseline persists across a restart" begin
+    @eval @testset "webhook dedup baseline persists across a restart" begin
         reset_notify!()
         dir = mktempdir()
         sp = joinpath(dir, "alert_notify_state.json")
@@ -3417,7 +3809,7 @@ esac
         rm(dir; recursive=true, force=true)
     end
 
-    @testset "static serving whitelists known asset extensions" begin
+    @eval @testset "static serving whitelists known asset extensions" begin
         @test serve_static("/index.html").status == 200
         @test serve_static("/style.css").status == 200
         stray = joinpath(PUBLIC_DIR, "stray_secret.txt")
@@ -3431,7 +3823,7 @@ esac
         end
     end
 
-    @testset "get_log degrades to no-500 when the log is rotated away" begin
+    @eval @testset "get_log degrades to no-500 when the log is rotated away" begin
         dir = mktempdir()
         p = joinpath(dir, "live_forecast_log.csv")
         write(p, "issue_time_utc,target_time_utc\n2026-01-01T00:00:00,2026-01-01T01:00:00\n")
@@ -3446,7 +3838,7 @@ esac
         rm(dir; recursive=true, force=true)
     end
 
-    @testset "the served-health window states its own bounds and span" begin
+    @eval @testset "the served-health window states its own bounds and span" begin
         # The window is the last N issue hours PRESENT IN THE LOG. While issuance is unbroken that is
         # a day; after an outage the same N hours can span days, and a rate over them was published
         # as the trailing day's. The live log carries a real multi-day gap, so this is the shape the
@@ -3491,7 +3883,7 @@ esac
         @test steady.served_fallback_window_24h_cycles == 6
     end
 
-    @testset "alert text writes whole nanotesla, as the dashboard does" begin
+    @eval @testset "alert text writes whole nanotesla, as the dashboard does" begin
         # The webhook and the dashboard are read together, so the same depth must not appear as
         # "-120.0 nT" in one and "-120" in the other.
         iss = now(UTC) - Minute(10)
@@ -3537,17 +3929,49 @@ esac
         dir = mktempdir()
         path = write_cycle_csv(joinpath(dir, "log.csv"), corrupt)
         _LOG_CACHE[] = nothing
-        response = make_handler(path)(HTTP.Request("GET", "/api/alerts"))
-        @test response.status == 200
-        served_alerts = JSON3.read(String(response.body))
-        @test served_alerts.active == true
-        @test occursin("-1.0e30 nT",
-                       only(filter(a -> a.kind == "forecast", served_alerts.alerts)).message)
-        _LOG_CACHE[] = nothing
-        rm(dir; recursive=true, force=true)
+        prior_swpc = lock(_SWPC_LOCK) do
+            (_SWPC_CACHE[], _SWPC_REFRESH_TASK[])
+        end
+        prior_dbdt = lock(_DBDT_LOCK) do
+            (copy(_DBDT_CACHE), copy(_DBDT_REFRESH_TASKS))
+        end
+        try
+            # Formatting depends on the local forecast, not live NOAA/USGS responses.
+            # Keep the real endpoint deterministic and leave no fetch running at process exit.
+            lock(_SWPC_LOCK) do
+                _SWPC_CACHE[] = (time(), _unavailable_swpc_snapshot())
+            end
+            lock(_DBDT_LOCK) do
+                for station in ("FRD", "CMO")
+                    _DBDT_CACHE[(station, 120)] = (time(), (station=station, available=false))
+                end
+            end
+            response = make_handler(path)(HTTP.Request("GET", "/api/alerts"))
+            @test response.status == 200
+            served_alerts = JSON3.read(String(response.body))
+            @test served_alerts.active == true
+            @test occursin("-1.0e30 nT",
+                           only(filter(a -> a.kind == "forecast", served_alerts.alerts)).message)
+            @test lock(_SWPC_LOCK) do
+                _SWPC_REFRESH_TASK[] === prior_swpc[2]
+            end
+            @test lock(_DBDT_LOCK) do
+                _DBDT_REFRESH_TASKS == prior_dbdt[2]
+            end
+        finally
+            lock(_SWPC_LOCK) do
+                _SWPC_CACHE[] = prior_swpc[1]
+            end
+            lock(_DBDT_LOCK) do
+                empty!(_DBDT_CACHE)
+                merge!(_DBDT_CACHE, prior_dbdt[1])
+            end
+            _LOG_CACHE[] = nothing
+            rm(dir; recursive=true, force=true)
+        end
     end
 
-    @testset "feed and log text reaches the page as text, not as markup" begin
+    @eval @testset "feed and log text reaches the page as text, not as markup" begin
         # The panels are assembled as HTML strings from values this page did not author: NOAA
         # product identifiers and alert summaries, the NOAA scale token, station codes, served
         # labels and interval sources written into the forecast log. Source scans cannot tell an
@@ -3700,7 +4124,7 @@ esac
         end
     end
 
-    @testset "responses carry the content-security policy and refuse writes" begin
+    @eval @testset "responses carry the content-security policy and refuse writes" begin
         dir = mktempdir()
         path = write_cycle_csv(joinpath(dir, "log.csv"), live_cycle_fixture(now(UTC) - Minute(10)))
         _LOG_CACHE[] = nothing
@@ -3760,7 +4184,7 @@ esac
         rm(dir; recursive=true, force=true)
     end
 
-    @testset "the network base map is fetched from an origin the policy admits" begin
+    @eval @testset "the network base map is fetched from an origin the policy admits" begin
         # `connect-src` governs one request the page does not write itself. A scattergeo has no
         # coastlines, borders or subunit outlines of its own: the plotting library fetches a topojson
         # file for the requested scope and resolution when the subplot is created, and its built-in
@@ -3839,7 +4263,7 @@ esac
         end
     end
 
-    @testset "an unreadable log is parsed once and reported as unreadable" begin
+    @eval @testset "an unreadable log is parsed once and reported as unreadable" begin
         dir = mktempdir()
         path = joinpath(dir, "live_forecast_log.csv")
         write_cycle_csv(path, live_cycle_fixture(now(UTC) - Minute(20)))
@@ -3909,7 +4333,36 @@ esac
         rm(dir; recursive=true, force=true)
     end
 
-    @testset "non-finite Dst threat is unknown" begin
+    @eval @testset "outbound requests select TLS without changing trust or deadlines" begin
+        original_default = HTTP.SOCKET_TYPE_TLS[]
+        calls = NamedTuple[]
+        get_request(url; kwargs...) = begin
+            push!(calls, (; url, kwargs=(; kwargs...)))
+            (; body="[]")
+        end
+        @test isempty(_swpc_get("/diagnostic"; http_get=get_request))
+        @test isempty(_fetch_usgs("FRD", 40; http_get=get_request))
+        post_request(url, headers, body; kwargs...) = begin
+            push!(calls, (; url, kwargs=(; kwargs...)))
+            @test headers == ["Content-Type" => "application/json"]
+            @test body == "{}"
+            HTTP.Response(204)
+        end
+        @test _default_post("https://example.invalid/hook",
+            ["Content-Type" => "application/json"], "{}";
+            http_post=post_request).status == 204
+        @test length(calls) == 3
+        for call in calls
+            @test call.kwargs.socket_type_tls === MbedTLS.SSLContext
+            @test !haskey(call.kwargs, :require_ssl_verification)
+            @test call.kwargs.status_exception === true
+        end
+        @test [(c.kwargs.connect_timeout, c.kwargs.readtimeout, c.kwargs.retries)
+               for c in calls] == [(1, 1, 0), (5, 15, 0), (10, 10, 1)]
+        @test HTTP.SOCKET_TYPE_TLS[] === original_default
+    end
+
+    @eval @testset "non-finite Dst threat is unknown" begin
         @test dst_threat_level(NaN) == (nothing, "Unknown")
         @test dst_threat_level(Inf) == (nothing, "Unknown")
         @test dst_threat_level(-Inf) == (nothing, "Unknown")
@@ -3918,7 +4371,7 @@ esac
         @test jnum(big(10)^10_000) === nothing
     end
 
-    @testset "the Dst threat scale is pinned at its band edges" begin
+    @eval @testset "the Dst threat scale is pinned at its band edges" begin
         # The published storm class is a step function of one number, and only its non-finite
         # inputs were asserted. Kyoto Dst is integer-valued, so the edges are hit constantly: a
         # one-character inclusivity change moves an exact -30 nT forecast from "Minor storm" to

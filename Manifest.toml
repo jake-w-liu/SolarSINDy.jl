@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "9fc468b12e4d107587537086f80533d620b6235f"
+project_hash = "d6a12479c803ac6e8c8c88a9e8caac28b4c93f50"
 
 [[deps.ATK_jll]]
 deps = ["Artifacts", "Glib_jll", "JLLWrappers", "Libdl"]
@@ -962,7 +962,7 @@ uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
 version = "1.11.0"
 
 [[deps.SolarSINDy]]
-deps = ["CSV", "DataFrames", "Dates", "Downloads", "EvoTrees", "FileWatching", "HTTP", "JSON3", "LinearAlgebra", "Logging", "PlotlySupply", "Printf", "Random", "SHA", "SpecialFunctions", "Statistics"]
+deps = ["CSV", "DataFrames", "Dates", "Downloads", "EvoTrees", "FileWatching", "HTTP", "JSON3", "LinearAlgebra", "Logging", "MbedTLS", "PlotlySupply", "Printf", "Random", "SHA", "SpecialFunctions", "Statistics"]
 path = "."
 uuid = "e7a3c1d2-5f8b-4a9e-b6c0-3d2e1f4a8b7c"
 version = "0.2.1"

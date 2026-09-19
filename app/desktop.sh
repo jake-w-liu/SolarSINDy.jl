@@ -28,10 +28,16 @@ trap cleanup EXIT INT TERM
 
 # Wait for readiness (bounded: 60 s), exit fast if the server dies.
 ready=0
+readiness_deadline=$((SECONDS + 60))
 for _ in $(seq 1 60); do
-  if curl -fs "${URL}/api/health" >/dev/null 2>&1; then ready=1; break; fi
+  remaining_seconds=$((readiness_deadline - SECONDS))
+  [ "$remaining_seconds" -gt 0 ] || break
+  probe_timeout=2
+  [ "$remaining_seconds" -ge "$probe_timeout" ] || probe_timeout="$remaining_seconds"
+  if curl -fs --connect-timeout "$probe_timeout" --max-time "$probe_timeout" \
+       "${URL}/api/health" >/dev/null 2>&1; then ready=1; break; fi
   kill -0 "$SRV" 2>/dev/null || { echo "backend exited during startup:"; cat "$OUT"; exit 1; }
-  sleep 1
+  if [ "$SECONDS" -lt "$readiness_deadline" ]; then sleep 1; fi
 done
 [ "$ready" = 1 ] || { echo "backend did not become ready in 60 s."; cat "$OUT"; exit 1; }
 

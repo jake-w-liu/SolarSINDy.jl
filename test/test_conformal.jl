@@ -26,6 +26,31 @@ end
 
 @testset "Conformal UQ" begin
 
+    @testset "V2.4e A1 calibration-shadow interval" begin
+        history = collect(1.0:30.0)
+        result = SolarSINDy._v24_calibration_shadow_interval(
+            -10.0, -12.0, -7.0, history; window=24, warmup=30, width_scale=1.5,
+        )
+        # Trailing 24 residuals are 7:30, whose median is 18.5. The two deployed
+        # half-widths are retained separately and scaled by 1.5.
+        @test result.available
+        @test result.history_n == 30
+        @test result.location == 18.5
+        @test result.lo == 5.5
+        @test result.hi == 13.0
+        immature = SolarSINDy._v24_calibration_shadow_interval(
+            -10.0, -12.0, -7.0, history[1:29]; window=24, warmup=30,
+        )
+        @test !immature.available
+        @test ismissing(immature.lo)
+        @test_throws ArgumentError SolarSINDy._v24_calibration_shadow_interval(
+            -10.0, -12.0, -7.0, [1.0, NaN]; warmup=1,
+        )
+        @test_throws ArgumentError SolarSINDy._v24_calibration_shadow_interval(
+            -10.0, -9.0, -7.0, history,
+        )
+    end
+
     @testset "finite-sample quantile index and coverage floor" begin
         # 99 residuals 1..99; coverage 0.90 → k = ceil(100*0.9)=90 → 90th smallest = 90.
         res = collect(1.0:99.0)
