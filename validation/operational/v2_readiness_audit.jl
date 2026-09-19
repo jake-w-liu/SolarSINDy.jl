@@ -683,9 +683,9 @@ function audit_v2_1_served_holdout!(state::AuditState)
     # `served_v2_1` component, not the stacked center that is now served. Reporting it without that
     # boundary would present evidence for one pipeline as evidence for another.
     warn!(state, "complete-hour served-stack V2.1 holdout scope",
-          "this holdout evidence applies to the V2.1 served operator, which the current served " *
-          "pipeline uses as one of its six components; it is not held-out evidence for the static " *
-          "regime stack, whose own live record is reported per served label")
+          "this holdout evidence applies only to the V2.1 served operator; it is " *
+          "not held-out evidence for a later served ensemble or its intervals. " *
+          "Each served identity has its own live record")
     return
 end
 

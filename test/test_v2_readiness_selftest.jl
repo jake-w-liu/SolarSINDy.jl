@@ -131,6 +131,11 @@ const AUDIT_PATH = normpath(joinpath(@__DIR__, "..", "validation", "operational"
 
     # Reader-facing readiness output must identify the effective product. V2.1 remains valid
     # predecessor evidence, but it must not be presented as the current operational method.
+    source = read(AUDIT_PATH, String)
+    stale_component_count = occursin("one of its six components", source)
+    scope_boundary = occursin("not held-out evidence for a later served ensemble", source)
+    @test !stale_component_count
+    @test scope_boundary
     mktempdir() do dir
         report = joinpath(dir, "readiness.md")
         audit.write_report(audit.AuditState(), report)

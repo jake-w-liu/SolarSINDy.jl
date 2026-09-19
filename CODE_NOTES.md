@@ -1355,3 +1355,10 @@ The final local verification receipt is
 GitHub's CI run is checked against the pushed revision. Full-suite provenance
 checks require a fixed Git revision throughout the run; commits must wait
 until that run exits.
+
+The live readiness check exposed a stale six-component description in the
+V2.1 holdout warning. The warning now states the evidence boundary without
+duplicating an ensemble's size: precursor holdout scores do not establish
+performance of a later served ensemble or its intervals. A focused copy
+regression rejects the old wording. No score, gate, identity or report count
+changes for this correction.
