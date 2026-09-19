@@ -47,13 +47,22 @@ printf '{"revision":"%s","full_sha":"%s","deployed_utc":"%s","source":"%s"}\n' \
   > "$REL_DIR/RELEASE.json"
 
 if [ "${SOLARSINDY_INSTANTIATE:-1}" = "1" ]; then
-  JULIA_BIN="${SOLARSINDY_JULIA:-$HOME/.juliaup/bin/julia}"
-  [ -x "$JULIA_BIN" ] || JULIA_BIN="$(command -v julia || true)"
-  if [ -n "$JULIA_BIN" ]; then
-    echo "instantiating $REL_DIR ..."
-    JULIA_NUM_THREADS=2 "$JULIA_BIN" --startup-file=no --project="$REL_DIR" -e 'using Pkg; Pkg.instantiate()'
-    JULIA_NUM_THREADS=2 "$JULIA_BIN" --startup-file=no --project="$REL_DIR/app" -e 'using Pkg; Pkg.instantiate()' || true
+  if [ -n "${SOLARSINDY_JULIA:-}" ]; then
+    JULIA_BIN="$SOLARSINDY_JULIA"
+  elif [ -x "$HOME/.juliaup/bin/julia" ]; then
+    JULIA_BIN="$HOME/.juliaup/bin/julia"
+  else
+    JULIA_BIN="julia"
   fi
+  command -v "$JULIA_BIN" >/dev/null 2>&1 || {
+    echo "error: Julia not found: $JULIA_BIN" >&2; exit 1
+  }
+  "$JULIA_BIN" --startup-file=no -e 'exit(v"1.12.6" <= VERSION < v"1.13.0" ? 0 : 1)' || {
+    echo "error: Julia 1.12.x (at least 1.12.6) is required" >&2; exit 1
+  }
+  echo "instantiating $REL_DIR ..."
+  JULIA_NUM_THREADS=2 "$JULIA_BIN" --startup-file=no --project="$REL_DIR" -e 'using Pkg; Pkg.instantiate()'
+  JULIA_NUM_THREADS=2 "$JULIA_BIN" --startup-file=no --project="$REL_DIR/app" -e 'using Pkg; Pkg.instantiate()'
 fi
 
 ln -sfn "$REL_DIR" "$RELEASES_ROOT/current"

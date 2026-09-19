@@ -1,5 +1,28 @@
 # SolarSINDy Research Test Report
 
+## Julia 1.12 release verification — 2026-09-19 UTC
+
+Package, dashboard, documentation, launchers, images, and CI now support only
+the Julia 1.12 series, with the minimum patch specified in Project.toml.
+The focused environment/deployment checks pass 92 assertions; CLI checks pass
+54, and the added pinned-release failure/success fixture passes nine. The
+dashboard suite and strict documentation build also pass on Julia 1.12.7.
+
+The receipt-time candidate and daily-report results are recorded below. The
+container build contract includes source-before-precompile, runtime data and
+audit-script availability, a depot writable by the non-root user, and a
+reachable Compose dashboard address. Actual image build and startup results
+come from the separate GitHub deployment-image job, not from static assertions.
+
+The final full-package, experiment, harness, live-reload and pushed-commit CI
+receipts are collected in
+`validation/output/operational/live_upgrade_20260919/RELEASE_VERIFICATION.md`.
+An earlier local full run rejected a changed Git baseline after an in-run
+commit; it is not passing evidence. Its provenance checks remain unchanged.
+The subsequent full run must keep the checkout revision fixed throughout.
+
+Earlier checkpoints below retain their original dates and outcomes.
+
 ## Recovery verification (2026-09-19)
 
 The [remediation report](validation/output/operational/deep_debug_20260919/remediation/REPORT.md)

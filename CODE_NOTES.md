@@ -1332,3 +1332,26 @@ The documentation check now tests every exported binding explicitly, because
 Documenter's `checkdocs=:exports` does not detect an export that has no docstring.
 The compatibility tests declare their `Pkg` standard-library dependency in the
 test target so they also run in CI's isolated environment.
+
+### Julia deployment boundaries
+
+Both container images use the same Julia 1.12 patch and a shared, runtime-user
+owned depot. The monitor image copies source before package precompilation and
+ships the frozen core data and included claim-audit script. A Project/Manifest
+only build layer reproduced the missing-source failure; adding source made
+that same precompile succeed. The Compose monitor addresses the dashboard by
+its service name for daily receipts. CI builds both images, loads the monitor's
+frozen artifacts as uid 10001, and starts and probes the dashboard as that user.
+
+The pinned-release helper must reject a missing or unsupported Julia and must
+propagate either environment's instantiation failure before selecting the new
+release. An isolated Git fixture reproduced selection after an unsupported
+runtime and after an application-environment failure. The repaired helper
+passes all nine failure/success assertions, including preservation of the
+previous release link. It does not change live forecasts or model artifacts.
+
+The final local verification receipt is
+`validation/output/operational/live_upgrade_20260919/RELEASE_VERIFICATION.md`;
+GitHub's CI run is checked against the pushed revision. Full-suite provenance
+checks require a fixed Git revision throughout the run; commits must wait
+until that run exits.

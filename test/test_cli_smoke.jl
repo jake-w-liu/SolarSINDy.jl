@@ -245,3 +245,48 @@ exit 0
         @test all(l -> !occursin("\\r", l), url_lines)
     end
 end
+
+@testset "Pinned release rejects failed environments" begin
+    if Sys.isunix()
+        mktempdir() do root
+            clone = joinpath(root, "clone")
+            mkpath(joinpath(clone, "deploy")); mkpath(joinpath(clone, "app"))
+            cp(joinpath(@__DIR__, "../deploy/deploy_release.sh"),
+               joinpath(clone, "deploy/deploy_release.sh"))
+            write(joinpath(clone, "Project.toml"), "[deps]\n")
+            write(joinpath(clone, "app/Project.toml"), "[deps]\n")
+            run(`git -C $clone init --quiet`)
+            run(`git -C $clone add .`)
+            run(`git -C $clone -c user.name=Test -c user.email=test@example.invalid commit -qm fixture`)
+            shim = joinpath(root, "julia")
+            write(shim, raw"""#!/bin/bash
+set -euo pipefail
+case "$*" in
+  *VERSION*) exit "${TEST_VERSION_EXIT:-0}" ;;
+esac
+for arg in "$@"; do
+  case "$arg" in --project=*/app) exit "${TEST_APP_EXIT:-0}" ;; esac
+done
+exit 0
+""")
+            chmod(shim, 0o755)
+            script = joinpath(clone, "deploy/deploy_release.sh")
+            for (name, version_exit, app_exit, expected) in
+                    (("version", 7, 0, 1), ("app", 0, 42, 42),
+                     ("missing", 0, 0, 1), ("valid", 0, 0, 0))
+                releases = joinpath(root, name)
+                previous = joinpath(releases, "previous"); mkpath(previous)
+                current = joinpath(releases, "current"); symlink(previous, current)
+                cmd = addenv(`bash $script HEAD $releases`,
+                    "SOLARSINDY_JULIA"=>(name == "missing" ? joinpath(root,"missing-julia") : shim),
+                    "SOLARSINDY_MONITOR_DIR"=>joinpath(root,"state"),
+                    "SOLARSINDY_INSTANTIATE"=>"1", "SOLARSINDY_ACTIVATE"=>"0",
+                    "TEST_VERSION_EXIT"=>string(version_exit), "TEST_APP_EXIT"=>string(app_exit))
+                result = run(pipeline(ignorestatus(cmd); stdout=devnull, stderr=devnull))
+                @test result.exitcode == expected
+                @test (readlink(current) == previous) == (expected != 0)
+                expected == 0 && @test isfile(joinpath(realpath(current), "RELEASE.json"))
+            end
+        end
+    end
+end
