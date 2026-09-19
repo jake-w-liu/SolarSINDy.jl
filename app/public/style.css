@@ -102,7 +102,7 @@ main { max-width: var(--content-max); margin: 0 auto; padding: 18px 20px 8px; }
 .grid-2 .card { margin: 0; }
 
 /* calibration panel */
-.calib { display: flex; flex-direction: column; gap: 10px; }
+.calib { display: flex; flex-direction: column; gap: 10px; overflow-wrap: anywhere; }
 .calib table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .calib th, .calib td { text-align: right; padding: 4px 6px; font-size: .86rem; border-bottom: 1px solid var(--card-edge); }
 .calib th:first-child, .calib td:first-child { text-align: left; color: var(--ink-soft); }
@@ -151,7 +151,7 @@ main { max-width: var(--content-max); margin: 0 auto; padding: 18px 20px 8px; }
 .tag-future { background: rgba(107,125,160,.15); color: var(--ink-soft); border: 1px solid var(--card-edge); }
 
 /* footer / misc */
-.footer { max-width: var(--content-max); margin: 8px auto 30px; padding: 14px 22px; color: var(--ink-soft); font-size: .82rem; border-top: 1px solid var(--card-edge); }
+.footer { max-width: var(--content-max); margin: 8px auto 30px; padding: 14px 22px; color: var(--ink-soft); font-size: .82rem; border-top: 1px solid var(--card-edge); overflow-wrap: anywhere; }
 .muted { color: var(--ink-mute); }
 .hidden { display: none !important; }
 .error-banner { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);

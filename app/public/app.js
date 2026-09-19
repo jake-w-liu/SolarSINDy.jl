@@ -273,7 +273,7 @@ const PLOT_LAYOUT = () => ({
   paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
   font: { color: "#9fb0cc", size: 12 },
   margin: { l: 52, r: 16, t: 10, b: 40 },
-  xaxis: { type: "date", automargin:true, nticks:5, tickangle:0, gridcolor: "rgba(120,140,180,0.12)", zeroline:false, title:{text:"UTC", font:{size:11}} },
+  xaxis: { type: "date", automargin:true, nticks:3, tickangle:0, gridcolor: "rgba(120,140,180,0.12)", zeroline:false, title:{text:"UTC", font:{size:11}} },
   yaxis: { title: { text: "Dst [nT]" }, gridcolor: "rgba(120,140,180,0.12)", zerolinecolor:"rgba(120,140,180,0.25)" },
   showlegend: true, legend: { orientation:"h", x:0, y:1.12, yanchor:"bottom", font:{size:11}, bgcolor:"rgba(0,0,0,0)" },
   hovermode: "x unified",

@@ -187,4 +187,10 @@ test("wrapped chart legends stay above the data and date labels reserve space", 
   assert.ok(layout.legend.y > 1);
   assert.equal(layout.xaxis.automargin, true);
   assert.equal(layout.xaxis.tickangle, 0);
+  // Full date labels must also fit the narrow layout; five ticks overlapped.
+  assert.equal(layout.xaxis.nticks, 3);
+  const styles = fs.readFileSync(require("node:path").join(__dirname, "../public/style.css"), "utf8");
+  for (const selector of ["calib", "footer"]) {
+    assert.match(styles, new RegExp(`\\.${selector}\\s*\\{[^}]*overflow-wrap:\\s*anywhere`));
+  }
 });

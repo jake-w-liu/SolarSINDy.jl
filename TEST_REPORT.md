@@ -29,6 +29,12 @@ hash-pinned pre-refactor function on ARM and x86; the original ARM numeric pins
 remain. The dated release receipt records the subsequent full local and GitHub
 results without rewriting the earlier failed runs as passes.
 
+The mobile inspection additionally reproduced overlapping date labels and
+overflowing long model text. Each new frontend assertion failed before its
+repair; all nine frontend tests pass afterward. The dated release receipt
+also records actual label geometry and screenshots across four viewport widths.
+The in-progress full run was stopped before these edits, not counted as a pass.
+
 Earlier checkpoints below retain their original dates and outcomes.
 
 ## Recovery verification (2026-09-19)

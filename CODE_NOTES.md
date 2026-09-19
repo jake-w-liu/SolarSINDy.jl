@@ -1385,3 +1385,12 @@ its capture platform and adds exact comparisons against that hash-pinned
 archived function on all platforms, including the broader driver/horizon
 matrix. No production numerical code, fitted artifact, scientific gate or
 tolerance changes.
+
+The subsequent live browser inspection found adjacent full date labels
+overlapping by 26.25 pixels at a 390-pixel viewport. The shared time-axis
+layout now requests three ticks rather than five, retaining horizontal dates
+and automatic margins. At 320 pixels, a long footer model identifier extended
+5.58 pixels beyond the viewport and calibration text exceeded its container.
+Inherited `overflow-wrap: anywhere` confines both without truncation. Browser
+checks cover all three time-series plots at 320, 390, 768 and 1440 pixels;
+the frontend regression pins tick count and wrapping. No forecast data changes.
