@@ -57,6 +57,19 @@ function _loaded_modules(directory::AbstractString)
 end
 
 @testset "Declared environment contract" begin
+    @testset "CI bootstraps registries before resolving a clean depot" begin
+        workflow = read(joinpath(PACKAGE_ROOT, ".github", "workflows", "ci.yml"), String)
+        commands = filter(line -> occursin("run: julia --project", line) &&
+                                  occursin("Pkg.resolve()", line), split(workflow, '\n'))
+        @test length(commands) == 2  # package and documentation environments
+        for command in commands
+            registry = findfirst("Pkg.Registry.add(\"General\")", command)
+            resolve = findfirst("Pkg.resolve()", command)
+            @test registry !== nothing
+            @test registry !== nothing && first(registry) < first(resolve)
+        end
+    end
+
     @testset "bundled socket fixtures are available to Pkg.test" begin
         @test get(PROJECT["extras"], "Sockets", nothing) ==
               "6462fe0b-24de-5631-8697-dd941f90decc"

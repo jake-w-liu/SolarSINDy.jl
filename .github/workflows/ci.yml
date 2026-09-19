@@ -35,7 +35,8 @@ jobs:
       - name: Resolve the declared compat on this Julia
         # The failure this repeats: a `[compat]` bound on a standard library pins the package to one
         # Julia release, and resolution — not the test suite — is where that shows.
-        run: julia --project=. -e 'using Pkg; Pkg.resolve(); Pkg.instantiate()'
+        # resolve() does not bootstrap registries in a fresh Julia depot.
+        run: julia --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate()'
       - name: Confirm the checkout carries no generated study output
         run: |
           if [ -d validation/output ]; then
@@ -60,7 +61,7 @@ jobs:
           version: '1.12'
       - uses: julia-actions/cache@v2
       - name: Instantiate the documentation environment
-        run: julia --project=docs -e 'using Pkg; Pkg.resolve(); Pkg.instantiate()'
+        run: julia --project=docs -e 'using Pkg; Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate()'
       - name: Build the manual
         # `docs/make.jl` runs with checkdocs=:exports, doctest=true and warnonly=false, so this step
         # fails on a missing manual entry or a stale doctest, not only on a broken page.

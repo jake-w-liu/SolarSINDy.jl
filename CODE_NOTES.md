@@ -1294,3 +1294,18 @@ and step; the schedule itself proves no source state and changes no forecast.
 | Live finding | On 784 matured exact-V2.4e rows, the step counts are 162, 198, 196, 35, 160 and 33 at internal steps 1, 2, 3, 4, 6 and 7. V2.4e has lower RMSE than static V2.2 at steps 1, 2, 3, 4 and 6 but is 0.23 nT higher at step 7; BurtonFull and O'Brien have lower pooled RMSE. These short, quiet, highly overlapping cohorts support continued monitoring, not a real-world superiority claim |
 | Scope | Report generation only. No logged row, forecast, fitted object, bundle, interval, alert or serving identity changes |
 | Verification | Focused live-workflow suite; full package suite and development harness; regenerated production report; strict live readiness and claim audits |
+# Live-validation development ledger — 2026-09-19
+
+The user approved continuing prospective collection, a separately identified
+experimental CMO ground forecast, daily reviews, and evidence-bound upgrades.
+The served Dst bundle, A3 history, existing criteria, and manuscript contract
+remain unchanged. Scientific success must be measured, not inferred from a
+successful deployment or from passing implementation tests.
+
+| Work item | Contract and verification |
+|---|---|
+| CI startup | Reproduce GitHub run 35450234656 in an empty Julia depot. Install the General registry before resolution; retain both Julia versions, all tests, and strict documentation checks. Verify the final pushed commit on GitHub. |
+| CMO shadow | Freeze the already evaluated log-feature coefficients; forecast a complete future 30-minute window after receipt and issuance. Keep adjusted/variation products separate, preserve raw receipts, and exclude the shadow from operational alerts. Test input validation, independent arithmetic, delayed observations, restarts, duplicate attempts, and crash-safe persistence. |
+| Daily review | Report data freshness, availability, actual forecast errors, interval coverage, and existing A3 failures separately. Persist dated reports automatically; do not clear failure history or label unavailable evidence successful. |
+| A3 and FRD research | Preserve failed candidates. Any further candidate requires a dated protocol, causal inputs, strong same-row controls, independent numerical checks, and unchanged advancement criteria. Exposed historical data remain development evidence. |
+| Reverification | Focused tests, full Pkg.test(), examples/experiments.jl, development harness, strict docs, deployment probes, and final GitHub CI. Commit and push code changes, then verify a clean synchronized codebase. |

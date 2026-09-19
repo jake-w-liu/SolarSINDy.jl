@@ -1644,3 +1644,16 @@ not a general leak or long-duration stability proof.
 
 The protected `submitted/` aggregate digest remained
 `7dfd4556fe8b6f1ae133be80a9a878d255df4ea1b715ef273d257520e728ca74`.
+# CI clean-depot investigation — 2026-09-19
+
+GitHub run `35450234656` failed all three jobs during dependency resolution,
+before either package tests or documentation checks began. Julia 1.12 reported
+no installed registries; Julia 1.10 reported the first unregistered dependency.
+The original command reproduced the missing-registry failure in a fresh local
+depot and clean archive. Adding General before resolution then installed and
+resolved that same package successfully on Julia 1.12.6. The focused environment
+contract suite passes 65 assertions, including a check for registry bootstrap
+in both workflow environments. Logs are in
+`validation/output/operational/live_upgrade_20260919/ci_empty_depot_{before,after}.log`.
+Full matrix and documentation results must be checked on the subsequent pushed
+commit; successful local bootstrap alone is not a completed CI verdict.
