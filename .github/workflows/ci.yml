@@ -1,9 +1,6 @@
 name: CI
 
-# A clean checkout is the environment this repository was never tested in: the study artifacts under
-# `validation/output/` are deliberately untracked, and the package shipped for months with a
-# standard-library compat bound that made it unresolvable on its own declared minimum Julia. Every
-# job here therefore runs on a fresh clone with nothing generated in advance.
+# Generated study artifacts are deliberately absent from each clean checkout.
 
 on:
   push:
@@ -17,29 +14,16 @@ concurrency:
 
 jobs:
   test:
-    name: Pkg.test — Julia ${{ matrix.julia-version }} (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Pkg.test — Julia 1.12
+    runs-on: ubuntu-latest
     timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        # The declared minimum in Project.toml and the release the package is developed on.
-        julia-version: ['1.10', '1.12']
-        os: [ubuntu-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
         with:
-          version: ${{ matrix.julia-version }}
+          version: '1.12'
       - uses: julia-actions/cache@v2
-      - name: Resolve minimum Julia from Project.toml
-        if: matrix.julia-version == '1.10'
-        # The deployment lockfile contains Julia 1.12-only standard libraries.
-        # Preserve it, but resolve the declared package compat natively on 1.10.
-        run: mv Manifest.toml "$RUNNER_TEMP/Manifest-julia1.12.toml"
-      - name: Resolve the declared compat on this Julia
-        # The failure this repeats: a `[compat]` bound on a standard library pins the package to one
-        # Julia release, and resolution — not the test suite — is where that shows.
+      - name: Resolve the package environment
         # resolve() does not bootstrap registries in a fresh Julia depot.
         run: julia --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate()'
       - name: Confirm the checkout carries no generated study output
@@ -49,10 +33,7 @@ jobs:
             exit 1
           fi
       - uses: julia-actions/julia-buildpkg@v1
-      # The suite's own "Local-artifact oracle ledger" testset prints, in this job's log, which
-      # real-data oracles ran and which were skipped for want of an untracked artifact, and fails if
-      # a registered gate disappears. A separate step restating that in prose showed nothing a reader
-      # could act on, so the ledger is read where it is produced.
+      # The suite reports which local-artifact oracles are unavailable in a clean clone.
       - uses: julia-actions/julia-runtest@v1
 
   docs:

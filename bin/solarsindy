@@ -110,6 +110,7 @@ case "$HOST" in
 esac
 URL="http://$BROWSE_HOST:$PORT"
 MIN_JULIA="1.12.6"
+MAX_JULIA="1.13.0"
 
 if [ -n "${JULIA:-}" ]; then
   :
@@ -140,11 +141,11 @@ note() { printf '  %s\n' "$*"; }
 
 need_julia() {
   command -v "$JULIA" >/dev/null 2>&1 || {
-    err "'$JULIA' not found. Install Julia $MIN_JULIA+ (https://julialang.org/downloads/) or set JULIA=/path/to/julia."
+    err "'$JULIA' not found. Install Julia 1.12.x (at least $MIN_JULIA) or set JULIA=/path/to/julia."
     exit 1
   }
-  "$JULIA" --startup-file=no -e "exit(VERSION >= v\"$MIN_JULIA\" ? 0 : 1)" >/dev/null 2>&1 || {
-    err "Julia $MIN_JULIA or newer is required (found: $("$JULIA" --version 2>/dev/null || echo unknown))."
+  "$JULIA" --startup-file=no -e "exit(v\"$MIN_JULIA\" <= VERSION < v\"$MAX_JULIA\" ? 0 : 1)" >/dev/null 2>&1 || {
+    err "Julia 1.12.x (at least $MIN_JULIA) is required (found: $("$JULIA" --version 2>/dev/null || echo unknown))."
     exit 1
   }
 }

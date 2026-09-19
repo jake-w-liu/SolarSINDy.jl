@@ -1304,7 +1304,7 @@ successful deployment or from passing implementation tests.
 
 | Work item | Contract and verification |
 |---|---|
-| CI startup | Reproduce GitHub run 35450234656 in an empty Julia depot. Install the General registry before resolution; retain both Julia versions, all tests, and strict documentation checks. Verify the final pushed commit on GitHub. |
+| CI startup | Reproduce GitHub run 35450234656 in an empty Julia depot. Install General before resolution; test the sole supported Julia 1.12 release, all package tests, and strict documentation checks. Verify the final pushed commit on GitHub. |
 | CMO shadow | Freeze the already evaluated log-feature coefficients; forecast a complete future 30-minute window after receipt and issuance. Keep adjusted/variation products separate, preserve raw receipts, and exclude the shadow from operational alerts. Test input validation, independent arithmetic, delayed observations, restarts, duplicate attempts, and crash-safe persistence. |
 | Daily review | Report data freshness, availability, actual forecast errors, interval coverage, and existing A3 failures separately. Persist dated reports automatically; do not clear failure history or label unavailable evidence successful. |
 | A3 and FRD research | Preserve failed candidates. Any further candidate requires a dated protocol, causal inputs, strong same-row controls, independent numerical checks, and unchanged advancement criteria. Exposed historical data remain development evidence. |

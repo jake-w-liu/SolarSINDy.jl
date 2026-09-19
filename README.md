@@ -237,9 +237,9 @@ Then:
 using SolarSINDy
 ```
 
-Requires Julia 1.10+ for the package API; the operational monitor/dashboard stack targets
-Julia 1.12.6+ (enforced by its launchers). `Manifest.toml` is committed for reproducible
-research runs.
+The package and operational services support Julia 1.12.x. The minimum patch
+version is defined by `[compat].julia` in [Project.toml](Project.toml).
+`Manifest.toml` is committed for reproducible research runs.
 
 ## Quick start — run the live forecast system
 

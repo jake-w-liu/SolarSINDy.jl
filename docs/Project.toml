@@ -4,6 +4,7 @@ SolarSINDy = "e7a3c1d2-5f8b-4a9e-b6c0-3d2e1f4a8b7c"
 
 [compat]
 Documenter = "1"
+julia = "~1.12.6"
 
 [sources]
 SolarSINDy = {path = ".."}

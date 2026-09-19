@@ -17,6 +17,7 @@ module CompatContractTests
 
 using Test
 using TOML
+using Pkg
 
 const PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
 const PROJECT = TOML.parsefile(joinpath(PACKAGE_ROOT, "Project.toml"))
@@ -68,8 +69,10 @@ end
             @test registry !== nothing
             @test registry !== nothing && first(registry) < first(resolve)
         end
-        @test occursin("if: matrix.julia-version == '1.10'", workflow)
-        @test occursin("run: mv Manifest.toml", workflow)
+        @test count("version: '1.12'", workflow) == 2
+        @test !occursin("matrix", workflow)
+        @test !occursin("1.10", workflow)
+        @test !occursin("mv Manifest.toml", workflow)
     end
 
     @testset "bundled socket fixtures are available to Pkg.test" begin
@@ -92,12 +95,24 @@ end
         end
     end
 
-    @testset "the declared minimum Julia is the one the documentation promises" begin
+    @testset "one Julia release across package, app, and documentation" begin
         @test haskey(COMPAT, "julia")
         declared = String(COMPAT["julia"])
-        @test declared == "1.10"
+        @test declared == "~1.12.6"
+        supported = Pkg.Types.semver_spec(declared)
+        @test v"1.12.6" in supported
+        @test v"1.12.7" in supported
+        @test v"1.12.99" in supported
+        for version in (v"1.10.11", v"1.11.9", v"1.12.5", v"1.13.0", v"2.0.0")
+            @test !(version in supported)
+        end
+        for environment in ("app", "docs")
+            project = TOML.parsefile(joinpath(PACKAGE_ROOT, environment, "Project.toml"))
+            @test project["compat"]["julia"] == declared
+        end
         readme = read(joinpath(PACKAGE_ROOT, "README.md"), String)
-        @test occursin("Requires Julia $(declared)+", readme)
+        @test occursin("support Julia 1.12.x", readme)
+        @test !occursin("Julia 1.10+", readme)
     end
 
     @testset "every dependency has a consumer" begin

@@ -1665,3 +1665,18 @@ resolve as a package on Julia 1.10. The minimum-version CI job now preserves tha
 lockfile in runner scratch and resolves the unchanged Project.toml natively.
 The same clean archive then resolves and instantiates successfully on Julia
 1.10.11. The Julia 1.12 job retains the deployment lockfile.
+
+## Julia 1.12-only support — 2026-09-19
+
+The support policy now excludes other Julia minor releases. Package, dashboard,
+and documentation environments share `~1.12.6`; launchers enforce both bounds.
+CI uses one Julia 1.12 test job and one strict documentation job. The temporary
+minimum-version lockfile workaround is no longer needed. The registry bootstrap
+repair remains in both jobs.
+
+Julia 1.12.7 resolves and instantiates all three environments. Focused tests pass
+80 environment assertions and 54 CLI assertions; the full dashboard suite and
+strict Documenter build exit successfully. The documentation build has no
+Documenter warnings. Dependency precompilation emits existing GeometryBasics
+unused-type-variable warnings, distinct from documentation diagnostics.
+The full package, harness, and final pushed-commit CI checks remain to be run.

@@ -6,7 +6,7 @@
 #     -v "$(pwd)/var/monitor:/data:ro" \
 #     -e SOLARSINDY_LOG=/data/live_forecast_log.csv swmonitor
 # For a supervised daemon+dashboard pair, prefer deploy/docker-compose.yml.
-FROM julia:1.12.6-bookworm
+FROM julia:1.12.7-bookworm
 
 # Dedicated non-root runtime user (shared uid with the monitor image so a log written mode-600 by
 # the daemon is readable by the dashboard over the shared volume).

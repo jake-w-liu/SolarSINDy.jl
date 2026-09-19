@@ -2,7 +2,7 @@
 # Build from the package root:
 #   docker build -t swmonitor-daemon -f deploy/Dockerfile.monitor .
 # Prefer deploy/docker-compose.yml, which runs this daemon and the dashboard as a supervised pair.
-FROM julia:1.12.6-bookworm
+FROM julia:1.12.7-bookworm
 
 # Shared non-root uid with the dashboard image so the daemon-written log (mode 600) is readable by
 # the dashboard over the shared volume.
