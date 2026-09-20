@@ -1423,3 +1423,16 @@ The receipt directory is `validation/output/operational/qualification_20260920`.
 Failed reproductions remain there alongside subsequent checks. This change adds
 no dependency, daemon, deployment identity, altered interval threshold or
 prospective collection claim.
+
+## Dashboard layout and observation provenance — 2026-09-20
+
+Contract: all network station labels/markers fit the plot, numeric table cells
+remain unbroken at 312 CSS pixels, and unavailable sources never carry live
+badges. Pending fetches retain a distinct refreshing state, including when the
+previous observation is stale. Observation timestamps identify independently
+refreshed ground panels.
+Oracles: rendered SVG bounds and text line rectangles; API timestamps; injected
+unavailable inputs with no live badges. New frontend regressions failed before
+implementation. Verify with the frontend suite, browser desktop/phone checks,
+full package tests and experiments through the development harness. No model,
+threshold, issued forecast or scientific qualification is changed.

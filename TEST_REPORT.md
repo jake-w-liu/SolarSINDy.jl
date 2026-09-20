@@ -1784,3 +1784,39 @@ The frozen experiment and diagnosis outputs are under
 `validation/output/operational/qualification_20260920`. Full-package, harness,
 documentation, live-reload and pushed-revision CI results belong in that
 directory's release receipt; focused checks alone do not complete verification.
+
+## Dashboard visual repairs — 2026-09-20
+
+Fresh Chrome screenshots reproduced the clipped BRW station and numeric cells
+breaking across lines. The map now reserves polar space and separates northern
+labels; narrow calibration tables retain complete numbers and readable headers.
+Independent DOM checks against the geographic clipping rectangle pass for all
+eight labels at 312, 390 and 1176 CSS pixels. All 22 numeric table cells occupy
+one line at each width. The same final layouts were inspected visually.
+
+Ground observations show their UTC timestamp and advancing age. Network tooltips
+and captions disclose observation times and independent refreshes. CMO's earlier
+stale, pending station cache subsequently returned a fresh adjusted observation;
+the network had independently fetched a newer observation. Neither payload was
+silently substituted. Future ground forecasts remain disabled.
+
+Unavailable or stale sources no longer carry live warning-chain badges. Pending
+ground retrievals display refreshing, retaining the stale qualification where
+applicable. Three new regression cases failed before those changes and pass
+afterward. Frontend tests also exercise notification escalation, deduplication
+and denied permission through a local stub, without sending a desktop alert.
+
+An isolated server using the shipped frontend exercised initial loading,
+unavailable, stale, refreshing and captured CMO adjusted responses. Live FRD
+variation, refresh/age progression, map hover provenance and legend toggling were
+checked in Chrome. No production data or service configuration was changed.
+Evidence and complete test transcripts are recorded in
+`validation/output/operational/dashboard_20260920`.
+
+Final local checks: all 13 frontend tests pass; the standalone dashboard run
+passes 1,654 assertions; `Pkg.test()` passes 287,483 assertions, including 1,721
+bundled dashboard assertions and all six local-artifact oracles with zero skips.
+The deterministic experiments pass with the served policy unchanged. The full
+development harness reports 350 passes, zero failures and one reviewed existing
+tolerance warning. No tolerance was changed. The strict documentation build
+passes. Served JavaScript/CSS bytes match the verified files exactly.

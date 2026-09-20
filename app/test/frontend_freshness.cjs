@@ -195,3 +195,57 @@ test("wrapped chart legends stay above the data and date labels reserve space", 
   }
   assert.match(styles, /\.card-head\s*\{[^}]*flex-wrap:\s*wrap/);
 });
+
+test("unavailable sources cannot carry live pipeline badges", () => {
+  const {context, element} = dashboard();
+  context.renderPipeline({available:false, upstream_status:{available:false}}, {available:false});
+  assert.doesNotMatch(element("pipeline").innerHTML, /tag-live|live nowcast|live \(USGS\)|live \(SWPC\)/i);
+  context.renderPipeline({available:true,served_product:"V2.4e",upstream_status:{available:true,mag_stale:false}},
+    {available:true,current_dbdt:1,current_tier:{label:"Below 18 nT/min"}});
+  assert.equal((element("pipeline").innerHTML.match(/tag-live/g)||[]).length, 3);
+});
+
+test("ground and network expose observation timestamps independently", async () => {
+  const {context,element} = dashboard();
+  const time = "2026-09-20T04:29:00Z";
+  await context.renderDbdt({available:true,station:"FRD",data_type:"variation",current_time_utc:time,
+    current_dbdt:1,max30_dbdt:2,current_tier:{level:0,label:"quiet"},max30_tier:{level:0},series:[]});
+  assert.ok(element("dbdt-caption").innerHTML.includes(time));
+  assert.match(element("dbdt-caption").innerHTML,/data-reltime/);
+  let plotted;
+  context.Plotly.react = async (...args) => { plotted = args; };
+  await context.renderNetwork({n_stations:1,stations:[{station:"CMO",name:"College",lon:-148,lat:65,
+    max_dbdt:20,tier:{level:1,label:"18 nT/min"},data_type:"adjusted",time_utc:time}]});
+  assert.ok(plotted[1][0].hovertext[0].includes(time));
+  assert.ok(element("network-caption").innerHTML.includes(time));
+});
+
+test("pending ground refresh distinguishes waiting from completed unavailability", async () => {
+  const {context,element}=dashboard();
+  await context.renderDbdt({available:false,refresh_in_progress:true});
+  assert.equal(element("dbdt-badge").textContent,"refreshing");
+  assert.match(element("dbdt-caption").textContent,/refresh is in progress/);
+  await context.renderDbdt({available:false,stale:true,refresh_in_progress:true});
+  assert.equal(element("dbdt-badge").textContent,"stale · refreshing");
+  context.renderPipeline({available:true,stale:true,served_product:"V2.4e"},null);
+  assert.doesNotMatch(element("pipeline").innerHTML,/live nowcast/);
+});
+
+test("notification escalation is deduplicated and permission-bound", () => {
+  const {context}=dashboard();
+  const notices=[];
+  function Notification(title, options) { notices.push({title,...options}); }
+  Notification.permission="granted";
+  context.Notification=context.window.Notification=Notification;
+  const quiet={available:true,threat:{level:0,label:"Quiet"}};
+  const watch={available:true,threat:{level:0,label:"Quiet",watch:true,watch_level:2,
+    watch_label:"Moderate storm",interval_lower_edge_min_dst_nt:-65}};
+  context.browserNotify(quiet);
+  context.browserNotify(watch);
+  context.browserNotify(watch);
+  assert.equal(notices.length,1);
+  assert.match(notices[0].body,/-65 nT/);
+  Notification.permission="denied";
+  context.browserNotify({available:true,threat:{level:4,label:"Extreme storm"}});
+  assert.equal(notices.length,1);
+});

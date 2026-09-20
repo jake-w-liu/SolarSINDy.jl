@@ -683,13 +683,15 @@ async function renderDbdt(dbdt) {
   const badge = $("dbdt-badge"), stats = $("dbdt-stats"), cap = $("dbdt-caption"), stn = $("dbdt-station");
   if (!dbdt || dbdt.available === false) {
     const stale = dbdt && dbdt.stale;
-    badge.textContent = stale ? "stale" : "unavailable"; badge.style.color = "var(--ink-mute)";
+    const pending = dbdt && dbdt.refresh_in_progress;
+    badge.textContent = pending ? (stale ? "stale · refreshing" : "refreshing") : (stale ? "stale" : "unavailable"); badge.style.color = "var(--ink-mute)";
     stats.innerHTML = ""; $("dbdt-forecast").innerHTML = "";
     stn.textContent = "";
     if (window.Plotly) Plotly.purge("dbdt-plot");
     cap.textContent = stale
       ? "The latest USGS ground-magnetometer sample is too old or future-dated for a live dB/dt assessment."
       : "No current usable USGS ground-magnetometer data; this panel retries automatically. The Dst forecast above is unaffected.";
+    if (pending) cap.textContent += " A refresh is in progress.";
     return;
   }
   const variation = dbdt.data_type === "variation";
@@ -750,6 +752,7 @@ async function renderDbdt(dbdt) {
   if (fc) capHtml += ` The next-30-min forecast combines a ridge point model trained on archival USGS quasi-definitive data with a fixed historical normalized-residual distribution, while the live input is the provisional adjusted product; `
     + `its upper estimate and empirical exceedance scores are not per-issue probabilities or online-updated coverage guarantees.`;
   else capHtml += ` The retrospective 30-min model is not served live because its OMNI training drivers are time-shifted to the bow-shock nose whereas the available real-time feed is measured at L1; the observed nowcast remains available.`;
+  if (dbdt.current_time_utc) capHtml += ` Observation: ${esc(dbdt.current_time_utc)} (<span data-reltime="${esc(dbdt.current_time_utc)}">${esc(relTime(dbdt.current_time_utc))}</span>).`;
   cap.innerHTML = capHtml;
 }
 
@@ -760,12 +763,15 @@ function renderPipeline(status, dbdt) {
   const dbdtIndicator = (dbdt && dbdt.available) ? `${fmt(dbdt.current_dbdt, 1)} nT/min · ${dbdt.current_tier.label}` : "USGS ground mag";
   const hasForecastIdentity = status && (status.served_product || status.served_model_version || status.model_version);
   const forecastLabel = hasForecastIdentity ? `${productName(status)} forecast` : "forecast identity unavailable";
+  const l1Live = us.available && (us.mag_stale === false || us.plasma_stale === false);
+  const dstLive = status && status.available !== false && !status.stale && !status.expired && hasForecastIdentity;
+  const groundLive = dbdt && dbdt.available && !dbdt.stale;
   const stages = [
     { ic:"☉", nm:"Eruption", ds:"Flare / CME launch", tag:"future", tl:"not in this system (T2)" },
     { ic:"🪐", nm:"CME transit", ds:"Heliosphere → arrival", tag:"future", tl:"CME models (T2)" },
-    { ic:"🛰", nm:"L1 solar wind", ds:l1, tag:"live", tl:"live (SWPC)" },
-    { ic:"🧲", nm:"Dst (ring current)", ds:forecastLabel, tag:"live", tl:"live nowcast" },
-    { ic:"📈", nm:"dB/dt indicator", ds:dbdtIndicator, tag:"live", tl:"live (USGS)" },
+    { ic:"🛰", nm:"L1 solar wind", ds:l1, tag:l1Live ? "live" : "future", tl:l1Live ? "live (SWPC)" : "unavailable" },
+    { ic:"🧲", nm:"Dst (ring current)", ds:forecastLabel, tag:dstLive ? "live" : "future", tl:dstLive ? "live nowcast" : "unavailable" },
+    { ic:"📈", nm:"dB/dt indicator", ds:dbdtIndicator, tag:groundLive ? "live" : "future", tl:groundLive ? "live (USGS)" : "unavailable" },
     { ic:"⚡", nm:"GIC / grid", ds:"Transformer stress", tag:"future", tl:"T3/T4" },
   ];
   const tagClass = { live:"tag-live", research:"tag-research", future:"tag-future" };
@@ -791,25 +797,30 @@ async function renderNetwork(net) {
     lon: S.map(s => s.lon), lat: S.map(s => s.lat),
     // Station codes and names come from the USGS feed; they are drawn through the plotting
     // library's own markup parser, so they pass the plot escape first.
-    text: S.map(s => escPlot(s.station)), textposition: "top center", textfont: { size: 9, color: "#9fb0cc" },
+    // Separate the nearby polar labels even when the map is phone-sized.
+    text: S.map(s => escPlot(s.station)),
+    textposition: S.map(s => s.station === "CMO" ? "bottom left" : s.station === "BRW" ? "middle right" : "top center"), textfont: { size: 9, color: "#9fb0cc" },
     marker: { size: S.map(s => 10 + Math.min(s.max_dbdt, 60) / 3),
               color: S.map(s => TIER_COLORS[s.tier.level || 0]),
               line: { width: 1, color: "rgba(255,255,255,0.5)" }, opacity: 0.9 },
-    hovertext: S.map(s => `${escPlot(s.name)} (${escPlot(s.station)})<br>${escPlot(s.max_dbdt)} nT/min · ${escPlot(s.tier.label)}<br>${s.data_type === "variation" ? "Variation (uncorrected)" : "Adjusted (provisional)"}`),
+    hovertext: S.map(s => `${escPlot(s.name)} (${escPlot(s.station)})<br>${escPlot(s.max_dbdt)} nT/min · ${escPlot(s.tier.label)}<br>${s.data_type === "variation" ? "Variation (uncorrected)" : "Adjusted (provisional)"}<br>Observed: ${escPlot(s.time_utc || "unavailable")}`),
     hoverinfo: "text",
   };
   const layout = {
     paper_bgcolor: "rgba(0,0,0,0)", margin: { l: 0, r: 0, t: 6, b: 0 }, height: 380,
     geo: { scope: "north america", resolution: 50,
+           projection: { scale: 0.85 },
            showland: true, landcolor: "#16203c", showocean: true, oceancolor: "#0b1020",
            showcountries: true, countrycolor: "#2a3550", showsubunits: true, subunitcolor: "#26314e",
            showlakes: false, bgcolor: "rgba(0,0,0,0)", framecolor: "#2a3550",
-           lataxis: { range: [14, 73] }, lonaxis: { range: [-172, -58] } },
+           lataxis: { range: [14, 80] }, lonaxis: { range: [-172, -58] } },
   };
   await Plotly.react("network-plot", [trace], layout, { displayModeBar: false, responsive: true });
+  const times = S.map(s => s.time_utc).filter(t => t && Number.isFinite(Date.parse(t))).sort();
   cap.innerHTML = `Thirty-minute maximum ground d<i>B</i>/d<i>t</i> across available USGS observatories; marker size shows magnitude and colour shows the threshold-magnitude band. `
     + `Product quality is shown on hover; ${S.filter(s => s.data_type === "variation").length} station(s) use uncorrected variation measurements because adjusted data are unavailable. `
-    + `The map is a spatial magnetic-variation indicator, not a GIC measurement or grid-impact map; local electric fields and network topology are required for those quantities.`;
+    + `The map is a spatial magnetic-variation indicator, not a GIC measurement or grid-impact map; local electric fields and network topology are required for those quantities.`
+    + (times.length ? ` Latest station observations span ${esc(times[0])} to ${esc(times[times.length - 1])}. Stations and the single-station panel refresh independently.` : "");
 }
 
 // Browser desktop notification on threat escalation (client-side; complements the server
