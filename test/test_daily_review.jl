@@ -13,7 +13,7 @@ const R = DailyOperationalReview
         @test kwargs[:readtimeout] == 10
         @test kwargs[:connect_timeout] == 3
         data = endswith(url,"/api/health") ? (;status="ok") :
-            endswith(url,"CMO") ? (;station="CMO",available=true,data_type="adjusted",forecast_status="disabled") :
+            endswith(url,"CMO") ? (;station="CMO",available=true,data_type="adjusted",refresh_in_progress=true,forecast_status="disabled") :
             (;station="FRD",available=false,data_type="variation",forecast_status="disabled")
         HTTP.Response(200,JSON3.write(data))
     end
@@ -40,6 +40,7 @@ const R = DailyOperationalReview
         markdown = read(joinpath(output,"review.md"),String)
         @test occursin("A3 historical integrity findings: 1",markdown)
         @test occursin("measurement available=true; product=adjusted",markdown)
+        @test occursin("refresh pending=true",markdown)
         @test occursin("measurement available=false; product=variation",markdown)
         @test occursin("CMO receipt-time screen: false",markdown)
         saved = read(joinpath(output,"review.json"))

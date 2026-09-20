@@ -1751,3 +1751,36 @@ GitHub run `35452903794` passed documentation but stopped at a missing test-only
 is corrected in the test target. Two in-progress local full runs were
 deliberately interrupted after the final reporting fix; they are not passing
 evidence. A fresh full harness and final-commit CI are required for handoff.
+
+## Freshness and calibration checks — 2026-09-20
+
+The focused checks pass 36 cache/freshness assertions, 40 diagnostic assertions,
+1,251 delayed adaptive-calibration assertions and 65 daily-review assertions.
+The nested-age reproduction failed nine assertions before the correction;
+the already-stale parent reproduction failed three. Cache tests exercise
+coalesced workers, completed unavailability and negative-cache throttling.
+Daily-review tests require an explicit pending state without rewriting prior
+dated reports.
+
+The independent historical checker passes 456,273 adaptive assertions and
+10,095 A3 assertions. It does not call the new evaluator's bounds, chronology,
+cohort, metric or decision functions. Input columns and hashes, receipt counts,
+miss counts, alpha values, bounds, coverage and decisions compare exactly.
+Aggregated metrics use BigFloat arithmetic with relative tolerance 2e-13 and
+absolute tolerance 2e-12, allowing only floating-point accumulation differences.
+The A3 check preserves all 48 recorded fallback findings and verifies the
+unchanged interval rule against each retained raw row. Linear receipt counting
+produces byte-identical diagnostic CSVs to the initial implementation.
+
+Tests include a future-outcome mutation that flips a covered outcome to a miss;
+earlier bounds remain unchanged and later controller feedback changes only after
+strict receipt. The initial test increased an outcome already counted as a miss,
+which correctly left binary feedback unchanged. That incorrect test expectation
+was corrected before the historical evaluation, without altering the candidate
+or any acceptance criterion. Invalid windows, duplicate panels, changed input
+hashes and output overwrite attempts are rejected.
+
+The frozen experiment and diagnosis outputs are under
+`validation/output/operational/qualification_20260920`. Full-package, harness,
+documentation, live-reload and pushed-revision CI results belong in that
+directory's release receipt; focused checks alone do not complete verification.

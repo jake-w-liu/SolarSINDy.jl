@@ -72,9 +72,11 @@ function report(record)
             "measurement available=$(display_value(getpath(capture.payload,"available"))); " *
             "product=$(display_value(getpath(capture.payload,"data_type"))); " *
             "age minutes=$(display_value(getpath(capture.payload,"age_minutes"))); " *
+            "refresh pending=$(display_value(getpath(capture.payload,"refresh_in_progress"))); " *
             "forecast status=$(display_value(getpath(capture.payload,"forecast_status"))).")
     end
-    push!(lines,"", "CMO receipt-time screen: $(display_value(getpath(record.cmo_screen.payload,"receipt_time_screen_pass"))).",
+    push!(lines,"", "A pending refresh reports the cached observation state, not a completed upstream availability check.",
+        "CMO receipt-time screen: $(display_value(getpath(record.cmo_screen.payload,"receipt_time_screen_pass"))).",
         "Observed derivatives and future forecasts are separate products.",
         "", "## Matched point comparisons", "")
     push!(lines,record.comparison.available ? record.comparison.body :

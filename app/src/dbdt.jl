@@ -363,12 +363,24 @@ function _checked_station(station::AbstractString)
 end
 
 function _current_dbdt_result(val; reference::Union{Nothing,DateTime}=nothing, cached::Bool=false)
-    !get(val, :available, false) && return val
-    f = _source_freshness(get(val, :current_time_utc, nothing), DBDT_MAX_AGE_MIN;
-                          reference=something(reference, now(UTC)))
-    return merge(val, (available=!f.stale, stale=f.stale,
-                       invalid_future=f.invalid_future, age_minutes=f.age_min,
-                       cached=cached))
+    reference = something(reference, now(UTC))
+    available = get(val, :available, false)
+    if available || haskey(val, :current_time_utc)
+        f = _source_freshness(get(val, :current_time_utc, nothing), DBDT_MAX_AGE_MIN;
+                              reference)
+        val = merge(val, (available=available && !f.stale, stale=f.stale,
+                         invalid_future=f.invalid_future, age_minutes=f.age_min,
+                         cached=cached))
+    end
+    geoe = get(val, :geoelectric, nothing)
+    if geoe !== nothing
+        f = _source_freshness(get(geoe, :current_time_utc, nothing), DBDT_MAX_AGE_MIN;
+                              reference)
+        geoe = get(val, :available, false) && !f.stale ?
+               merge(geoe, (age_minutes=f.age_min,)) : nothing
+        val = merge(val, (geoelectric=geoe,))
+    end
+    return val
 end
 
 function _observation_time(val, field::Symbol)
@@ -450,11 +462,13 @@ function usgs_dbdt(; station::AbstractString = "FRD", minutes::Int = 120,
     key = (code, minutes)
     # Hold the lock only to inspect cache/flight state. Each key retains an independent in-flight
     # identity; potentially blocking upstream work then enters the shared execution slot.
-    cached_entry = lock(_DBDT_LOCK) do
-        get(_DBDT_CACHE, key, nothing)
+    cached_entry, refreshing = lock(_DBDT_LOCK) do
+        task = get(_DBDT_REFRESH_TASKS, key, nothing)
+        (get(_DBDT_CACHE, key, nothing), task !== nothing && !istaskdone(task))
     end
     if cached_entry !== nothing && (time() - cached_entry[1]) <= DBDT_TTL
-        return _current_dbdt_result(cached_entry[2]; reference=reference, cached=true)
+        return merge(_current_dbdt_result(cached_entry[2]; reference, cached=true),
+                     (refresh_in_progress=refreshing,))
     end
 
     task = _start_keyed_refresh!(
@@ -466,9 +480,10 @@ function usgs_dbdt(; station::AbstractString = "FRD", minutes::Int = 120,
         stale = lock(_DBDT_LOCK) do
             get(_DBDT_CACHE, key, nothing)
         end
-        return stale === nothing ?
+        val = stale === nothing ?
                (station=code, available=false, error="dB/dt refresh still in progress") :
                _current_dbdt_result(stale[2]; reference=reference, cached=true)
+        return merge(val, (refresh_in_progress=!istaskdone(task),))
     end
     if outcome.error !== nothing
         err, _ = outcome.error
@@ -476,11 +491,11 @@ function usgs_dbdt(; station::AbstractString = "FRD", minutes::Int = 120,
         stale = lock(_DBDT_LOCK) do
             get(_DBDT_CACHE, key, nothing)
         end
-        stale !== nothing && return _current_dbdt_result(
-            stale[2]; reference=reference, cached=true,
-        )
-        return (station=code, available=false, error=string(err))
+        val = stale === nothing ? (station=code, available=false, error=string(err)) :
+              _current_dbdt_result(stale[2]; reference, cached=true)
+        return merge(val, (refresh_in_progress=false,))
     end
-    return _current_dbdt_result(outcome.value; reference=reference,
-                                cached=get(outcome.value, :cached, false))
+    return merge(_current_dbdt_result(outcome.value; reference,
+                     cached=get(outcome.value, :cached, false)),
+                 (refresh_in_progress=false,))
 end

@@ -806,6 +806,8 @@ using DataFrames
 
     include("test_compat.jl")
     include("test_ground_delay_check.jl")
+    include("test_calibration_diagnosis.jl")
+    include("test_ground_adaptive_calibration.jl")
     include("test_daily_review.jl")
     include("test_documentation.jl")
     include("test_discovery_provenance.jl")

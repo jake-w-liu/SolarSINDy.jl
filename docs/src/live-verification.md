@@ -63,7 +63,9 @@ The long-running monitor writes one dated review on its first cycle of each UTC
 day, including cycles where forecast issuance fails. Read
 `var/monitor/reviews/YYYY-MM-DD/review.md`; its JSON receipt retains the claim
 audit, comparison, and dashboard responses with hashes and receipt times.
-Missing or stale sources remain explicitly unavailable. Existing daily reviews
+Missing or stale sources remain explicitly unavailable. The ground snapshot also
+reports whether a refresh was pending; that state does not establish an upstream
+outage. Existing daily reviews
 are checked, not overwritten. The machine must remain awake and connected for
 collection; missed days are not reconstructed as live evidence.
 

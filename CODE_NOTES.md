@@ -1399,3 +1399,27 @@ squeezing the title into a column only a few characters wide.
 The CLI labels its filesystem-age diagnostic as "log updated": scoring an
 observation can update the file without issuing a forecast. The dashboard's
 separate issuance-time display is unchanged.
+
+## Ground freshness and calibration diagnosis — 2026-09-20
+
+| Item | Contract and verification |
+|---|---|
+| Objective | Correct cached observation ages and distinguish an unfinished request from completed unavailability; diagnose A3 and test one separately specified ground calibration candidate. |
+| Freshness contract | Parent and nested ages use the response reference time. Stale, invalid or future nested estimates are withheld. Rejected payloads remain unavailable even when their timestamp becomes recent. |
+| Cache oracle | Hand-calculated minute offsets, the exact ten-minute boundary, malformed/future timestamps, and a gated worker verify age updates, nonblocking reads, request coalescing and cleanup. |
+| Evidence | A captured CMO response had different parent/nested ages for the same timestamp. A direct USGS response contained recent adjusted X/Y measurements. A regression also reproduced frozen ages on payloads already marked stale. |
+| Scientific contract | Preserve A3 identities, historical findings and existing decisions. The new ground experiment uses the unchanged point model, fixed input hashes, strict outcome-receipt chronology and the dated adaptive protocol. It cannot enable serving. |
+| Independent oracles | Reconstruct A3 endpoints and cohorts from raw rows. Reconstruct adaptive bounds with binary-search receipt chronology and fresh residual sorting; compute losses and RMSE with high-precision arithmetic. |
+| Baselines | Keep all original same-row point controls and compare upper pinball loss with the original bound. No missing row, failed case or original model is replaced. |
+| Resources | Keep the existing bounded caches and worker limits. The offline controller retains 1,440 residuals; diagnosis counts receipt maturity with one ordered pass. |
+| Regeneration | Rerun diagnosis and the frozen offline experiment into new directories after an algorithm change. No manuscript data or figures depend on these descriptive operational reports. |
+| Verification | Focused regressions, full application tests, required-artifact Pkg.test(), examples/experiments.jl, root development harness, strict docs, live API checks and exact-revision CI. |
+
+The experiment is specified in
+[ground_adaptive_protocol.md](validation/operational/ground_adaptive_protocol.md).
+Its input, protocol, model and executable digests are recorded with its results.
+The independent checks cover every issued bound and every grouped A3 metric.
+The receipt directory is `validation/output/operational/qualification_20260920`.
+Failed reproductions remain there alongside subsequent checks. This change adds
+no dependency, daemon, deployment identity, altered interval threshold or
+prospective collection claim.

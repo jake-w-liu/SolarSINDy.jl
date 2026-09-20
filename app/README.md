@@ -78,6 +78,9 @@ compatibility with older clients.
 The live-source endpoints return the last complete cached snapshot immediately and refresh NOAA
 or USGS data in the background. A cold cache therefore reports `available=false` until a later poll
 rather than holding the dashboard request open on DNS, TLS, or a public-data outage.
+For ground observations, `refresh_in_progress` distinguishes a pending fetch from a completed
+availability check. Cached observation ages are recalculated on each response; stale geoelectric
+estimates are withheld.
 
 ## How forecasts are scored
 
