@@ -387,7 +387,8 @@ Two live-path details are load-bearing and are asserted by tests rather than ass
 
 These are properties of the deployment that the identity oracle cannot test, because they are
 differences between the live and offline information sets rather than differences in arithmetic. Both
-have since been quantified against data in `RISK_CLOSURE_REPORT.md`, which carries the tables,
+have since been quantified against data in `RISK_CLOSURE_REPORT.md` (removed in the
+2026-10-10 cleanup; preserved in git history), which carried the tables,
 methods and decision records summarised here.
 
 - **Provisional versus final Dst.** The live engine anchors on the Kyoto provisional/quicklook Dst
