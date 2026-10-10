@@ -237,7 +237,7 @@ Then:
 using SolarSINDy
 ```
 
-The package and operational services support Julia 1.12.x. The minimum patch
+The package and operational services support Julia 1.12.x and 1.13.x. The minimum
 version is defined by `[compat].julia` in [Project.toml](Project.toml).
 `Manifest.toml` is committed for reproducible research runs.
 
