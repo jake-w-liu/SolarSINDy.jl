@@ -3291,7 +3291,7 @@ esac
             source = read(joinpath(app_root, launcher), String)
             @test occursin(r"SWM_JULIA_THREADS:-4", source)
             @test occursin(r"--threads=\"\$JULIA_THREADS\"", source)
-            @test occursin("v\"1.12.6\" <= VERSION < v\"1.13.0\"", source)
+            @test occursin("VERSION >= v\"1.12.6\"", source)
         end
         @test !occursin("Pkg.instantiate()' >/dev/null 2>&1 || true",
                         read(joinpath(app_root, "desktop.sh"), String))
@@ -3302,7 +3302,7 @@ esac
         dockerfile = read(joinpath(app_root, "Dockerfile"), String)
         @test occursin("FROM julia:1.12.7-bookworm", dockerfile)
         @test occursin(
-            "julia = \"~1.12.6\"",
+            "julia = \"1.12.6\"",
             read(joinpath(app_root, "Project.toml"), String),
         )
         @test occursin(r"JULIA_NUM_THREADS=4", dockerfile)

@@ -115,12 +115,14 @@ end
     @testset "one Julia release across package, app, and documentation" begin
         @test haskey(COMPAT, "julia")
         declared = String(COMPAT["julia"])
-        @test declared == "~1.12.6"
+        @test declared == "1.12.6"
         supported = Pkg.Types.semver_spec(declared)
         @test v"1.12.6" in supported
         @test v"1.12.7" in supported
         @test v"1.12.99" in supported
-        for version in (v"1.10.11", v"1.11.9", v"1.12.5", v"1.13.0", v"2.0.0")
+        @test v"1.13.0" in supported
+        @test v"1.13.99" in supported
+        for version in (v"1.10.11", v"1.11.9", v"1.12.5", v"2.0.0")
             @test !(version in supported)
         end
         for environment in ("app", "docs")
@@ -128,7 +130,7 @@ end
             @test project["compat"]["julia"] == declared
         end
         readme = read(joinpath(PACKAGE_ROOT, "README.md"), String)
-        @test occursin("support Julia 1.12.x", readme)
+        @test occursin("support Julia 1.12.x and 1.13.x", readme)
         @test !occursin("Julia 1.10+", readme)
     end
 

@@ -11,8 +11,8 @@ JULIA="${JULIA:-julia}"
 JULIA_THREADS="${SWM_JULIA_THREADS:-4}"
 
 command -v "$JULIA" >/dev/null 2>&1 || { echo "error: '$JULIA' not found (install Julia 1.12.x, at least 1.12.6)." >&2; exit 1; }
-if ! "$JULIA" --startup-file=no -e 'exit(v"1.12.6" <= VERSION < v"1.13.0" ? 0 : 1)' >/dev/null 2>&1; then
-  echo "error: the monitor app requires Julia 1.12.x, at least 1.12.6." >&2
+if ! "$JULIA" --startup-file=no -e 'exit(VERSION >= v"1.12.6" ? 0 : 1)' >/dev/null 2>&1; then
+  echo "error: the monitor app requires Julia 1.12.6 or later." >&2
   exit 1
 fi
 

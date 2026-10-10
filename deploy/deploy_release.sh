@@ -57,8 +57,8 @@ if [ "${SOLARSINDY_INSTANTIATE:-1}" = "1" ]; then
   command -v "$JULIA_BIN" >/dev/null 2>&1 || {
     echo "error: Julia not found: $JULIA_BIN" >&2; exit 1
   }
-  "$JULIA_BIN" --startup-file=no -e 'exit(v"1.12.6" <= VERSION < v"1.13.0" ? 0 : 1)' || {
-    echo "error: Julia 1.12.x (at least 1.12.6) is required" >&2; exit 1
+  "$JULIA_BIN" --startup-file=no -e 'exit(VERSION >= v"1.12.6" ? 0 : 1)' || {
+    echo "error: Julia 1.12.6 or later is required" >&2; exit 1
   }
   echo "instantiating $REL_DIR ..."
   JULIA_NUM_THREADS=2 "$JULIA_BIN" --startup-file=no --project="$REL_DIR" -e 'using Pkg; Pkg.instantiate()'
