@@ -2,7 +2,7 @@
 
 ## Coverage
 
-The focused suite contains 1,753 assertions across the V2.2 research surfaces:
+The focused suite contains 1,906 assertions across the V2.2 research surfaces:
 
 | Surface | Assertions |
 |---|---:|
@@ -20,7 +20,11 @@ The focused suite contains 1,753 assertions across the V2.2 research surfaces:
 | Receipt-causal M2 arrival queue and ungated sparse candidate | 151 |
 | Low-level M2 matrix-to-core wrapper | 26 |
 | Combined-mechanism recoverability helpers | 17 |
-| Stable group-sparse M2 driver kernel | 52 |
+| Stable group-sparse M2 driver kernel | 60 |
+| Pre-2023 M2 driver diagnostic | 40 |
+| Frozen-core M2 diagnostic | 23 |
+| Sparse M3 diagnostic | 49 |
+| Lag-feature tree M3 diagnostic | 33 |
 | Causal AR-only M3 error-state control | 70 |
 | Full exogenous M3 error-state candidate | 106 |
 | Checksum-bound V2.2 shadow chain | 149 |
@@ -95,6 +99,12 @@ inference, checksummed artifact round trips, and corruption rejection.
   missing-history fallback, deterministic sparse fitting, stability rejection,
   correction caps, record and current-call base-center binding, artifact
   corruption, and non-regular output-target preservation.
+- The pre-2023 M2/M3 diagnostics enforce the target boundary, point-only source
+  access, exact M2-eligible and scheduled readiness denominators, fold-specific
+  center lineage, whole-anchor embargoes, regime-safe positive-gain selection,
+  exact-zero null artifacts, and common calendar-month bootstrap draws. The
+  tree tests independently exercise final-fit chronology, rounds, shrinkage,
+  regime safety, correction caps, and unchanged-center fallback.
 - The shadow-chain contract is checked against hand-computed AR and full-M3
   corrections, exact wrapper-result handoff, post-issue invariance, all six
   lead-specific exogenous artifact identities, semantic core and conformal
@@ -136,7 +146,7 @@ execution.
 
 ## Full verification
 
-- All 1,753 focused V2.2 assertions pass on the final source tree under bounds
+- All 1,906 focused V2.2 assertions pass on the final source tree under bounds
   checking with deprecations treated as errors. The bounded invocations read no
   post-2022 challenge values and performed no network or service action.
 - Current metadata, ephemeris, quality, and source-URL identity extension:
@@ -159,8 +169,12 @@ execution.
 - Current recoverability helpers: 17/17 under bounds checking. The complete
   pre-2023 diagnostic passed the 0.25 nT point margin at all six leads; its
   noncausal driver input makes it a mechanism bound, not a promotion result.
-- Current pure M2 group-sparse driver kernel: 52/52 under bounds checking. It
+- Current pure M2 group-sparse driver kernel: 60/60 under bounds checking. It
   has not been selected or fitted on a receipt-causal observational cohort.
+- Current pre-2023 diagnostics: M2 driver 40/40, frozen core 23/23, sparse M3
+  49/49, and lag-feature tree M3 33/33 under bounds checking with deprecations
+  treated as errors. The persisted decision remains `NO_GO`; these tests
+  establish implementation integrity, not operational accuracy.
 - Current causal AR-only M3 error-state control: 70/70 under bounds checking.
   It excludes the exogenous M2 and issue-time features required by the full M3
   candidate and therefore does not establish end-to-end skill.
@@ -172,14 +186,12 @@ execution.
   path, AR M3, full exogenous M3, and the composite passed 403/403 assertions
   in aggregate. These are
   synthetic contract tests, not an observational fit or accuracy result.
-- The full package suite was not rerun because this bounded task prohibited
-  access to the local challenge-data values exercised by broader tests.
-- Prior frozen V2.2 state before the current bounded V2.2 extensions: clean full
-  package suite with 5,098/5,098 assertions passed.
+- The final full package suite passes 6,460/6,460 assertions under bounds
+  checking with deprecations treated as errors.
 - Current deterministic package experiment: `SolarSINDy experiments: V2.1
   deterministic smoke PASS` under bounds checking with deprecations treated as
   errors.
-- Prior development harness: 155 passes, 3 warnings, and 0 failures. One warning is
+- Current development harness: 182 passes, 3 warnings, and 0 failures. One warning is
   the conservative loose-tolerance scan documented above; the other two report
   that this package-only worktree does not contain the workspace manuscript
   data and figure directories.
@@ -237,5 +249,16 @@ The first aggregate standalone invocation exposed that the M2 driver test file
 relied on imports supplied by the full test runner. Explicit `CSV`,
 `DataFrames`, `LinearAlgebra`, `Random`, `Statistics`, `Test`, and `SolarSINDy`
 imports were added without changing an expectation. Its standalone
-bounds-checked suite then passed 52/52, and the remaining focused chain passed
-under the same strict settings.
+bounds-checked suite then passed 52/52. Expanded segmented-recovery oracles
+raised the current kernel suite to 60/60 without changing its fixed tolerance.
+
+An independent M3 audit then found five verification defects: calibration rows
+were scanned despite a zero-read label, the pre-2023 reader bounded issues but
+not targets, sparse selection and null artifacts lacked mutation coverage, the
+bootstrap fixture could not distinguish shared block draws, and the tree final
+fit and regime screen were untested. The point reader now stops after the first
+calibration split label without materializing its values, target timestamps are
+bounded, readiness distinguishes M2-conditional from scheduled availability,
+and the selection, bootstrap, null-artifact, chronology, rounds, shrinkage, and
+regime paths have independent adversarial tests. A fresh read-only audit
+returned `CLEAN` after the 49/49 sparse and 33/33 tree suites passed.

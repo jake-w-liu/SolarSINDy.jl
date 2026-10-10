@@ -436,28 +436,20 @@ function operational_v22_driver_rollout(
     return result
 end
 
-"Fit the frozen sequential group-thresholded ridge continuation."
-function fit_operational_v22_driver(
-        states::AbstractMatrix;
-        ridge::Real,
-        threshold::Real,
-        label::AbstractString="operational-v2.2-m2-driver")
-    converted = _operational_v22_driver_matrix(states)
-    size(converted, 1) >= _OPERATIONAL_V22_DRIVER_HISTORY_ROWS + 1 ||
-        throw(ArgumentError(
-            "V2.2-M2 fitting requires at least 26 chronological state rows",
+function _operational_v22_driver_fit_segments(
+        converted_segments::Vector{Matrix{Float64}},
+        ridge64::Float64,
+        threshold64::Float64,
+        label::String;
+        verify_training_rollouts::Bool=true)
+    all(segment -> size(segment, 1) >=
+                   _OPERATIONAL_V22_DRIVER_HISTORY_ROWS + 1,
+        converted_segments) || throw(ArgumentError(
+            "each V2.2-M2 fitting segment requires at least 26 chronological state rows",
         ))
-    ridge64 = _operational_v22_driver_float(ridge, "ridge")
-    threshold64 = _operational_v22_driver_float(threshold, "threshold")
-    ridge64 in OPERATIONAL_V22_DRIVER_RIDGE_GRID || throw(ArgumentError(
-        "V2.2-M2 ridge must belong to the frozen search grid",
-    ))
-    threshold64 in OPERATIONAL_V22_DRIVER_THRESHOLD_GRID || throw(ArgumentError(
-        "V2.2-M2 threshold must belong to the frozen search grid",
-    ))
-
-    center_vector = vec(mean(converted; dims=1))
-    scale_vector = vec(std(converted; dims=1, corrected=false))
+    combined = reduce(vcat, converted_segments)
+    center_vector = vec(mean(combined; dims=1))
+    scale_vector = vec(std(combined; dims=1, corrected=false))
     all(isfinite, center_vector) || throw(ArgumentError(
         "V2.2-M2 state centers exceed the supported Float64 range",
     ))
@@ -465,8 +457,13 @@ function fit_operational_v22_driver(
         throw(ArgumentError(
             "V2.2-M2 fitting requires finite nonconstant state columns",
         ))
-    standardized = (converted .- transpose(center_vector)) ./ transpose(scale_vector)
-    design, targets = _operational_v22_driver_design(standardized)
+    standardized_segments = [
+        (segment .- transpose(center_vector)) ./ transpose(scale_vector)
+        for segment in converted_segments
+    ]
+    design_targets = map(_operational_v22_driver_design, standardized_segments)
+    design = reduce(vcat, first.(design_targets))
+    targets = reduce(vcat, last.(design_targets))
 
     intercept, fitted, active, iterations =
         _operational_v22_driver_threshold_fit(
@@ -499,12 +496,62 @@ function fit_operational_v22_driver(
         label=label,
     )
 
-    for anchor in _OPERATIONAL_V22_DRIVER_HISTORY_ROWS:size(standardized, 1)
-        first_row = anchor - maximum(OPERATIONAL_V22_DRIVER_LAGS)
-        history = Matrix(@view converted[first_row:anchor, :])
-        operational_v22_driver_rollout(artifact, history)
+    if verify_training_rollouts
+        for segment in converted_segments
+            for anchor in _OPERATIONAL_V22_DRIVER_HISTORY_ROWS:size(segment, 1)
+                first_row = anchor - maximum(OPERATIONAL_V22_DRIVER_LAGS)
+                history = Matrix(@view segment[first_row:anchor, :])
+                operational_v22_driver_rollout(artifact, history)
+            end
+        end
     end
     return artifact
+end
+
+function _operational_v22_driver_fit_hyperparameters(ridge, threshold)
+    ridge64 = _operational_v22_driver_float(ridge, "ridge")
+    threshold64 = _operational_v22_driver_float(threshold, "threshold")
+    ridge64 in OPERATIONAL_V22_DRIVER_RIDGE_GRID || throw(ArgumentError(
+        "V2.2-M2 ridge must belong to the frozen search grid",
+    ))
+    threshold64 in OPERATIONAL_V22_DRIVER_THRESHOLD_GRID || throw(ArgumentError(
+        "V2.2-M2 threshold must belong to the frozen search grid",
+    ))
+    return ridge64, threshold64
+end
+
+"Fit the frozen continuation to one contiguous 30-minute state sequence."
+function fit_operational_v22_driver(
+        states::AbstractMatrix;
+        ridge::Real,
+        threshold::Real,
+        label::AbstractString="operational-v2.2-m2-driver")
+    converted = _operational_v22_driver_matrix(states)
+    ridge64, threshold64 =
+        _operational_v22_driver_fit_hyperparameters(ridge, threshold)
+    return _operational_v22_driver_fit_segments(
+        [converted], ridge64, threshold64, String(label),
+    )
+end
+
+"Fit without creating artificial lag or target rows across observed data gaps."
+function fit_operational_v22_driver(
+        segments::AbstractVector;
+        ridge::Real,
+        threshold::Real,
+        label::AbstractString="operational-v2.2-m2-driver")
+    isempty(segments) && throw(ArgumentError(
+        "V2.2-M2 segmented fitting requires at least one segment",
+    ))
+    all(segment -> segment isa AbstractMatrix, segments) || throw(ArgumentError(
+        "V2.2-M2 fitting segments must be state matrices",
+    ))
+    converted = [_operational_v22_driver_matrix(segment) for segment in segments]
+    ridge64, threshold64 =
+        _operational_v22_driver_fit_hyperparameters(ridge, threshold)
+    return _operational_v22_driver_fit_segments(
+        converted, ridge64, threshold64, String(label),
+    )
 end
 
 function _operational_v22_driver_hash_token(io::IO, value)
