@@ -1,310 +1,129 @@
 # SolarSINDy.jl
 
-`SolarSINDy.jl` is a Julia package for **data-driven geomagnetic storm (Dst) forecasting**.
-It combines sparse equation discovery with a calibrated operational forecasting layer, and
-runs end to end from synthetic validation through real NASA OMNI2 discovery to a live
-NOAA SWPC–driven monitor.
+A Julia package for data-driven geomagnetic storm (Dst) forecasting, with a live
+operational monitor and web dashboard. It has two layers:
 
-The package is organized as two layers:
+1. **Discovery** — sparse identification of nonlinear dynamics (SINDy) recovers a
+   compact solar-wind–magnetosphere coupling equation for Dst (20 candidate terms,
+   11 active), alongside classical baselines (Burton, Burton-full,
+   O'Brien–McPherron).
+2. **Operational forecasting (V2.4e)** — a nonnegative super learner combines ten
+   causal experts with weights fitted per model step, issue-time regime, and
+   ring-current depth, plus depth-stratified split-conformal intervals. Served
+   identity:
 
-1. **Discovery.** Sparse identification of nonlinear dynamics (SINDy) recovers a
-   closed-form solar wind–magnetosphere coupling equation for Dst from storm time
-   series, alongside classical physical baselines. The current discovery artifact has
-   20 candidate terms and 11 active terms.
-2. **Operational forecasting (V2.4e).** The serving path forms ten causal experts,
-   including two V2.1 predecessor forms built on the revised 20/11 point forecast,
-   and combines them with nonnegative step-, regime-, and depth-specific weights.
-   It publishes depth-stratified split-conformal intervals and records any fallback
-   to static V2.2 or V2.1 explicitly. The archived 21/10 V2.0 core is available only
-   through an explicit historical request.
+   ```text
+   v2.4+sindy20x11+superlearner10floor+conformal
+   ```
 
-## Capabilities
+## Requirements
 
-**Discovery and modeling (v1)**
+- Julia **≥ 1.12.6** (`[compat].julia` in [Project.toml](Project.toml))
+- Network access to NOAA SWPC for the live path only
 
-- synthetic storm generation for controlled validation
-- sparse equation discovery (STLSQ, ensemble SINDy, λ sweeps) from storm time series
-- a candidate coupling-function library (rectified `VBs`, clock angle, dynamic pressure, …)
-- classical baselines: Burton, Burton-full, and O'Brien–McPherron
-- NASA OMNI2 ingestion, cleaning, and storm-catalog extraction
-
-**Operational forecasting (V2.4e with a V2.1 base operator)**
-
-- a causal correction layer, `Dst_v2 = Dst_v1 + β₀ + Σ βⱼ zⱼ`, fit only from prior
-  (replay/live) rows so it never looks ahead of the issue time
-- stratified split-conformal predictive intervals with finite-sample marginal coverage
-  under exchangeability, stratified by lead time × geomagnetic activity regime
-- adaptive (online) conformal updating under distribution shift
-- V2.1 tail: ballistically propagated L1 forcing when the corresponding upstream window
-  has sufficient coverage, then regime-aware Bz/By relaxation, a capped causal
-  rapid-deepening projection, one-hour persistence shrinkage selected on development
-  partitions, and a separate extreme-core persistence guard
-- guarded component selection over corrected SINDy, uncorrected SINDy v1, persistence,
-  Burton, Burton-full, and O'Brien–McPherron, deployed only after chronological validation
-- online assimilation utilities for reproducibility and shadow experiments; EKF-on-SINDy
-  failed promotion gates and is not part of V2.4e serving
-- forecast skill metrics (RMSE, correlation, skill score, prediction efficiency, Wilcoxon)
-
-**Real-time**
-
-- NOAA SWPC plasma / magnetic-field / Dst fetchers
-- a rolling monitor loop with interval-aware storm-severity alarms
-
-## Operational forecast status
-
-The dashboard and live monitor serve a single forecast whose SINDy core is the same
-20-candidate/11-active-term artifact used by the revised discovery paper. The served
-point center is the **V2.4e super-learner**: a fitted nonnegative combination of ten
-causal forecasts, weighted per model step, per causal issue-time regime and per
-ring-current depth bin, with a 0.60 lower bound on the outer weight assigned to four experts
-classified in the operational SINDy lineage. The ten are the served
-V2.1 operator center, the frozen-tail V2.1 center, an analog driver-continuation center with
-the refit ridge correction, persistence, Burton, Burton-full, O'Brien-McPherron, a tuned
-direct increment-GBM, climatology-relaxed persistence, and the fixed 2010-2017 static V2.2
-regime stack. Static V2.2 counts as one classified outer expert even though it is itself a
-six-expert mixture containing nonsparse components. The 0.60 constraint is therefore an
-expert-taxonomy rule, not a lower bound on the atomic contribution of the sparse equation.
-The served identity is
-
-```text
-v2.4+sindy20x11+superlearner10floor+conformal
-```
-
-Its evidence is a rolling-origin study over 2014-2025 in which every model is refitted
-inside every fold: V2.4e has the lowest pooled RMSE of the comparator set at every model
-step on the full window and on 2020-2025, and beats the static stack it replaces at every
-step with positive one-sided lower bounds and no bootstrap-supported storm-cell loss on
-those two scopes. The study's own preregistered rule returned `SHADOW` because the
-data-poor 2014-2019 folds fail two gates marginally; the operational serve rule, evaluated
-against the product actually being replaced, returned `SERVE_ELIGIBLE_PENDING_G4` on the
-full window and on 2020-2025, with 2014-2019 disclosed rather than decisive because the
-static stack is partly in sample there.
-
-The bundle ships as `deploy/v2_4/` — stack weights, per-step boosted models, the analog
-archive and its standardisation, the refit correction, the climatology timescale, the
-conformal half-widths, the guard record and a digest manifest — and is rebuilt by
-`validation/operational/v2_4_build_deploy.jl`. It is verified on load: every file against
-its SHA-256, the analog archive rebuilt from the shipped frame and compared with the origin
-count and standardisation the builder recorded, every stack cell for non-negativity, unit
-mass, the served expert set and the SINDy floor, the conformal grid for completeness, and
-the guard record against this build's own thresholds and its own guard switch. A bundle that
-fails any check does not load, and the row falls back down the chain instead of serving
-unverified artifacts.
-
-The served point forecast carries no guard: the static stack is one of the combined
-forecasts. Depth safety lives at the alerting layer instead, where the published severity and
-watch state are the deepest of the V2.4e center, the static-stack center and the V2.1 center,
-so a combination that blends toward a shallower state cannot lower a warning either
-predecessor would have raised. The guard code path is retained and is driven by the bundle's
-own `guard.json`, so a later bundle whose selection returns a guarded variant is servable
-without a source change.
-
-The served band of a V2.4e row is the study's split-conformal interval for that center,
-stratified by model step and depth bin, disclosed as `interval_source = v24_conformal_depth`.
-
-The **fallback chain is V2.4e → static V2.2 stack → V2.1 operator**, disclosed per row:
-
-```text
-v24_status            ok | fallback:<reason>       (super-learner stage)
-v2_2_status           ok | ok_unpinned | fallback_v2_1:<reason>   (stack stage)
-v24_pred_dst_nt       served V2.4e center, equal to v24_l1_center_dst_nt while no guard acts
-v24_ci05_nt/ci95_nt   conformal interval endpoints of that center
-v24_regime_cell       the (regime, depth) cell whose weights were used
-v24_guard_applied     whether a bundle-configured guard moved the center (false as deployed)
-v24_projection_applied   whether the physical +50/-2000 nT projection moved the center
-v2_2_stack_pred_dst_nt   static-stack center of the row (expert ten, and a severity partner)
-v2_1_served_pred_dst_nt  V2.1 operator center of the row
-v2_2_stack_ci05_dst_nt   lower band edge the stack stage would have published for this issue
-v2_1_served_ci05_dst_nt  lower band edge the V2.1 operator would have published
-direct_gbm_pred_dst_nt / climatology_pred_dst_nt / v24_t1r_pred_dst_nt
-                      the three experts no other column carries
-v24_manifest_sha256   digest of the bundle's own manifest
-```
-
-The static V2.2 regime stack — a bounded, SINDy-dominant convex combination of the six
-point components, selected per model step and per causal issue-time regime — remains the
-first fallback and the guard's reference. Its weights ship as
-`deploy/operational_v2_2_stack.csv` with their SHA-256 in
-`deploy/operational_v2_2_stack_manifest.csv`; the engine refuses weights whose digest or
-label does not match the published fit. Because the guard needs that center, a cycle whose
-stack stage cannot act serves the V2.1 operator rather than an unguarded candidate.
-
-The published threat level is taken against the deepest of the served center, the
-static-stack center and the V2.1 center. The interval lower edge that raises a watch is taken
-the same way, against the deepest of the served edge and the edge each of those stages would
-have published — not against the served edge shifted by the change in the center. The two are
-not the same statement: a V2.4e row carries the depth-stratified conformal half-width, which
-in the shallow bins is narrower than the shifted frozen-tail and adaptive bands the earlier
-stages served under, so a shifted edge can still sit a storm tier shallower than the
-predecessor's own. Both partner edges are therefore logged per row and the published edge is
-the minimum over them, which makes the rule idempotent and leaves a deeper served edge
-untouched. A row written before those columns existed falls back to the earlier shift rule and
-the payload discloses that it did. The API publishes the alerting center and edge as
-`severity_dst_nt` and `severity_ci05_dst_nt`, with `severity_ci05_source` naming the stage the
-edge came from, and the dashboard renders both under the served forecast.
-
-The **V2.3 analog driver continuation** is integrated as a shadow forecast only. Its
-single-shot confirmatory scoring on the 2020-2025 partition returned `NO_GO`
-(`validation/output/operational/v2_3_test/decision.csv`), so it never reaches the served
-center, the threat level or an alert. Each issued row records the shadow center and its
-provenance:
-
-```text
-v23_shadow_model_version  v2.3-shadow+sindy20x11+L1A+ADC(magnetic,K25)+T1rcal+LAT+E
-v23_manifest_sha256       digest of the shadow deployment's own manifest
-v23_status                ok | ok:e_layer_pending | unavailable:<reason>
-v23_analog_k              ensemble size actually retrieved
-v23_history_hours         hourly L1 driver means the analog key could draw on
-v23_raw_dst_nt            analog ensemble mean before the correction
-v23_center_dst_nt         center after the correction and the lead-aware blend
-v23_step1_center_dst_nt   one-hour pre-layer center of this anchor
-v23_shadow_pred_dst_nt    center after the capped error layer
-v23_e_layer_applied       whether six matured innovations were available
-```
-
-The error layer is defined against the one-hour pre-layer center, and the issued model
-steps are 2/3/4/7 h at a one-hour Kyoto anchor lag, so the one-hour center is recorded on
-every cycle whether or not one hour is an issued horizon. The innovation of anchor `a` is
-`Dst(a + 1 h)` minus that recorded center; until six have matured the layer is the identity
-and the row says `ok:e_layer_pending`.
-
-The shadow deployment lives in `deploy/v2_3_shadow/`, is rebuilt by
-`validation/operational/v2_3_build_deploy.jl --from-test`, and is verified on load: every
-file is checked against its SHA-256, and the 86,968-origin analog archive is rebuilt from
-the shipped hourly frame and compared with the origin count and feature standardisation the
-scoring run recorded.
-
-Two offline identity oracles keep the served and shadow paths equal to what was measured:
+## Quick start — the live system
 
 ```bash
-julia --project=. validation/operational/v2_4_serving_identity.jl  # served V2.4e center
-julia --project=. validation/operational/v2_2_served_identity.jl   # static stack center
-julia --project=. validation/operational/v2_3_serving_identity.jl  # V2.3 shadow center
+git clone https://github.com/jake-w-liu/SolarSINDy.jl.git
+cd SolarSINDy.jl
+
+bin/solarsindy setup    # one-time: check Julia, instantiate both environments
+bin/solarsindy start    # forecast daemon + dashboard; opens http://127.0.0.1:8723
+bin/solarsindy status   # process / health / issuance-freshness summary
+bin/solarsindy stop     # stop both services
 ```
 
-The first drives the serving functions with hourly archive inputs against a fold-2025
-replica of the deployment bundle and reproduces every stage the study scored — the ten
-experts, the super-learner center, the published center and both interval endpoints — to
-1e-9 nT. The second
-reproduces the archived `static_v2_2_dst_nt` column on every scorable DEV/TEST row; the
-third reproduces the scored `V2_3_final` centers at every model step.
+Other useful commands: `bin/solarsindy once` (single forecast cycle in the
+foreground, the right smoke test), `bin/solarsindy open` (reopen the dashboard),
+`bin/solarsindy logs monitor -f`, `bin/solarsindy install-service` /
+`uninstall-service` (supervised mode: macOS launchd with auto-restart and
+watchdog; systemd templates in [`deploy/`](deploy/)).
 
-Operational readiness is audited by
-[`validation/operational/v2_readiness_audit.jl`](validation/operational/v2_readiness_audit.jl).
-Its served-stage window reports the fallback rate over four days of hourly issuance against
-the integration specification's 1% target, but the target is not the operative gate and the
-audit does not present it as one: two fallbacks in ninety-six cycles is already 2.1%, so any
-window that reaches the two-cycle failure threshold is over a 1% target by arithmetic. What
-fails the audit is a fallback on the newest cycle — the cycle being served now — or two or more
-fallbacks in the window; the rate is reported and recorded as `served_fallback_rate`. When the
-newest cycle predates the served stage it carries no served-stage verdict, which is disclosed as
-its own check rather than resolved against an older cycle.
+## The served product
 
-The former 21/10 product is labeled V2.0 and retained under `data/historical/v2_0/` and
-`deploy/historical/v2_0/` only for reproducible matched comparisons. The `v2` API
-alias resolves to V2.1; loading V2.0 requires an explicit version.
+**Experts.** The ten inputs are: the V2.1 operator, the frozen-tail V2.1 form,
+an analog driver-continuation expert with refit ridge correction, persistence,
+Burton, Burton-full, O'Brien–McPherron, a direct increment-GBM, climatology, and
+the static V2.2 regime stack. A 0.60 floor on the four SINDy-lineage experts
+applies per cell; because the static stack is itself a six-expert mixture, that
+constraint is an expert taxonomy, not a lower bound on sparse-equation
+contribution.
 
-EKF-on-SINDy is retained as research infrastructure only. Both tested deployment paths
-(decay-only and injection-adaptive EKF) failed promotion gates, so they are not exposed
-through the dashboard, daemon, alerting path, or V2 forecast columns. Recent
-lower-RMSE relaxed-tail variants also remain diagnostic until they avoid severe-storm
-under-warning in sustained southward-Bz stress rows.
+**Fallback chain (fail-closed):** V2.4e → static V2.2 stack → V2.1 operator.
+Every issued row records which stage served it (`model_version`), the chosen
+cell, the bundle digest, and the partner centers used for alerting.
 
-The files named `v2_lookahead`, `v2_envelope`, `v2_improved`, `v2_subhourly`, and
-the EKF replays are development-lineage experiments. They now load the same revised
-20/11 core and V2.1 calibration features as the package, but deliberately substitute
-or omit parts of the served tail to isolate one idea. Their frozen-tail comparisons
-must not be read as evaluations of the complete V2.1 product. Historical 21/10
-execution is confined to the explicit V2.0 artifact resolver and matched provenance
-comparisons.
+**Alerting is separate from the point forecast.** The published severity is the
+*deepest* of the served center, the static-stack center, and the V2.1 center, so
+a blended forecast can never downgrade a warning a predecessor would have
+raised.
 
-## Installation
+**Bundle.** Served artifacts live in `deploy/v2_4/` (stack weights, boosted
+models, analog archive, refit correction, climatology timescale, conformal
+half-widths, guard record, SHA-256 manifest) and are rebuilt by
+`validation/operational/v2_4_build_deploy.jl`. Every file is digest-verified on
+load; a bundle that fails any check does not serve.
+
+**Shadow product.** The V2.3 analog-continuation model is recorded for
+monitoring only — its confirmatory scoring returned `NO_GO`, so it never reaches
+the served center or alerts. It ships in `deploy/v2_3_shadow/`.
+
+**Identity oracles** reproduce the served, stack, and shadow centers offline:
+
+```bash
+julia --project=. validation/operational/v2_4_serving_identity.jl
+julia --project=. validation/operational/v2_2_served_identity.jl
+julia --project=. validation/operational/v2_3_serving_identity.jl
+```
+
+**Readiness audit** (while services run):
+
+```bash
+julia --project=. validation/operational/v2_readiness_audit.jl \
+  --write-report --require-api --require-fresh
+```
+
+## Live monitor
+
+The daemon issues immutable forecasts at 1/2/3/6 h (or the shifted step set when
+the Dst anchor lags by one hour), scores them after the observation matures,
+captures an external SWPC Dst snapshot as an independent comparator, and rewrites
+the comparison report. State lives under `var/monitor/` by default.
+
+Key environment variables (full list: `bin/solarsindy help`, template
+[`deploy/solarsindy.env.example`](deploy/solarsindy.env.example)):
+
+| Variable | Purpose |
+|---|---|
+| `SWM_HOST`, `SWM_PORT` | dashboard bind host/port |
+| `SOLARSINDY_MONITOR_DIR` | monitor state directory |
+| `SWM_WEBHOOK_URL` | POST alerts on threat-level changes |
+| `SOLARSINDY_LOG` | dashboard log path override |
+| `LIVE_MONITOR_INTERVAL_SEC`, `LIVE_MONITOR_MAX_CYCLES`, `LIVE_MONITOR_DEADMAN_CYCLES` | cadence, cycle cap, dead-man threshold |
+| `LIVE_MONITOR_PHASE_SAMPLING=1` | alternate issue phase each hour (prospective calibration evidence) |
+| `LIVE_MONITOR_MAX_LOG_ROWS` | hot-log cap (default 50,000; older rows cold-archive) |
+| `SOLARSINDY_NO_OPEN=1` | never auto-open the browser |
+
+The hot log is capped and rolls mature rows into an append-only cold archive;
+daemon logs are ring-rotated. `var/monitor/source_cache/` (raw feed receipts)
+grows unboundedly — prune it periodically.
+
+## Dashboard
+
+`app/` contains a self-contained HTTP.jl + Plotly UI over the locked-live log:
+served forecast with its empirical 90% band, forecast-vs-observed track, verified
+track record, calibration/skill, a ground-d*B*/d*t* nowcast, and the warning
+chain. Coverage is labeled empirical; best-method highlighting waits for enough
+matured rows. See [`app/README.md`](app/README.md) for endpoints.
+
+## Using the library
 
 ```julia
 using Pkg
 Pkg.add(url="https://github.com/jake-w-liu/SolarSINDy.jl")
 ```
 
-Or from a local checkout:
-
-```julia
-Pkg.develop(path="SolarSINDy.jl")
-```
-
-Then:
-
-```julia
-using SolarSINDy
-```
-
-The package and operational services support Julia 1.12.x and 1.13.x. The minimum
-version is defined by `[compat].julia` in [Project.toml](Project.toml).
-`Manifest.toml` is committed for reproducible research runs.
-
-## Quick start — run the live forecast system
-
-A fresh clone runs the full operational system — the hourly forecast daemon plus the web
-dashboard — with one command each:
-
-```bash
-git clone https://github.com/jake-w-liu/SolarSINDy.jl.git
-cd SolarSINDy.jl
-
-bin/solarsindy setup      # one-time: checks Julia, instantiates + precompiles both environments
-bin/solarsindy start      # forecast daemon + dashboard; auto-opens http://127.0.0.1:8723
-bin/solarsindy status     # process / health / issuance-freshness summary
-bin/solarsindy open       # reopen the dashboard tab any time
-bin/solarsindy stop       # stops both daemons
-```
-
-`start` opens the dashboard in your browser only from an interactive terminal (never when
-scripted, piped, or headless; `SOLARSINDY_NO_OPEN=1` turns it off) — the server keeps
-running either way, and a closed tab is just `bin/solarsindy open` away.
-
-`bin/solarsindy help` lists everything else: `start`/`stop`/`restart` take `monitor`,
-`dashboard`, or `all`; `once` runs a single forecast cycle in the foreground; `logs
-[monitor|dashboard] [-f]` tails the daemon logs; `install-service` /
-`uninstall-service` switch to and from the supervised production mode (macOS launchd
-with auto-restart and an out-of-process watchdog; systemd templates for Linux live in
-[`deploy/`](deploy/)). Configuration is by environment variable — `SWM_PORT`,
-`SOLARSINDY_MONITOR_DIR`, `SWM_WEBHOOK_URL` for push alerts — or a gitignored
-`solarsindy.env` file in the clone root (template:
-[`deploy/solarsindy.env.example`](deploy/solarsindy.env.example)). A launchd job inherits
-nothing from an interactive shell, so `install-service` renders the allow-listed keys into
-each service's `EnvironmentVariables` block — the bind host and port, the webhook URL, the
-cadence and log-cap settings, and the served-artifact overrides — and names at install time
-any key that is set but reaches none of the selected services. Changing `solarsindy.env`
-after an install therefore requires re-running `install-service`; until then `status` reads
-the installed plist's port so it probes the port the service actually binds. The CLI keeps its
-pidfiles inside the instance state directory, serializes concurrent starts with a lock,
-refuses to start a second copy while the installed service mode is active, and never
-signals a process that is not running this clone's daemon entry point (so a recycled PID
-can never be hit).
-
-## Architecture: discovery → operational calibration
-
-The two layers are deliberately decoupled. The v1 SINDy model is a fixed, interpretable
-dynamical core. The v2 calibration is a thin causal layer fit on top of replayed or live
-forecasts; it **does not** modify the v1 coefficients or the forecast state. This keeps the
-discovered physics auditable while letting the operational forecast adapt:
-
-```
-issue-time drivers ──▶ v1 SINDy point forecast ──▶ v2 correction (causal, β·z)
-                                                 └─▶ conformal interval (stratified)
-                                                 └─▶ V2 tail (L1 look-ahead + regime-aware relaxation)
-                                                 └─▶ guarded component selection
-                                                          │
-                                                          ▼
-                              operational Dst + empirically evaluated 90% target band
-```
-
-Because the v2 correction and the conformal quantiles are fit only from rows strictly
-earlier than the issue time, the operational forecast carries no look-ahead leakage.
-
-## Quick start — discovery (v1)
-
-Generate a synthetic storm, prepare the discovery inputs, discover a sparse equation, and
-simulate it forward:
+Discovery quick start:
 
 ```julia
 using SolarSINDy
@@ -315,389 +134,60 @@ lib = build_minimal_library()
 
 ξ, active_terms, _ = sindy_discover(data, lib, dDst; λ=0.01)
 Dst_pred = simulate_sindy(ξ, lib, swd, 1.0)
-
-println(active_terms)
-println("Prediction efficiency = ", prediction_efficiency(Dst_pred, swd.Dst_star))
 ```
 
-## Quick start — calibrated forecast (v2)
-
-Fit the V2 calibration from a replay table of prior forecasts (issue-time
-features + realized observations), then issue a corrected point forecast with a
-finite-sample conformal interval:
+Calibration example:
 
 ```julia
-using SolarSINDy
-
-# 1. Stratified split-conformal calibration from prior residuals (distribution-free band).
-#    points / observations / horizons / latest_dsts are equal-length vectors of past forecasts.
 cal = fit_conformal(points, observations, horizons, latest_dsts; coverage=0.90)
-lo, hi = conformal_interval(cal, point_forecast, horizon, latest_dst)   # scalar query
-println("90% band: [", lo, ", ", hi, "]  (target coverage 0.90)")
-println("empirical coverage = ", conformal_coverage(cal, points, observations, horizons, latest_dsts))
+lo, hi = conformal_interval(cal, point_forecast, horizon, latest_dst)
 
-# 2. V2 causal correction on top of the v1 point forecast.
-#    replay_df is a DataFrame of prior issued forecasts + realized observations.
-v2cal = fit_operational_v2_calibration(replay_df)            # β·z fit from prior rows only
+v2cal = fit_operational_v2_calibration(replay_df)          # β·z fit, causal
 out = operational_v2_predict(v2cal, v1_point, v1_ci05, v1_ci95, features)
-println("v2 Dst = ", out.pred_dst, "  90% band = [", out.ci05_dst, ", ", out.ci95_dst, "]")
 ```
-
-The conformal layer is distribution-free: it assumes only that calibration and test
-residuals are exchangeable, and gives the marginal guarantee
-`P(|Y − Ŷ| ≤ Q̂) ≥ ⌈(n+1)(1−α)⌉ / (n+1)`. Quantiles are stratified by forecast horizon
-and by activity regime, because storm-time residuals are heavier-tailed than quiet-time
-residuals and longer leads carry larger error; a single pooled band would over-cover
-quiet/short cases and under-cover storm/long-lead cases.
-
-## Real-time monitoring
-
-```bash
-julia --project=SolarSINDy.jl SolarSINDy.jl/examples/storm_monitor.jl
-```
-
-The monitor:
-
-- fetches near-real-time solar wind from NOAA SWPC (`fetch_realtime_solar_wind`)
-- forward-integrates the current eleven-active-term SINDy equation at hourly cadence,
-  loading the canonical V2.1 artifacts from `data/`
-- propagates the 500-member coefficient ensemble for prediction intervals
-- emits configurable storm-severity alarms (`QUIET` / `MODERATE` / `INTENSE` / `SUPERINTENSE`)
-
-Set `STORM_MONITOR_MAX_CYCLES=<n>` to exit after `n` poll cycles (verification / CI).
-
-A locked-live verification harness — which issues a forecast, locks it, and scores it only
-after the target hour is observed — is in
-[`examples/live_forecast_verify.jl`](examples/live_forecast_verify.jl). The realtime data
-path depends on external NOAA SWPC availability.
-
-## Running the live monitor
-
-[`examples/live_monitor.jl`](examples/live_monitor.jl) is the long-running accrual daemon. Each
-cycle it issues immutable V2 forecasts at 1/2/3/6 h leads, refreshes observations from the live
-Dst feed, scores any pending rows whose target hour has arrived, captures an external
-Dst snapshot, and rewrites the comparison report. External prospective scores require a recorded
-response completion before target; late rows and legacy rows without completion evidence remain
-archived but are excluded from those scores. See the
-[external snapshot timing contract](docs/src/live-verification.md#external-dst-receipt-timing).
-The comparison report gives pooled and internal-step
-same-row scores for the served product, the static V2.2 predecessor and the listed comparators;
-small step cells remain descriptive. The managed path is
-`bin/solarsindy start monitor` (pidfile, readiness check, then `stop` / `status` /
-`logs monitor -f`); the daemon can also be run directly from a fresh clone:
-
-```bash
-git clone https://github.com/jake-w-liu/SolarSINDy.jl.git
-julia --project=SolarSINDy.jl -e 'using Pkg; Pkg.instantiate()'
-
-# One cycle against the live feeds, then exit:
-julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_monitor.jl --once
-
-# Continuous daemon (default 3600 s cadence):
-julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_monitor.jl
-```
-
-Configuration is by environment variable:
-
-- `SOLARSINDY_MONITOR_DIR` — output/state directory for the log, comparison report, outage
-  sentinel, and external-Dst snapshots (default `<clone>/var/monitor`).
-- `SOLARSINDY_V2_CALIBRATION` — V2 calibration CSV (default `<dir>/operational_v2_calibration.csv`).
-  When the directory has no calibration, the monitor falls back to the bundled locked calibration
-  in [`deploy/`](deploy/) and emits a warning. The conformal interval sidecar is looked up next to
-  the calibration (`*_conformal.csv`), also bundled in `deploy/`.
-- `SOLARSINDY_MONITOR_ONCE=1` (or `--once`) — run exactly one cycle, then exit (CI/verification).
-- `LIVE_MONITOR_INTERVAL_SEC`, `LIVE_MONITOR_MAX_CYCLES`, and
-  `LIVE_MONITOR_DEADMAN_CYCLES` — cadence, cycle cap, and issuance dead-man threshold. The
-  product horizons are fixed at 1, 2, 3, and 6 h to match the dashboard/API cycle contract. The
-  actual integration step is measured from the latest hourly Dst anchor, which may lag the issue
-  hour by at most one step. The shipped V2.1 point and conformal artifacts therefore declare and
-  validate the exact model-step support `{1,2,3,4,6,7}`; a cycle whose computed step lies outside
-  that set fails before scoring or logging. The
-  cadence is fixed-rate: cycle runtime is subtracted from the next wait and fully elapsed slots are
-  skipped instead of accumulating drift or producing catch-up bursts. Interval selection is also
-  atomic across the four-row product: ACI is used only when its point and served residual streams
-  are ready at every horizon; otherwise every row uses the static conformal fallback.
-  The cadence *phase* — the minute of the hour the daemon happens to run — therefore has an
-  observable consequence. The phase sets the Dst anchor lag (0 or 1 h), the lag sets the model-step
-  set ({1,2,3,6} at lag 0, {2,3,4,7} at lag 1), and the two step sets have independent residual
-  streams with independent maturities, so a restart at a different minute can flip the batch policy
-  between `aci` and `static` and change the fallback-row and frozen-tail band widths by roughly a
-  factor of four. Under the default fixed interval, the phase is anchored at process start, so a
-  restart re-anchors it. Every
-  `:static` selection now records the anchor lag, the required step set, and each immature stream
-  with its verified-residual counts, so a flip is attributable from the daemon log alone.
-- `LIVE_MONITOR_PHASE_SAMPLING=1` — replace the fixed interval after the immediate startup cycle
-  with one issue per UTC hour: minute 05 in even-numbered hours and minute 55 in odd-numbered
-  hours. This alternation is intended to accrue both admitted Dst-anchor lag phases for the
-  prospective V2.4e calibration gate. The actual logged anchor and internal step determine the
-  evidence stratum; the schedule never assumes that an hourly Dst value has been published.
-- `LIVE_MONITOR_MAX_LOG_ROWS` — maximum retained hot-log rows (default 50,000). Values below
-  four are rejected so retention cannot delete part of the latest product cycle. Pruned rows
-  are cold-archived first; when the hot log's columns differ from the newest archive segment's
-  header, the archive rolls to a new numbered segment instead of refusing, so a routine column
-  addition can no longer stall retention permanently. Only the newest segment is ever appended to,
-  so segment order is append order.
-- `LIVE_FUTURE_CLOCK_TOLERANCE_MIN` and `LIVE_MAX_FUTURE_CLOCK_SKEW_MIN` (defaults 2 and 15) —
-  the source-clock skew band. Post-issue feed samples never enter a forecast, so a feed a few
-  minutes ahead of the local clock is reported with its skew and excluded-sample count while
-  issuance continues on the causal remainder; beyond the sanity limit issuance fails closed.
-- A cycle's issuance depends on the L1 feeds; Kyoto verification, retention, the prospective
-  V2.4e claim audit, the external Dst snapshot and the comparison report do not, and run on every
-  cycle regardless of whether forecasts were issued. The A3 claim audit accepts only the frozen
-  V2.4e bundle manifest and exact served/shadow identities, recomputes the A3 endpoint formula,
-  and keeps storm skill blocked unless all five independent events appear at every supported step.
-
-### macOS launchd service (production)
-
-`bin/solarsindy install-service` (equivalently
-[`deploy/install_launchd.sh`](deploy/install_launchd.sh)) renders the tracked launchd
-templates and bootstraps three supervised services — the live monitor, the
-dashboard/alerting server, and the out-of-process watchdog — with auto-restart
-(`KeepAlive`) and the stable juliaup shim, so a `juliaup update` cannot delete the
-interpreter out from under a running service. Supervisor console streams go to bounded,
-self-rotating files under `var/monitor/logs/` (`launchd.out`/`launchd.err` rotate once per
-(re)start, and the daemon mirrors its diagnostic history into the size-capped
-`monitor.log` ring), so crash output is retained instead of discarded. Bounded forecast,
-state, report, and outage artifacts remain in `var/monitor/`. Remove the services with
-`bin/solarsindy uninstall-service`.
-
-### Artifact regeneration
-
-- **Current discovery artifacts** — V2.1 loads
-  `data/real_sindy_discovery_coefficients.csv`,
-  `data/real_ensemble_inclusion.csv`, and
-  `data/real_sindy_ensemble_draws.csv`. These tracked files encode the revised
-  20-candidate/11-active-term equation and 500 joint coefficient draws. Regenerate
-  them with [`validation/real_data_discovery.jl`](validation/real_data_discovery.jl)
-  followed by [`validation/generate_ensemble_draws.jl`](validation/generate_ensemble_draws.jl),
-  then rerun the artifact-identity and replay tests before promotion.
-- **Historical V2.0 artifacts** — the former 21-candidate/10-active-term files are
-  preserved under `data/historical/v2_0/`; their calibration is under
-  `deploy/historical/v2_0/`. They are provenance inputs, never current defaults.
-- **Conformal interval sidecar** — since V2.4e the published interval on a served row is the
-  study's split-conformal depth band (`interval_source = v24_conformal_depth`), stratified by model
-  step and ring-current depth. The adaptive-conformal band applies to rows that fall back to an
-  earlier stage and to the frozen-tail columns; the batch policy behind those columns is recorded
-  per row in `frozen_tail_interval_source`. The stratified sidecar remains the cold-start/fallback
-  interval for the V2.1 operator. Regenerate it from a verified log with
-  [`validation/make_operational_conformal_sidecar.jl`](validation/make_operational_conformal_sidecar.jl)
-  (`SOLARSINDY_LIVE_LOG` / `SOLARSINDY_V2_CONFORMAL_SIDECAR` override the paths).
-- **One-minute OMNI HRO cache** — the sub-hourly component replays use NASA CDAWeb
-  monthly files kept under the ignored validation cache. Fetch and verify the seven-storm
-  set with
-  `julia --project=. validation/operational/fetch_omni_hro.jl`; pass `YYYYMM`
-  arguments to fetch selected months. The fetcher validates the file structure and writes
-  a local SHA-256 manifest before the replay consumes the data.
-
-## Web dashboard
-
-A self-contained operational dashboard ships in [`app/`](app/): a minimal-dependency
-`HTTP.jl` backend serving a Plotly UI over the locked-live forecast log — current storm level,
-the Dst forecast with its empirically evaluated 90% target band, a **rolling forecast-vs-observed track** (every
-locked forecast plotted against the observation that later arrived), the verified track record,
-calibration/skill, a live ground-d*B*/d*t* nowcast, and the Sun → grid
-warning chain.
-
-The served-center shift and bounded online interval update do not retain the
-frozen-center distribution-free guarantee. The dashboard therefore labels coverage as
-empirical, reports every point comparator on one common target cohort, and withholds
-best-method highlighting until at least 48 matched live rows have matured.
-
-The ground-d*B*/d*t* panel prefers the provisional USGS adjusted near-real-time product.
-When it is unavailable, the panel can show the same station's uncorrected variation data,
-with an explicit product label and no electric-field estimate. This is a GIC-hazard indicator;
-archival quality control can revise the magnetic vectors. See the
-[ground-data contract](app/README.md) for product and station fallback behavior. The bundled
-retrospective forecaster uses quasi-definitive ground data and bow-shock-shifted OMNI drivers, so
-it is not served from the newest unshifted L1 observation. Its
-18/42/66/90 nT/min lines are the unit-converted threshold magnitudes used by
-[Pulkkinen et al. (2013)](https://doi.org/10.1002/swe.20056), not a reproduction of that
-study's nonoverlapping 20-minute validation protocol or universal grid-risk categories. The optional electric-field value is a
-1-D reference-ground estimate; a GIC or grid-impact calculation additionally requires site
-conductivity and network topology.
-
-```bash
-bin/solarsindy start dashboard    # managed background start (or: cd app && ./run.sh for foreground)
-```
-
-The server compiles and caches its log-backed endpoint paths *before* opening the
-listener, so the first dashboard hit after a (re)start responds in milliseconds instead
-of paying a one-time parse/compile stall.
-
-It reads `<clone>/var/monitor/live_forecast_log.csv` by default (or set
-`SOLARSINDY_LOG=/path/to/live_forecast_log.csv`),
-falls back to the Plotly CDN when no vendored copy is present, and POSTs webhook alerts on
-threat-level changes when `SWM_WEBHOOK_URL` is set. The dashboard has its own lightweight
-environment (`app/Project.toml`) and test suite (`app/test/runtests.jl`, also run by the package
-`Pkg.test()`); see [`app/README.md`](app/README.md) for endpoints and configuration.
 
 ## Data
 
-Pre-computed SINDy coefficients and validation datasets ship in `data/`, available
-through both `Pkg.add` and cloned repos. Access them programmatically:
+- Pre-computed SINDy coefficients and validation data ship in `data/` (tracked).
+- The large NASA OMNI2 hourly archive is **not** committed; fetch and prepare it
+  with `prepare_omni_data()` — downloads, parses, and cleans in one call.
+- The historical 21/10 V2.0 core is kept under `data/historical/v2_0/` and
+  `deploy/historical/v2_0/` for provenance comparisons only; the `v2` API alias
+  resolves to V2.1, so loading V2.0 requires an explicit version.
 
-```julia
-data_dir = get_data_dir()
-coef_csv = joinpath(data_dir, "real_sindy_discovery_coefficients.csv")
-```
-
-The current joint SINDy ensemble draws (`data/real_sindy_ensemble_draws.csv`) are versioned
-with the 20/11 point artifact. The V2.0 joint draws are retained beside the historical 21/10
-core. A fresh clone therefore preserves the cross-term covariance used by each matched
-forecast. Regenerate a draw artifact with `validation/generate_ensemble_draws.jl`, then rerun
-the artifact-identity and replay gates before replacing a tracked file.
-
-### Fetching the OMNI2 dataset
-
-The large NASA OMNI2 hourly archive used for real-data discovery and backtests is **not**
-committed (hundreds of MB, gitignored). Fetch and prepare it from the public NASA SPDF
-source with one call:
-
-```julia
-df = prepare_omni_data()                                  # download → extract → parse → clean
-df = prepare_omni_data(year_start=2010, year_end=2019)    # restrict the year range
-```
-
-Or step by step:
-
-```julia
-raw       = download_omni2(joinpath(get_data_dir(), "omni_hourly_raw.dat"))
-extracted = extract_omni2_columns(raw, joinpath(get_data_dir(), "omni_extracted.csv"))
-df        = parse_omni2(extracted; year_start=2010, year_end=2019)
-clean_omni_data!(df)
-```
-
-The downloaded `omni_hourly_raw.dat` / `omni_extracted.csv` stay under `data/` and remain
-gitignored; rerun `prepare_omni_data()` anytime to regenerate them. Every script under
-`validation/` reads and writes within the package, so a fresh clone reproduces all results
-end to end with no external paths.
-
-## Core API
-
-**Utilities** — `numerical_derivative`, `smooth_moving_average`, `pressure_correct_dst`,
-`halfwave_rectify`, `imf_clock_angle`, `get_data_dir`
-
-**Library** — `CandidateLibrary`, `build_solar_wind_library`, `build_minimal_library`,
-`evaluate_library`, `get_term_names`
-
-**SINDy** — `stlsq`, `sindy_discover`, `ensemble_sindy`, `sindy_predict`, `simulate_sindy`,
-`sweep_lambda`
-
-**Baselines** — `burton_model`, `burton_model_full`, `newell_coupling`,
-`obrien_mcpherron_model`, `simulate_burton`, `simulate_burton_full`, `simulate_obrien`
-
-**Synthetic data** — `SolarWindData`, `StormEvent`, `generate_synthetic_storm`,
-`generate_multistorm_dataset`, `identify_storm_phases`, `prepare_sindy_data`
-
-**Real-data pipeline** — `download_omni2`, `prepare_omni_data`, `extract_omni2_columns`,
-`parse_omni2`, `load_omni2_csv`, `clean_omni_data!`, `StormCatalogEntry`,
-`build_storm_catalog`, `extract_storm_data`, `extract_all_storms`, `save_storm_catalog`,
-`load_storm_catalog`
-
-**Metrics** — `rmse`, `correlation`, `skill_score`, `prediction_efficiency`,
-`metrics_summary`, `wilcoxon_signed_rank_p`
-
-**Forecast (v1 + V2.1 correction and frozen-tail ablation)** — `ForecastState`, `ForecastResult`, `init_forecast`,
-`step_forecast!`, `forecast_ahead`, `OperationalV2Calibration`,
-`default_operational_v2_calibration`, `operational_v2_feature_tuple`,
-`fit_operational_v2_calibration`, `operational_v2_predict`, `score_operational_v2`,
-`write_operational_v2_calibration`, `read_operational_v2_calibration`
-
-**Versioned operational core** — `OPERATIONAL_V2_1_MODEL_VERSION`,
-`OPERATIONAL_V2_0_MODEL_VERSION`, `OperationalCoreArtifacts`,
-`OperationalCalibrationArtifacts`, `OperationalCore`,
-`canonical_operational_version`, `operational_core_artifacts`,
-`operational_calibration_artifacts`, `validate_operational_core_artifacts`,
-`load_operational_core`, `init_operational_forecast`, `operational_core_forecast`
-
-**Conformal UQ** — `ConformalCalibration`, `ConformalStratum`, `fit_conformal`,
-`conformal_stratum`, `conformal_halfwidth`, `conformal_interval`, `conformal_coverage`,
-`write_conformal_calibration`, `read_conformal_calibration`, `AdaptiveConformal`,
-`init_adaptive_conformal`, `adaptive_conformal_step!`, `run_adaptive_conformal`
-
-**Online assimilation (research/shadow only)** — `AssimilationFilter`, `init_assimilation`, `assimilation_predict!`,
-`assimilation_update!`, `run_assimilation`, `current_dst`, `current_coeffs`, `dst_variance`
-
-**Alarms** — `StormSeverity` (`QUIET`, `MODERATE`, `INTENSE`, `SUPERINTENSE`), `Alarm`,
-`AlarmConfig`, `default_alarm_config`, `check_alarm`, `classify_severity`, `alarm_print`,
-`alarm_log`
-
-**Real-time** — `fetch_swpc_plasma`, `fetch_swpc_mag`, `fetch_swpc_dst`,
-`fetch_realtime_solar_wind`, `run_monitor`
-
-## Reproducing research results
-
-Research/paper workflows live under `validation/` (not `examples/`):
+## Development
 
 ```bash
-julia --project=SolarSINDy.jl SolarSINDy.jl/validation/real_data_discovery.jl
+julia --project=SolarSINDy.jl SolarSINDy.jl/test/runtests.jl      # test suite
+julia --project=SolarSINDy.jl/docs -e 'include("SolarSINDy.jl/docs/make.jl")'  # docs
 ```
 
-Useful scripts: `download_omni.jl`, `real_data_discovery.jl`, `phase_dependent_discovery.jl`,
-`coupled_discovery.jl`, `significance_tests.jl`, `generate_real_figures.jl`,
-`run_validation.jl`.
+- Tests use independent oracles (analytical, conservation, regression). A few
+  oracles need generated artifacts under `validation/output/`; absent ones are
+  registered as skipped, or as failures with
+  `SOLARSINDY_REQUIRE_LOCAL_ARTIFACTS=1`.
+- Research scripts live under `validation/` (`real_data_discovery.jl`,
+  `generate_ensemble_draws.jl`, `run_validation.jl`, …). The package app has its
+  own environment (`app/Project.toml`) and tests (`app/test/runtests.jl`).
+- `Manifest.toml` is committed for reproducible runs.
 
-## Tests
+## Repository map
 
-```bash
-julia --project=SolarSINDy.jl SolarSINDy.jl/test/runtests.jl
+```text
+src/            package source (discovery, calibration, serving, monitor glue)
+app/            dashboard + alerting server
+bin/solarsindy  service CLI (setup/start/stop/status/logs/install-service)
+deploy/         served bundles, launchd + systemd templates, env template
+validation/     research and operational-validation scripts
+data/           tracked coefficients, catalogs, ensemble draws
+examples/       runnable examples (live monitor, verification, review)
+docs/           Documenter sources; DOCS_REPORT.md records coverage
+var/monitor/    live state (gitignored): logs, forecast log, cold archive
 ```
-
-The suite uses independent expectations—analytical checks, conservation and limiting cases,
-and regression baselines—rather than tautologies. Coverage includes:
-
-- analytical checks for the classical baselines
-- SINDy synthetic recovery
-- forecast-state, operational-v2 correction, and alarm logic
-- stratified and adaptive conformal coverage (finite-sample guarantee, exchangeability)
-- OMNI parsing, fill-value replacement, cleaning, and storm-catalog extraction
-- realtime hourly aggregation and forecast initialization
-- live-log duplicate suppression, filesystem locking, and stale-lock recovery
-- served static-stack regime derivation, coupling gate, and archived-column identity
-- V2.3 shadow deployment provenance, analog retrieval, lead-aware blend, and error layer
-
-See the package test suites (`test/runtests.jl` and `app/test/runtests.jl`) for coverage,
-tolerances, and anti-false-test checks.
-
-Six oracles read artifacts the offline validation scripts generate under `validation/output/`, which
-is deliberately untracked: the OMNI archive, the V2.3 base table and hourly frame, and the three
-served-identity tables. A clean clone cannot run them, so each registers itself in a ledger that the
-suite prints and pins — a green run states which real-data oracles it exercised and which it skipped.
-Setting `SOLARSINDY_REQUIRE_LOCAL_ARTIFACTS=1` turns any absence into a failure once the artifacts
-have been generated.
-
-`.github/workflows/ci.yml` runs the suite on a clean checkout on the declared minimum Julia and on
-the release the package is developed on, and builds the manual, so the clean-clone path stays
-exercised.
-
-## Docs
-
-```bash
-julia --project=SolarSINDy.jl/docs -e 'using Pkg; Pkg.instantiate()'
-julia --project=SolarSINDy.jl/docs -e 'include("SolarSINDy.jl/docs/make.jl")'
-```
-
-Doc sources live in `docs/src/`: the narrative pages (`index.md`, `examples.md`,
-`live-verification.md`, `ekf-v3-decision.md`) and the API reference, which reaches every exported
-binding through `@autodocs` blocks keyed on source file (`api.md`, `forecast-api.md`,
-`operational-api.md`, `operational-v24-api.md`, `operational-v22-research-api.md`,
-`operational-v23-api.md`). The build runs with `checkdocs = :exports`, `doctest = true` and
-`warnonly = false`, so a docstring that never reaches the manual fails it. Measured coverage and the
-remaining gaps are recorded in `DOCS_REPORT.md`.
 
 ## Notes
 
-- `Manifest.toml` is committed for reproducible research runs.
-- The realtime data path depends on external NOAA SWPC availability.
-- The monitor writes a local log file and is intended as an operational-prototype workflow.
-- Installation is path/URL-based rather than registry-based.
-
-## Release notes
-
-Release notes live in [CHANGELOG.md](CHANGELOG.md).
-
-## Citation
-
-If you use this code in academic work, cite the associated paper/project materials from this
-repository; citation metadata is in [CITATION.cff](CITATION.cff). A final archival software
-citation can be tightened once the long-term repository URL and paper DOI are fixed.
+- The realtime path depends on NOAA SWPC availability; missing feeds fail closed.
+- EKF-on-SINDy remains research infrastructure — it failed promotion gates and
+  is not part of serving.
+- Release notes: [CHANGELOG.md](CHANGELOG.md). Citation: [CITATION.cff](CITATION.cff).
