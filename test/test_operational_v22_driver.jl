@@ -188,6 +188,60 @@ end
         @test all(iszero, constant_coefficients)
     end
 
+    @testset "segmented fitting never crosses an observed-data gap" begin
+        states, _, _ = _v22d_synthetic_states(rows=700, seed=4401)
+        ordinary = fit_operational_v22_driver(
+            states; ridge=1.0e-6, threshold=1.0e-1,
+            label="single-segment-equivalence",
+        )
+        segmented_single = fit_operational_v22_driver(
+            [states]; ridge=1.0e-6, threshold=1.0e-1,
+            label="single-segment-equivalence",
+        )
+        @test operational_v22_driver_sha256(segmented_single) ==
+              operational_v22_driver_sha256(ordinary)
+        @test segmented_single.fit_rows == size(states, 1) - 25
+
+        first_segment, true_coefficients, _ =
+            _v22d_synthetic_states(rows=1000, seed=4402)
+        second_segment, _, _ = _v22d_synthetic_states(rows=1000, seed=4403)
+        second_segment .*= 100.0
+        separated = fit_operational_v22_driver(
+            [first_segment, second_segment];
+            ridge=1.0e-6,
+            threshold=1.0e-1,
+            label="separated-gap",
+        )
+        @test separated.fit_rows ==
+              (size(first_segment, 1) - 25) +
+              (size(second_segment, 1) - 25)
+        @test separated.fit_rows == size(vcat(first_segment, second_segment), 1) - 50
+
+        normalization = Diagonal(collect(separated.scale))
+        separated_original = similar(operational_v22_driver_coefficients(separated))
+        for lag_index in axes(separated_original, 3)
+            separated_original[:, :, lag_index] .=
+                normalization * operational_v22_driver_coefficients(separated)[
+                    :, :, lag_index,
+                ] / normalization
+        end
+        @test maximum(abs.(separated_original .- true_coefficients)) < 7.0e-2
+
+        @test_throws ArgumentError fit_operational_v22_driver(
+            Matrix{Float64}[]; ridge=1.0e-6, threshold=0.0,
+        )
+        @test_throws ArgumentError fit_operational_v22_driver(
+            [randn(MersenneTwister(4), 25, 5)];
+            ridge=1.0e-6,
+            threshold=0.0,
+        )
+        @test_throws ArgumentError fit_operational_v22_driver(
+            Any[randn(MersenneTwister(5), 30, 5), 1.0];
+            ridge=1.0e-6,
+            threshold=0.0,
+        )
+    end
+
     @testset "spectral-radius rejection without rescaling" begin
         stable_coefficients = zeros(5, 5, 6)
         stable_coefficients[:, :, 1] .= 0.5 .* Matrix{Float64}(I, 5, 5)

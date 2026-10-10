@@ -312,9 +312,9 @@ path-to-core overload is disabled; the bound overload reverifies the queue and
 driver artifact plus a caller-pinned semantic frozen-core SHA, then still fails
 closed. Training-fold support envelopes, activation, asymmetric clipping, Bz
 sign protection, and an unobserved-shock gate have not been fitted or frozen,
-and no thresholds are invented in their place.
-No observational M2 fit, prospective storm score, promotion decision, or
-service change follows from the synthetic verification.
+and no thresholds are invented in their place. The later OMNI diagnostic is
+not an admissible receipt-causal fit, prospective storm score, or promotion
+decision, and it does not authorize a service change.
 
 ## Combined-mechanism recoverability bound
 
@@ -348,6 +348,129 @@ This is a pure numerical kernel. Hyperparameter selection, causal transport,
 training-fold preprocessing, support envelopes, correction bounds, activation,
 and driver-level evaluation remain outside the artifact and must follow the
 M2 nested protocol. No observational fit or score has been produced.
+
+## Pre-2023 near-Earth predictability diagnostic
+
+The next executable research gate is a deliberately non-promotable driver-level
+screen using NASA OMNI HRO2 1-minute data ending before the exposed 2023--2025
+archive. OMNI is retrospectively shifted to the bow-shock nose, so this screen
+cannot establish historical issue-time receipt causality or authorize a V2.2
+artifact. Its narrower purpose is to falsify M2 early if the frozen sparse delay
+map cannot improve even an idealized near-Earth continuation problem.
+
+The diagnostic aggregates only jointly finite `BX_GSE`, `BY_GSM`, `BZ_GSM`,
+speed, `Vx`, and proton-density minutes into half-open 30-minute bins. A bin is
+usable only with at least 15 joint minutes. Missing bins split the time series;
+fitting and scoring never build a lag or target across a gap. Training-fold
+normalization and all coefficients are fit from earlier contiguous segments
+only. Expanding calendar blocks use a 168-hour target embargo. Grid selection
+uses origins six hours apart to limit serial duplication, whereas the final
+score uses every eligible hourly origin in the already exposed 2017--2020
+development interval.
+
+The frozen hyperparameter grid and fourteen-step standardized-state loss are
+the M2 plan's exact grid and horizon. The one-standard-error rule prefers fewer
+active groups, then larger ridge and threshold values. Sparse M2 is compared on
+identical complete histories and targets against transported persistence and a
+dense ridge VAR with the same state and lag set. Primary driver checks are
+`Bz`, southward `Bz`, and `Ey` RMSE/MAE at 1, 2, 3, 4, 6, and 7 hours; all five
+state errors and availability are also recorded. A fixed known-prefix
+sensitivity may quantify the value of an already observed upstream segment,
+but it is labelled as an oracle and cannot count as a causal forecast.
+
+Independent oracles are: segmented fitting equals ordinary fitting for one
+segment; separating two segments removes a deliberately adversarial boundary
+transition; persistence repeats the exact last known state; a hand-generated
+stable delay map is recovered on synthetic contiguous segments; post-cutoff
+state mutation cannot change a fitted artifact; and every scoring row binds a
+complete 25-row history plus 14-row target on one 30-minute grid. Any sparse
+loss to dense ridge or persistence at `Bz`/`Ey`, any gap crossing, or any
+post-cutoff dependence is a diagnostic failure, not a reason to weaken the
+contract.
+
+The frozen run used 125 content-addressed HAPI months from January 2010 through
+May 2020. It retained 152,154 half-hour bins and 3,011 of 22,677 scheduled
+hourly validation origins with complete 12 h histories and 7 h targets. The
+one-standard-error rule selected ridge `100`, threshold `0.3`, and five active
+groups; the dense comparator used ridge `100` and all 30 groups. Sparse M2 beat
+transported persistence in `Bz` and `Ey` at every lead, but it did not beat the
+dense ridge VAR. The dense-minus-sparse `Bz` RMSE difference ranged from
+`-0.0162` to `-0.0015` nT without an oracle prefix, and the corresponding `Ey`
+difference ranged from `-0.0420` to `-0.0018` mV/m. All dense comparisons had
+nonpositive one-sided 95% lower bounds. The frozen outcome is therefore
+`PREDICTABILITY_NOT_SUPPORTED`; neither the selected sparse driver nor its
+artifact is promotable.
+
+As a downstream recoverability check only, the unchanged V2.1 20/11 core was
+then driven by the selected sparse, dense, and persistence trajectories on the
+same 3,011 origins. Hourly Dst came from the official OMNI2 HAPI product, whose
+half-hour midpoint tags were mapped to the corresponding hourly index. The
+sparse-driver core ranked first in overall RMSE at every lead (`2.942`, `4.792`,
+`5.943`, `6.661`, `7.513`, and `7.857` nT), but its smallest advantage over a
+same-driver physics comparator was only `0.012`--`0.151` nT, below the frozen
+`0.25` nT margin; several safety strata also favored another comparator.
+Sparse and dense end-to-end gates both failed. This result supports testing the
+already preregistered M3 error state, but it cannot rescue the M2 driver gate or
+authorize service integration.
+
+## Pre-2023 M3 recoverability diagnostic
+
+The next diagnostic keeps the exact 73-feature M3 schema and never treats OMNI
+as receipt-causal. M2 trajectories are generated out of fold for the 2013--2017
+calendar blocks from driver models fitted only before each block. The current
+22-feature block reuses the audited physical and frozen-V2.1 expert values, but
+all fields named `primary_minus_*` are recomputed from the matching out-of-fold
+M2-driven SINDy center; no fitted static-V2.2 prediction is reused as the M3
+primary. Nine H1 innovations are admitted only after their hourly Dst targets
+have matured. The five endpoint states and the final center come from the same
+M2 path and issue.
+
+Per-lead M3 ridge and group threshold use the frozen `9 × 7` grid. Selection is
+nested over the 2014--2017 OOF blocks with a 168 h target embargo, uses bounded
+`5 + 5h` corrections, and applies the one-standard-error sparsity rule. The
+2017 selection block stops early enough that its latest target is 168 h before
+the final diagnostic origin at 2017-10-20 23:00 UTC. Final artifacts fit only
+OOF rows whose targets mature by 2017-10-13 23:00 UTC. The already exposed
+2017--2020 window is then evaluated once, on complete common anchors, against
+the uncorrected M2 center, served and frozen V2.1, raw SINDy, persistence,
+Burton variants, O'Brien--McPherron, dense-driver controls, and the rejected
+static primary where available.
+
+The available-comparator diagnostic requires at least `0.25` nT RMSE
+improvement at all six leads, a simultaneous one-sided 95% calendar-month
+block-bootstrap lower bound above zero, no MAE increase, and no RMSE increase
+in target-storm, active/deepening, or recovery rows with at least 20 examples.
+The source has no frozen event identifiers, so the inherited event/month
+inference and full comparator gate remain unavailable. Promotion is false
+regardless because the upstream sparse driver gate failed, exact historical
+receipt causality is unavailable, the mandatory comparator and ablation set is
+incomplete, and no prospective storm-and-recovery cohort exists.
+
+The lag-feature tree comparison reuses the already frozen
+recoverability family: depths `(3, 4)`, rounds `(64, 128, 256)`, correction
+shrinkages `(0.25, 0.50, 0.75, 1.00)`, learning rate `0.03`, `L2=2`,
+`lambda=10`, minimum leaf weight `96`, 64 bins, and seed `22,022,026`. It uses
+the identical 73 features, expanding 2014--2017 M2-plus-core folds, contiguous
+24 h readiness mask, cap, and unchanged-center fallback. The exposed
+2017--2020 point-validation window is diagnostic only.
+
+The completed diagnostic had full 24 h history for `939/3,011` M2-eligible
+origins (`31.19%`). Because M2 retained only `3,011/22,677` scheduled issues,
+end-to-end readiness was `4.14%`. Fold predictions retain their actual
+M2-plus-core identities; the final artifacts bind the final center and the full
+cross-fit-manifest checksum. After the disturbed-state safety screen, the
+sparse correction remained only at 2 h and reduced RMSE by `0.061` nT relative
+to the uncorrected center, while recovery RMSE worsened by `0.126` nT. The other
+five leads used exact unchanged-center fallbacks. The tree model kept only its
+depth-3, 256-round, unit-shrinkage 1 h model, whose gain was `0.044` nT; it also
+fell back at the other five leads. The sparse and tree candidates lost to the
+strongest available comparator by `0.137`--`0.350` and `0.093`--`0.350` nT,
+respectively. Both simultaneous one-sided lower bounds were `-0.497` nT.
+
+Only one storm row was correction-ready at 1 h and none at 2--7 h; there were
+no Dst <= -100 nT rows or storm-event labels. The complete comparator and
+SINDy-removal set was unavailable. The formal result is `NO_GO`, not `PIVOT`.
+The M2/M3 family is closed to further selection on the exposed 2017--2020 rows.
 
 ## Causal error-state control
 
