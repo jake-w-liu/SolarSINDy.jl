@@ -181,7 +181,7 @@ deploy/         served bundles, launchd + systemd templates, env template
 validation/     research and operational-validation scripts
 data/           tracked coefficients, catalogs, ensemble draws
 examples/       runnable examples (live monitor, verification, review)
-docs/           Documenter sources; DOCS_REPORT.md records coverage
+docs/           Documenter sources (built by CI with warnonly=false)
 var/monitor/    live state (gitignored): logs, forecast log, cold archive
 ```
 
@@ -190,4 +190,4 @@ var/monitor/    live state (gitignored): logs, forecast log, cold archive
 - The realtime path depends on NOAA SWPC availability; missing feeds fail closed.
 - EKF-on-SINDy remains research infrastructure — it failed promotion gates and
   is not part of serving.
-- Release notes: [CHANGELOG.md](CHANGELOG.md). Citation: [CITATION.cff](CITATION.cff).
+- Citation: [CITATION.cff](CITATION.cff).
