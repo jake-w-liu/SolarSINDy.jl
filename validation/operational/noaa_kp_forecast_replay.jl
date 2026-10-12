@@ -203,6 +203,56 @@ function _forecast_dates_from_header(line::AbstractString, issue::DateTime)
     return dates
 end
 
+"""Raised when a printed SWPC "(Gn)" label disagrees with `noaa_g_level` of its Kp."""
+struct NoaaGLabelMismatch <: Exception
+    msg::String
+end
+Base.showerror(io::IO, e::NoaaGLabelMismatch) = print(io, "NoaaGLabelMismatch: ", e.msg)
+
+"""
+    _parse_noaa_kp_cells(text) -> Vector{Tuple{Float64,Union{Nothing,Int}}}
+
+Split the cells of one Kp breakdown row into (Kp, printed G level or `nothing`). Any
+parenthetical that is not a G1-G5 label is rejected (fail closed on unknown markup).
+"""
+function _parse_noaa_kp_cells(text::AbstractString)
+    cells = Tuple{Float64,Union{Nothing,Int}}[]
+    rest = String(text)
+    for mm in eachmatch(r"(\d+(?:\.\d+)?)(?:\s*\(([^)]*)\))?", rest)
+        kp = parse(Float64, mm.captures[1])
+        tag = mm.captures[2]
+        label = nothing
+        if tag !== nothing
+            lm = match(r"^\s*G\s*([1-5])\s*$", tag)
+            lm === nothing && throw(NoaaGLabelMismatch("unrecognised Kp cell label ($(tag)) in: $(strip(rest))"))
+            label = parse(Int, lm.captures[1])
+        end
+        push!(cells, (kp, label))
+    end
+    # Any stray parenthetical not attached to a number is also unknown markup.
+    n_tags = count(_ -> true, eachmatch(r"\(", rest))
+    n_tags == count(c -> c[2] !== nothing, cells) ||
+        throw(NoaaGLabelMismatch("unattached parenthetical in Kp row: $(strip(rest))"))
+    return cells
+end
+
+"""
+    _check_noaa_g_label(kp, label) -> Bool
+
+Cross-check a printed SWPC "(Gn)" label against `noaa_g_level(kp)`; a disagreement throws
+`NoaaGLabelMismatch` (fail closed). A cell without a printed label has nothing to
+cross-check: returns `true` when the recomputed level is G0 and `false` for an unlabelled
+storm-level value (a rare SWPC omission, e.g. an unlabelled 4.67 whose own product header
+says "below NOAA Scale levels"), which callers record rather than hide.
+"""
+function _check_noaa_g_label(kp::Real, label; source::AbstractString = "", line::AbstractString = "")
+    recomputed = noaa_g_level(kp)
+    label === nothing && return recomputed == 0
+    Int(label) == recomputed && return true
+    throw(NoaaGLabelMismatch("Kp $(kp) printed as G$(label) but SWPC mapping gives " *
+                             "G$(recomputed) [$(source)]: $(line)"))
+end
+
 function parse_noaa_3day_kp_text(text::AbstractString; source::AbstractString = "")
     lines = split(String(text), '\n')
     issue = nothing
@@ -227,23 +277,29 @@ function parse_noaa_3day_kp_text(text::AbstractString; source::AbstractString = 
     rows = DataFrame(issue_utc = DateTime[], target_bin_start_utc = DateTime[],
                      target_bin_end_utc = DateTime[], lead_h = Float64[],
                      forecast_day = Int[], forecast_kp = Float64[],
-                     forecast_g_level = Int[], source_file = String[])
+                     forecast_g_level = Int[], forecast_g_label_printed = Int[],
+                     source_file = String[])
     earliest_forecast_bin = _ceil_next_kp_bin(issue)
     for i in (header_idx + 1):min(header_idx + 12, lastindex(lines))
         line = lines[i]
         m = match(r"^\s*(\d{2})-(\d{2})UT\s+(.+)$", line)
         m === nothing && continue
         start_hour = parse(Int, m.captures[1])
-        cell_text = replace(m.captures[3], r"\([^)]*\)" => "")
-        vals = [parse(Float64, mm.match) for mm in eachmatch(r"\d+(?:\.\d+)?", cell_text)]
+        cells = _parse_noaa_kp_cells(m.captures[3])
+        vals = first.(cells)
+        printed = [c[2] === nothing ? -1 : Int(c[2]) for c in cells]
         length(vals) >= length(forecast_dates) || continue
+        for (kp, label) in cells
+            _check_noaa_g_label(kp, label; source = source, line = strip(line)) ||
+                @warn "SWPC Kp cell at storm level without a printed G label; scored at the recomputed SWPC level" source kp line = strip(line)
+        end
         for (j, date) in enumerate(forecast_dates)
             target_start = DateTime(date) + Hour(start_hour)
             target_end = target_start + Hour(3)
             target_start < earliest_forecast_bin && continue
             push!(rows, (issue, target_start, target_end,
                          Dates.value(target_start - issue) / 3_600_000,
-                         j, vals[j], noaa_g_level(vals[j]), String(source)))
+                         j, vals[j], noaa_g_level(vals[j]), printed[j], String(source)))
         end
     end
     isempty(rows) && error("NOAA 3-day forecast produced no future Kp rows")
@@ -257,6 +313,9 @@ function load_noaa_3day_kp(files::Vector{String}; start_utc::DateTime, end_utc::
             rows = parse_noaa_3day_kp_text(read(path, String); source = basename(path))
             append!(out, rows; cols = :union)
         catch err
+            # A printed SWPC G label that disagrees with the recomputed level is a mapping
+            # failure, not an unparsable file: fail the whole replay closed.
+            err isa NoaaGLabelMismatch && rethrow()
             @warn "skipping unparsable NOAA 3-day forecast" path exception = sprint(showerror, err)
         end
     end
@@ -293,6 +352,15 @@ function _validate_noaa_rows(rows::DataFrame)
                 :observed_g_level, :kp_error, :lead_band]
     missing_cols = [String(c) for c in required if !(String(c) in names(rows))]
     isempty(missing_cols) || error("NOAA Kp scoring missing columns: $(join(missing_cols, ", "))")
+    all(Int.(rows.forecast_g_level) .== noaa_g_level.(Float64.(rows.forecast_kp))) ||
+        error("forecast_g_level is not the SWPC level of forecast_kp")
+    all(Int.(rows.observed_g_level) .== noaa_g_level.(Float64.(rows.observed_kp))) ||
+        error("observed_g_level is not the SWPC level of observed_kp")
+    if "forecast_g_label_printed" in names(rows)
+        lab = Int.(rows.forecast_g_label_printed)
+        all((lab .== -1) .| (lab .== Int.(rows.forecast_g_level))) ||
+            throw(NoaaGLabelMismatch("scored row printed G label disagrees with forecast_g_level"))
+    end
     all(rows.target_bin_start_utc .< rows.target_bin_end_utc) || error("invalid Kp bin geometry")
     all(rows.target_bin_start_utc .>= _ceil_next_kp_bin.(rows.issue_utc)) ||
         error("NOAA scoring includes a target bin already underway at issue time")
@@ -367,7 +435,11 @@ function _write_noaa_report(path::AbstractString, scored::DataFrame, summary::Da
         println(io, "Scoring range: ", cfg.start_utc, " to ", cfg.end_utc,
                 "; scored forecast rows=", nrow(scored), ".")
         println(io, "Causality rule: target 3-hour Kp bin must start strictly after the issue time.")
-        println(io, "Observed label: GFZ three-hour Kp at the target-bin start.\n")
+        println(io, "Observed label: GFZ three-hour Kp at the target-bin start.")
+        println(io, NOAA_G_SCALE_NOTE, "; applied to both forecast and observed Kp. Every printed SWPC \"(Gn)\" label was cross-checked against the recomputed level (the replay fails closed on disagreement).")
+        unl = _unlabelled_storm_rows(scored)
+        println(io, "Scored forecast rows at G1+ without a printed SWPC label (scored at the recomputed level): ",
+                nrow(unl), isempty(unl) ? "" : " (" * join(unique(String.(unl.source_file)), ", ") * ")", ".\n")
         @printf(io, "Overall G3+ event skill: hits=%d, misses=%d, false alarms=%d, POD=%.3f, FAR=%.3f, CSI=%.3f, Kp RMSE=%.3f.\n\n",
                 g3.hits, g3.misses, g3.false_alarms, g3.pod, g3.far, g3.csi, g3.rmse_kp)
         println(io, "| scope | lead band | threshold | rows | hits | misses | false alarms | POD | FAR | CSI | bias | Kp RMSE |")
@@ -380,6 +452,11 @@ function _write_noaa_report(path::AbstractString, scored::DataFrame, summary::Da
         end
         println(io, "\nInterpretation boundary: this is an external operational Kp/G-scale forecast audit. It is not a same-unit Dst RMSE baseline for V2.")
     end
+end
+
+function _unlabelled_storm_rows(rows::DataFrame)
+    "forecast_g_label_printed" in names(rows) || return rows[Int[], :]
+    return rows[(Int.(rows.forecast_g_label_printed) .== -1) .& (Int.(rows.forecast_g_level) .> 0), :]
 end
 
 function _sample_noaa_3day_text()
@@ -416,11 +493,22 @@ function _selftest_noaa_kp()
     sm = noaa_kp_summary(scored)
     g3 = sm[(sm.scope .== "all") .& (sm.lead_band .== "all") .&
             (sm.threshold_g .== 3), :][1, :]
+    # 6.67 (May 11 09-12UT, printed G3) is an SWPC G3 forecast; observed 2.0 there -> 1 false alarm.
     @assert g3.hits == 2
     @assert g3.misses == 3
-    @assert g3.false_alarms == 0
+    @assert g3.false_alarms == 1
     @assert isapprox(g3.pod, 0.4; atol = 1e-12)
     @assert _validate_noaa_rows(scored)
+    # Printed-label cross-check fails closed on a disagreement.
+    bad = replace(_sample_noaa_3day_text(), "6.67 (G3)" => "6.67 (G2)")
+    mismatch_caught = try
+        parse_noaa_3day_kp_text(bad; source = "bad")
+        false
+    catch err
+        err isa NoaaGLabelMismatch || rethrow()
+        true
+    end
+    @assert mismatch_caught
     println("  ✓ NOAA Kp archive self-test: parser, causality filter, G-threshold CRC")
     return true
 end

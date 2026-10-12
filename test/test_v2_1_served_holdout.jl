@@ -135,7 +135,20 @@ include(SERVED_HOLDOUT_SCRIPT)
     @test published_shape.pooled_gate_pass == overall.pooled_gate_pass[1]
     @test published_shape.pooled_gate_pass
 
+    # V10-04: the served tail rate is the live `_freshest_dst_rate` over the Dst series, not the
+    # calibration memory feature `dst_delta_1h_nt` (neutralised to 0 when a feature row is absent).
+    t = DateTime(2021, 3, 1, 12)
+    times = [t - Hour(3), t - Hour(2), t - Hour(1), t, t + Hour(1)]
+    @test _v21_issue_dst_rate(times, [0.0, 0.0, 0.0, -30.0, -500.0], t) == -30.0
+    @test _v21_issue_dst_rate(times, [0.0, 0.0, 0.0, -30.0, -500.0], t) ==
+          _freshest_dst_rate(times, [0.0, 0.0, 0.0, -30.0, -500.0], t)
+    gap_times = [t - Hour(3), t - Hour(2), t]           # Dst(t-1h) absent
+    @test _v21_issue_dst_rate(gap_times, [0.0, -10.0, -40.0], t) == -10.0
+    @test _v21_issue_dst_rate([t - Hour(9), t - Hour(8), t], [0.0, -20.0, -40.0], t) == 0.0
+
     source = read(SERVED_HOLDOUT_SCRIPT, String)
+    @test !occursin("rate = Float64(row.dst_delta_1h_nt)", source)
+    @test occursin("rate = _v21_issue_dst_rate(dst_times, dst_vals,", source)
     @test occursin("force_frozen=true", source)
     @test occursin("holdout_residual_updates=[0]", source)
     @test occursin("static_conformal_shifted_to_complete_hour_served_center", source)

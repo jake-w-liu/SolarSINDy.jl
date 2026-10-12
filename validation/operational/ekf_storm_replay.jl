@@ -67,6 +67,11 @@ function causal_bootstrap(lib, ξ0, i_decay, year_end::Int)
     return f
 end
 
+"""Last OMNI year the EKF bootstrap may assimilate for `storm`: the year before the year in which the
+storm's replay window STARTS (`year(t0)`, not `year(t1)`), so a window that straddles New Year (Jan 2025
+storm, t0 = 2024-12-31) never has its own first hours, or later Dst, assimilated before it is replayed."""
+_ekf_boot_year_end(storm) = year(storm.t0 - Hour(6)) - 1
+
 """Walk one storm's hourly anchors through the constrained EKF `f` (mutated), emitting one row per
 (issue, lead). The filter assimilates each anchor ONCE per issue hour (advancing the adapted decay), then
 issues a forecast at every lead in LEADS by free-running the discovered ODE forward h hours. `ekf_fixed`
@@ -183,7 +188,7 @@ function main_ekf_storm_replay()
     boot = Dict{Int,Any}()
     all_rows = DataFrame()
     for s in STORMS
-        ye = year(s.t1) - 1
+        ye = _ekf_boot_year_end(s)
         haskey(boot, ye) || (boot[ye] = causal_bootstrap(lib, ξ0, i_decay, ye))
         rows = replay_ekf_storm(s, lib, ξ0, i_decay, cal, deepcopy(boot[ye]))
         append!(all_rows, rows)
@@ -252,6 +257,10 @@ end
 
 # ---- CRC self-test (independent oracles; runs before main) ----
 function _selftest()
+    # Oracle 0: causality of the bootstrap cut — every assimilated hour precedes the storm's replay window.
+    for s in STORMS
+        @assert DateTime(_ekf_boot_year_end(s) + 1) <= s.t0 - Hour(6) "bootstrap leaks into the $(s.name) replay window"
+    end
     lib, ξ0, i_decay = _shadow_library()
     decay_cap = _shadow_decay_cap(ξ0, i_decay)
     cal = _load_calibration_for_model(LiveVerifyConfig(model = :v2))

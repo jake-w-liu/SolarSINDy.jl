@@ -465,6 +465,52 @@ end
     @test !any(store.fallback)
 end
 
+@testset "a --years subset never fits a later fold on a truncated history (V06-02)" begin
+    issues = vcat([hourly(DateTime(y, 12, 20, 0), DateTime(y, 12, 31, 23)) for y in 2012:2015]...,
+                  hourly(DateTime(2016, 1, 1, 0), DateTime(2016, 1, 5, 23)))
+    ctx = tiny_context(tiny_anchors(issues))
+    outdir = mktempdir()
+    plan = V24Plan("v2_4_rolling", outdir, false, [2015, 2016], 0, collect(V24_DIRECT_GRID),
+                   0, 0, true)
+    folds = v24_run_folds(ctx, plan)
+    # The earlier preregistered folds are walked as history, in year order.
+    @test [f.year for f in folds] == [2013, 2014, 2015, 2016]
+    # On an empty tree an unrequested history fold is refused, not computed or skipped.
+    @test_throws ErrorException v24_fold_action(ctx, plan, folds[1], Int[])
+    @test v24_fold_action(ctx, plan, folds[3], [2013, 2014]) === :compute
+
+    # The signature records the out-of-fold history the fold was fitted on: a fold a subset
+    # run computed as a seed (no prior years) is not current for the full chain.
+    fold_2015 = folds[3]
+    seed_signature = v24_fold_signature(ctx, plan, fold_2015, Int[])
+    @test seed_signature != v24_fold_signature(ctx, plan, fold_2015, [2013, 2014])
+    write_fold_stub(year, prior) = begin
+        write(v24_oof_year_path(outdir, year), "stub")
+        write(v24_manifest_year_path(outdir, year), "stub")
+        write(v24_signature_year_path(outdir, year),
+              v24_fold_signature(ctx, plan, folds[year - 2012], prior))
+    end
+    write_fold_stub(2015, Int[])
+    @test v24_fold_is_current(ctx, plan, fold_2015, Int[])
+    @test !v24_fold_is_current(ctx, plan, fold_2015, [2013, 2014])
+    @test v24_fold_action(ctx, plan, fold_2015, [2013, 2014]) === :compute
+
+    # History folds that are current on disk are reused.
+    write_fold_stub(2013, Int[])
+    write_fold_stub(2014, [2013])
+    @test v24_fold_action(ctx, plan, folds[1], Int[]) === :reused
+    @test v24_fold_action(ctx, plan, folds[2], [2013]) === :reused
+    # ...but a history fold persisted on another history is not.
+    @test_throws ErrorException v24_fold_action(ctx, plan, folds[2], Int[])
+
+    # A plan that starts at the seed year walks only what it asks for; the smoke plan stays a
+    # single seed fold in its own tree.
+    seeded = V24Plan("v2_4_rolling", outdir, false, [2013, 2014], 0,
+                     collect(V24_DIRECT_GRID), 0, 0, true)
+    @test [f.year for f in v24_run_folds(ctx, seeded)] == [2013, 2014]
+    @test [f.year for f in v24_run_folds(ctx, v24_smoke_plan(; year=2015))] == [2015]
+end
+
 # ---------------------------------------------------------------------------
 # 5. Artifact identity: the smoke fold against the archived V2.3 core
 # ---------------------------------------------------------------------------

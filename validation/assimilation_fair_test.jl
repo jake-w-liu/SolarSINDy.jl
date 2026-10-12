@@ -1,5 +1,6 @@
 # assimilation_fair_test.jl — FAIR test of online EKF coefficient adaptation, fixing the two confounds
-# that biased the earlier check (assimilation_forecast_value.jl) toward "adaptation hurts":
+# that biased an earlier, since-removed May 2024 check toward "adaptation hurts" (one-step RMSE ~23.3 nT
+# fixed vs ~27.8 / ~32.8 nT adapted; its input columns no longer exist in data/may2024_reconstruction.csv):
 #   (1) it used the minimal 3-term library (a poor base model)         -> here: the FULL operational library;
 #   (2) it initialised coefficients least-squares-fit on the test storm -> here: the DEPLOYED discovery
 #       coefficients, fit on the TRAIN-split storms (solar cycles 20-23), hence genuinely out-of-sample for

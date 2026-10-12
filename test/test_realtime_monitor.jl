@@ -939,6 +939,57 @@ using Sockets
         @test prop_fresh - raw_fresh == Millisecond(round(Int, (1.5e6 / 400 / 3600) * 3_600_000))
     end
 
+    @testset "G03-02: monitor data age uses measurement time, not propagated arrival" begin
+        # 1-min live feed at 400 km/s, last L1 sample at T. The propagated freshness
+        # stamp leads T by the ~1.04 h transit; staleness must use measurement time.
+        T = DateTime(2026, 5, 1, 12, 28)
+        ts = collect(T - Hour(8):Minute(1):T)
+        n = length(ts)
+        plasma = DataFrame(time_tag = ts, density = fill(5.0, n), speed = fill(400.0, n),
+                           temperature = fill(1e5, n))
+        mag = DataFrame(time_tag = ts, bx_gsm = fill(1.0, n), by_gsm = fill(2.0, n),
+                        bz_gsm = fill(-5.0, n), bt = fill(6.0, n))
+        _, _, prop_fresh, prop_meas = fetch_realtime_solar_wind(
+            hours = 6; plasma = plasma, mag = mag, propagate_l1_to_earth = true)
+        _, _, raw_fresh, raw_meas = fetch_realtime_solar_wind(
+            hours = 6; plasma = plasma, mag = mag)
+        @test prop_fresh > T                       # arrival stamp is in the future
+        @test prop_meas == T                       # measurement stamp is the newest sample
+        @test raw_meas == raw_fresh == T           # unpropagated: both stamps agree
+        stale = SolarSINDy._monitor_data_stale
+        live_age = (T + Minute(2)) - prop_meas
+        @test abs(live_age) < Minute(5)            # live feed is minutes old, not -1 h
+        @test !stale(live_age, 3.0)
+        # Frozen feed: flagged STALE exactly at threshold after the last sample.
+        @test !stale((T + Minute(179)) - prop_meas, 3.0)
+        @test stale((T + Hour(3)) - prop_meas, 3.0)
+    end
+
+    @testset "R1-01: measurement stamp never re-gates coverage on raw L1 hours" begin
+        # Two sparse raw hours (9 samples each, below the 10-sample floor) merge into one
+        # covered Earth-arrival hour after a speed jump (600 -> 1000 km/s). The propagated
+        # fetch must succeed, and its measurement stamp must be the raw time of the sample
+        # that defines the arrival freshness stamp.
+        ts = vcat([DateTime(2026, 1, 1, 10, 41) + Minute(i) for i in 0:8],
+                  [DateTime(2026, 1, 1, 11, 0) + Minute(i) for i in 0:8],
+                  [DateTime(2026, 1, 1, 12, 30)])
+        sp = vcat(fill(600.0, 9), fill(1000.0, 9), [400.0])
+        n = length(ts)
+        plasma = DataFrame(time_tag = ts, density = fill(5.0, n), speed = sp,
+                           temperature = fill(1e5, n))
+        mag = DataFrame(time_tag = ts, bx_gsm = fill(1.0, n), by_gsm = fill(2.0, n),
+                        bz_gsm = fill(-5.0, n), bt = fill(6.0, n))
+        _, _, fresh, measured = fetch_realtime_solar_wind(
+            hours = 6; plasma = plasma, mag = mag, propagate_l1_to_earth = true,
+            min_hourly_samples = 10)
+        p_arr, _ = SolarSINDy._l1_earth_arrival_times(plasma, mag)
+        idx = findall(==(fresh), p_arr)
+        @test !isempty(idx)
+        @test measured == maximum(ts[idx])
+        @test measured < fresh
+        @test measured in ts
+    end
+
     @testset "M5: monitor poll-cycle glue is testable in isolation" begin
         # --- staleness computation ---
         stale = SolarSINDy._monitor_data_stale
@@ -1112,6 +1163,85 @@ using Sockets
             @test state.t_current == times[4]               # recovered to newest bin
             @test last_obs_time == times[1]                 # anchored on observed Dst*
             @test last_result !== nothing
+        end
+    end
+
+    @testset "G03-03: interior driver gap with lagging Dst does not wedge the monitor" begin
+        # >3 h interior Bz gap (bins 3-6) while Kyoto has published only pre-gap hours
+        # (bins 1-2). The previous state is anchored at bin 2. Before the fix every new
+        # bin re-selected the pre-gap anchor, the replay threw, and the recovery served
+        # an empty forecast with no alarms, repeating every hour.
+        mktempdir() do tmp
+            coef = joinpath(tmp, "c.csv"); ens = joinpath(tmp, "e.csv")
+            CSV.write(coef, DataFrame(term = ["Bs", "Dst_star"], coefficient = [-2.0, -0.05]))
+            CSV.write(ens, DataFrame(term = ["Bs", "Dst_star"], inclusion_prob = [0.95, 0.99],
+                                     ci_025 = [-2.2, -0.06], ci_975 = [-1.8, -0.04]))
+            N = 10
+            times = [DateTime(2026, 1, 1) + Hour(h) for h in 0:(N - 1)]
+            Bz = fill(-15.0, N); Bz[3:6] .= NaN
+            dst = fill(NaN, N); dst[1:2] .= [-110.0, -120.0]
+            swd = SolarWindData(collect(0.0:(N - 1)), fill(600.0, N), Bz, zeros(N),
+                                fill(10.0, N), fill(6.0, N), dst, dst)
+            cfg = default_alarm_config()
+            seen = Dict{DateTime,SolarSINDy.StormSeverity}()
+            kw(lr, lf, lot) = (forecast_horizon_hr = 6, alarm_config = cfg, history_cap = 2000,
+                               last_result = lr, last_forecast = lf, last_alarm = nothing,
+                               last_alarm_time = DateTime(1970), last_horizon_alarm = nothing,
+                               last_obs_time = lot, horizon_seen = seen)
+            latest = SolarSINDy._latest_finite_VBz_idx(swd.V, swd.Bz)
+            @test latest == N
+
+            # A state anchored before the gap genuinely cannot be bridged: the cycle
+            # throws and run_monitor recovers via _rewarm_monitor.
+            st = SolarSINDy.init_forecast(; coefficients_csv = coef, ensemble_csv = ens,
+                                          t0 = times[2], dst0 = -120.0)
+            lr0 = ForecastResult(times[2], -120.0, -120.0, -120.0, -120.0, -120.0)
+            @test_throws ArgumentError SolarSINDy._monitor_cycle!(
+                st, swd, times, latest, 600.0, -15.0, 0.0, 10.0, 6.0;
+                kw(lr0, ForecastResult[], times[2])...)
+
+            # Recovery must serve a real horizon forecast, not an empty one.
+            state, last_result, last_obs_time, last_forecast = SolarSINDy._rewarm_monitor(
+                swd, times, 600.0, -15.0, 0.0, 10.0, 6.0; coefficients_csv = coef,
+                ensemble_csv = ens, history_cap = 2000, forecast_horizon_hr = 6)
+            @test state.t_current == times[N]
+            @test length(last_forecast) == 6
+            same = SolarSINDy._monitor_cycle!(state, swd, times, latest, 600.0, -15.0, 0.0,
+                                              10.0, 6.0; kw(last_result, last_forecast,
+                                                           last_obs_time)...)
+            @test same.new_bin == false
+            @test length(same.forecast) == 6
+
+            # Next bin arrives with Dst still lagging: the unbridgeable pre-gap anchor
+            # is ignored and the cycle continues from the post-gap state (no throw).
+            N2 = N + 1
+            times2 = [DateTime(2026, 1, 1) + Hour(h) for h in 0:(N2 - 1)]
+            swd2 = SolarWindData(collect(0.0:(N2 - 1)), fill(600.0, N2), vcat(Bz, -15.0),
+                                 zeros(N2), fill(10.0, N2), fill(6.0, N2),
+                                 vcat(dst, NaN), vcat(dst, NaN))
+            t_before = state.t_current
+            cyc = SolarSINDy._monitor_cycle!(state, swd2, times2, N2, 600.0, -15.0, 0.0,
+                                             10.0, 6.0; kw(same.result, same.forecast,
+                                                          same.last_obs_time)...)
+            @test cyc.new_bin == true
+            @test state.t_current == times2[N2] == t_before + Hour(1)
+            @test length(cyc.forecast) == 6
+            @test cyc.last_obs_time === last_obs_time       # not rewound to the pre-gap hour
+
+            # An observation older than the state's current anchor is not re-selected
+            # even when it is bridgeable: the cycle continues from the current state.
+            times3 = [DateTime(2026, 1, 1) + Hour(h) for h in 0:3]
+            swd3 = SolarWindData(collect(0.0:3.0), fill(600.0, 4), fill(-15.0, 4), zeros(4),
+                                 fill(10.0, 4), fill(6.0, 4),
+                                 [-50.0, NaN, NaN, NaN], [-50.0, NaN, NaN, NaN])
+            st3 = SolarSINDy.init_forecast(; coefficients_csv = coef, ensemble_csv = ens,
+                                           t0 = times3[3], dst0 = -80.0)
+            cyc3 = SolarSINDy._monitor_cycle!(
+                st3, swd3, times3, 4, 600.0, -15.0, 0.0, 10.0, 6.0;
+                kw(ForecastResult(times3[3], -80.0, -80.0, -80.0, -80.0, -80.0),
+                   ForecastResult[], times3[2])...)
+            @test length(st3.history) == 1                  # one step from 02:00, no rewind
+            @test cyc3.last_obs_time == times3[2]
         end
     end
 

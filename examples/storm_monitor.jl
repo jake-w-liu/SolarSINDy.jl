@@ -146,7 +146,7 @@ function run_v2_1_monitor(; poll_interval_min::Int=5,
         while cycles < max_cycles
             cycles += 1
 
-            swd_new, t_new, t_fresh = try
+            swd_new, t_new, _, t_measured = try
                 dst_feed = SolarSINDy._refresh_dst_feed(dst_feed)
                 data = fetch_realtime_solar_wind(; hours=6, dst=dst_feed,
                                                  propagate_l1_to_earth=true)
@@ -177,7 +177,9 @@ function run_v2_1_monitor(; poll_interval_min::Int=5,
                 continue
             end
 
-            data_age = now(UTC) - t_fresh
+            # Age in raw measurement time, not the L1->Earth propagated arrival time
+            # (which leads the sample by the ~1 h transit). Mirrors run_monitor.
+            data_age = now(UTC) - t_measured
             stale = SolarSINDy._monitor_data_stale(data_age, 3.0)
 
             V = SolarSINDy._safe_val(swd_new.V[latest_idx], 400.0)
@@ -212,7 +214,10 @@ function run_v2_1_monitor(; poll_interval_min::Int=5,
                 try
                     state, last_result, last_obs_time =
                         build_v2_1_state(swd_new, t_new; history_cap=history_cap)
-                    last_forecast = ForecastResult[]
+                    # Serve a real forecast after recovery, never an empty one
+                    # (mirrors run_monitor's _rewarm_monitor).
+                    last_forecast = forecast_ahead(state, V, Bz, By, n_val, Pdyn,
+                                                   forecast_horizon_hr)
                     last_alarm = nothing
                     last_horizon_alarm = nothing
                     empty!(horizon_seen)

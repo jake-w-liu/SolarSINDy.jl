@@ -19,22 +19,24 @@ df = CSV.read(joinpath(DATA_DIR, "phase_threshold_sensitivity.csv"), DataFrame)
 # Recovery phase decay coefficient — most important for validation
 phase = "recovery"
 term = "Dst_star"
-R_vals = sort(unique(df.R_thresh))
+R_vals = sort(unique(df.deriv_thresh))
 
 fig = nothing
 for (ri, R_thresh) in enumerate(R_vals)
     sub = filter(row -> row.phase == phase && row.term == term &&
-                 row.R_thresh == R_thresh, df)
-    sort!(sub, :D_thresh)
+                 row.deriv_thresh == R_thresh, df)
+    sort!(sub, :quiet_thresh)
 
-    # Convert Dst_star coefficient to decay timescale (τ = -1/ξ)
-    tau_vals = [-1.0 / c for c in sub.coefficient]
+    # Convert Dst_star coefficient to decay timescale (τ = -1/ξ). A zero
+    # coefficient means STLSQ dropped the decay term; plot it as a gap (NaN),
+    # not as τ = -Inf.
+    tau_vals = [iszero(c) ? NaN : -1.0 / c for c in sub.coefficient]
 
     label = raw"$R_\mathrm{thresh}$=" * "$(Int(R_thresh)) nT/hr"
     dashes = ["solid", "dash", "dashdot", "dot", "longdash"]
 
     if fig === nothing
-        global fig = plot_scatter(Float64.(sub.D_thresh), tau_vals;
+        global fig = plot_scatter(Float64.(sub.quiet_thresh), tau_vals;
             xlabel=raw"$D_\mathrm{thresh}$ [nT]",
             ylabel=raw"Recovery decay $\tau$ [hr]",
             mode="lines+markers",
@@ -45,7 +47,7 @@ for (ri, R_thresh) in enumerate(R_vals)
             legend=label,
             fontsize=12)
     else
-        plot_scatter!(fig, Float64.(sub.D_thresh), tau_vals;
+        plot_scatter!(fig, Float64.(sub.quiet_thresh), tau_vals;
             mode="lines+markers",
             color=COLORS[ri],
             dash=dashes[ri],

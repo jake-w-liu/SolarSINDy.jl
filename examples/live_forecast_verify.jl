@@ -3792,7 +3792,9 @@ function _embargo_splits(train::DataFrame, validation::DataFrame, holdout::DataF
     tr_max = _max_target(train)
     validation = _issued_after(validation, tr_max)
     va_max = _max_target(validation)
-    holdout = _issued_after(holdout, va_max)
+    # Purge holdout against the latest PRIOR target: validation's when it survived, else train's
+    # (an embargo-emptied validation split must not leave holdout un-purged against train).
+    holdout = _issued_after(holdout, va_max === nothing ? tr_max : va_max)
     return train, validation, holdout
 end
 
@@ -4092,6 +4094,14 @@ function fit_v2_calibration!(cfg::LiveVerifyConfig)
         cfg.v2_train_fraction,
         cfg.v2_validation_fraction,
     )
+    # The purge/embargo can delete every validation anchor (multi-horizon, short replay). The paired
+    # validation gate cannot be evaluated on zero rows, so fail closed with a named reason instead of
+    # an opaque metric error from inside candidate selection.
+    nrow(validation) == 0 && throw(ArgumentError(
+        "validation_split_too_thin: the purge/embargo left 0 validation rows " *
+        "(every validation anchor was issued at or before the last train target). Use a longer " *
+        "replay, fewer/shorter replay horizons, or a larger v2_validation_fraction.",
+    ))
     selection = _select_validated_v2_calibration(train, validation, cfg)
     candidate_cal = selection.cal
 
@@ -5723,6 +5733,16 @@ function _has_prediction(df::DataFrame, row_idx::Int, pred_col::Symbol)
     return !ismissing(value) && isfinite(value)
 end
 
+# The static V2.2 predecessor center exists only on rows where the stack stage acted; a V2.1-fallback
+# row (stack absent/invalid/refused) carries `missing` by construction. Requiring it on every
+# same-row comparison row would silently empty the headline cohort, so keep that comparator only
+# when every current-identity row carries it.
+function _drop_uncarried_predecessor(df::DataFrame, model_specs::Vector{Pair{String,Symbol}},
+                                     rows::Vector{Int})
+    all(row_idx -> _has_prediction(df, row_idx, :v2_2_stack_pred_dst_nt), rows) && return model_specs
+    return [spec for spec in model_specs if last(spec) != :v2_2_stack_pred_dst_nt]
+end
+
 function _same_row_model_indices(df::DataFrame, rows::Vector{Int},
                                  model_specs::Vector{Pair{String,Symbol}})
     required = last.(model_specs)
@@ -5891,6 +5911,7 @@ function write_live_comparison_report(
     model_specs = _standard_model_columns(
         df; identity=identity, served_label=headline_name,
     )
+    model_specs = _drop_uncarried_predecessor(df, model_specs, current_verified)
     comparison_rows = _same_row_model_indices(df, current_verified, model_specs)
     served_active = any(last(spec) == :served_pred_dst_nt for spec in model_specs)
     base_is_v2_1 = identity == :v2_1
@@ -6191,6 +6212,7 @@ function summarize_log(log_path::String)
     n_duplicate_dropped > 0 && println(
         "(excluded $n_duplicate_dropped duplicate (issue hour, target, served identity) scored row(s) from pooled metrics)")
     current_verified = _rows_for_served_labels(df, kept, current_labels)
+    model_specs = _drop_uncarried_predecessor(df, model_specs, current_verified)
     comparison_rows = _same_row_model_indices(df, current_verified, model_specs)
     println("Verified rows across all served identities: $(length(kept)); current identity set: $(length(current_verified))")
     for (name, col) in model_specs

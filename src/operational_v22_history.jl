@@ -693,6 +693,12 @@ function fit_operational_v22_history(
         ))
     slope = _operational_v22_history_dst_slope(core)
     eta3_lower = (-1.0 - slope) / bound
+    # Rounding can leave `(1 + slope) + eta3_lower * bound` a few ulps below zero, so the
+    # constructor (same association order) would reject the active-bound solution. Step to the
+    # nearest representable coefficient that satisfies the bound as evaluated there.
+    while (1.0 + slope) + eta3_lower * bound < 0.0
+        eta3_lower = nextfloat(eta3_lower)
+    end
     coefficients = _operational_v22_history_box_fit(
         features, target, eta3_lower, support_mask,
     )
@@ -823,7 +829,15 @@ function read_operational_v22_history(
     isfile(source) && !islink(source) || throw(ArgumentError(
         "V2.2-M1 artifact must be a regular non-symlink file: $source",
     ))
-    df = CSV.read(source, DataFrame)
+    # Text-valued columns are read as text: a numeric-looking label ("007") would otherwise parse
+    # as a number and change the hashed string. `validate = false` keeps a missing column reporting
+    # through the schema check below rather than through the parser.
+    df = CSV.read(source, DataFrame;
+                  types = Dict(:schema_version => String, :package_version => String,
+                               :artifact_sha256 => String, :label => String,
+                               :core_version => String, :core_sha256 => String,
+                               :supported_anchor_lags => String, :term => String),
+                  validate = false)
     names(df) == collect(String.(_OPERATIONAL_V22_HISTORY_CSV_COLUMNS)) ||
         throw(ArgumentError("V2.2-M1 artifact CSV schema is invalid"))
     nrow(df) == length(OPERATIONAL_V22_HISTORY_TERMS) || throw(ArgumentError(

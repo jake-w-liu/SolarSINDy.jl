@@ -3,6 +3,7 @@ using SolarSINDy
 using Dates
 using CSV
 using DataFrames
+using Random
 
 const V22H = SolarSINDy
 
@@ -423,6 +424,51 @@ end
                 OperationalV22HistoryState(DateTime(2021, 9, 1), -40.0, 2.0),
                 _v22h_driver(),
             )
+
+            # A numeric-looking label is text and must round-trip unchanged (G04-02).
+            numeric_label = OperationalV22HistoryArtifact(
+                core, (0.0, 0.0, 0.0);
+                tau_memory_hours=6.0,
+                support_mask=(false, false, false),
+                coupling_bound_mvm=50.0,
+                fit_rows=24,
+                label="007",
+            )
+            label_path = joinpath(tmp, "label007.csv")
+            write_operational_v22_history(label_path, numeric_label)
+            restored_label = read_operational_v22_history(label_path, core)
+            @test restored_label.label == "007"
+            @test operational_v22_history_sha256(restored_label) ==
+                  operational_v22_history_sha256(numeric_label)
+        end
+    end
+
+    @testset "G: active eta3 stability bound is representable (G04-01)" begin
+        # With the eta3 lower bound active, the fitted coefficient sits exactly on the
+        # nonoscillatory bound. For bounds such as 51 and 44 the naive (-1 - slope)/bound rounds
+        # one ulp past it and the constructor rejected the feasible fit.
+        for bound in (44.0, 50.0, 51.0)
+            rng = MersenneTwister(1)
+            n = 200
+            dst = -100 .* rand(rng, n)
+            mem = bound .* rand(rng, n)
+            cpl = bound .* rand(rng, n)
+            target = -1.0 .* dst .* mem .+ 0.01 .* randn(rng, n)
+            fitted = fit_operational_v22_history(
+                core, dst, mem, cpl, target;
+                tau_memory_hours=6.0, coupling_bound_mvm=bound,
+            )
+            slope = fitted.frozen_dst_slope_per_h
+            @test fitted.coefficients[3] <= 0.0
+            @test (1.0 + slope) + fitted.coefficients[3] * bound >= 0.0
+            @test fitted.coefficients[3] ≈ (-1.0 - slope) / bound
+            # The artifact serves at the bound without tripping the rollout stability check.
+            stepped = operational_v22_history_step(
+                core, fitted,
+                OperationalV22HistoryState(DateTime(2021, 9, 1), -40.0, bound),
+                _v22h_driver(V=400.0, Bz=0.0),
+            )
+            @test isfinite(stepped.dst_star_nt)
         end
     end
 end

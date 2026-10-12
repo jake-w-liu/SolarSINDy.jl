@@ -194,11 +194,18 @@ When `table_sha` is given, every T1r summary must additionally carry a valid
 `sig_T1r_<config>.txt`: those artifacts are written outside the stage machinery,
 so without the key a summary produced by superseded sources or by a superseded
 analog core would enter the selection rule unchallenged.
+
+When `ctx` is given, every T1, T1a and T2 summary must likewise still match its
+resume signature `sig_<config>.txt` (`v23_config_is_current`, the key the
+development runner reuses artifacts by). The selection record is stamped with the
+current code and input digests, so a stale artifact admitted here would pass the
+confirmatory drift check under a provenance it does not have.
 """
 function v23_select_candidate_metrics(outdir::AbstractString;
                                       families=V23_SELECT_FAMILIES,
                                       table_sha::Union{Nothing,AbstractString}=nothing,
-                                      code_sha::AbstractString=v23_code_signature())
+                                      code_sha::AbstractString=v23_code_signature(),
+                                      ctx::Union{Nothing,V23Context}=nothing)
     isdir(outdir) || error("development output directory is missing: $outdir")
     wanted = Set(String.(families))
     metrics = NamedTuple[]
@@ -221,6 +228,14 @@ function v23_select_candidate_metrics(outdir::AbstractString;
             v23_t1r_require_signature(outdir, file[length(prefix) + 1:end - 4];
                                       table_sha=table_sha, code_sha=code_sha)
         end
+        if family != V23_T1R_FAMILY && ctx !== nothing
+            id = file[length("summary_") + 1:end - 4]
+            v23_config_is_current(ctx, id, v23_select_config_params(id)) || error(
+                "the artifacts of $id cannot be used: $(v23_signature_path(ctx.plan, id)) is " *
+                "missing or stale. Rerun v2_3_development.jl so its out-of-fold rows and " *
+                "summary carry a signature over the current base table, frame and sources.",
+            )
+        end
         append!(metrics, v23_metric_namedtuples(table))
         push!(files, file)
     end
@@ -228,6 +243,34 @@ function v23_select_candidate_metrics(outdir::AbstractString;
         "no candidate summaries of families $(join(collect(families), ", ")) in $outdir",
     )
     return (metrics=metrics, files=files)
+end
+
+"""
+    v23_select_config_params(id) -> Dict{String,Any}
+
+Parameter record of a persisted T1, T1a or T2 configuration, rebuilt from its
+identity with the same constructors the development runner signs it with. The
+identity is checked against the forward map rather than assumed.
+"""
+function v23_select_config_params(id::AbstractString)
+    analog = match(r"^(T1a?)_([a-z]+)_K(\d+)$", String(id))
+    if analog !== nothing
+        family, weight_set, k = analog.captures[1], analog.captures[2],
+                                parse(Int, analog.captures[3])
+        v23_analog_id(family, weight_set, k) == String(id) || throw(ArgumentError(
+            "$(id) does not invert to an analog configuration",
+        ))
+        return v23_analog_params(family, weight_set, k, family == "T1a")
+    end
+    gdc = match(r"^T2_d(\d+)_r(\d+)$", String(id))
+    if gdc !== nothing
+        depth, rounds = parse(Int, gdc.captures[1]), parse(Int, gdc.captures[2])
+        v23_gdc_id(depth, rounds) == String(id) || throw(ArgumentError(
+            "$(id) does not invert to a T2 configuration",
+        ))
+        return v23_gdc_params(depth, rounds)
+    end
+    throw(ArgumentError("$(id) is not a T1, T1a or T2 configuration"))
 end
 
 """
@@ -549,7 +592,7 @@ function run_v2_3_selection(; smoke::Bool=false)
                       length(ctx.anchors), length(folds), time() - started))
 
     loaded = v23_select_candidate_metrics(plan.outdir; table_sha=ctx.base_table_sha,
-                                          code_sha=ctx.code_sha)
+                                          code_sha=ctx.code_sha, ctx=ctx)
     candidates = v23_candidates(loaded.metrics)
     eligible = v23_select_eligible(plan)
     rule = v23_select_apply_rule(candidates, eligible; require_guards=!plan.smoke)

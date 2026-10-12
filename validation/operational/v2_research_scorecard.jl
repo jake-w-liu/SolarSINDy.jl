@@ -125,8 +125,8 @@ function _candidate_cell(rows::DataFrame, col::Symbol)
     ei = rows.obs .- rows.current_v2_1
     rf, rh, rc, rp, ri = _rmse(ef), _rmse(eh), _rmse(ec), _rmse(ep), _rmse(ei)
     strong_pers = rp <= rf
-    Δ, lo, hi = paired_improvement(strong_pers ? ep : ef, ec)
-    Δi, loi, hii = col == :current_v2_1 ? (0.0, 0.0, 0.0) : paired_improvement(ei, ec)
+    Δ, lo, hi = paired_improvement(strong_pers ? ep : ef, ec; storms=rows.storm)
+    Δi, loi, hii = col == :current_v2_1 ? (0.0, 0.0, 0.0) : paired_improvement(ei, ec; storms=rows.storm)
     return (n=nrow(rows), rmse=rc, rmse_frozen_tail=rf, rmse_v2_0=rh,
             rmse_persistence=rp, rmse_current=ri,
             stronger=strong_pers ? "persistence" : "V2.1 frozen-tail",
@@ -268,6 +268,19 @@ function _selftest_research_scorecard()
     s = _safety_table(rows)
     @assert nrow(m) > 0 "metric table is empty"
     @assert s[s.candidate .== "plain-fixed-relax", :underwarn_100_count][1] == 1 "under-warning oracle failed"
+    # Promotion-gate CIs must come from the storm-cluster bootstrap (V10-02): two storms whose candidate
+    # advantage has opposite signs -> the cell CI equals the storm-labelled paired_improvement CI.
+    cobs = fill(-100.0, 8); cbase = [6.0, -5.0, 7.0, -6.0, 6.0, -5.0, 7.0, -6.0]
+    ccand = [0.5 .* cbase[1:4]; 1.6 .* cbase[5:8]]
+    crows = DataFrame(storm=[fill("a", 4); fill("b", 4)], issue_utc=[DateTime(2026) + Hour(i) for i in 1:8],
+                      lead=fill(1, 8), obs=cobs, frozen_tail_ablation=cobs .- cbase,
+                      historical_v2_0=cobs .- cbase, persistence=cobs .- 3 .* cbase, rate=fill(-20.0, 8),
+                      current_v2_1=cobs .- cbase, r0_3_75=cobs .- ccand, r0_15=cobs .- ccand,
+                      plain_b=cobs .- ccand, selector_rmse_lean=cobs .- ccand, selector_safety_lean=cobs .- ccand)
+    cc = _candidate_cell(crows, :r0_15)
+    clu = paired_improvement(crows.obs .- crows.frozen_tail_ablation, crows.obs .- crows.r0_15; storms=crows.storm)
+    @assert (cc.ci_lo, cc.ci_hi) == clu[2:3] "scorecard CI is not the storm-cluster bootstrap"
+    @assert (cc.current_ci_lo, cc.current_ci_hi) == clu[2:3] "scorecard vs-current CI is not the storm-cluster bootstrap"
     println("  ✓ research scorecard self-test: metrics and severe-underwarning oracle")
     return true
 end

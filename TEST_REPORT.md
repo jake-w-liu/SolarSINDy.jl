@@ -496,6 +496,12 @@ isolated timeout exercises do not establish sustained production stability.
 | Fresh V2.3 identity / innovation chain | 4,206 / 51,754 rows, exact agreement |
 | Fresh V2.4e identity | 4,518 rows / 15 fields, exact agreement |
 
+Superseded entry: the V2.3 innovation-chain figure (51,754 rows, also cited
+below) was produced by a check that included served-fallback anchors and compared
+a history with itself. The oracle was corrected to use non-fallback anchors and an
+independently built live-rule history; its rerun (which needs the confirmatory
+output tree) has not been repeated, so no replacement count is recorded here.
+
 The focused retention/collector integration and final package suite also test
 that archival does not erase a claim failure. Source loading joins numeric cold
 segments with the hot log under the shared lock and rejects incomplete receipts,

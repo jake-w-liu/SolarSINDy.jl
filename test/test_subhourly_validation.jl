@@ -65,4 +65,25 @@ include(joinpath(
     @test raw_frozen ≈ dst_star_to_dst(anchor_star, issue_drv.Pdyn) atol=1e-12
 end
 
+# V10-01 regression: the lineage replays must label the anchor Dst rate with the TRUE 1 h delta
+# Dst(it) - Dst(it-1h) from the Dst series (as ekf_storm/v2/lookahead/improved replays do), never the
+# delta to the previous *processed* issue (which reads a multi-hour gap as nT/h and makes the first
+# issue of every storm NaN). The storm loops need the OMNI HRO archive, which is not shipped, so this
+# pins the loop source; a real-OMNI behavioural check of the envelope loop is kept in deep_debug/FIX_K.md.
+@testset "Lineage replays use the true 1 h Dst rate (V10-01)" begin
+    opdir = joinpath(@__DIR__, "..", "validation", "operational")
+    for (file, fname) in (("v2_envelope_replay.jl", "replay_env_storm"),
+                          ("v2_subhourly_A_replay.jl", "replay_subA_storm"),
+                          ("validate_ballistic_subhourly.jl", "replay_ballistic_storm"))
+        src = read(joinpath(opdir, file), String)
+        start = findfirst("function $fname(", src)
+        @test start !== nothing
+        stop = findnext("\nend\n", src, last(start))
+        body = src[first(start):last(stop)]
+        @test occursin("prev1 = get(dst_map, it - Hour(1), NaN)", body)
+        @test occursin("rate = isfinite(prev1) ? latest - prev1 : NaN", body)
+        @test !occursin("prev_anchor", body)
+    end
+end
+
 end

@@ -746,4 +746,83 @@ end
     @test_throws ErrorException _v23_assert_embargo(anchors, Int[], [200])
 end
 
+
+"""
+A synthetic hourly frame with a real driver lookup, real analog-key features and
+the frozen V2.1 core, so the two A4 mutation checks run on the production code.
+"""
+function a4_mutation_context(hours::Int=720)
+    start = DateTime(2001, 1, 1)
+    times = [start + Hour(i) for i in 0:hours - 1]
+    speed = [400.0 + 300.0 * sin(2π * i / 97) for i in 0:hours - 1]
+    bz = [-9.0 * sin(2π * i / 37) + 3.0 * cos(2π * i / 7) for i in 0:hours - 1]
+    by = [5.0 * cos(2π * i / 29) for i in 0:hours - 1]
+    density = [5.0 + 3.0 * sin(2π * i / 23) + 1.5 * cos(2π * i / 5) for i in 0:hours - 1]
+    pdyn = [dynamic_pressure(density[i], speed[i]) for i in eachindex(speed)]
+    dst = [-40.0 + 35.0 * sin(2π * i / 61) - 10.0 * cos(2π * i / 11) for i in 0:hours - 1]
+    frame = DataFrame(time_utc=times, V=speed, Bz=bz, By=by, n=density, Pdyn=pdyn, Dst=dst)
+    lookup = v2_3_frame_driver_lookup(frame)
+    rows = collect(30:hours - V23_MAX_STEP - 1)
+    issues = collect(frame.time_utc[rows])
+    n = length(rows)
+    driver = [lookup[t - Hour(1)] for t in issues]
+    latest = [frame.Dst[a] for a in rows]
+    rate = [frame.Dst[a] - frame.Dst[a - 1] for a in rows]
+    anchor_star = [pressure_correct_dst([latest[i]], [driver[i].Pdyn])[1] for i in 1:n]
+    anchors = V23Anchors(
+        issues, Dict(t => i for (i, t) in enumerate(issues)), fill("DEV", n), fill(2001, n),
+        driver, latest, rate, zeros(n), anchor_star, trues(n, V23_STEP_COUNT),
+        (zeros(n, V23_STEP_COUNT) for _ in 1:10)...,
+    )
+    features, ok = v23_feature_matrix(frame, issues)
+    core = load_operational_core(OPERATIONAL_V2_1_MODEL_VERSION)
+    ctx = V23Context(v23_test_plan(; smoke=true), anchors, frame, lookup, core, nothing,
+                     features, ok, v23_analog_origin_ok(lookup, issues),
+                     v23_cell_masks(anchors), nothing, "t", "f", "c", "unit", 0.0)
+    # Archive in the first half, queries a full base embargo later.
+    split = findfirst(t -> t >= start + Hour(330), issues)
+    query_from = findfirst(t -> t >= issues[split] + Hour(V23_MAX_STEP + V23_BASE_EMBARGO_HOURS),
+                           issues)
+    fold = V23Fold("unit", collect(1:split), collect(query_from:n))
+    return (; ctx, fold, frame, issues = issues[query_from:end])
+end
+
+@testset "A4 tail mutation invariance can fail on a non-causal member" begin
+    fixture = a4_mutation_context()
+    spec = (weight_set=:uniform, k=4, direct=false)
+    # The causal analog ensemble reads nothing past the L1 window.
+    @test _v23_tail_invariance(fixture.ctx, fixture.fold, spec, 20)
+    # A member that continues with the query's own realized drivers reads the
+    # post-issue records; the check must see the fabricated tail and fail.
+    leaky = (drv, lookup, issue, origin) ->
+        v23_realized_driver_member(kk -> get(lookup, issue + Hour(kk - 1), nothing))
+    @test !_v23_tail_invariance(fixture.ctx, fixture.fold, spec, 20; member=leaky)
+end
+
+@testset "A4 feature mutation invariance destroys the issue-hour driver record" begin
+    fixture = a4_mutation_context()
+    ctx = fixture.ctx
+    issues = fixture.issues[1:5:25]
+    # The production analog key uses records t-1..t-7 and Dst(t): it passes.
+    @test _v23_feature_invariance(ctx, issues)
+    # A key that reads the driver record tagged at the issue hour (covering
+    # [t, t+1), unknown at issue) must be flagged.
+    lag0(frame, wanted) = begin
+        X, ok = v23_feature_matrix(frame, wanted)
+        row = Dict(t => i for (i, t) in enumerate(frame.time_utc))
+        for (j, t) in enumerate(wanted)
+            X[j, 1] = frame.V[row[t]]
+        end
+        X, ok
+    end
+    leaky_X, _ = lag0(ctx.frame, ctx.anchors.issue)
+    saved = ctx.X
+    ctx.X = leaky_X
+    try
+        @test !_v23_feature_invariance(ctx, issues; features_of=lag0)
+    finally
+        ctx.X = saved
+    end
+end
+
 end # module

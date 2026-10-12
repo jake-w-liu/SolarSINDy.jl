@@ -26,7 +26,11 @@ _with_upstream_refresh_slot(work::Function) = lock(work, _UPSTREAM_REFRESH_LOCK)
 # products update about once per minute, so a gap longer than 15 minutes is treated as stale.
 const SW_INPUT_MAX_AGE_MIN = 15.0
 const SWPC_FUTURE_TOL_MIN = 2.0
-const KP_MAX_AGE_MIN = 240.0                  # Kp is a 3-hour product
+# Kp is a 3-hour product whose SWPC `time_tag` is the interval START, published only after the
+# interval ENDS: the newest row is ~3 h old when it appears and ~6 h old just before its successor
+# appears. The limit covers that normal start-labelled latency (2 x 3 h) plus 1 h publication slack,
+# so a current Kp is never dropped between publications while a frozen feed still goes stale.
+const KP_MAX_AGE_MIN = 420.0
 const SCALES_MAX_AGE_MIN = 120.0
 
 # Parse a possibly-string numeric to finite Float64 or nothing. JSON booleans are not

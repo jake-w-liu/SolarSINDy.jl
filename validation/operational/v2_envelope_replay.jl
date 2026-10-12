@@ -60,17 +60,18 @@ function replay_env_storm(storm, lib, ξ0, cal, tau)
     sort!(df, [:issue_dt, :model_step_hours])
     out = DataFrame(storm = String[], issue_utc = DateTime[], lead = Int[], obs = Float64[], v2 = Float64[],
                     b = Float64[], b_frozen = Float64[], persistence = Float64[], rate = Float64[])
-    prev_anchor = NaN
+    dst_map = Dict{DateTime,Float64}(zip(dst_times, Float64.(dst_vals)))  # true hourly Dst series
     for it in sort!(unique(df.issue_dt))
         g = df[df.issue_dt .== it, :]; r1 = g[1, :]
         issue_drv = (V = Float64(r1.V_kms), Bz = Float64(r1.Bz_nt), By = Float64(r1.By_nt),
                      n = Float64(r1.n_cm3), Pdyn = Float64(r1.Pdyn_npa))
         latest = Float64(r1.latest_dst_nt)
-        all(isfinite, (issue_drv.V, issue_drv.Bz, issue_drv.By, issue_drv.n, issue_drv.Pdyn, latest)) ||
-            (prev_anchor = NaN; continue)
+        all(isfinite, (issue_drv.V, issue_drv.Bz, issue_drv.By, issue_drv.n, issue_drv.Pdyn, latest)) || continue
         anchor_star = pressure_correct_dst([latest], [issue_drv.Pdyn])[1]
-        rate = isfinite(prev_anchor) ? latest - prev_anchor : NaN
-        prev_anchor = latest
+        # Recent Dst rate = true 1 h delta from the Dst series (NaN when the prior hour is absent), so a
+        # skipped issue hour is never misread as an nT/h rate.
+        prev1 = get(dst_map, it - Hour(1), NaN)
+        rate = isfinite(prev1) ? latest - prev1 : NaN
         for r in eachrow(g)
             (ismissing(r.observation_dst_nt) || ismissing(r.v2_pred_dst_nt)) && continue
             isfinite(Float64(r.observation_dst_nt)) && isfinite(Float64(r.v2_pred_dst_nt)) || continue
@@ -91,7 +92,7 @@ function _cell_b(rows)
     ev2 = rows.obs .- rows.v2; eb = rows.obs .- rows.b; ep = rows.obs .- rows.persistence
     rv2, rb, rp = _rmse(ev2), _rmse(eb), _rmse(ep)
     strong_pers = rp <= rv2
-    Δ, lo, hi = paired_improvement(strong_pers ? ep : ev2, eb)
+    Δ, lo, hi = paired_improvement(strong_pers ? ep : ev2, eb; storms = rows.storm)
     return (n = nrow(rows), rmse_v2 = rv2, rmse_b = rb, rmse_pers = rp, stronger = strong_pers ? "pers" : "frozen-tail",
             improve = Δ, ci_lo = lo, ci_hi = hi, fair = maximum(abs.(rows.b_frozen .- rows.v2)))
 end
@@ -172,6 +173,13 @@ function _selftest_env()
     # than a zero-Bz rollout from the same anchor (driver becomes V/n/Pdyn only within a step).
     fast = _envelope_forecast(lib, ξ0, -150.0, drv, -148.0, _calB(), 6; tau = 0.01)[1]
     @assert fast >= relaxed - 1e-6 "faster relaxation should not deepen vs slower ($fast vs $relaxed)"
+    # Oracle 4 — the cell CI is the storm-cluster bootstrap, not the anti-conservative iid one (V10-02).
+    cobs = fill(-100.0, 8); cbase = [6.0, -5.0, 7.0, -6.0, 6.0, -5.0, 7.0, -6.0]
+    ccand = [0.5 .* cbase[1:4]; 1.6 .* cbase[5:8]]
+    crows = DataFrame(storm = [fill("a", 4); fill("b", 4)], obs = cobs, v2 = cobs .- cbase, b = cobs .- ccand,
+                      b_frozen = cobs .- cbase, persistence = cobs .- 3 .* cbase)
+    cc = _cell_b(crows)
+    @assert (cc.ci_lo, cc.ci_hi) == paired_improvement(crows.obs .- crows.v2, crows.obs .- crows.b; storms = crows.storm)[2:3] "envelope CI is not the storm-cluster bootstrap"
     println("  ✓ Direction B self-test: frozen-tail continuity, relaxation reduces over-injection, τ→0 limit sane")
     return true
 end

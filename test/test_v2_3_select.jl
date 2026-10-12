@@ -457,4 +457,38 @@ end
     @test plain["safeguards"] == true
 end
 
+
+@testset "a T1, T1a or T2 summary with a stale resume signature never enters the rule" begin
+    outdir = mktempdir()
+    count = 6
+    anchors = tiny_anchors(count; obs=zeros(count, V23_STEP_COUNT),
+                           served=fill(-7.0, count, V23_STEP_COUNT),
+                           frozen=fill(-3.0, count, V23_STEP_COUNT))
+    ctx = tiny_context(anchors, outdir)
+    configs = [("T1_uniform_K25", "T1", v23_analog_params("T1", :uniform, 25, false)),
+               ("T1a_uniform_K25", "T1a", v23_analog_params("T1a", :uniform, 25, true)),
+               ("T2_d4_r200", "T2", v23_gdc_params(4, 200))]
+    for (id, family, params) in configs
+        @test v23_select_config_params(id) == params
+        v23_write_config!(ctx, V23ConfigResult(id, family, params,
+                                               fill(-11.0, count, V23_STEP_COUNT),
+                                               falses(count), collect(1:count), false), 1.0)
+    end
+    # Signatures written by the current context are accepted.
+    @test length(v23_select_candidate_metrics(outdir; ctx=ctx).files) == 3
+    for (id, _, _) in configs
+        path = v23_signature_path(ctx.plan, id)
+        current = read(path, String)
+        # A key from superseded sources or inputs is refused, as is a missing one.
+        write(path, "stale-signature")
+        @test_throws ErrorException v23_select_candidate_metrics(outdir; ctx=ctx)
+        rm(path)
+        @test_throws ErrorException v23_select_candidate_metrics(outdir; ctx=ctx)
+        write(path, current)
+    end
+    ctx.code_sha = "other-code"
+    @test_throws ErrorException v23_select_candidate_metrics(outdir; ctx=ctx)
+    @test_throws ArgumentError v23_select_config_params("DGBM_d4_r200")
+end
+
 end # module

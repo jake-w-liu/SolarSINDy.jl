@@ -16,7 +16,8 @@
 #
 # The error-layer innovation history is taken from the same scored table: the layer is defined
 # against the one-step center *before* the layer acts, which is the `V2_3_LAT` column, so the history
-# is `observation - V2_3_LAT` at `model_step_hours = 1` over the six preceding anchors.
+# is `observation - V2_3_LAT` at `model_step_hours = 1` over the six preceding anchors, counting only
+# anchors the scoring run did not serve as V2.1 fallback (as the scored chain does).
 #
 # Usage (from the package root):
 #   julia --startup-file=no --project=. validation/operational/v2_3_serving_identity.jl [options]
@@ -26,7 +27,9 @@
 #   --anchors=<n>     minimum number of scored anchors to reproduce (default 500)
 #   --out=<path>      per-row output CSV (default …/v2_3_serving_identity.csv)
 #   --wait            poll for logs/test_confirm.exit before reading the confirmatory tree, and
-#                     fall back to the smoke tree (and its deployment) if it never appears
+#                     fall back to the smoke tree (and its deployment) if it never appears; the
+#                     smoke deployment is …/v2_3_test_smoke/deploy_v2_3_shadow, written by
+#                     v2_3_build_deploy.jl --from-smoke --out=<that directory>
 
 isdefined(@__MODULE__, :V23Context) || include(joinpath(@__DIR__, "v2_3_common.jl"))
 
@@ -38,6 +41,12 @@ const V23_IDENTITY_HISTORY_LAGS = V23_SOUTH_RUN_CAP_H
 
 "Anchors the live error-layer innovation rule must reproduce against the scored history."
 const V23_IDENTITY_MIN_CHAIN_ANCHORS = 300
+
+"""
+Deployment of the pseudo-TEST smoke tree, used by the `--wait` fallback. Build it with
+`validation/operational/v2_3_build_deploy.jl --from-smoke --out=<this directory>`.
+"""
+const V23_IDENTITY_SMOKE_DEPLOY_DIR = joinpath(V23_TEST_SMOKE_DIR, "deploy_v2_3_shadow")
 
 "Sentinel poll: 90 attempts one minute apart bounds the wait at 90 minutes."
 const V23_IDENTITY_SENTINEL_ATTEMPTS = 90
@@ -98,6 +107,69 @@ function v23_identity_anchor_selection(anchors::Vector{DateTime}, complete::Set{
         push!(sampled, t)
     end
     return sort(collect(sampled))
+end
+
+"""
+    v23_identity_innovation_chain(scores, frame, frame_index, artifacts) -> NamedTuple
+
+Error-layer innovation history of the scored chain, and its reproduction by the live rule.
+
+The scored history is `observation - V2_3_LAT` at `model_step_hours = 1`, but only over anchors the
+confirmatory runner did not serve as V2.1 fallback: it builds the innovation chain over non-fallback
+rows only, and its fallback mask is the analog-key availability `v23_feature_matrix` reports on the
+same hourly frame. A fallback row's `V2_3_LAT` is the finite served V2.1 value, so taking every
+step-1 row would hand the layer innovations the scored chain never had.
+
+The live engine cannot filter the log for one-hour rows: it issues wall horizons at an anchor lag, so
+no logged row carries a one-hour model step. It records the one-hour pre-layer center of every anchor
+whose serving key (`v23_serving_features`) is available and forms the innovation as
+`Dst(anchor + 1 h) - center_1h(anchor)` through `v23_serving_innovations_from_step1_centers`. That rule,
+with its independently derived availability, must reproduce the scored history, or the live error
+layer is a different layer from the scored one; any disagreement fails closed.
+"""
+function v23_identity_innovation_chain(scores::DataFrame, frame::DataFrame,
+                                       frame_index::Dict{DateTime,Int}, artifacts)
+    step1 = [r for r in 1:nrow(scores) if Int(scores.model_step_hours[r]) == 1]
+    step1_anchors = DateTime[scores.issue_time_utc[r] for r in step1]
+    _, scored_ok = v23_feature_matrix(frame, step1_anchors)
+    innovations = Dict{DateTime,Float64}()
+    step1_centers = Dict{DateTime,Float64}()
+    matured_dst = Dict{DateTime,Float64}()
+    for (j, r) in enumerate(step1)
+        anchor = scores.issue_time_utc[r]
+        lat = Float64(scores.V2_3_LAT[r])
+        observation = scores.observation_dst_nt[r]
+        matured = !ismissing(observation) && isfinite(Float64(observation))
+        if scored_ok[j] && matured && isfinite(lat)
+            innovations[anchor] = Float64(observation) - lat
+        end
+        matured && (matured_dst[anchor + Hour(1)] = Float64(observation))
+        isfinite(lat) || continue
+        anchor_row = get(frame_index, anchor, 0)
+        previous_row = get(frame_index, anchor - Hour(1), 0)
+        (anchor_row == 0 || previous_row == 0) && continue
+        key = v23_serving_features(artifacts, anchor,
+                                   v23_identity_driver_history(frame_index, frame, anchor),
+                                   Float64(frame.Dst[anchor_row]),
+                                   Float64(frame.Dst[previous_row]))
+        key.ok && (step1_centers[anchor] = lat)
+    end
+    live_rule = v23_serving_innovations_from_step1_centers(step1_centers, matured_dst)
+    chain_anchors = length(live_rule)
+    chain_worst = 0.0
+    for (anchor, value) in live_rule
+        haskey(innovations, anchor) || error(
+            "the live innovation rule produced an anchor the scored history does not have: $anchor",
+        )
+        chain_worst = max(chain_worst, abs(value - innovations[anchor]))
+    end
+    length(innovations) == chain_anchors || error(
+        "the scored innovation history has $(length(innovations)) anchors but the live rule " *
+        "produced $chain_anchors",
+    )
+    chain_worst <= V23_IDENTITY_TOL_NT || error(@sprintf(
+        "the live innovation rule deviates from the scored history by %.3e nT", chain_worst))
+    return (innovations = innovations, chain_anchors = chain_anchors, chain_worst = chain_worst)
 end
 
 """
@@ -166,7 +238,6 @@ function run_v2_3_serving_identity(; deploy::AbstractString,
     table = DataFrame()
 
     scored = Dict{Tuple{DateTime,Int},NamedTuple}()
-    innovations = Dict{DateTime,Float64}()
     step_count = Dict{DateTime,Int}()
     for r in 1:nrow(scores)
         anchor = scores.issue_time_utc[r]
@@ -176,45 +247,10 @@ function run_v2_3_serving_identity(; deploy::AbstractString,
         served = Float64(scores.served_v2_1[r])
         scored[(anchor, step)] = (final = final, lat = lat, served = served)
         step_count[anchor] = get(step_count, anchor, 0) + 1
-        if step == 1
-            observation = scores.observation_dst_nt[r]
-            if !ismissing(observation) && isfinite(Float64(observation)) && isfinite(lat)
-                innovations[anchor] = Float64(observation) - lat
-            end
-        end
     end
-    # The live engine cannot filter the log for one-hour rows: it issues wall horizons at an anchor
-    # lag, so no logged row carries a one-hour model step. It instead records the one-hour pre-layer
-    # center of every anchor and forms the innovation as `Dst(anchor + 1 h) - center_1h(anchor)`
-    # through `v23_serving_innovations_from_step1_centers`. That rule must reproduce the history built
-    # above from the scored table, or the live error layer is a different layer from the scored one.
-    step1_centers = Dict{DateTime,Float64}()
-    matured_dst = Dict{DateTime,Float64}()
-    for r in 1:nrow(scores)
-        Int(scores.model_step_hours[r]) == 1 || continue
-        anchor = scores.issue_time_utc[r]
-        lat = Float64(scores.V2_3_LAT[r])
-        isfinite(lat) || continue
-        step1_centers[anchor] = lat
-        observation = scores.observation_dst_nt[r]
-        (!ismissing(observation) && isfinite(Float64(observation))) || continue
-        matured_dst[anchor + Hour(1)] = Float64(observation)
-    end
-    live_rule = v23_serving_innovations_from_step1_centers(step1_centers, matured_dst)
-    chain_anchors = length(live_rule)
-    chain_worst = 0.0
-    for (anchor, value) in live_rule
-        haskey(innovations, anchor) || error(
-            "the live innovation rule produced an anchor the scored history does not have: $anchor",
-        )
-        chain_worst = max(chain_worst, abs(value - innovations[anchor]))
-    end
-    length(innovations) == chain_anchors || error(
-        "the scored innovation history has $(length(innovations)) anchors but the live rule " *
-        "produced $chain_anchors",
-    )
-    chain_worst <= V23_IDENTITY_TOL_NT || error(@sprintf(
-        "the live innovation rule deviates from the scored history by %.3e nT", chain_worst))
+    chain = v23_identity_innovation_chain(scores, frame, frame_index, artifacts)
+    innovations, chain_anchors, chain_worst = chain.innovations, chain.chain_anchors,
+                                              chain.chain_worst
     _v23_identity_log(@sprintf(
         "  error-layer chain: live rule reproduces %d scored innovations, max|Δ| = %.3e nT",
         chain_anchors, chain_worst))
@@ -386,7 +422,17 @@ function v23_identity_wait_for_sentinel(path::AbstractString;
     return isfile(path)
 end
 
-function main_v2_3_serving_identity(args = ARGS)
+"""
+    v23_identity_options(args; sentinel_appeared) -> NamedTuple
+
+Resolve the command line into `(deploy, tree, n_anchors, out)`. With `--wait`, `sentinel_appeared()`
+is polled once (by default the bounded sentinel wait); if the confirmatory run never finished, both
+the scored tree and the deployment switch to the smoke pair, because a smoke tree scored against
+the confirmatory deployment compares two different fits.
+"""
+function v23_identity_options(args = ARGS;
+                              sentinel_appeared = () -> v23_identity_wait_for_sentinel(
+                                  joinpath(OPERATIONAL_PACKAGE_ROOT, "logs", "test_confirm.exit")))
     deploy = joinpath(OPERATIONAL_PACKAGE_ROOT, "deploy", "v2_3_shadow")
     tree = V23_TEST_DIR
     n_anchors = 500
@@ -408,14 +454,20 @@ function main_v2_3_serving_identity(args = ARGS)
         end
     end
     if wait_for_sentinel
-        sentinel = joinpath(OPERATIONAL_PACKAGE_ROOT, "logs", "test_confirm.exit")
-        if !v23_identity_wait_for_sentinel(sentinel)
+        if !sentinel_appeared()
             _v23_identity_log(
-                "  ! $(sentinel) never appeared; running against the pseudo-TEST smoke tree instead",
+                "  ! logs/test_confirm.exit never appeared; running against the pseudo-TEST smoke " *
+                "tree and its deployment instead",
             )
             tree = V23_TEST_SMOKE_DIR
+            deploy = V23_IDENTITY_SMOKE_DEPLOY_DIR
         end
     end
+    return (deploy = deploy, tree = tree, n_anchors = n_anchors, out = out)
+end
+
+function main_v2_3_serving_identity(args = ARGS)
+    deploy, tree, n_anchors, out = v23_identity_options(args)
     _v23_identity_log("V2.3 shadow identity oracle")
     _v23_identity_log("  tree $tree")
     result = run_v2_3_serving_identity(; deploy = deploy, tree = tree, n_anchors = n_anchors,

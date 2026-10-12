@@ -680,13 +680,18 @@ function _v23_run_stage!(ctx::V23Context, ids::Vector{String}, params_of, comput
 end
 
 """
-    _v23_feature_invariance(ctx, issues) -> Bool
+    _v23_feature_invariance(ctx, issues; features_of = v23_feature_matrix) -> Bool
 
 Post-issue mutation invariance of the analog key: every frame value strictly
 after the issue hour is destroyed and the issue-time feature vector is rebuilt.
 A feature that moved would mean the retrieval key had read the future.
+
+The record tagged `t` covers `[t, t+1)`, so at issue `t` only its Dst is known;
+its solar-wind columns are destroyed as well (driver columns at `time ≥ issue`,
+Dst at `time > issue`), so a lag-0 driver read is caught too.
 """
-function _v23_feature_invariance(ctx::V23Context, issues::AbstractVector{DateTime})
+function _v23_feature_invariance(ctx::V23Context, issues::AbstractVector{DateTime};
+                                 features_of = v23_feature_matrix)
     for issue in issues
         anchor = ctx.anchors.index[issue]
         mutated = DataFrame(
@@ -695,10 +700,12 @@ function _v23_feature_invariance(ctx::V23Context, issues::AbstractVector{DateTim
             Dst=copy(ctx.frame.Dst),
         )
         later = mutated.time_utc .> issue
-        for column in (:V, :Bz, :By, :n, :Pdyn, :Dst)
-            mutated[!, column][later] .= NaN
+        later_driver = mutated.time_utc .>= issue
+        for column in (:V, :Bz, :By, :n, :Pdyn)
+            mutated[!, column][later_driver] .= NaN
         end
-        features, ok = v23_feature_matrix(mutated, [issue])
+        mutated.Dst[later] .= NaN
+        features, ok = features_of(mutated, [issue])
         ok[1] || return false
         vec(features[1, :]) == vec(ctx.X[anchor, :]) || return false
     end
@@ -706,15 +713,24 @@ function _v23_feature_invariance(ctx::V23Context, issues::AbstractVector{DateTim
 end
 
 """
-    _v23_tail_invariance(ctx, fold, spec, sample) -> Bool
+    _v23_tail_invariance(ctx, fold, spec, sample; member) -> Bool
 
 Post-issue driver invariance of the rollout: every driver record beyond the
 L1-admitted window is replaced by an extreme fabricated record and the ensemble
 must return the identical center. Records inside the window are left alone,
 because they were L1-measured before issue and the served product admits them
 by the same rule.
+
+The fabrication is applied to the driver lookup itself, and both the admitted
+window and the ensemble members are rebuilt from the mutated lookup, because the
+rollout reads `future(k)` only inside the window: corrupting `future` alone
+would never be observed and the check could not fail. `member(drv, lookup,
+issue, origin)` builds one ensemble member; production uses the analog member,
+and a test hands in a deliberately non-causal member to prove the check fails.
 """
-function _v23_tail_invariance(ctx::V23Context, fold::V23Fold, spec, sample::Int)
+function _v23_tail_invariance(ctx::V23Context, fold::V23Fold, spec, sample::Int;
+                              member = (drv, lookup, issue, origin) ->
+                                  v23_analog_member(drv, lookup, origin; direct=spec.direct))
     anchors = ctx.anchors
     weight_set, k, direct = spec.weight_set, spec.k, spec.direct
     archive = [i for i in fold.train if ctx.ok[i] && ctx.origin_ok[i]]
@@ -734,14 +750,22 @@ function _v23_tail_invariance(ctx::V23Context, fold::V23Fold, spec, sample::Int)
         drv = anchors.drv[i]
         issue = anchors.issue[i]
         admitted = floor(Int, _transit_hours(drv.V))
+        # First record the L1 window does not admit: future(kk) reads issue+kk-1.
+        horizon = issue + Hour(admitted)
+        mutated = copy(ctx.lookup)
+        for t in keys(ctx.lookup)
+            t >= horizon && (mutated[t] = fabricated)
+        end
         truthful = kk -> get(ctx.lookup, issue + Hour(kk - 1), nothing)
-        corrupted = kk -> kk <= admitted ? truthful(kk) : fabricated
-        members = [v23_analog_member(drv, ctx.lookup, archive_times[neighbours[j, m]];
-                                     direct=direct) for m in 1:k]
+        corrupted = kk -> get(mutated, issue + Hour(kk - 1), nothing)
+        origins = [archive_times[neighbours[j, m]] for m in 1:k]
+        members = [member(drv, ctx.lookup, issue, s) for s in origins]
+        corrupted_members = [member(drv, mutated, issue, s) for s in origins]
         before = Matrix{Float64}(undef, k, V23_STEP_COUNT)
         after = Matrix{Float64}(undef, k, V23_STEP_COUNT)
         v23_member_step_raw!(before, lib, xi, anchors.anchor_star[i], drv, truthful, members)
-        v23_member_step_raw!(after, lib, xi, anchors.anchor_star[i], drv, corrupted, members)
+        v23_member_step_raw!(after, lib, xi, anchors.anchor_star[i], drv, corrupted,
+                             corrupted_members)
         before == after || return false
     end
     return true

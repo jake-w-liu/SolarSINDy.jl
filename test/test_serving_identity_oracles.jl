@@ -146,6 +146,19 @@ const V24_IDENTITY_OUT = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_4_serving_identity
         @test all(t -> t in first_call, deep)
     end
 
+    @testset "V2.4 identity reduction fails closed on non-finite deviations (V06-01)" begin
+        deltas = DataFrame([Symbol("d_", c) => [0.0, 1e-12] for c in V24_IDENTITY_COLUMNS])
+        _, worst, worst_column = v24_identity_column_worst(deltas)
+        @test worst == 1e-12 && worst <= V24_IDENTITY_TOL_NT
+        bad = V24_IDENTITY_COLUMNS[2]
+        deltas[2, Symbol("d_", bad)] = NaN
+        per_column, worst, worst_column = v24_identity_column_worst(deltas)
+        @test !isfinite(worst)
+        @test worst_column == bad
+        @test !(isfinite(worst) && worst <= V24_IDENTITY_TOL_NT)
+        @test !isfinite(only(r.max_abs_delta_nt for r in per_column if r.column == bad))
+    end
+
     @testset "driver history is built in lag order and reports gaps" begin
         times = [DateTime(2020, 5, 1, 0) + Hour(k - 1) for k in 1:40]
         frame = DataFrame(
@@ -203,6 +216,50 @@ const V24_IDENTITY_OUT = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_4_serving_identity
         partial = Set(anchors[1:2000])
         restricted = v23_identity_anchor_selection(anchors, partial, latest, 100)
         @test all(t -> t in partial, restricted)
+    end
+
+    @testset "V2.3 innovation history skips served-fallback anchors (V08-01)" begin
+        hours = 90
+        start = DateTime(2020, 3, 1)
+        times = [start + Hour(i) for i in 0:hours - 1]
+        frame = DataFrame(time_utc = times, V = fill(420.0, hours),
+                          Bz = [-3.0 + sin(i / 5) for i in 0:hours - 1], By = fill(1.0, hours),
+                          n = fill(5.0, hours), Pdyn = fill(dynamic_pressure(5.0, 420.0), hours),
+                          Dst = [-20.0 + 5 * sin(i / 7) for i in 0:hours - 1])
+        gap = start + Hour(50)
+        frame.V[findfirst(==(gap), times)] = NaN   # anchors gap+1 h … gap+7 h lose their analog key
+        index = Dict(frame.time_utc[i] => i for i in 1:nrow(frame))
+        anchors = times[30:80]
+        _, key_ok = v23_feature_matrix(frame, anchors)
+        fallback = anchors[.!key_ok]
+        @test fallback == [gap + Hour(h) for h in 1:7]
+        # A fallback row's pre-layer center is the finite served V2.1 value, as the runner writes it.
+        scores = DataFrame(issue_time_utc = anchors, model_step_hours = fill(1, length(anchors)),
+                           V2_3_LAT = [-25.0 + 0.1 * i for i in eachindex(anchors)],
+                           observation_dst_nt = fill(-24.0, length(anchors)))
+        artifacts = load_v23_serving_artifacts(
+            joinpath(OPERATIONAL_PACKAGE_ROOT, "deploy", "v2_3_shadow"))
+        chain = v23_identity_innovation_chain(scores, frame, index, artifacts)
+        @test all(t -> !haskey(chain.innovations, t), fallback)
+        @test length(chain.innovations) == count(key_ok)
+        # The live rule, with its own key availability, reproduces exactly the non-fallback chain.
+        @test chain.chain_anchors == count(key_ok)
+        @test chain.chain_worst == 0.0
+        # The first keyed anchor after the gap has fallback predecessors, so (as scored) no layer.
+        @test !v23_serving_innovation_lags(gap + Hour(8), chain.innovations).ok
+        @test v23_serving_innovation_lags(gap + Hour(14), chain.innovations).ok
+    end
+
+    @testset "V2.3 --wait fallback switches tree and deployment together (V08-02)" begin
+        never = v23_identity_options(["--wait"]; sentinel_appeared = () -> false)
+        @test never.tree == V23_TEST_SMOKE_DIR
+        @test never.deploy == V23_IDENTITY_SMOKE_DEPLOY_DIR
+        @test never.deploy != joinpath(OPERATIONAL_PACKAGE_ROOT, "deploy", "v2_3_shadow")
+        appeared = v23_identity_options(["--wait"]; sentinel_appeared = () -> true)
+        @test appeared.tree == V23_TEST_DIR
+        @test appeared.deploy == joinpath(OPERATIONAL_PACKAGE_ROOT, "deploy", "v2_3_shadow")
+        plain = v23_identity_options(String[]; sentinel_appeared = () -> error("not polled"))
+        @test plain.tree == V23_TEST_DIR
     end
 
     @testset "published oracle results" begin

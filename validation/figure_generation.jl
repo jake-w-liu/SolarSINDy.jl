@@ -524,7 +524,7 @@ end
 # ============================================================
 println("\n=== Result 8: Scalability Sweep ===")
 
-n_storm_vals = [1, 2, 3, 5, 7, 10]
+n_storm_vals = [1, 2, 3, 5, 7, 9]  # at most 9: storm 10 is the held-out test storm
 scale_rmse = Float64[]
 scale_n_terms = Int[]
 scale_pe = Float64[]
@@ -535,6 +535,7 @@ test_data_sc, _ = prepare_sindy_data(test_swd_sc, 1.0; smooth_window=5)
 
 for ns in n_storm_vals
     train_ds = all_datasets[1:min(ns, 9)]  # never include test storm 10
+    length(train_ds) == ns || error("scalability training set size mismatch: $ns")
     tr_data, tr_dDst = concatenate_data(train_ds)
     ξ_sc, _, _ = sindy_discover(tr_data, lib, tr_dDst; λ=3.0, normalize=true)
 
@@ -567,7 +568,7 @@ fig8 = plot_scatter(Float64.(n_storm_vals), scale_rmse;
     mode="lines+markers", color=COLORS[1], dash=DASHES[1],
     legend="SINDy", linewidth=2, marker_size=8)
 # Add Burton comparison line
-plot_scatter!(fig8, Float64.([1, 10]), [burton_rmse_sc, burton_rmse_sc];
+plot_scatter!(fig8, Float64.([1, 9]), [burton_rmse_sc, burton_rmse_sc];
     color=COLORS[2], dash=DASHES[2], mode="lines",
     legend="Burton", linewidth=2)
 set_legend!(fig8; position=:topright)

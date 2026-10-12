@@ -110,8 +110,8 @@ for k in 1:length(swd.t)-1
     Dst_sindy_sim[k+1] = Dst_sindy_sim[k] + pred_k[1] * dt
 end
 
-Dst_burton_sim = simulate_burton(swd.V, Bs, dt)
-Dst_obrien_sim = simulate_obrien(swd.V, Bs, dt)
+Dst_burton_sim = simulate_burton(swd.V, Bs, dt; Dst0=swd.Dst_star[1])
+Dst_obrien_sim = simulate_obrien(swd.V, Bs, dt; Dst0=swd.Dst_star[1])
 
 # Metrics
 ms_sindy = metrics_summary(dDst_sindy, dDst; name="SINDy")

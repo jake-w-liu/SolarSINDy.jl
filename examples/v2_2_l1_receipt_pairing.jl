@@ -11,17 +11,20 @@ export V22_L1_ISSUE_CUTOFF_SCHEMA_VERSION,
        select_v2_2_l1_issue_pair, select_v2_2_l1_issue_pairs
 
 const V22_L1_ISSUE_PAIR_SCHEMA_VERSION = "v2_2_l1_issue_pair_v2"
+# Latest-only selection scans only records that can contribute a measurement
+# minute within this lookback of the issue (G11-06/G11-08).
+const V22_L1_PAIR_LOOKBACK = Hour(2)
 
 function _v22_l1_pair_position(metadata)
     text = String(metadata.ephemeris_record_json)
     isempty(text) && error("V2.2 L1 admitted row has no ephemeris record")
     position = JSON3.read(text)
     source = _v22_l1_valid_source_token(_v22_l1_object_field(position, :source))
-    source == "DSCOVR" || error(
-        "V2.2 L1 paired ephemeris source is not DSCOVR",
+    source !== nothing && source in V22_L1_ADMISSIBLE_SOURCES || error(
+        "V2.2 L1 paired ephemeris source is not an admitted source",
     )
     timestamp = String(_v22_l1_object_field(position, :position_time_utc))
-    _v22_l1_parse_utc(timestamp)
+    position_time = _v22_l1_parse_utc(timestamp)
     frame = String(_v22_l1_object_field(position, :position_frame))
     units = String(_v22_l1_object_field(position, :position_units))
     frame == V22_L1_EPHEMERIS_POSITION_FRAME || error(
@@ -37,7 +40,7 @@ function _v22_l1_pair_position(metadata)
         "V2.2 L1 paired ephemeris contains invalid GSE coordinates",
     )
     method = String(_v22_l1_object_field(position, :method))
-    method in ("exact", "linear") || error(
+    method in ("exact", "linear", "hold") || error(
         "V2.2 L1 paired ephemeris interpolation method changed",
     )
     fraction = _v22_l1_finite_number(
@@ -46,14 +49,31 @@ function _v22_l1_pair_position(metadata)
     fraction !== nothing && 0.0 <= fraction <= 1.0 || error(
         "V2.2 L1 paired ephemeris interpolation fraction is invalid",
     )
+    lower_time_utc = String(_v22_l1_object_field(position, :lower_time_utc))
+    upper_time_utc = String(_v22_l1_object_field(position, :upper_time_utc))
+    if method == "hold"
+        # v3 bounded causal hold: one earlier row, zero fraction, recorded age
+        # equal to the measurement-minus-row interval and at most 90 minutes.
+        held = _v22_l1_parse_utc(lower_time_utc)
+        age = _v22_l1_finite_number(
+            _v22_l1_object_field(position, :hold_age_seconds),
+        )
+        lower_time_utc == upper_time_utc && fraction == 0.0 &&
+            held < position_time &&
+            position_time - held <= V22_L1_EPHEMERIS_MAX_HOLD &&
+            age !== nothing &&
+            age == Dates.value(position_time - held) / 1000.0 || error(
+            "V2.2 L1 paired ephemeris hold is inconsistent or stale",
+        )
+    end
     return (
         source=source,
         timestamp_utc=timestamp,
         frame=frame,
         units=units,
         method=method,
-        lower_time_utc=String(_v22_l1_object_field(position, :lower_time_utc)),
-        upper_time_utc=String(_v22_l1_object_field(position, :upper_time_utc)),
+        lower_time_utc=lower_time_utc,
+        upper_time_utc=upper_time_utc,
         interpolation_fraction=fraction,
         x_gse=x,
         y_gse=y,
@@ -62,7 +82,9 @@ function _v22_l1_pair_position(metadata)
 end
 
 function _v22_l1_row_observations(parsed)
-    rows_by_time = Dict{DateTime,Vector{Any}}()
+    # Keyed by (timestamp, source): live feeds report the same minute from
+    # several spacecraft, which is not a same-stream ambiguity.
+    rows_by_time = Dict{Tuple{DateTime,String},Vector{Any}}()
     for row in parsed
         raw_time = _v22_l1_object_field(row, :time_tag)
         raw_time isa AbstractString || continue
@@ -72,24 +94,27 @@ function _v22_l1_row_observations(parsed)
             error isa InterruptException && rethrow()
             continue
         end
-        push!(get!(rows_by_time, timestamp, Any[]), row)
+        row_source = _v22_l1_valid_source_token(
+            _v22_l1_object_field(row, :source),
+        )
+        key = (timestamp, row_source === nothing ? "" : row_source)
+        push!(get!(rows_by_time, key, Any[]), row)
     end
     observations = NamedTuple[]
-    for (timestamp, rows) in rows_by_time
+    for ((timestamp, source), rows) in rows_by_time
         if length(rows) != 1
             push!(observations, (
                 timestamp=timestamp,
-                source="",
+                source=source,
                 target_row_sha256="ambiguous",
                 status="ambiguous_measurement_time",
             ))
             continue
         end
         row = only(rows)
-        source = _v22_l1_valid_source_token(_v22_l1_object_field(row, :source))
         push!(observations, (
             timestamp=timestamp,
-            source=source === nothing ? "" : source,
+            source=source,
             target_row_sha256=_v22_l1_sha256(codeunits(JSON3.write(row))),
             status="unique_measurement_row",
         ))
@@ -109,6 +134,7 @@ function _v22_l1_pair_candidate(root::AbstractString, source, record,
 
     raw_relative = String(record.raw_relative_path)
     raw_path = _v22_l1_resolve_relative(root, raw_relative, "paired raw path")
+    _v22_l1_count_read!(:raw)
     raw = read(raw_path)
     raw_sha256 = _v22_l1_sha256(raw)
     raw_sha256 == String(record.body_sha256) || error(
@@ -130,8 +156,8 @@ function _v22_l1_pair_candidate(root::AbstractString, source, record,
     target.timestamp <= receipt || error(
         "V2.2 L1 admitted measurement time is later than its receipt",
     )
-    target.source == "DSCOVR" || error(
-        "V2.2 L1 admitted response does not target DSCOVR",
+    target.source in V22_L1_ADMISSIBLE_SOURCES || error(
+        "V2.2 L1 admitted response does not target an admitted source",
     )
     timestamp_utc = _v22_l1_utc(target.timestamp)
     timestamp_utc == String(metadata.quality_row_timestamp_utc) || error(
@@ -140,9 +166,10 @@ function _v22_l1_pair_candidate(root::AbstractString, source, record,
     String(metadata.quality_row_source) == target.source || error(
         "V2.2 L1 quality source does not match its admitted row",
     )
-    String(metadata.quality_binding_status) ==
-        "bound_noaa_dscovr_overall_quality" || error(
-        "V2.2 L1 admitted row lacks bound DSCOVR quality",
+    _v22_l1_bound_quality_status(
+        String(metadata.quality_binding_status), target.source,
+    ) || error(
+        "V2.2 L1 admitted row lacks bound NOAA RTSW quality",
     )
     Int(metadata.quality_value) == 0 || error(
         "V2.2 L1 admitted row is not normal quality",
@@ -204,6 +231,9 @@ function _v22_l1_pair_candidate(root::AbstractString, source, record,
     )
 
     position = _v22_l1_pair_position(metadata)
+    position.source == target.source || error(
+        "V2.2 L1 ephemeris source does not match its admitted row",
+    )
     position.timestamp_utc == timestamp_utc || error(
         "V2.2 L1 ephemeris timestamp does not match its admitted row",
     )
@@ -246,7 +276,9 @@ function _v22_l1_pair_candidate(root::AbstractString, source, record,
         position=position,
     )
     target_observations = filter(
-        item -> item.timestamp == candidate.timestamp, observations,
+        item -> item.timestamp == candidate.timestamp &&
+                item.source == candidate.source,
+        observations,
     )
     length(target_observations) == 1 &&
         only(target_observations).status == "unique_measurement_row" &&
@@ -257,30 +289,57 @@ function _v22_l1_pair_candidate(root::AbstractString, source, record,
     return (candidate=candidate, observations=observations)
 end
 
+# True when a verified record cannot contain a row stamped at or after
+# `scan_start`: received before it and with an earlier maximum time_tag.
+# Unparseable maximum time tags are treated as possibly recent.
+function _v22_l1_record_precedes_scan(record, scan_start::DateTime)
+    _v22_l1_parse_utc(record.receipt_completed_utc) < scan_start || return false
+    text = String(record.maximum_time_tag)
+    isempty(text) && return true
+    maximum_time = try
+        _v22_l1_parse_source_utc(text)
+    catch error
+        error isa InterruptException && rethrow()
+        return false
+    end
+    return maximum_time < scan_start
+end
+
 function _v22_l1_pair_candidates(root::AbstractString, source, count::Integer,
-                                 kind::Symbol, issue_time::DateTime)
+                                 kind::Symbol, issue_time::DateTime;
+                                 scan_start::DateTime=typemin(DateTime))
     candidates = NamedTuple[]
     observations = NamedTuple[]
-    for sequence in 1:Int(count)
+    # Walk backward from the verified cutoff head (receipts are non-decreasing
+    # along the chain) and stop at the first record that can contribute neither
+    # a measurement minute nor revision evidence at or after `scan_start`.
+    for sequence in Int(count):-1:1
         relative = _v22_l1_record_relative(source.name, sequence)
         path = _v22_l1_resolve_relative(root, relative, "paired record path")
+        _v22_l1_count_read!(:record)
         record = JSON3.read(read(path, String))
         _v22_l1_record_sha256(record) == String(record.record_sha256) || error(
             "V2.2 L1 paired record checksum changed after verification",
         )
+        _v22_l1_record_precedes_scan(record, scan_start) && break
         result = _v22_l1_pair_candidate(
             root, source, record, kind, issue_time,
         )
         result.candidate === nothing || push!(candidates, result.candidate)
         append!(observations, result.observations)
     end
-    return (admitted=candidates, observations=observations)
+    return (admitted=reverse!(candidates), observations=observations)
 end
 
 function _v22_l1_stable_candidate(candidates, observations,
                                   timestamp::DateTime,
+                                  source::AbstractString,
                                   label::AbstractString)
-    matches = filter(candidate -> candidate.timestamp == timestamp, candidates)
+    matches = filter(
+        candidate -> candidate.timestamp == timestamp &&
+                     candidate.source == source,
+        candidates,
+    )
     isempty(matches) && error("V2.2 L1 $label pair candidate is missing")
     fingerprints = unique((
         candidate.target_row_sha256,
@@ -292,7 +351,10 @@ function _v22_l1_stable_candidate(candidates, observations,
     length(fingerprints) == 1 || error(
         "V2.2 L1 $label row has conflicting pre-issue revisions",
     )
-    observed = filter(item -> item.timestamp == timestamp, observations)
+    observed = filter(
+        item -> item.timestamp == timestamp && item.source == source,
+        observations,
+    )
     isempty(observed) && error(
         "V2.2 L1 $label row lacks raw revision evidence",
     )
@@ -304,7 +366,7 @@ function _v22_l1_stable_candidate(candidates, observations,
     )
     raw_fingerprint = only(raw_fingerprints)
     raw_fingerprint[1] == "unique_measurement_row" &&
-        raw_fingerprint[2] == "DSCOVR" &&
+        raw_fingerprint[2] == source &&
         raw_fingerprint[3] == first(matches).target_row_sha256 || error(
         "V2.2 L1 $label row revision no longer matches its admitted evidence",
     )
@@ -337,16 +399,6 @@ function _v22_l1_assert_candidate_unchanged(root::AbstractString, candidate)
     return nothing
 end
 
-"""
-    select_v2_2_l1_issue_pair(root, issue_time_utc::DateTime; lock_timeout_sec=30.0)
-
-Acquire the collector lock, fully verify the live receipt archive, save its
-immutable issue cutoff, and return the latest common, individually admitted
-DSCOVR magnetometer/wind row received no later than `issue_time_utc`. The
-three-argument overload requires an existing cutoff and reads only its exact
-source prefixes. Neither overload interpolates measurement values or performs
-network access.
-"""
 function _v22_l1_pair_floor_30(time::DateTime)
     minute = Dates.minute(time) < 30 ? 0 : 30
     return DateTime(
@@ -363,7 +415,8 @@ end
 function _v22_l1_issue_pair_output(mag_selected, wind_selected,
                                    issue_time_utc::DateTime,
                                    cutoff)
-    mag_selected.source == wind_selected.source == "DSCOVR" || error(
+    mag_selected.source == wind_selected.source &&
+        mag_selected.source in V22_L1_ADMISSIBLE_SOURCES || error(
         "V2.2 L1 paired records changed spacecraft identity",
     )
     mag_selected.timestamp_utc == wind_selected.timestamp_utc || error(
@@ -384,7 +437,7 @@ function _v22_l1_issue_pair_output(mag_selected, wind_selected,
         issue_cutoff_relative_path=cutoff.cutoff_relative_path,
         issue_cutoff_sha256=cutoff.cutoff_sha256,
         measurement_time_utc=mag_selected.timestamp_utc,
-        source="DSCOVR",
+        source=mag_selected.source,
         mag_source_product_id=mag_selected.source_product_id,
         wind_source_product_id=wind_selected.source_product_id,
         magnetic_component_frame="GSM",
@@ -451,38 +504,53 @@ function _select_v2_2_l1_issue_pairs_unlocked(
         "V2.2 L1 measurement window starts after its issue time",
     ))
     sources = V22_L1_RECEIPT_SOURCES
+    # Prefix verification reuses the in-process verified-prefix memo; a
+    # missing, stale, or contradicted memo falls back to full verification.
     before = _v22_l1_verify_issue_cutoff(
-        storage, issue_time_utc, cutoff_relative_path, sources,
+        storage, issue_time_utc, cutoff_relative_path, sources; memo=true,
     )
     counts = Dict(result.source_name => result.records for result in before.prefixes)
+    # Latest-only selection considers measurement minutes within the documented
+    # lookback of the issue; windowed selection is bounded by its window start.
+    window_start = latest_only ?
+        max(measurement_start_utc, issue_time_utc - V22_L1_PAIR_LOOKBACK) :
+        measurement_start_utc
     mag = _v22_l1_pair_candidates(
-        storage, sources[1], counts[sources[1].name], :mag, issue_time_utc,
+        storage, sources[1], counts[sources[1].name], :mag, issue_time_utc;
+        scan_start=window_start,
     )
     wind = _v22_l1_pair_candidates(
-        storage, sources[2], counts[sources[2].name], :wind, issue_time_utc,
+        storage, sources[2], counts[sources[2].name], :wind, issue_time_utc;
+        scan_start=window_start,
     )
+    # Magnetometer and wind rows of a pair must come from the same admitted
+    # source; one minute admitted from two sources fails closed.
     common = intersect(
-        Set(candidate.timestamp for candidate in mag.admitted),
-        Set(candidate.timestamp for candidate in wind.admitted),
+        Set((candidate.timestamp, candidate.source) for candidate in mag.admitted),
+        Set((candidate.timestamp, candidate.source) for candidate in wind.admitted),
     )
-    timestamps = sort!(collect(filter(
-        timestamp -> timestamp >= measurement_start_utc, common,
-    )))
-    isempty(timestamps) && error(
+    pair_keys = sort!(collect(filter(key -> key[1] >= window_start, common)))
+    isempty(pair_keys) && error(
         "V2.2 L1 archive has no exact admitted mag/wind timestamp in the requested causal window",
     )
-    latest_only && (timestamps = [last(timestamps)])
+    if latest_only
+        latest_time = last(pair_keys)[1]
+        pair_keys = filter(key -> key[1] == latest_time, pair_keys)
+    end
+    length(unique(first.(pair_keys))) == length(pair_keys) || error(
+        "V2.2 L1 measurement minute is admitted from more than one source",
+    )
     selected = Tuple((
         mag=_v22_l1_stable_candidate(
-            mag.admitted, mag.observations, timestamp, "magnetometer",
+            mag.admitted, mag.observations, timestamp, source, "magnetometer",
         ),
         wind=_v22_l1_stable_candidate(
-            wind.admitted, wind.observations, timestamp, "wind",
+            wind.admitted, wind.observations, timestamp, source, "wind",
         ),
-    ) for timestamp in timestamps)
+    ) for (timestamp, source) in pair_keys)
 
     after = _v22_l1_verify_issue_cutoff(
-        storage, issue_time_utc, cutoff_relative_path, sources,
+        storage, issue_time_utc, cutoff_relative_path, sources; memo=true,
     )
     before == after || error("V2.2 L1 archive changed during issue pairing")
     for pair in selected
@@ -507,6 +575,18 @@ function _select_v2_2_l1_issue_pair_unlocked(storage::AbstractString,
     return last(pairs)
 end
 
+"""
+    select_v2_2_l1_issue_pair(root, issue_time_utc::DateTime; lock_timeout_sec=30.0)
+
+Acquire the collector lock, verify the live receipt archive (incrementally from
+the in-process verified-prefix memo when it is valid, otherwise in full), save
+its immutable issue cutoff, and return the latest common, individually admitted
+magnetometer/wind row from one allow-listed source (`DSCOVR` or `SOLAR1`)
+received no later than `issue_time_utc`, with a measurement minute within
+`V22_L1_PAIR_LOOKBACK` (2 h) of the issue. The three-argument overload requires
+an existing cutoff and reads only its exact source prefixes. Neither overload
+interpolates measurement values or performs network access.
+"""
 function select_v2_2_l1_issue_pair(root::AbstractString,
                                    issue_time_utc::DateTime;
                                    lock_timeout_sec::Real=30.0)
@@ -541,9 +621,9 @@ end
                                measurement_start_utc, lock_timeout_sec=30.0)
 
 Under one collector lock, build the verified magnetometer and wind candidate
-sets once per call and return every stable exact DSCOVR minute in the inclusive
-measurement-time window. The result is chronological and contains only records
-received by the issue. The live overload first saves a fully verified issue
+sets once per call and return every stable exact same-source minute (`DSCOVR`
+or `SOLAR1`) in the inclusive measurement-time window. The result is chronological and contains only records
+received by the issue. The live overload first saves a verified issue
 cutoff; the cutoff-bound overload verifies and reads only those saved prefixes.
 """
 function select_v2_2_l1_issue_pairs(

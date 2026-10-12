@@ -261,4 +261,16 @@ using CSV, DataFrames
             @test !ispath(paths.split * ".set.lock")
         end
     end
+
+    @testset "selection CSV writer accepts a bare relative filename (G06-01)" begin
+        # `dirname("plain.csv") == ""`; staging the temporary file there failed on Windows.
+        mktempdir() do root
+            cd(root) do
+                @test SolarSINDy._write_selection_csv("plain.csv", [(a=1,)]) == "plain.csv"
+                @test isfile(joinpath(root, "plain.csv"))
+                @test CSV.read("plain.csv", DataFrame).a == [1]
+                @test readdir(root) == ["plain.csv"]
+            end
+        end
+    end
 end

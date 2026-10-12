@@ -1167,7 +1167,10 @@ calibration schema. Older files without selector fields use the documented V2
 selector defaults.
 """
 function read_operational_v2_calibration(path::String)
-    df = CSV.read(path, DataFrame)
+    # `supported_model_steps` is ";"-joined text; a single step ("1") would otherwise parse as
+    # an integer column. `validate = false` keeps older files without the column readable.
+    df = CSV.read(path, DataFrame;
+                  types = Dict(:supported_model_steps => String), validate = false)
     _require_columns(df, [:feature, :feature_mean, :feature_scale,
                           :coefficient, :interval_scale, :label])
     nrow(df) >= 1 || throw(ArgumentError("empty V2 calibration: $path"))

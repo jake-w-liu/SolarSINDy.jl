@@ -278,4 +278,22 @@ end
                   SolarSINDy._operational_v22_boost_sha256(artifact)
         end
     end
+
+    @testset "Numeric-looking label round-trips as text (G04-02)" begin
+        # A minimal artifact (two single-leaf trees) whose label parses as an integer if the
+        # reader infers column types.
+        labelled = OperationalV22BoostArtifact(
+            "007", 1, 0, V22B_FEATURES, 0.4, 10.0, 64, 7, 1, 1, 8, 0.1, 1.0, 0.0, 0.0,
+            1.0, 1.0, 1.0, (1, 2), (1, 2), (true, true), (0, 0), (0.0, 0.0), (0, 0), (0, 0),
+            (0.0f0, 1.5f0), (0.0f0, 0.0f0),
+        )
+        mktempdir() do tmp
+            path = joinpath(tmp, "label007.csv")
+            write_operational_v22_boost(path, labelled)
+            restored = read_operational_v22_boost(path)
+            @test restored.label == "007"
+            @test V22B._operational_v22_boost_sha256(restored) ==
+                  V22B._operational_v22_boost_sha256(labelled)
+        end
+    end
 end

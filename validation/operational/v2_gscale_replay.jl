@@ -15,8 +15,14 @@ const GSCALE_OUT_EVENTS = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_gscale_event_cata
 const GSCALE_OUT_CSV = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_gscale_replay_scored.csv")
 const GSCALE_OUT_SUMMARY = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_gscale_replay_summary.csv")
 const GSCALE_OUT_MD = joinpath(OPERATIONAL_OUTPUT_DIR, "v2_gscale_replay_report.md")
+# Event selection is GFZ Kp >= 7o (7.0). This is deliberately NOT the full NOAA G3+ class:
+# SWPC G3 starts at Kp 7- (6.67), see noaa_g_level. The legacy machine keys "all_G3plus" /
+# "exact_G3plus" and GSCALE_MIN_LEVEL are kept so the committed evidence and the readiness
+# audit keep reading; every selected event (peak Kp >= 7o) is SWPC G3 or higher.
 const GSCALE_MIN_KP = 7.0
 const GSCALE_MIN_LEVEL = 3
+const GSCALE_SELECTION_LABEL = "GFZ Kp >= 7o (7.0); NOAA G3 starts at Kp 7- (6.67), so this is not the full G3+ class"
+const NOAA_G_SCALE_NOTE = "NOAA G levels follow the SWPC Kp mapping on the thirds scale: G1 >= 5- (4.67), G2 >= 6- (5.67), G3 >= 7- (6.67), G4 = 8- through 9- (7.67-8.67), G5 = 9o (9.00)"
 const GSCALE_GAP_HOURS = 6
 const GSCALE_PRE_HOURS = 6
 const GSCALE_POST_HOURS = 24
@@ -111,13 +117,22 @@ function ensure_gfz_kp_source(path::AbstractString = GFZ_KP_SOURCE; url::Abstrac
     return path
 end
 
+"""
+    noaa_g_level(kp) -> Int
+
+NOAA SWPC geomagnetic-storm level (0 = below G1) for a Kp value on the thirds scale.
+SWPC scales: G1 Kp=5, G2 Kp=6, G3 Kp=7, G4 "Kp = 8, including a 9-", G5 Kp=9, where a
+third belongs to its integer class (SWPC prints "4.67 (G1)"). Hence G1 >= 5- (4.67),
+G2 >= 5.67, G3 >= 6.67, G4 = 7.67..8.67, G5 = 9.00 only. Thresholds sit between the
+thirds (4.5/5.5/6.5/7.5 and 8.84) so 4.667, 4.67 and 5.0 all map to G1.
+"""
 function noaa_g_level(kp::Real)
     x = Float64(kp)
-    x >= 9.0 && return 5
-    x >= 8.0 && return 4
-    x >= 7.0 && return 3
-    x >= 6.0 && return 2
-    x >= 5.0 && return 1
+    x >= 8.84 && return 5
+    x >= 7.5 && return 4
+    x >= 6.5 && return 3
+    x >= 5.5 && return 2
+    x >= 4.5 && return 1
     return 0
 end
 
@@ -407,14 +422,16 @@ function _write_gscale_report(path::AbstractString, events::DataFrame, scored::D
     open(path, "w") do io
         println(io, "# Operational V2.1 exact Kp/G-scale replay\n")
         println(io, "Selection: GFZ three-hour Kp bins with Kp >= ", cfg.min_kp,
-                " (NOAA G", cfg.min_level, "+), clustered with gap <= ", cfg.gap_hours,
+                " (", _gscale_selection_text(cfg.min_kp), "), clustered with gap <= ", cfg.gap_hours,
                 " h; replay window = event start - ", cfg.pre_hours,
                 " h through event end + ", cfg.post_hours, " h.")
         println(io, "Event range: ", cfg.start_utc, " to ", cfg.end_utc,
                 ". Events=", nrow(events), "; scored events=",
                 isempty(scored) ? 0 : length(unique(Int.(scored.g_event_id))),
                 "; scored rows=", nrow(scored), "; skipped events=", nrow(skipped), ".")
-        println(io, "Source: GFZ Kp/ap since 1932; NOAA G-scale thresholds are Kp 5/6/7/8/9 for G1/G2/G3/G4/G5.\n")
+        println(io, "Source: GFZ Kp/ap since 1932; ", NOAA_G_SCALE_NOTE, ".")
+        println(io, "Cohort `all_G3plus` is a legacy machine key for all selected events (peak Kp >= ",
+                cfg.min_kp, "); the G subgroups are the SWPC level of each event's peak Kp.\n")
         println(io, "| cohort | lead h | rows | events | G range | RMSE historical V2.0 | RMSE V2.1 | RMSE persistence | improve vs best | max tail effect | max core change |")
         println(io, "| --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |")
         for r in eachrow(summary)
@@ -434,13 +451,19 @@ function _write_gscale_report(path::AbstractString, events::DataFrame, scored::D
     end
 end
 
+function _gscale_selection_text(min_kp::Real)
+    Float64(min_kp) == GSCALE_MIN_KP && return GSCALE_SELECTION_LABEL
+    return @sprintf("GFZ Kp >= %.3g; peak NOAA G level >= G%d under the SWPC mapping",
+                    Float64(min_kp), noaa_g_level(min_kp))
+end
+
 function _selftest_gscale()
-    @assert noaa_g_level(4.999) == 0
-    @assert noaa_g_level(5.0) == 1
-    @assert noaa_g_level(6.0) == 2
-    @assert noaa_g_level(7.0) == 3
-    @assert noaa_g_level(8.0) == 4
-    @assert noaa_g_level(9.0) == 5
+    # SWPC thirds mapping (a third belongs to its integer Kp class; G4 includes 9-).
+    for (kp, g) in ((4.333, 0), (4.667, 1), (4.67, 1), (5.0, 1), (5.333, 1), (5.667, 2),
+                    (6.0, 2), (6.667, 3), (7.0, 3), (7.333, 3), (7.667, 4), (8.0, 4),
+                    (8.667, 4), (8.67, 4), (9.0, 5))
+        @assert noaa_g_level(kp) == g "noaa_g_level($kp) != G$g"
+    end
     kp = load_gfz_kp()
     @assert nrow(kp) > 250_000
     @assert minimum(kp.utc) == DateTime(1932, 1, 1)
@@ -502,7 +525,8 @@ function main_gscale(args = ARGS)
                                  start_utc = cfg.start_utc, end_utc = cfg.end_utc,
                                  limit = cfg.limit)
     isempty(events) && error("no G-scale events selected")
-    println("G-scale V2.1 replay: selected ", nrow(events), " exact Kp/G events at Kp >= ", cfg.min_kp)
+    println("G-scale V2.1 replay: selected ", nrow(events), " exact Kp events at ",
+            _gscale_selection_text(cfg.min_kp))
     scored, skipped = run_gscale_replay(events)
     _validate_gscale_rows(scored)
     summary = gscale_summary(scored)

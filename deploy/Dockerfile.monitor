@@ -29,7 +29,10 @@ VOLUME ["/data"]
 ENV SOLARSINDY_MONITOR_DIR=/data JULIA_NUM_THREADS=2
 USER swm
 # Liveness = the daemon is still issuing: fail if the locked-live log has not been rewritten within
-# two hourly cadences, so a stuck/dead daemon is restarted by the orchestrator.
+# two hourly cadences, so a stuck daemon is reported unhealthy. `restart: always` alone restarts only
+# on process exit, not on unhealthy; under deploy/docker-compose.yml the `autoheal` sidecar
+# (deploy/autoheal.sh) restarts this container once Docker marks it unhealthy (label
+# com.solarsindy.autoheal=true). Elsewhere, the orchestrator must act on the health status.
 HEALTHCHECK --interval=120s --timeout=10s --start-period=300s --retries=3 \
   CMD test "$(( $(date -u +%s) - $(stat -c %Y /data/live_forecast_log.csv 2>/dev/null || echo 0) ))" -lt 7200 || exit 1
 CMD ["julia", "--project=.", "examples/live_monitor.jl"]

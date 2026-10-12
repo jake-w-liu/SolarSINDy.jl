@@ -148,7 +148,18 @@ function _v21_assert_holdout_rows(rows::DataFrame, contract;
     return true
 end
 
-function _v21_served_center(row, core, calibration, lookup;
+"""Tail Dst rate [nT/h] at `issue`, computed exactly as the live served stack does
+(`_freshest_dst_rate`: latest-minus-previous Dst, falling back up to 6 h to the freshest contiguous
+pair, else 0) from the archive Dst series. The calibration memory feature `dst_delta_1h_nt` is NOT
+used: it is neutralised to 0 whenever a feature-table row is absent, which live never feeds to the
+tail. `dst_times` must be sorted; only Dst at or before `issue` is read."""
+function _v21_issue_dst_rate(dst_times, dst_vals, issue::DateTime)
+    lo = searchsortedfirst(dst_times, issue - Hour(7))
+    hi = searchsortedlast(dst_times, issue)
+    return Float64(_freshest_dst_rate(view(dst_times, lo:hi), view(dst_vals, lo:hi), issue))
+end
+
+function _v21_served_center(row, core, calibration, lookup, rate::Real;
                             force_frozen::Bool=false)
     issue = _v21_parse_datetime(row.issue_time_utc)
     h = Int(row.model_step_hours)
@@ -158,7 +169,7 @@ function _v21_served_center(row, core, calibration, lookup;
     )
     latest = Float64(row.latest_dst_nt)
     anchor = pressure_correct_dst([latest], [drivers.Pdyn])[1]
-    rate = Float64(row.dst_delta_1h_nt)
+    rate = Float64(rate)
     future = k -> get(lookup, issue + Hour(k - 1), nothing)
     return _v2_forecast(
         core.library, core.coefficients, anchor, drivers, future, latest,
@@ -348,6 +359,10 @@ function main_v21_served_holdout(; self_test_only::Bool=false)
     lookup = _driver_lookup_range(
         year(contract.minimum_issue) - 1, year(contract.maximum_target),
     )
+    _, _, dst_times, dst_vals = _omni_replay_inputs(
+        OMNI, year(contract.minimum_issue) - 1, year(contract.maximum_target),
+    )
+    issorted(dst_times) || error("served-holdout Dst series is not chronologically sorted")
     out = DataFrame(
         issue_time_utc=DateTime[], target_time_utc=DateTime[],
         model_step_hours=Int[], latest_dst_nt=Float64[],
@@ -360,10 +375,11 @@ function main_v21_served_holdout(; self_test_only::Bool=false)
     max_frozen_delta = 0.0
     max_center_delta = 0.0
     for (i, row) in enumerate(eachrow(holdout))
-        frozen = _v21_served_center(row, core, calibration, lookup; force_frozen=true)
+        rate = _v21_issue_dst_rate(dst_times, dst_vals, _v21_parse_datetime(row.issue_time_utc))
+        frozen = _v21_served_center(row, core, calibration, lookup, rate; force_frozen=true)
         frozen_reference = Float64(row.v2_pred_dst_nt)
         max_frozen_delta = max(max_frozen_delta, abs(frozen - frozen_reference))
-        served = _v21_served_center(row, core, calibration, lookup)
+        served = _v21_served_center(row, core, calibration, lookup, rate)
         h = Int(row.model_step_hours)
         latest = Float64(row.latest_dst_nt)
         lo, hi, source_label = _resolve_interval(

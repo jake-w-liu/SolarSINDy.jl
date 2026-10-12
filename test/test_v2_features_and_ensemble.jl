@@ -156,6 +156,12 @@ end
         write_operational_v2_calibration(path, cal)
         artifact = CSV.read(path, DataFrame)
         @test read_operational_v2_calibration(path).supported_model_steps == [1, 2, 3]
+        # A single supported step is written as a bare "1"; it must still read back (G03-01).
+        single_path = joinpath(dir, "single_step.csv")
+        write_operational_v2_calibration(
+            single_path, default_operational_v2_calibration(; supported_model_steps=[1]),
+        )
+        @test read_operational_v2_calibration(single_path).supported_model_steps == [1]
         artifact.feature[3] = artifact.feature[2]
         CSV.write(path, artifact)
         @test_throws ArgumentError read_operational_v2_calibration(path)

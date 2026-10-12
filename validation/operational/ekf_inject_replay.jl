@@ -144,7 +144,7 @@ end
 function replay_all(lib, ξ0, i_decay, i_Bs, cal, q_bs)
     boot = Dict{Int,Any}(); all_rows = DataFrame()
     for s in STORMS
-        ye = year(s.t1) - 1
+        ye = _ekf_boot_year_end(s)
         haskey(boot, ye) || (boot[ye] = causal_bootstrap_inject(lib, ξ0, i_decay, i_Bs, ye; q_bs = q_bs))
         append!(all_rows, replay_inject_storm(s, lib, ξ0, i_decay, i_Bs, cal, deepcopy(boot[ye])))
     end
@@ -201,8 +201,8 @@ function main_inject()
         println(io, "# Injection-adaptive EKF — V2.1 frozen-tail ablation and persistence\n")
         println(io, "Same causal protocol as the decay-only retirement test, but the EKF also adapts the discovered ",
                     "southward-injection coefficient `Bs` (box $(BS_BOX), q_Bs ≈ $(round(_q_bs(ξ0,i_decay,i_Bs);sigdigits=2))), ",
-                    "giving the filter a downward lever. `improve` = paired |err stronger-baseline| − |err EKF| ",
-                    "(positive = EKF beats the stronger of {V2.1 frozen-tail, persistence}); v3 needs its 95% CI > 0. `bias` = ",
+                    "giving the filter a downward lever. `improve` = paired RMSE(stronger baseline) − RMSE(EKF) ",
+                    "(positive = EKF beats the stronger of {V2.1 frozen-tail, persistence}); v3 needs its storm-cluster 95% CI > 0. `bias` = ",
                     "mean(obs − EKF). `fair` = ",
                     "max|ekf_fixed − frozen_tail|, must be ≈0.\n")
         println(io, "| lead [h] | regime | n | RMSE frozen-tail | RMSE EKF | RMSE pers | stronger | improve [nT] (95% CI) | bias | fair |")

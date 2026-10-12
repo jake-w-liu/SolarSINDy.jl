@@ -163,6 +163,29 @@ function v24_identity_anchor_selection(anchors::Vector{DateTime}, complete::Set{
 end
 
 """
+    v24_identity_column_worst(result) -> (per_column, worst, worst_column)
+
+Largest absolute deviation of every identity column and the overall worst. A non-finite deviation
+means the stage was not reproduced at all, so it counts as `Inf` and can never pass the tolerance;
+`maximum` alone returns `NaN`, which no `>` comparison selects, and the oracle would fail open.
+"""
+function v24_identity_column_worst(result::DataFrame)
+    per_column = NamedTuple[]
+    worst = 0.0
+    worst_column = "none"
+    for column in V24_IDENTITY_COLUMNS
+        values = result[!, Symbol("d_", column)]
+        value = all(isfinite, values) ? maximum(values) : Inf
+        push!(per_column, (column=column, n=length(values), max_abs_delta_nt=value))
+        if value > worst
+            worst = value
+            worst_column = column
+        end
+    end
+    return per_column, worst, worst_column
+end
+
+"""
     run_v2_4_serving_identity(; bundle, tree, year, n_anchors, table_path, frame_path, out)
 
 Reproduce the scored V2.4 fold table through the serving functions and report the largest absolute
@@ -415,18 +438,7 @@ function run_v2_4_serving_identity(; bundle::AbstractString=V24_IDENTITY_DEFAULT
     mkpath(dirname(String(out)))
     CSV.write(String(out), result)
 
-    per_column = NamedTuple[]
-    worst = 0.0
-    worst_column = "none"
-    for column in V24_IDENTITY_COLUMNS
-        values = result[!, Symbol("d_", column)]
-        value = maximum(values)
-        push!(per_column, (column=column, n=length(values), max_abs_delta_nt=value))
-        if value > worst
-            worst = value
-            worst_column = column
-        end
-    end
+    per_column, worst, worst_column = v24_identity_column_worst(result)
     per_step_rows = NamedTuple[]
     for step in V24_SERVING_MODEL_STEPS
         subset = result[result.model_step_hours .== step, :]
@@ -457,7 +469,7 @@ function run_v2_4_serving_identity(; bundle::AbstractString=V24_IDENTITY_DEFAULT
         _v24_identity_log(@sprintf("    column %-16s n=%d  max|Δ| = %.3e nT", row.column, row.n,
                                    row.max_abs_delta_nt))
     end
-    passed = worst <= V24_IDENTITY_TOL_NT && anchors_checked >= n_anchors
+    passed = isfinite(worst) && worst <= V24_IDENTITY_TOL_NT && anchors_checked >= n_anchors
     _v24_identity_log(@sprintf(
         "  overall max|Δ| = %.3e nT on %s (target %.0e), anchors %d (target %d): %s",
         worst, worst_column, V24_IDENTITY_TOL_NT, anchors_checked, n_anchors,

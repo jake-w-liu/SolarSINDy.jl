@@ -745,7 +745,15 @@ function read_operational_v22_driver(path::AbstractString)
     isfile(source) && !islink(source) || throw(ArgumentError(
         "V2.2-M2 artifact must be a regular non-symlink file: $source",
     ))
-    df = CSV.read(source, DataFrame)
+    # Text-valued columns are read as text: a numeric-looking label ("007", "1e3") would otherwise
+    # parse as a number and change the hashed string. `validate = false` keeps a missing column
+    # reporting through the schema check below rather than through the parser.
+    df = CSV.read(source, DataFrame;
+                  types = Dict(:schema_version => String, :package_version => String,
+                               :artifact_sha256 => String, :label => String,
+                               :state_schema => String, :lag_schema => String,
+                               :predictor => String),
+                  validate = false)
     names(df) == collect(String.(_OPERATIONAL_V22_DRIVER_CSV_COLUMNS)) ||
         throw(ArgumentError("V2.2-M2 artifact CSV schema is invalid"))
     expected_rows = _OPERATIONAL_V22_DRIVER_NSTATE * _OPERATIONAL_V22_DRIVER_NLAG

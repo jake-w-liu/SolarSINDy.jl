@@ -2869,12 +2869,18 @@ function v24_write_deployment(outdir::AbstractString, bundle)
         residual_form = "none"
     else
         residual_form = bundle.l2_layer.form
-        if residual_form == "joint"
+        # v24_fit_l2 only builds models for accepted steps (joint: model 0 only
+        # when some step is accepted), so ship exactly the accepted models.
+        accepted_steps = collect(bundle.l2_layer.accepted_steps)
+        if isempty(accepted_steps)
+            # no residual model was fitted; nothing to ship
+        elseif residual_form == "joint"
             path = record(joinpath(directory, "residual_model_joint.bson"))
             SolarSINDy.v23_save(bundle.l2_layer.models[0], path)
             push!(residual_files, basename(path))
         else
             for step in V24_STEPS
+                step in accepted_steps || continue
                 path = record(joinpath(directory, "residual_model_step$(step).bson"))
                 SolarSINDy.v23_save(bundle.l2_layer.models[step], path)
                 push!(residual_files, basename(path))

@@ -140,6 +140,12 @@ M2 fit.
 
 ## Prospective L1 metadata contract
 
+> Superseded in part by protocol amendment A1 (2026-10-12, contract
+> `noaa_rtsw_metadata_v3`): SOLAR1 is admitted alongside DSCOVR, and a bounded
+> ephemeris hold is allowed. See "L1 receipt study amendment A1" at the end of this
+> file. The DSCOVR-only text below still describes v2 records, which keep verifying
+> under their own rules.
+
 The receipt schema binds each HTTP response to metadata derived only from its
 immutable raw bytes and hash-bound source URL. Only the canonical NOAA RTSW
 endpoints receive authoritative status. NOAA Service Change Notice 26-21
@@ -607,8 +613,14 @@ on the first rollout step instead of reusing the row's target-step panel. Second
 the rule that turns logged centers into innovations lives in
 `v23_serving_innovations_from_step1_centers` and is called by both the engine and
 the offline identity oracle; the oracle asserts that the rule reproduces the
-history it builds from the scored table, which it does on 51,754 anchors with
-max |Δ| = 0 nT.
+history it builds from the scored table, which it did on 51,754 anchors with
+max |Δ| = 0 nT. That recorded count is superseded: it included served-fallback
+anchors that the confirmatory chain and the live engine exclude, and both sides
+of the comparison were built from the same history, so the check could not fail.
+The oracle (`v23_identity_innovation_chain`) now builds the scored history from
+non-fallback anchors only and compares it with an independently built live-rule
+history; a rerun therefore reports a smaller anchor count. The rerun needs the
+confirmatory output tree and has not been repeated since the change.
 
 A step whose selected layer is a fitted model but whose history is incomplete
 records `v23_status = "ok:e_layer_pending"`. The `ok` prefix is what availability
@@ -1559,3 +1571,78 @@ unavailable inputs with no live badges. New frontend regressions failed before
 implementation. Verify with the frontend suite, browser desktop/phone checks,
 full package tests and experiments through the development harness. No model,
 threshold, issued forecast or scientific qualification is changed.
+
+## L1 receipt study amendment A1 (2026-10-12)
+
+Reason: SWPC stopped ingesting DSCOVR (SWPC news, 2026-06-30). SOLAR-1 (`SOLAR1`,
+formerly SWFO-L1) is now the primary real-time L1 source, with ACE as backup. The live
+RTSW JSON rows for SOLAR1 use the same schema, including `active` and `overall_quality`.
+The 2026-10-12T09:31Z live snapshot of `rtsw_mag_1m`, `rtsw_wind_1m` and
+`rtsw_ephemerides_1h` contained no DSCOVR rows, and 1434 mag, 1244 wind and 714
+ephemeris SOLAR1 rows with `active=true`; every SOLAR1 mag and wind row had
+`overall_quality=0`. The amendment changes no admitted evidence: before the
+source-timestamp fix (live `time_tag` values carry no `Z`), no live row could parse, so
+no row was ever admitted under the DSCOVR-only rule.
+
+Rules under metadata contract `noaa_rtsw_metadata_v3`:
+
+- Admission. A row is admissible only if it is the newest SWPC-active row
+  (`active === true`) of its canonical endpoint, its exact `source` token is in the
+  allow-list {`DSCOVR`, `SOLAR1`}, `overall_quality` is the integer 0, and the required
+  forecast fields are finite and in bounds. The quality semantics (0 normal, 1 suspect,
+  2 error) are those of the shared RTSW field; the sub-flags (`max_data_flag`, ...) are
+  not read, so SOLAR1's -9999 sub-flag fill has no effect. Other sources stay
+  inadmissible (`unverified_non_admitted_source_quality_semantics`).
+- Pairing. Magnetometer and wind rows of a pair must come from the same admitted source;
+  a minute admitted from two sources fails closed; the pair records its `source`.
+- Status. Writers emit `bound_noaa_rtsw_overall_quality`. Pairing and the M2 arrival
+  queue also accept the legacy `bound_noaa_dscovr_overall_quality`, for DSCOVR rows only.
+  `quality_source_product` keeps `dscovr_m1m`/`dscovr_f1m` because those name the
+  field-definition authority; the spacecraft is recorded in `quality_row_source`.
+- Ephemeris. Exact match and bracketing interpolation (bracket <= 1 h) are unchanged.
+  With no later same-source row, a causal hold uses the newest earlier same-source row
+  if it is at most 90 min old (`method="hold"`, `lower == upper`, fraction 0,
+  `hold_age_seconds`); older rows return `ephemeris_stale`. Bound from the live
+  snapshot (666 hourly SOLAR1 pairs): at most 663.5 km/h in 3-D and 88 km/h along x,
+  so a 90-min hold changes the 400 km/s L1->Earth transit by at most 2.5 s (3-D) or
+  0.33 s (x, the component the transport uses).
+- Legacy records. Each archived record is re-verified under the contract version it
+  declares; an unknown version fails closed.
+
+Incremental issue-time verification (fixes cohort invalidation as the archive grows):
+issue-time verification uses an in-process memo of each source's verified chain prefix
+(keyed by storage realpath, source name and URL). A later call fully verifies only the
+records after the memoized head and checks chain continuity into it; a missing or
+contradicted memo, or one older than `V22_L1_VERIFY_MEMO_MAX_AGE_SEC[]` (default 24 h),
+forces a full verification. The public `verify_v2_2_l1_receipts` and
+`verify_v2_2_l1_issue_cutoff` remain full verifiers by default. The pair-candidate scan
+walks backward from the cutoff head and stops before `V22_L1_PAIR_LOOKBACK` (2 h) for
+latest-only selection. Accepted risk: between full verifications, a rewrite of an old
+memoized object outside the scan window is caught only at the next full verification.
+Measured: raw-object reads per issue plateau at 16 with the memo versus 236 at cycle 14
+without it.
+
+## NOAA G-scale mapping (2026-10-12)
+
+`noaa_g_level` (validation/operational/v2_gscale_replay.jl) is the single SWPC Kp->G
+mapping. SWPC scales: G1 Kp=5, G2 Kp=6, G3 Kp=7, G4 "Kp = 8, including a 9-", G5 Kp=9,
+and a third belongs to its integer class (the SWPC 3-day forecast prints "4.67 (G1)").
+Thresholds therefore sit between thirds: 4.5/5.5/6.5/7.5 and 8.84 (G5 = 9o only). Do not
+reintroduce integer thresholds. The NOAA forecast replay cross-checks every printed
+"(Gn)" label and fails closed on disagreement; unlabelled storm-level cells are scored at
+the recomputed level and flagged (`forecast_g_label_printed = -1`). The G-scale replay
+still selects GFZ Kp >= 7o (`GSCALE_MIN_KP = 7.0`, 311 events), a subset of NOAA G3+
+(Kp >= 7-); the machine keys `all_G3plus`/`exact_G3plus` are kept for evidence
+compatibility and the human label is `GSCALE_SELECTION_LABEL`.
+
+## Container restart on unhealthy (2026-10-12)
+
+`deploy/docker-compose.yml` runs monitor + dashboard + an `autoheal` sidecar
+(`docker:29-cli`, `deploy/autoheal.sh`, POSIX sh). A restart policy reacts only to
+process exit, so the sidecar restarts (`docker restart -t 30`) containers of the compose
+project labelled `com.solarsindy.autoheal=true` whose Docker health status is
+`unhealthy`, every `AUTOHEAL_INTERVAL_SEC` (default 60). Docker's HEALTHCHECK
+start-period/retries decide unhealthy. The sidecar mounts `/var/run/docker.sock`, which
+is root-equivalent on the host; delete the service when an orchestrator already restarts
+unhealthy containers. Verified with a stub `docker` and static tests only, not against a
+real Docker daemon.

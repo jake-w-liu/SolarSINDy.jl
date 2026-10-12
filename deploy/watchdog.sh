@@ -19,11 +19,14 @@
 #   SOLARSINDY_WATCHDOG_DASH_URL  dashboard health URL (default http://127.0.0.1:8723/api/health)
 #   SWM_WEBHOOK_URL               webhook (empty = no push, sentinel still written)
 #   SOLARSINDY_WATCHDOG_STREAM_MAX_BYTES  rotate launchd .out/.err over this size (default 2097152)
+#   SOLARSINDY_V22_RECEIPT_LOG_DIR  V2.2 receipt-collector console-capture dir, rotated the same way
+#                                   (default: <clone>/var/v2_2_l1_logs)
 set -uo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_MONITOR_DIR="$(cd "$SELF_DIR/.." && pwd)/var/monitor"
 MONITOR_DIR="${SOLARSINDY_MONITOR_DIR:-$DEFAULT_MONITOR_DIR}"
+RECEIPT_LOG_DIR="${SOLARSINDY_V22_RECEIPT_LOG_DIR:-$(cd "$SELF_DIR/.." && pwd)/var/v2_2_l1_logs}"
 LOG="$MONITOR_DIR/live_forecast_log.csv"
 SENTINEL="$MONITOR_DIR/OUTAGE.md"
 LOGS_DIR="$MONITOR_DIR/logs"
@@ -77,9 +80,10 @@ for numeric_setting in STALE_SEC STREAM_MAX_BYTES; do
   esac
 done
 
-# Size-bound the launchd console-capture files (monitor + dashboard) so no stream grows without
-# limit between restarts. O_APPEND makes in-place truncation safe (next append lands at offset 0).
-for f in "$LOGS_DIR"/*.out "$LOGS_DIR"/*.err; do
+# Size-bound the launchd console-capture files (monitor + dashboard, and the V2.2 receipt collector,
+# whose streams live in their own dir) so no stream grows without limit between restarts. O_APPEND
+# makes in-place truncation safe (next append lands at offset 0).
+for f in "$LOGS_DIR"/*.out "$LOGS_DIR"/*.err "$RECEIPT_LOG_DIR"/*.out "$RECEIPT_LOG_DIR"/*.err; do
   [ -f "$f" ] || continue
   if [ "$(_size "$f")" -gt "$STREAM_MAX_BYTES" ]; then
     cp -f "$f" "$f.1" 2>/dev/null || true
@@ -140,9 +144,15 @@ post_webhook() {
 }
 
 if [ -n "$problems" ]; then
+  # Dedup on stable problem KINDS only, not the human summary: the age embedded in the
+  # stale message grows every probe, so keying on it re-POSTed the outage each 900 s cycle.
+  sig="PROBLEM: $kinds"
   # Ensure the sentinel exists so the dashboard surfaces the outage. Do NOT clobber a richer
-  # daemon-authored dead-man sentinel; only create one when absent.
-  if [ ! -f "$SENTINEL" ]; then
+  # daemon-authored dead-man sentinel; create one when absent, and refresh a watchdog-authored
+  # one when the problem set changed (else it keeps reporting resolved causes). Written via
+  # temp+mv so the dashboard never reads a half-written sentinel.
+  if [ ! -f "$SENTINEL" ] || { [ "$prev_state" != "$sig" ] &&
+       grep -q "Source: external watchdog" "$SENTINEL" 2>/dev/null; }; then
     {
       printf '# LIVE FORECAST MONITOR OUTAGE\n\n'
       printf 'Source: external watchdog\n'
@@ -150,11 +160,9 @@ if [ -n "$problems" ]; then
       printf 'Summary: %s\n\n' "$problems"
       printf 'The out-of-process watchdog detected that the live forecast monitor or its dashboard '
       printf 'is not healthy. This sentinel persists until the watchdog observes recovery.\n'
-    } > "$SENTINEL" 2>/dev/null || wd_log "could not write sentinel"
+    } > "$SENTINEL.tmp" 2>/dev/null && mv -f "$SENTINEL.tmp" "$SENTINEL" 2>/dev/null \
+      || { rm -f "$SENTINEL.tmp" 2>/dev/null; wd_log "could not write sentinel"; }
   fi
-  # Dedup on stable problem KINDS only, not the human summary: the age embedded in the
-  # stale message grows every probe, so keying on it re-POSTed the outage each 900 s cycle.
-  sig="PROBLEM: $kinds"
   if [ "$prev_state" != "$sig" ]; then
     wd_log "OUTAGE detected: $problems"
     post_webhook "Space-weather monitor outage: $problems" "outage"

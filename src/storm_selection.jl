@@ -262,7 +262,9 @@ end
 function _write_selection_csv(path, rows, empty_frame=nothing)
     frame = isempty(rows) && empty_frame !== nothing ? empty_frame : DataFrame(rows)
     _require_regular_output_target(path)
-    tmp, io = mktemp(dirname(path); cleanup=false)
+    # `dirname` of a bare filename is "", and `mktemp("")` fails on Windows; stage beside the
+    # absolute target instead.
+    tmp, io = mktemp(dirname(abspath(path)); cleanup=false)
     close(io)
     try
         CSV.write(tmp, frame)

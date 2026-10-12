@@ -79,8 +79,10 @@ function stlsq(Θ::AbstractMatrix, dx::AbstractVector;
         col_norm_shapes = ones(p)
     end
 
-    # Initial least squares
-    ξ = Θn \ dx
+    # Initial least squares. Pivoted QR at every solve: this is what `\` already uses for a
+    # non-square design, so tall/wide results are unchanged, while a square rank-deficient design
+    # gets the same least-squares solution instead of an LU `SingularException`.
+    ξ = qr(Θn, ColumnNorm()) \ dx
     all(isfinite, ξ) || throw(ArgumentError("initial least-squares solve was non-finite"))
 
     for iter in 1:max_iter
@@ -102,7 +104,7 @@ function stlsq(Θ::AbstractMatrix, dx::AbstractVector;
         # Re-solve on active terms only
         ξ_new = similar(ξ, p)
         fill!(ξ_new, zero(eltype(ξ_new)))
-        ξ_new[active] = Θn[:, active] \ dx
+        ξ_new[active] = qr(Θn[:, active], ColumnNorm()) \ dx
         all(isfinite, ξ_new) ||
             throw(ArgumentError("active-set least-squares solve was non-finite"))
 
@@ -134,7 +136,7 @@ function stlsq(Θ::AbstractMatrix, dx::AbstractVector;
         isempty(active_final) && break
         ξ_new = similar(ξ, p)
         fill!(ξ_new, zero(eltype(ξ_new)))
-        ξ_new[active_final] = Θn[:, active_final] \ dx
+        ξ_new[active_final] = qr(Θn[:, active_final], ColumnNorm()) \ dx
         all(isfinite, ξ_new) ||
             throw(ArgumentError("final active-set least-squares solve was non-finite"))
         ξ = ξ_new

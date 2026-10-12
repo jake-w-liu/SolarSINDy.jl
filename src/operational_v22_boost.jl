@@ -783,7 +783,15 @@ function read_operational_v22_boost(path::AbstractString)
     isfile(source) && !islink(source) || throw(ArgumentError(
         "boost artifact must be a regular non-symlink file: $source",
     ))
-    df = CSV.read(source, DataFrame)
+    # Text-valued columns are read as text: a numeric-looking label ("007") would otherwise parse
+    # as a number and change the hashed string. `validate = false` keeps a missing column reporting
+    # through the schema check below rather than through the parser.
+    df = CSV.read(source, DataFrame;
+                  types = Dict(:schema_version => String, :package_version => String,
+                               :evotrees_version => String, :artifact_sha256 => String,
+                               :label => String, :feature_schema => String,
+                               :tree_roots => String),
+                  validate = false)
     names(df) == collect(String.(_OPERATIONAL_V22_BOOST_CSV_COLUMNS)) ||
         throw(ArgumentError(
             "boost artifact CSV schema does not exactly match " *

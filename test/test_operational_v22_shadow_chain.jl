@@ -950,6 +950,75 @@ end
         @test operational_v22_shadow_chain_sha256(numeric_loaded) ==
               operational_v22_shadow_chain_sha256(numeric_manifest)
 
+        # G06b-01: m3_kind must be tied to its frozen feature schema on the
+        # validated (reader) construction path too.
+        exogenous_schema = Tuple(String.(OPERATIONAL_V22_ERROR_EXOGENOUS_FEATURES))
+        for (kind, schema) in (
+                (:ar_control, exogenous_schema),
+                (:exogenous, OPERATIONAL_V22_SHADOW_DEFAULT_FEATURE_SCHEMA),
+            )
+            mismatched_bindings = OperationalV22ShadowBindings(
+                receipt_pair_contract_sha256=repeat("1", 64),
+                transport_support_sha256=repeat("2", 64),
+                anchor_pressure_contract_sha256=repeat("3", 64),
+                conformal_sidecar_sha256=repeat("4", 64),
+                point_calibration_sha256=repeat("5", 64),
+                feature_schema=schema,
+            )
+            @test_throws ArgumentError OperationalV22ShadowChainArtifact(
+                numeric_label, mismatched_bindings, repeat("6", 64),
+                repeat("7", 64), repeat("8", 64), kind,
+                ntuple(_ -> repeat("9", 64), 6), repeat("0", 64),
+                OPERATIONAL_V22_SHADOW_SUPPORTED_HORIZONS_H, 0, Val(:validated),
+            )
+        end
+        # Hand-relabel the nine-lag manifest as exogenous with a correct self
+        # checksum (mirrors operational_v22_shadow_chain_sha256); must be rejected.
+        relabeled = CSV.read(numeric_path, DataFrame; types=String)
+        relabeled.m3_kind[1] = "exogenous"
+        relabel_io = IOBuffer()
+        for value in (
+                SolarSINDy.OPERATIONAL_V22_SHADOW_SCHEMA_VERSION,
+                numeric_manifest.label,
+                numeric_bindings.product_version,
+                numeric_bindings.receipt_pair_contract_sha256,
+                numeric_bindings.transport_support_sha256,
+                numeric_bindings.anchor_pressure_contract_sha256,
+                numeric_bindings.conformal_sidecar_sha256,
+                numeric_bindings.point_calibration_sha256,
+                numeric_manifest.driver_sha256,
+                numeric_manifest.core_sha256,
+                numeric_manifest.base_center_sha256,
+                :exogenous,
+                numeric_manifest.conformal_sha256,
+                numeric_manifest.anchor_lag_hours,
+            )
+            SolarSINDy._operational_v22_shadow_hash_token(relabel_io, value)
+        end
+        for values in (
+                numeric_bindings.feature_schema,
+                numeric_manifest.supported_horizons_hours,
+                numeric_manifest.m3_sha256_by_horizon,
+            )
+            SolarSINDy._operational_v22_shadow_hash_token(relabel_io, length(values))
+            for value in values
+                SolarSINDy._operational_v22_shadow_hash_token(relabel_io, value)
+            end
+        end
+        relabeled.artifact_sha256[1] =
+            bytes2hex(SolarSINDy.SHA.sha256(take!(relabel_io)))
+        relabeled_path = joinpath(directory, "relabeled-kind.csv")
+        CSV.write(relabeled_path, relabeled)
+        relabel_error = try
+            read_operational_v22_shadow_chain(relabeled_path)
+            nothing
+        catch err
+            err
+        end
+        @test relabel_error isa ArgumentError
+        @test relabel_error isa ArgumentError &&
+              occursin("does not match M3 kind", relabel_error.msg)
+
         nested_path = joinpath(directory, "nested", "artifacts", "shadow.csv")
         @test write_operational_v22_shadow_chain(nested_path, chain.artifact) ==
               nested_path

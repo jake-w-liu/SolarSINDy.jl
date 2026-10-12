@@ -98,6 +98,40 @@ end
         @test occursin("SOLARSINDY_REVIEW_DASH_URL=http://dashboard:8723/api/health",compose)
     end
 
+    # G12-06: `restart: always` never acts on an unhealthy HEALTHCHECK, so the compose deployment
+    # ships a label-scoped `autoheal` sidecar that restarts unhealthy monitor/dashboard containers.
+    @testset "compose restarts unhealthy services (autoheal sidecar)" begin
+        compose = replace(read(joinpath(PACKAGE_ROOT,"deploy/docker-compose.yml"),String),"\r\n"=>"\n")
+        # Split the `services:` mapping into its two-space-indented service blocks.
+        services_body = split(split(compose,r"^services:\n"m)[2],r"^\S"m)[1]
+        blocks = Dict{String,String}()
+        for m in eachmatch(r"^  ([A-Za-z0-9_-]+):\n((?:(?:    .*|[ ]*|  #.*)\n)*)"m,services_body)
+            blocks[m.captures[1]] = m.captures[2]
+        end
+        @test Set(keys(blocks)) == Set(["monitor","dashboard","autoheal"])
+        for svc in ("monitor","dashboard")
+            @test occursin(r"^    labels:\n      - com\.solarsindy\.autoheal=true$"m,blocks[svc])
+        end
+        sidecar = blocks["autoheal"]
+        @test occursin(r"^    image: docker:29-cli$"m,sidecar)
+        @test occursin(r"^    restart: always$"m,sidecar)
+        @test occursin(r"^    entrypoint: \[\"/bin/sh\", \"/autoheal\.sh\"\]$"m,sidecar)
+        @test occursin(r"^      - /var/run/docker\.sock:/var/run/docker\.sock:ro$"m,sidecar)
+        @test occursin(r"^      - \./autoheal\.sh:/autoheal\.sh:ro$"m,sidecar)
+        @test occursin(r"^      - AUTOHEAL_LABEL=com\.solarsindy\.autoheal=true$"m,sidecar)
+        @test occursin("root-equivalent",compose)              # socket security note
+        script = read(joinpath(PACKAGE_ROOT,"deploy/autoheal.sh"),String)
+        @test startswith(script,"#!/bin/sh\n")
+        @test occursin("--filter \"health=unhealthy\"",script)
+        @test occursin("label=com.docker.compose.project=",script)
+        @test occursin("docker restart -t 30",script)
+        for path in ("app/Dockerfile","deploy/Dockerfile.monitor")
+            dockerfile = read(joinpath(PACKAGE_ROOT,path),String)
+            @test occursin("deploy/autoheal.sh",dockerfile)
+            @test !occursin("advisory only",dockerfile)
+        end
+    end
+
     @testset "no standard library carries a version bound" begin
         # `Logging = \"1.11.0\"` with `julia = \"1.10\"` made the package unresolvable on its own
         # declared minimum: Julia 1.10 ships Logging without a version at all.
@@ -130,7 +164,7 @@ end
             @test project["compat"]["julia"] == declared
         end
         readme = read(joinpath(PACKAGE_ROOT, "README.md"), String)
-        @test occursin("support Julia 1.12.x and 1.13.x", readme)
+        @test occursin("Julia **≥ $(declared)**", readme)
         @test !occursin("Julia 1.10+", readme)
     end
 

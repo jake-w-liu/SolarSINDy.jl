@@ -69,15 +69,17 @@ function replay_ballistic_storm(storm, lib, ξ0, cal)
     sort!(df, [:issue_dt, :model_step_hours])
     out = DataFrame(storm=String[], issue_utc=DateTime[], lead=Int[], obs=Float64[], v2=Float64[],
                     subA=Float64[], subA_frozen=Float64[], persistence=Float64[], rate=Float64[])
-    prev_anchor = NaN
+    dst_map = Dict{DateTime,Float64}(zip(dst_times, Float64.(dst_vals)))  # true hourly Dst series
     for it in sort!(unique(df.issue_dt))
         g = df[df.issue_dt .== it, :]; r1 = g[1, :]
         issue_drv = (V=Float64(r1.V_kms), Bz=Float64(r1.Bz_nt), By=Float64(r1.By_nt), n=Float64(r1.n_cm3), Pdyn=Float64(r1.Pdyn_npa))
         latest = Float64(r1.latest_dst_nt)
-        all(isfinite, (issue_drv.V, issue_drv.Bz, issue_drv.By, issue_drv.n, issue_drv.Pdyn, latest)) || (prev_anchor = NaN; continue)
+        all(isfinite, (issue_drv.V, issue_drv.Bz, issue_drv.By, issue_drv.n, issue_drv.Pdyn, latest)) || continue
         anchor_star = pressure_correct_dst([latest], [issue_drv.Pdyn])[1]
-        rate = isfinite(prev_anchor) ? latest - prev_anchor : NaN
-        prev_anchor = latest
+        # Recent Dst rate = true 1 h delta from the Dst series (NaN when the prior hour is absent), so a
+        # skipped issue hour is never misread as an nT/h rate.
+        prev1 = get(dst_map, it - Hour(1), NaN)
+        rate = isfinite(prev1) ? latest - prev1 : NaN
         for r in eachrow(g)
             (ismissing(r.observation_dst_nt) || ismissing(r.v2_pred_dst_nt)) && continue
             isfinite(Float64(r.observation_dst_nt)) && isfinite(Float64(r.v2_pred_dst_nt)) || continue

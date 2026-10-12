@@ -213,6 +213,18 @@ using DataFrames
         @test_throws ArgumentError stlsq(
             huge_column, fill(nextfloat(0.0), 2); λ=0.0,
         )
+
+        # A square rank-deficient design gets the same least-squares solution as its tall
+        # counterpart instead of an LU `SingularException` (G01-01).
+        sq_dup = [1.0 1.0 0.5; 2.0 2.0 0.1; 3.0 3.0 7.0]
+        tall_dup = vcat(sq_dup, [4.0 4.0 1.0])
+        ξ_sq_dup = stlsq(sq_dup, [1.0, 2.0, 3.0]; λ=0.01)
+        @test all(isfinite, ξ_sq_dup)
+        @test ξ_sq_dup ≈ stlsq(tall_dup, [1.0, 2.0, 3.0, 4.0]; λ=0.01)
+        @test ξ_sq_dup ≈ [0.5, 0.5, 0.0]
+        ξ_sq_rank1 = stlsq([1.0 2.0; 2.0 4.0], [1.0, 2.0]; λ=0.0)
+        @test ξ_sq_rank1 ≈ stlsq([1.0 2.0; 2.0 4.0; 3.0 6.0], [1.0, 2.0, 3.0]; λ=0.0)
+        @test ξ_sq_rank1 ≈ [0.5, 0.25]
     end
 
     @testset "STLSQ returns a thresholding fixed point (final-contract)" begin

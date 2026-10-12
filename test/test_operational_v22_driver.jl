@@ -363,4 +363,22 @@ end
         @test SolarSINDy.OPERATIONAL_V22_SPECTRAL_RADIUS_RTOL <
               SolarSINDy.OPERATIONAL_V22_DRIVER_STABILITY_TOLERANCE
     end
+
+    @testset "numeric-looking labels round-trip as text (G05-02)" begin
+        coefficients = zeros(5, 5, 6)
+        for i in 1:5
+            coefficients[i, i, 1] = 0.5
+        end
+        mktempdir() do tmp
+            for label in ("007", "1e3")
+                artifact = OperationalV22DriverArtifact(coefficients; label=label)
+                path = joinpath(tmp, "driver-$label.csv")
+                write_operational_v22_driver(path, artifact)
+                restored = read_operational_v22_driver(path)
+                @test restored.label == label
+                @test operational_v22_driver_sha256(restored) ==
+                      operational_v22_driver_sha256(artifact)
+            end
+        end
+    end
 end

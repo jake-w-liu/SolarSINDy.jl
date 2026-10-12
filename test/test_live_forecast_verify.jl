@@ -3220,6 +3220,56 @@ using .V24ServingFixture
         end
     end
 
+    @testset "G09-03: V2.1-fallback cohort is compared without the absent static-V2.2 center" begin
+        mktempdir() do dir
+            n = 4
+            issue = [DateTime(2026, 7, 1, 10, 5) + Hour(i) for i in 1:n]
+            df = DataFrame(
+                issue_time_utc=string.(issue),
+                latest_dst_time_utc=string.(_floor_hour.(issue)),
+                target_time_utc=string.(_floor_hour.(issue) .+ Hour(1)),
+                model_version=fill(OPERATIONAL_V2_1_MODEL_VERSION, n),
+                model_step_hours=fill(1, n), wall_clock_lead_hours=fill(0.9, n),
+                sub_hourly_model_version=fill(V2_SERVED_TAIL_VERSION, n),
+                observation_dst_nt=[-20.0, -22, -25, -30],
+                pred_dst_nt=[-19.0, -21, -24, -28],
+                pred_dst_ci05_nt=fill(-40.0, n), pred_dst_ci95_nt=fill(0.0, n),
+                observed_in_90ci=fill(true, n),
+                v2_pred_dst_nt=[-19.0, -21, -24, -28],
+                v2_pred_dst_ci05_nt=fill(-40.0, n), v2_pred_dst_ci95_nt=fill(0.0, n),
+                v1_pred_dst_nt=[-18.0, -20, -23, -27],
+                persistence_dst_nt=[-19.0, -20, -22, -25],
+                burton_dst_nt=[-19.0, -20, -22, -25],
+                burton_full_dst_nt=[-19.0, -20, -22, -25],
+                obrien_dst_nt=[-19.0, -20, -22, -25],
+                served_pred_dst_nt=[-20.0, -22, -25, -29],
+                served_pred_dst_ci05_nt=fill(-40.0, n), served_pred_dst_ci95_nt=fill(0.0, n),
+                v2_2_status=fill("fallback_v2_1:stack_absent", n),
+                v2_2_stack_pred_dst_nt=Vector{Union{Missing,Float64}}(missing, n),
+            )
+            log_path = joinpath(dir, "fallback_log.csv")
+            report_path = joinpath(dir, "fallback_report.md")
+            CSV.write(log_path, df)
+            write_live_comparison_report(log_path, report_path)
+            text = read(report_path, String)
+            @test occursin("Same-row current-identity comparison rows: 4", text)
+            @test occursin("| V2.1 | 4 |", text)
+            @test occursin("| Persistence | 4 |", text)
+            @test !occursin("| Static V2.2 predecessor |", text)
+
+            summary_text = open(joinpath(dir, "fallback_summary.txt"), "w+") do io
+                redirect_stdout(io) do
+                    summarize_log(log_path)
+                end
+                seekstart(io)
+                read(io, String)
+            end
+            @test occursin(r"V2\.1\s+n=4 RMSE=", summary_text)
+            @test occursin(r"Persistence\s+n=4 RMSE=", summary_text)
+            @test !occursin("no verified rows", summary_text)
+        end
+    end
+
     @testset "Historical archive report preserves served/frozen V2.0 roles" begin
         mktempdir() do dir
             historical_log = joinpath(
@@ -3776,6 +3826,53 @@ using .V24ServingFixture
             @test !any(selection.deployed)
             @test selection.deploy_block_reason[1] == "validation_split_too_thin"
             @test !selection.validation_trusted[1]
+        end
+    end
+
+    @testset "G09-02: embargo-emptied validation purges holdout vs train and fails closed by name" begin
+        mktempdir() do tmp
+            table_path = joinpath(tmp, "replay.csv")
+            cal_path = joinpath(tmp, "v2_calibration.csv")
+            # 30 hourly anchors x horizons {1,6}: the 6 h purge after train deletes every
+            # validation anchor (0.15 * 30 = 4 anchors < 6 h).
+            rows = NamedTuple[]
+            for i in 1:30, h in (1, 6)
+                issue = DateTime(2026, 1, 1) + Hour(i)
+                pred = -30.0 + 0.5i + h
+                push!(rows, (issue_time_utc=string(issue), target_time_utc=string(issue + Hour(h)),
+                    latest_dst_time_utc=string(issue), model_step_hours=h,
+                    pred_dst_nt=pred, pred_dst_ci05_nt=pred - 3, pred_dst_ci95_nt=pred + 3,
+                    observation_dst_nt=pred + 2 + 0.3 * sin(i), v1_pred_dst_nt=pred,
+                    v1_pred_dst_ci05_nt=pred - 3, v1_pred_dst_ci95_nt=pred + 3,
+                    latest_dst_nt=pred - 1, V_kms=420.0, Bz_nt=-2.0 + 0.1i,
+                    By_nt=1.0, n_cm3=5.0, Pdyn_npa=1.5))
+            end
+            replay = DataFrame(rows)
+            CSV.write(table_path, replay)
+            cfg = LiveVerifyConfig(;
+                mode=:fit_v2_calibration, table_path=table_path, v2_calibration_path=cal_path,
+                v2_train_fraction=0.7, v2_validation_fraction=0.15,
+                v2_ridge_grid=[0.0], v2_ridge=0.0,
+            )
+            train, validation, holdout = _chronological_train_validation_test(
+                SolarSINDy.add_operational_v2_features!(_v2_base_prediction_table(copy(replay))),
+                cfg.v2_train_fraction, cfg.v2_validation_fraction,
+            )
+            @test nrow(validation) == 0
+            @test nrow(holdout) > 0
+            # Holdout is purged against the latest PRIOR target (train's, validation being empty).
+            @test maximum(_parse_dt.(train.target_time_utc)) <
+                  minimum(_parse_dt.(holdout.issue_time_utc))
+            err = try
+                fit_v2_calibration!(cfg)
+                nothing
+            catch e
+                e
+            end
+            @test err isa ArgumentError
+            @test occursin("validation_split_too_thin", sprint(showerror, err))
+            @test !occursin("no common finite rows", sprint(showerror, err))
+            @test !isfile(cal_path)
         end
     end
 

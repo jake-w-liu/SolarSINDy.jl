@@ -576,8 +576,11 @@ function renderCalib(status) {
   note += `Live intervals use <strong>${esc(liveSrc)}</strong> and target 90% coverage. The served-center shift and bounded online update do not retain a distribution-free coverage guarantee, so coverage is empirical. `;
   if (nLive === 0) note += `No forecast from ${liveSrcNoun} has matured yet. `;
   else note += `${nLive} verified ${nLive === 1 ? "forecast has" : "forecasts have"} matured from ${liveSrcNoun}. `;
-  if (c.deepest_obs_dst_nt != null) note += `This live period has been geomagnetically quiet — deepest observed Dst `
-    + `${fmt(c.deepest_obs_dst_nt,0)} nT, ${c.n_storm_verified} ${c.n_storm_verified === 1 ? "storm hour" : "storm hours"} below −50 nT — so storm-time performance is not yet stress-tested.`;
+  // n_storm_verified counts distinct verified target hours with observed Dst <= -50 nT.
+  if (c.deepest_obs_dst_nt != null && c.n_storm_verified === 0) note += `This live period has been geomagnetically quiet — deepest observed Dst `
+    + `${fmt(c.deepest_obs_dst_nt,0)} nT, no verified target hour at or below −50 nT — so storm-time performance is not yet stress-tested.`;
+  else if (c.deepest_obs_dst_nt != null && c.n_storm_verified != null) note += `Deepest observed Dst in this live period: ${fmt(c.deepest_obs_dst_nt,0)} nT; `
+    + `${c.n_storm_verified} distinct target ${c.n_storm_verified === 1 ? "hour" : "hours"} at or below −50 nT ${c.n_storm_verified === 1 ? "has" : "have"} been verified.`;
   html += `<div class="note">${note}</div>`;
 
   if (c.by_served_model && c.by_served_model.length > 1) {

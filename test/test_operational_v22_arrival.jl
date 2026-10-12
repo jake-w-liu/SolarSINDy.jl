@@ -276,9 +276,80 @@ end
              position_interpolation_fraction=0.5),
         )
         @test_throws ArgumentError build_operational_v22_arrival_queue((too_wide,), issue)
-        # And an unknown method is refused outright, so the two branches are the whole contract.
+        # And an unknown method is refused outright, so exact, linear, and the
+        # bounded hold are the whole contract.
         unknown = _v22a_rehash_pair(linear, (position_method="spline",))
         @test_throws ArgumentError build_operational_v22_arrival_queue((unknown,), issue)
+    end
+
+    @testset "SOLAR1 admission and bounded ephemeris hold (protocol amendment)" begin
+        @test SolarSINDy.OPERATIONAL_V22_ARRIVAL_ADMISSIBLE_SOURCES == ("DSCOVR", "SOLAR1")
+        @test SolarSINDy.OPERATIONAL_V22_ARRIVAL_MAX_POSITION_HOLD_MINUTES == 90
+        issue = DateTime(2022, 5, 5, 2)
+        measurement = DateTime(2022, 5, 5, 0, 10)
+        base = _v22a_pair(measurement; issue=issue, delay_minutes=50.0, sequence=8)
+        new_status = "bound_noaa_rtsw_overall_quality"
+        solar1 = _v22a_rehash_pair(base, (
+            source="SOLAR1",
+            mag_quality_binding_status=new_status,
+            wind_quality_binding_status=new_status,
+        ))
+        queue = build_operational_v22_arrival_queue((solar1,), issue)
+        @test only(queue.transported_pairs).arrival_time_utc == DateTime(2022, 5, 5, 1)
+        # The legacy v2 status still verifies for DSCOVR; the new status too.
+        @test only(build_operational_v22_arrival_queue((base,), issue).transported_pairs).arrival_time_utc ==
+              DateTime(2022, 5, 5, 1)
+        dscovr_new = _v22a_rehash_pair(base, (
+            mag_quality_binding_status=new_status,
+            wind_quality_binding_status=new_status,
+        ))
+        @test length(build_operational_v22_arrival_queue((dscovr_new,), issue).transported_pairs) == 1
+        # Unknown sources, the legacy DSCOVR status on a SOLAR1 pair, and mixed
+        # magnetometer/wind statuses are refused.
+        for changes in (
+                (source="ACE",),
+                (source="IMAP", mag_quality_binding_status=new_status,
+                 wind_quality_binding_status=new_status),
+                (source="SOLAR1",),
+                (source="SOLAR1", mag_quality_binding_status=new_status),
+                (wind_quality_binding_status=new_status,),
+            )
+            bad = _v22a_rehash_pair(base, changes)
+            @test_throws ArgumentError build_operational_v22_arrival_queue((bad,), issue)
+        end
+
+        # Hold: one earlier row, zero fraction, age <= 90 minutes.
+        held_time = measurement - Minute(70)
+        hold = _v22a_rehash_pair(solar1, (
+            position_method="hold",
+            position_lower_time_utc=_v22a_utc(held_time),
+            position_upper_time_utc=_v22a_utc(held_time),
+            position_interpolation_fraction=0.0,
+        ))
+        @test only(build_operational_v22_arrival_queue((hold,), issue).transported_pairs).arrival_time_utc ==
+              DateTime(2022, 5, 5, 1)
+        boundary = _v22a_rehash_pair(hold, (
+            position_lower_time_utc=_v22a_utc(measurement - Minute(90)),
+            position_upper_time_utc=_v22a_utc(measurement - Minute(90)),
+        ))
+        @test length(build_operational_v22_arrival_queue((boundary,), issue).transported_pairs) == 1
+        for changes in (
+                # over-age hold (90 min + 1 ms)
+                (position_lower_time_utc=_v22a_utc(measurement - Minute(90) - Millisecond(1)),
+                 position_upper_time_utc=_v22a_utc(measurement - Minute(90) - Millisecond(1))),
+                # non-zero fraction
+                (position_interpolation_fraction=0.5,),
+                # lower != upper
+                (position_upper_time_utc=_v22a_utc(held_time + Minute(1)),),
+                # held row not earlier than the measurement
+                (position_lower_time_utc=_v22a_utc(measurement),
+                 position_upper_time_utc=_v22a_utc(measurement)),
+                (position_lower_time_utc=_v22a_utc(measurement + Minute(5)),
+                 position_upper_time_utc=_v22a_utc(measurement + Minute(5))),
+            )
+            bad = _v22a_rehash_pair(hold, changes)
+            @test_throws ArgumentError build_operational_v22_arrival_queue((bad,), issue)
+        end
     end
 
     @testset "bin medians and exact physical fallbacks" begin

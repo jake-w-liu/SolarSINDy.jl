@@ -107,7 +107,7 @@ function run_monitor(; poll_interval_min::Int=5,
     try
         while true
             # Fetch latest data with error handling (refresh observed Dst too)
-            swd_new, t_new, t_fresh = try
+            swd_new, t_new, _, t_measured = try
                 dst_feed = _refresh_dst_feed(dst_feed)
                 # 6 h trailing window: wide enough to contain at least one
                 # published Kyoto Dst hour (the feed lags ~1-3 h) so re-anchoring
@@ -153,10 +153,13 @@ function run_monitor(; poll_interval_min::Int=5,
             # Data-staleness guard: a frozen feed (old rows returned 200 OK) must
             # not be displayed as current. Threshold allows Kyoto/SWPC publication
             # lag (~2-3 h) before flagging.
-            # Measure freshness from the newest actual sample (t_fresh = t_end), not the last
-            # hour-floored bin start, which lags real time by up to ~2 h (within-hour offset +
-            # the dropped trailing partial hour) and would falsely trip STALE on a live feed.
-            data_age = clock() - t_fresh
+            # Measure freshness from the newest actual sample, not the last hour-floored bin
+            # start, which lags real time by up to ~2 h (within-hour offset + the dropped
+            # trailing partial hour) and would falsely trip STALE on a live feed. Use the raw
+            # MEASUREMENT time (t_measured), not the L1->Earth propagated arrival time, which
+            # leads the sample by the ~1 h transit (live feed would read ~-1 h old and a
+            # frozen feed would be flagged STALE only threshold + transit after it froze).
+            data_age = clock() - t_measured
             # Use |age|: a future-dated latest timestamp (clock skew or a mislabeled feed) is
             # anomalous too and must not read as "fresh". Threshold in minutes avoids the
             # round-half-to-even surprise of Hour(Int(round(2.5))) == 2 h.
@@ -201,10 +204,10 @@ function run_monitor(; poll_interval_min::Int=5,
                 # contiguous driver block (Dst re-anchors from the feed). If re-warm
                 # also fails, stay alive and retry on the next poll.
                 try
-                    state, last_result, last_obs_time = _warmup_and_init_monitor(
-                        swd_new, t_new; coefficients_csv=coefficients_csv,
-                        ensemble_csv=ensemble_csv, history_cap=history_cap)
-                    last_forecast = ForecastResult[]
+                    state, last_result, last_obs_time, last_forecast = _rewarm_monitor(
+                        swd_new, t_new, V, Bz, By, n_val, Pdyn;
+                        coefficients_csv=coefficients_csv, ensemble_csv=ensemble_csv,
+                        history_cap=history_cap, forecast_horizon_hr=forecast_horizon_hr)
                     last_alarm = nothing
                     last_horizon_alarm = nothing
                     empty!(horizon_seen)
@@ -333,6 +336,27 @@ function _warmup_and_init_monitor(swd::SolarWindData,
 end
 
 """
+    _rewarm_monitor(swd, t_tags, V, Bz, By, n_val, Pdyn; coefficients_csv,
+                    ensemble_csv, history_cap, forecast_horizon_hr)
+
+Recovery re-warm used by `run_monitor` after a failed cycle: rebuild the state with
+[`_warmup_and_init_monitor`](@ref) and project the horizon forecast from it, so the
+same-bin polls that follow a recovery serve a real forecast instead of an empty one.
+Returns `(state, last_result, last_obs_time, forecast)`.
+"""
+function _rewarm_monitor(swd::SolarWindData, t_tags::AbstractVector{DateTime},
+                         V::Float64, Bz::Float64, By::Float64,
+                         n_val::Float64, Pdyn::Float64;
+                         coefficients_csv::String, ensemble_csv::String,
+                         history_cap::Int, forecast_horizon_hr::Int)
+    state, last_result, last_obs_time = _warmup_and_init_monitor(
+        swd, t_tags; coefficients_csv=coefficients_csv,
+        ensemble_csv=ensemble_csv, history_cap=history_cap)
+    forecast = forecast_ahead(state, V, Bz, By, n_val, Pdyn, forecast_horizon_hr)
+    return state, last_result, last_obs_time, forecast
+end
+
+"""
     _monitor_data_stale(data_age, staleness_threshold_hr) -> Bool
 
 Return `true` when the newest data sample is older than `staleness_threshold_hr`.
@@ -405,6 +429,16 @@ function _monitor_cycle!(state::ForecastState, swd_new::SolarWindData,
     end
 
     obs_idx = findlast(i -> isfinite(swd_new.Dst_star[i]), 1:latest_idx)
+    # Re-anchor only on an observation the replay can bridge (finite V/Bz in every
+    # driver bin obs_idx:latest_idx-1) and that is not older than the state's current
+    # anchor. Otherwise (e.g. a lagging Kyoto hour before an interior driver gap that a
+    # re-warm has already moved past) continue from the current state: rewinding to a
+    # pre-gap anchor would throw on every new bin and wedge the monitor.
+    if obs_idx !== nothing &&
+       (!all(i -> isfinite(swd_new.V[i]) && isfinite(swd_new.Bz[i]), obs_idx:(latest_idx - 1)) ||
+        (last_obs_time !== nothing && t_new[obs_idx] < last_obs_time))
+        obs_idx = nothing
+    end
     new_obs_time = obs_idx !== nothing ? t_new[obs_idx] : last_obs_time
 
     result = _replay_monitor_from_anchor!(state, swd_new, t_new, obs_idx, latest_idx)

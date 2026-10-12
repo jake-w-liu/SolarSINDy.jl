@@ -35,9 +35,12 @@ end
 _drv_bz(drivers, t::DateTime) = (d = get(drivers, t, nothing); d === nothing ? NaN : d.Bz)
 
 function _window_bz_stats(drivers, issue::DateTime, lead::Int)
-    issue_bz = _drv_bz(drivers, issue)
-    past = [_drv_bz(drivers, issue - Hour(k)) for k in 0:2]
-    fut = [_drv_bz(drivers, issue + Hour(k)) for k in 1:lead]
+    # Keys are OMNI hour-start tags. Same convention as the replay rows: the issue driver is tag issue-1h
+    # (half-open [issue-1h, issue) window) and rollout step k is driven by tag issue+k-1, so the causal
+    # labels use tags issue-1..issue-3 and the realized forecast window is tags issue..issue+lead-1.
+    issue_bz = _drv_bz(drivers, issue - Hour(1))
+    past = [_drv_bz(drivers, issue - Hour(k)) for k in 1:3]
+    fut = [_drv_bz(drivers, issue + Hour(k - 1)) for k in 1:lead]
     fpast = filter(isfinite, past)
     ffut = filter(isfinite, fut)
     past_south = count(<=(BZ_SOUTH_NT), fpast)
@@ -102,8 +105,8 @@ function _stress_cell(rows::DataFrame, col::Symbol)
     ei = rows.obs .- rows.current_v2_1
     rf, rh, rc, rp = _rmse(ef), _rmse(eh), _rmse(ec), _rmse(ep)
     strong_pers = rp <= rf
-    Δ, lo, hi = paired_improvement(strong_pers ? ep : ef, ec)
-    Δi, loi, hii = col == :current_v2_1 ? (0.0, 0.0, 0.0) : paired_improvement(ei, ec)
+    Δ, lo, hi = paired_improvement(strong_pers ? ep : ef, ec; storms=rows.storm)
+    Δi, loi, hii = col == :current_v2_1 ? (0.0, 0.0, 0.0) : paired_improvement(ei, ec; storms=rows.storm)
     severe = rows[rows.obs .<= -100.0, :]
     deep_bias = nrow(severe) == 0 ? NaN : mean(severe.obs .- Float64.(severe[!, col]))
     under100 = nrow(severe) == 0 ? 0 : count(Float64.(severe[!, col]) .> -100.0)
@@ -240,6 +243,7 @@ end
 function _selftest_sustained_bz()
     t0 = DateTime(2026, 1, 1, 0)
     drivers = Dict(
+        t0 - Hour(3) => (V=400.0, Bz=-6.5, By=0.0, n=5.0, Pdyn=2.0),
         t0 - Hour(2) => (V=400.0, Bz=-6.0, By=0.0, n=5.0, Pdyn=2.0),
         t0 - Hour(1) => (V=400.0, Bz=-7.0, By=0.0, n=5.0, Pdyn=2.0),
         t0           => (V=400.0, Bz=-8.0, By=0.0, n=5.0, Pdyn=2.0),
@@ -257,9 +261,26 @@ function _selftest_sustained_bz()
     @assert ann.causal_past_sustained_southward[1] "past sustained label failed"
     @assert ann.realized_future_sustained_southward[1] "future sustained label failed"
     @assert ann.realized_future_strong_southward[1] "future strong label failed"
+    # Time-alignment oracle (V10-03): strong southward Bz ONLY at tag t0, the first post-issue arrival
+    # hour. It is not measured at issue (causal labels quiet) but it drives the 1 h target (lead-1 future).
+    spike = Dict(t0 + Hour(k) => (V=400.0, Bz=(k == 0 ? -12.0 : 2.0), By=0.0, n=5.0, Pdyn=2.0) for k in -4:4)
+    sp = _window_bz_stats(spike, t0, 1)
+    @assert sp.issue_bz_nt == 2.0 && !sp.causal_issue_southward "causal issue Bz peeks at the post-issue hour"
+    @assert sp.past3_mean_bz_nt == 2.0 "trailing Bz includes the post-issue hour"
+    @assert sp.realized_future_sustained_southward && sp.future_min_bz_nt == -12.0 "lead-1 future window misses the hour driving the target"
     m = _metric_table(ann)
     @assert nrow(m) > 0 "stress metric table is empty"
     @assert m[(m.candidate .== "plain-fixed-relax") .& (m.regime .== "severe_stress"), :underwarn_100][1] == 1 "under-warning oracle failed"
+    # Stress-gate CIs must come from the storm-cluster bootstrap (V10-02).
+    cobs = fill(-100.0, 8); cbase = [6.0, -5.0, 7.0, -6.0, 6.0, -5.0, 7.0, -6.0]
+    ccand = [0.5 .* cbase[1:4]; 1.6 .* cbase[5:8]]
+    crows = DataFrame(storm=[fill("a", 4); fill("b", 4)], obs=cobs, frozen_tail_ablation=cobs .- cbase,
+                      historical_v2_0=cobs .- cbase, persistence=cobs .- 3 .* cbase,
+                      current_v2_1=cobs .- cbase, r0_15=cobs .- ccand)
+    cc = _stress_cell(crows, :r0_15)
+    clu = paired_improvement(crows.obs .- crows.frozen_tail_ablation, crows.obs .- crows.r0_15; storms=crows.storm)
+    @assert (cc.ci_lo, cc.ci_hi) == clu[2:3] "stress CI is not the storm-cluster bootstrap"
+    @assert (cc.current_ci_lo, cc.current_ci_hi) == clu[2:3] "stress vs-current CI is not the storm-cluster bootstrap"
     println("  ✓ sustained-Bz stress self-test: labels, metrics, under-warning oracle")
     return true
 end

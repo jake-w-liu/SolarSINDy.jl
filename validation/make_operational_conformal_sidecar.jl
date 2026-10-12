@@ -37,11 +37,22 @@ keep = isfinite.(pts) .& isfinite.(obs) .& isfinite.(hz) .& (hz .> 0)
 println("log rows=", nrow(df), "  verified usable=", count(keep),
         "  horizons=", sort(unique(round.(Int, hz[keep]))))
 
-cal = SolarSINDy.fit_conformal(pts[keep], obs[keep], hz[keep], ld[keep])
 isfile(POINT_CALIBRATION) || error("point calibration not found: $POINT_CALIBRATION")
+# Bind the sidecar to the point calibration's model-step support exactly as the live
+# fitter does (examples/live_forecast_verify.jl `_fit_deployed_conformal` /
+# `_supported_horizon_edges`); `_load_conformal_for_model` rejects a sidecar whose
+# supported_model_steps differs from the point calibration's.
+point_cal = SolarSINDy.read_operational_v2_calibration(String(POINT_CALIBRATION))
+isempty(point_cal.supported_model_steps) &&
+    error("point calibration declares no supported_model_steps: $POINT_CALIBRATION")
+steps = sort!(unique(Int.(point_cal.supported_model_steps)))
+edges = vcat(0.0, [(steps[i] + steps[i + 1]) / 2 for i in 1:(length(steps) - 1)], Inf)
+cal = SolarSINDy.fit_conformal(pts[keep], obs[keep], hz[keep], ld[keep];
+                               horizon_edges=edges)
 SolarSINDy.write_conformal_calibration(
     SIDECAR, cal;
     point_calibration_sha256=bytes2hex(SHA.sha256(read(POINT_CALIBRATION))),
+    supported_model_steps=join(point_cal.supported_model_steps, ";"),
 )
 SolarSINDy.read_conformal_calibration(SIDECAR)   # re-asserts invariants on reload
 println("SIDECAR_OK: ", SIDECAR)

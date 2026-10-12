@@ -603,8 +603,11 @@ function _v24_serving_read_conformal(path::AbstractString, variant::AbstractStri
                    "coverage_floor")
         column in _v24_serving_column_names(path) || error("$path lacks the $column column")
     end
+    # `source` is optional (see below); `validate = false` lets the typed read accept a table
+    # that omits it instead of rejecting the unknown `types` key.
     table = CSV.read(path, DataFrame; types = Dict("variant" => String, "depth_bin" => String,
-                                                   "source" => String))
+                                                   "source" => String),
+                     validate = false)
     strata = Dict{Tuple{Int,Symbol},V24ServingStratum}()
     for r in 1:nrow(table)
         String(table.variant[r]) == String(variant) || continue

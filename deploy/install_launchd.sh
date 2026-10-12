@@ -180,6 +180,11 @@ PROBE_HOST="$SWM_HOST_VALUE"
 case "$SWM_HOST_VALUE" in
   0.0.0.0|::|'[::]') PROBE_HOST="127.0.0.1" ;;
 esac
+# An IPv6 literal (e.g. ::1) must be bracketed in a URL or curl rejects it as a bad port.
+case "$PROBE_HOST" in
+  \[*) ;;
+  *:*) PROBE_HOST="[$PROBE_HOST]" ;;
+esac
 WATCHDOG_DASH_URL_VALUE="${SOLARSINDY_WATCHDOG_DASH_URL:-http://$PROBE_HOST:$SWM_PORT_VALUE/api/health}"
 WATCHDOG_STALE_SEC_VALUE="${SOLARSINDY_WATCHDOG_STALE_SEC:-7200}"
 case "$WATCHDOG_STALE_SEC_VALUE" in

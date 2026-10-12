@@ -566,6 +566,17 @@ const V2_1_DRIVER_TOKEN =
         @test !cal.live_skill_mature
         @test cal.live_skill_rows_remaining == 44
         @test cal.served_interval_coverage_scope == "empirical_only"
+        @test cal.deepest_obs_dst_nt == -63.0 && cal.n_storm_verified == 4
+
+        # Storm hours are distinct verified target hours, not verified rows: a target forecast by
+        # two cycles (one per horizon) is one storm hour. Cycles issued an hour apart with
+        # horizons (1, 2, 3, 6) share two targets, so 8 rows at or below -50 nT are 6 hours.
+        overlap = vcat(live_cycle_fixture(issue; observations=[-60.0, -61.0, -62.0, -63.0]),
+                       live_cycle_fixture(issue - Hour(1); observations=[-60.0, -61.0, -62.0, -63.0]))
+        overlap_v = verified_rows(overlap)
+        @test nrow(overlap_v) == 8
+        @test length(unique(overlap_v.target_time_utc_dt)) == 6
+        @test calibration_summary(overlap).n_storm_verified == 6
 
         # One missing O'Brien value removes that target from every matched RMSE.
         # Persistence then has squared errors 100, 121, and 144: sqrt(365/3)=11.03
@@ -2991,6 +3002,19 @@ esac
         @test future.invalid_future && future.mag_stale && future.plasma_stale
         @test future.mag_age_min == -10.0
 
+        # SWPC labels each 3-h Kp by its interval START and publishes it after the interval ENDS,
+        # so the newest row is normally 3-6 h old (plus publication slack). A storm-level Kp must
+        # stay current over that whole window; a feed frozen well beyond it must still go stale.
+        kp_only(t) = (available=true, scales=nothing, kp=(value=6.0, time_utc=jdt(t), trend=[]),
+                      solar_wind=Dict{Symbol,Any}(:available=>false))
+        for lag in (Minute(185), Minute(270), Minute(350), Minute(390))
+            kp_cur = upstream_assessment(kp_only(reference - lag); reference=reference)
+            @test kp_cur.kp_stale == false
+            @test kp_cur.elevated && any(occursin("Kp 6.0", r) for r in kp_cur.reasons)
+        end
+        kp_frozen = upstream_assessment(kp_only(reference - Hour(8)); reference=reference)
+        @test kp_frozen.kp_stale && !kp_frozen.elevated && isempty(kp_frozen.reasons)
+
         # A future-poisoned RTSW row must not displace the newest valid current row.
         rows = JSON3.read("""[
           {"time_tag":"2026-07-14T12:10:00","active":true,"bt":20.0,"bz_gsm":-30.0},
@@ -3805,6 +3829,25 @@ esac
         @test isempty(calls)
         # ... and the persisted marker stays down until data actually arrives.
         @test JSON3.read(read(cold_state, String)).seen_data == false
+
+        # Data then arrives quiet: the marker rises without any delivered transition, and it must
+        # still reach disk, so a restart into an emptied log is read as an outage, not as quiet.
+        write_cycle_csv(cold_log, quiet_cycle(now(UTC) - Minute(20)))
+        _LOG_CACHE[] = nothing
+        first_data = evaluate(cold_log; sp = cold_state)
+        @test first_data.state.level == 0 && first_data.state.stale == false
+        @test first_data.result.fired == false && first_data.result.reason == "no change"
+        @test isempty(calls)
+        persisted = JSON3.read(read(cold_state, String))
+        @test persisted.seen_data == true
+        @test persisted.level == 0 && persisted.stale == false   # delivered state unchanged
+        reset_notify!()
+        write_empty_log(cold_log)
+        _LOG_CACHE[] = nothing
+        cold_restart = evaluate(cold_log; sp = cold_state)
+        @test cold_restart.state.stale == true
+        @test cold_restart.result.fired == true && cold_restart.result.kind == "stale_onset"
+        @test length(calls) == 1 && !occursin("all clear", lowercase(calls[end].text))
 
         reset_notify!()
         _LOG_CACHE[] = nothing

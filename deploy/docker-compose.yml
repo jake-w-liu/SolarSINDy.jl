@@ -1,14 +1,29 @@
-# Supervised two-process deployment for a Linux/container host.
+# Supervised two-process deployment for a Linux/container host (+ a restart-on-unhealthy sidecar).
 #
 # The forecast DAEMON (writes the locked-live log) and the read-only DASHBOARD/alerting server share
-# a named volume. Both restart on failure and expose HEALTHCHECKs (defined in their Dockerfiles), so
-# a non-macOS node — or any node without a persistent login session — can run the actual forecaster
-# supervised, not just replay a log produced elsewhere.
+# a named volume. Both are restarted when their process exits (`restart: always`), so a non-macOS
+# node — or any node without a persistent login session — can run the actual forecaster supervised,
+# not just replay a log produced elsewhere. Both also expose HEALTHCHECKs (defined in their
+# Dockerfiles). A restart policy alone never acts on an `unhealthy` status (it only fires when the
+# process exits), so the `autoheal` sidecar below restarts a hung-but-alive daemon or dashboard:
+# every AUTOHEAL_INTERVAL_SEC (default 60) it runs deploy/autoheal.sh, which `docker restart -t 30`s
+# each container of this compose project labelled com.solarsindy.autoheal=true whose Docker health
+# status is `unhealthy`. Docker's own HEALTHCHECK start-period/retries decide when that is, so a
+# container still warming up is never restarted. This is the compose counterpart of
+# deploy/watchdog.sh on the launchd path.
+#
+# SECURITY: the sidecar mounts /var/run/docker.sock. Access to the Docker socket is root-equivalent
+# on the host (the `:ro` mount flag does NOT limit what the API can do). If your orchestrator
+# (Kubernetes liveness probes, Swarm, Nomad, systemd, ...) already restarts unhealthy containers,
+# or you do not accept that exposure, delete the `autoheal` service; the labels are then inert and
+# health is reported only (`docker compose ps`).
 #
 # Run from the package root:
 #   docker compose -f deploy/docker-compose.yml up -d --build
 #   docker compose -f deploy/docker-compose.yml ps        # HEALTHCHECK state
 #   docker compose -f deploy/docker-compose.yml logs -f
+#   docker compose -f deploy/docker-compose.yml logs autoheal   # restart-on-unhealthy actions
+# (relative paths such as ./autoheal.sh resolve against deploy/, the compose file's directory)
 services:
   monitor:
     build:
@@ -16,6 +31,8 @@ services:
       dockerfile: deploy/Dockerfile.monitor
     image: swmonitor-daemon
     restart: always
+    labels:
+      - com.solarsindy.autoheal=true
     volumes:
       - monitor-state:/data
     environment:
@@ -29,6 +46,8 @@ services:
       dockerfile: app/Dockerfile
     image: swmonitor
     restart: always
+    labels:
+      - com.solarsindy.autoheal=true
     depends_on:
       - monitor
     # Bind to loopback by default; put a TLS-terminating reverse proxy in front for LAN/WAN access.
@@ -48,6 +67,19 @@ services:
       - SWM_ALERT_STATE=/app/alert_notify_state.json
       # Enable push alerts (Slack/Discord/generic) by setting the webhook here:
       # - SWM_WEBHOOK_URL=https://hooks.example.com/...
+
+  # Restart-on-unhealthy sidecar (see header, incl. the SECURITY note). Delete this service when an
+  # orchestrator already restarts unhealthy containers.
+  autoheal:
+    image: docker:29-cli
+    restart: always
+    entrypoint: ["/bin/sh", "/autoheal.sh"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./autoheal.sh:/autoheal.sh:ro
+    environment:
+      - AUTOHEAL_INTERVAL_SEC=60
+      - AUTOHEAL_LABEL=com.solarsindy.autoheal=true
 
 volumes:
   monitor-state:

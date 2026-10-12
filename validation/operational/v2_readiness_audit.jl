@@ -284,6 +284,8 @@ function target_dst_regime(obs)
 end
 
 function issue_rate_regime(rate)
+    # A non-finite (or missing) rate has no regime; it must not fall through to "recovering".
+    finite_value(rate) || return "undefined"
     x = Float64(rate)
     x < -15.0 && return "rapid_deepening"
     x < -5.0 && return "deepening"
@@ -799,7 +801,7 @@ function audit_replay!(state::AuditState; strict_regime_persistence::Bool = fals
 
     numeric_cols = [:obs, :v2_1, :v2_1_pre_rate_guard,
                     :v2_1_pre_one_hour_inertia, :v2_1_pre_state_inertia,
-                    :v2_0, :v2_1_frozen, :persistence]
+                    :v2_0, :v2_1_frozen, :persistence, :rate]
     finite_rows = finite_mask(df, numeric_cols)
     if all(finite_rows)
         pass!(state, "V2 replay finite values", "all $(nrow(df)) rows finite for $(join(String.(numeric_cols), ", "))")
@@ -1585,7 +1587,7 @@ function audit_v2_4_bundle!(state::AuditState; dir::AbstractString = V2_4_DEPLOY
     if !isdir(dir)
         fail!(state, "served V2.4 bundle",
               "$(relpath(dir, REPO_ROOT)) is absent; the engine cannot serve the published product")
-        return (ok = false, sha256 = missing)
+        return (ok = false, sha256 = missing, identity = missing)
     end
     manifest = joinpath(dir, "manifest.csv")
     if !isfile(manifest)
@@ -2006,6 +2008,7 @@ function audit_live_log!(state::AuditState)
     state.live_metrics[:live_log_mtime] = mtime(path)
 
     if nrow(df) == 0
+        state.live_metrics[:served_n] = 0
         pass!(state, "current V2.1 hot-log boundary",
               "zero-row schema initialized after byte-identical V2.0 archival")
         warn!(state, "current V2.1 live sample maturity",
@@ -2270,12 +2273,7 @@ function _identity_datetime_agrees(record_value, bundle_value)
     return a == b
 end
 
-function audit_v2_1_issue_identity!(state::AuditState;
-                                    path::AbstractString = joinpath(LIVE_DIR,
-                                                                    "v2_1_issue_identity.csv"))
-    df = read_csv_checked!(state, path, "V2.1 issue identity")
-    df === nothing && return
-    required = [:model_version, :served_model_version, :served_fallback_model_version,
+const V21_ISSUE_IDENTITY_REQUIRED_COLUMNS = [:model_version, :served_model_version, :served_fallback_model_version,
                 :served_stack_model_version, :served_bundle_manifest_sha256,
                 :served_bundle_fold_year, :served_bundle_training_max_target_utc,
                 :served_stack_label, :served_stack_sha256,
@@ -2295,7 +2293,14 @@ function audit_v2_1_issue_identity!(state::AuditState;
                 :rapid_deepening_extreme_max_drop_nt, :calibration_label,
                 :coefficient_sha256, :ensemble_sha256, :draws_sha256,
                 :calibration_sha256, :historical_v2_0_requires_explicit_version]
-    require_columns!(state, df, required, "V2.1 issue identity") || return
+
+function audit_v2_1_issue_identity!(state::AuditState;
+                                    path::AbstractString = joinpath(LIVE_DIR,
+                                                                    "v2_1_issue_identity.csv"))
+    df = read_csv_checked!(state, path, "V2.1 issue identity")
+    df === nothing && return
+    require_columns!(state, df, V21_ISSUE_IDENTITY_REQUIRED_COLUMNS,
+                     "V2.1 issue identity") || return
     nrow(df) == 1 || return fail!(state, "V2.1 issue identity cardinality",
                                   "expected one row, got $(nrow(df))")
     r = df[1, :]
@@ -2410,19 +2415,27 @@ function refresh_live_log_metrics_for_dashboard!(state::AuditState;
                        :served_pred_dst_ci95_nt, :v2_pred_dst_nt, :persistence_dst_nt]
         all(c -> has_col(df, c), served_cols) || return (ok = false, changed = false, detail = "missing V2 product columns")
         served = df[finite_mask(df, served_cols), :]
-        nrow(served) > 0 || return (ok = false, changed = false, detail = "no finite V2 product rows")
 
         state.live_metrics[:served_n] = nrow(served)
-        state.live_metrics[:served_rmse] = rmse(served.served_pred_dst_nt, served.observation_dst_nt)
-        state.live_metrics[:baseline_rmse] = rmse(served.v2_pred_dst_nt, served.observation_dst_nt)
-        state.live_metrics[:persistence_rmse] = rmse(served.persistence_dst_nt, served.observation_dst_nt)
+        if nrow(served) > 0
+            state.live_metrics[:served_rmse] = rmse(served.served_pred_dst_nt, served.observation_dst_nt)
+            state.live_metrics[:baseline_rmse] = rmse(served.v2_pred_dst_nt, served.observation_dst_nt)
+            state.live_metrics[:persistence_rmse] = rmse(served.persistence_dst_nt, served.observation_dst_nt)
 
-        obs = Float64.(served.observation_dst_nt)
-        lo = Float64.(served.served_pred_dst_ci05_nt)
-        hi = Float64.(served.served_pred_dst_ci95_nt)
-        state.live_metrics[:served_coverage] = mean(Float64.((lo .<= obs) .& (obs .<= hi)))
-        state.live_metrics[:obs_min] = minimum(obs)
-        state.live_metrics[:obs_max] = maximum(obs)
+            obs = Float64.(served.observation_dst_nt)
+            lo = Float64.(served.served_pred_dst_ci05_nt)
+            hi = Float64.(served.served_pred_dst_ci95_nt)
+            state.live_metrics[:served_coverage] = mean(Float64.((lo .<= obs) .& (obs .<= hi)))
+            state.live_metrics[:obs_min] = minimum(obs)
+            state.live_metrics[:obs_max] = maximum(obs)
+        else
+            # No matured row yet (including the zero-row hot log): the verified count is 0 and every
+            # skill metric is undefined, exactly as audit_live_log! leaves them.
+            for key in (:served_rmse, :baseline_rmse, :persistence_rmse,
+                        :served_coverage, :obs_min, :obs_max)
+                delete!(state.live_metrics, key)
+            end
+        end
 
         # The label the newest logged cycle carries is compared against the payload the API just
         # returned, so it has to be re-read from the same snapshot as the comparison metrics. Leaving
@@ -3099,9 +3112,17 @@ function selftest_readiness_audit()
     # The identity artifact records an empty shadow manifest digest when no shadow deployment is
     # present, and an empty CSV field reads back as `missing`. That documented case must warn, not
     # raise inside the identity audit.
-    if isfile(joinpath(LIVE_DIR, "v2_1_issue_identity.csv"))
+    # The fixture is derived from the evidence record, so it is only meaningful when that record
+    # carries the current identity schema. When LIVE_DIR resolves to a dated article snapshot
+    # (frozen at an earlier serving composition, e.g. the V2.1 paper copy), the audit correctly
+    # fails it on schema before the shadow-digest check, which this block cannot then exercise.
+    identity_path = joinpath(LIVE_DIR, "v2_1_issue_identity.csv")
+    identity_current = isfile(identity_path) &&
+        all(c -> c in propertynames(CSV.read(identity_path, DataFrame)),
+            V21_ISSUE_IDENTITY_REQUIRED_COLUMNS)
+    if identity_current
         mktempdir() do dir
-            identity = CSV.read(joinpath(LIVE_DIR, "v2_1_issue_identity.csv"), DataFrame)
+            identity = CSV.read(identity_path, DataFrame)
             identity[!, :shadow_manifest_sha256] = Union{Missing, String}[missing]
             fixture = joinpath(dir, "v2_1_issue_identity.csv")
             CSV.write(fixture, identity)
@@ -3118,7 +3139,9 @@ function selftest_readiness_audit()
     # training-window bound (which CSV.read parses into a `DateTime`) with the bundle's; that path
     # must evaluate — the production audit once aborted here on `String(::DateTime)` — pass on the
     # deployed record, and fail (not raise) on a record carrying another refit's provenance.
-    if isfile(joinpath(LIVE_DIR, "v2_1_issue_identity.csv")) && isdir(V2_4_DEPLOY_DIR)
+    # Same precondition as above: a dated (pre-V2.4) identity snapshot cannot carry the bundle
+    # provenance this block compares.
+    if identity_current && isdir(V2_4_DEPLOY_DIR)
         loaded_state = AuditState()
         audit_v2_4_bundle!(loaded_state)
         if haskey(loaded_state.live_metrics, :served_bundle_training_max_target_utc)
@@ -3718,7 +3741,7 @@ function write_report(state::AuditState, path::AbstractString)
 
         if nrow(state.gscale_metrics) > 0
             println(io, "\n## Exact Kp/G-Scale Replay Metrics\n")
-            println(io, "Exact replay selects GFZ three-hour Kp events with Kp >= 7 (NOAA G3+) and scores V2.1 on the same locked issue/target rows as historical V2.0 and persistence. Skipped catalog events are data-coverage skips from unavailable finite OMNI/Dst rows.\n")
+            println(io, "Exact replay selects GFZ three-hour Kp events with Kp >= 7o (legacy cohort key all_G3plus; NOAA G3 starts at Kp 7-) and scores V2.1 on the same locked issue/target rows as historical V2.0 and persistence. Skipped catalog events are data-coverage skips from unavailable finite OMNI/Dst rows.\n")
             println(io, "| Cohort | Lead [h] | n | events | RMSE historical V2.0 | RMSE V2.1 | RMSE persistence | Improve vs best comparator | Max operational-layer effect | Max 20/11-core effect |")
             println(io, "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
             sort!(state.gscale_metrics, [:cohort, :lead])

@@ -123,21 +123,36 @@ it (the seed fold has no variant centers, so it calibrates nothing).
 function v24_deploy_request(fold_year::Integer; outdir::AbstractString,
                             indir::AbstractString=V24_ROLLING_DIR)
     year = Int(fold_year)
+    expected_oof = Int[Int(candidate) for candidate in V24_FOLD_YEARS if candidate < year]
     oof = Int[]
-    for candidate in V24_FOLD_YEARS
-        candidate < year || continue
+    for candidate in expected_oof
         isfile(v24_oof_year_path(indir, candidate)) || continue
         push!(oof, candidate)
     end
     isempty(oof) && error(
         "no persisted fold table precedes $year in $indir; the bundle would have no pool to fit on",
     )
+    # The study's pool is contiguous from the seed fold (the learn stage scores only the contiguous
+    # prefix, `v24_available_years`); a gapped pool is not the study's pool, so fail closed.
+    missing_oof = setdiff(expected_oof, oof)
+    isempty(missing_oof) || error(
+        "fold tables $(missing_oof) are missing from $indir; the out-of-fold pool for $year would " *
+        "have a hole",
+    )
     conformal = Int[]
+    missing_learn = Int[]
     for candidate in oof
-        candidate == minimum(oof) && continue
-        isfile(joinpath(indir, "learn_year_$(candidate).csv")) || continue
-        push!(conformal, candidate)
+        candidate == first(V24_FOLD_YEARS) && continue
+        if isfile(joinpath(indir, "learn_year_$(candidate).csv"))
+            push!(conformal, candidate)
+        else
+            push!(missing_learn, candidate)
+        end
     end
+    isempty(missing_learn) || error(
+        "learn-stage tables $(missing_learn) are missing from $indir; the conformal pool for $year " *
+        "would have a hole",
+    )
     isempty(conformal) && error(
         "no learn-stage year precedes $year in $indir; the bundle would have no interval",
     )

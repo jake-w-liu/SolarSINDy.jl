@@ -126,7 +126,7 @@ function main_one_hour_inertia()
     CSV.write(H1_EVALUATION_CSV, evaluation)
     open(H1_REPORT, "w") do io
         println(io, "# Operational V2.1 one-hour inertia selection\n")
-        @printf(io, "A fixed weight of %.3f was selected by minimum validation RMSE among %d/%d candidates that beat both historical V2.0 and persistence on the broad-replay training and validation partitions. The broad test partition, exact G3+ replay, and severe-storm cohort were scored only after selection.\n\n",
+        @printf(io, "A fixed weight of %.3f was selected by minimum validation RMSE among %d/%d candidates that beat both historical V2.0 and persistence on the broad-replay training and validation partitions. The broad test partition, exact GFZ Kp >= 7o replay (legacy key exact_G3plus; NOAA G3 starts at Kp 7-), and severe-storm cohort were scored only after selection.\n\n",
                 weight, count(candidates.passes_development_gate), nrow(candidates))
         println(io, "The operator is `latest Dst + weight × (V2.1 − latest Dst)` at one hour only. It uses no V2.0 value at issue time; historical V2.0 appears only in offline scoring.\n")
         println(io, "| cohort | rows | groups | RMSE historical V2.0 | RMSE V2.1 | RMSE persistence | improvement vs stronger comparator |")

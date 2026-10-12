@@ -65,6 +65,24 @@ _experts(values) = NamedTuple{V24_SERVING_EXPERTS}(Tuple(Float64.(values)))
         @test V24_SERVING_ANALOG_IDENTITY != V23_SERVING_IDENTITY
     end
 
+    @testset "conformal.csv without the optional source column loads with source \"\" (G07-01)" begin
+        mktempdir() do dir
+            path = joinpath(dir, "conformal.csv")
+            rows = [(fold_year=2024, variant="v2_4e", model_step_hours=step,
+                     depth_bin=String(depth), half_width_nt=10.0 + step, n=50,
+                     coverage_floor=0.9)
+                    for step in V24_SERVING_MODEL_STEPS
+                    for depth in (V24_SERVING_POOLED, V24_SERVING_DEPTH_BINS...)]
+            CSV.write(path, DataFrame(rows))
+            @test !("source" in names(CSV.read(path, DataFrame)))
+            strata = SolarSINDy._v24_serving_read_conformal(path, "v2_4e", 2024)
+            @test length(strata) == length(V24_SERVING_MODEL_STEPS) *
+                                    (1 + length(V24_SERVING_DEPTH_BINS))
+            @test all(stratum -> stratum.source == "", values(strata))
+            @test strata[(1, V24_SERVING_POOLED)].half_width_nt == 11.0
+        end
+    end
+
     @testset "depth bins are closed from below" begin
         @test v24_serving_depth_bin(0.0) === :shallow
         @test v24_serving_depth_bin(-29.999) === :shallow

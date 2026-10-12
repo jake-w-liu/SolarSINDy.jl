@@ -180,6 +180,21 @@ test("claim display retains historical failures instead of suggesting only more 
   assert.doesNotMatch(element("calib").innerHTML, /48 historical/);
 });
 
+test("calibration note claims a quiet period only when no storm target was verified", () => {
+  const { context, element } = dashboard();
+  const status = {calibration:{n_verified:120, deepest_obs_dst_nt:-180, n_storm_verified:40}};
+  context.renderCalib(status);
+  const stormy = element("calib").innerHTML;
+  assert.doesNotMatch(stormy, /geomagnetically quiet/);
+  assert.doesNotMatch(stormy, /not yet stress-tested/);
+  assert.match(stormy, /-180 nT/);
+  assert.match(stormy, /40 distinct target hours at or below −50 nT/);
+  status.calibration = {n_verified:120, deepest_obs_dst_nt:-31, n_storm_verified:0};
+  context.renderCalib(status);
+  assert.match(element("calib").innerHTML, /geomagnetically quiet/);
+  assert.match(element("calib").innerHTML, /not yet stress-tested/);
+});
+
 test("wrapped chart legends stay above the data and date labels reserve space", () => {
   const { context } = dashboard();
   const layout = vm.runInContext("PLOT_LAYOUT()", context);

@@ -419,4 +419,21 @@ end
             @test read(sentinel, String) == "preserve"
         end
     end
+
+    @testset "Numeric-looking labels round-trip as text (G05-02)" begin
+        mktempdir() do temporary
+            for label in ("007", "1e3")
+                artifact = OperationalV22ErrorStateArtifact(
+                    V22E_HASH, 0.1, [0.5, 0, 0, 0, 0, 0, 0, 0, 0];
+                    fit_rows=10, label=label,
+                )
+                path = joinpath(temporary, "error-$label.csv")
+                write_operational_v22_error_state(path, artifact)
+                restored = read_operational_v22_error_state(path)
+                @test restored.label == label
+                @test operational_v22_error_state_sha256(restored) ==
+                      operational_v22_error_state_sha256(artifact)
+            end
+        end
+    end
 end

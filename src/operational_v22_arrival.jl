@@ -30,6 +30,15 @@ const OPERATIONAL_V22_ARRIVAL_MAX_FRESHNESS_MINUTES = 90
 const OPERATIONAL_V22_ARRIVAL_X_REF_GSE_KM = 0.0
 "Fixed transport distance used by the V2.1-compatible delay diagnostic, in km."
 const OPERATIONAL_V22_ARRIVAL_V21_COMPATIBILITY_DISTANCE_KM = 1.5e6
+"Allow-listed SWPC real-time L1 sources (protocol amendment: SOLAR1 replaced DSCOVR ingest)."
+const OPERATIONAL_V22_ARRIVAL_ADMISSIBLE_SOURCES = ("DSCOVR", "SOLAR1")
+"Maximum age of a held (not interpolated) ephemeris position, in minutes."
+const OPERATIONAL_V22_ARRIVAL_MAX_POSITION_HOLD_MINUTES = 90
+
+# Source-neutral writer status, plus the legacy v2 status accepted for DSCOVR only.
+const _OPERATIONAL_V22_ARRIVAL_QUALITY_STATUS = "bound_noaa_rtsw_overall_quality"
+const _OPERATIONAL_V22_ARRIVAL_LEGACY_QUALITY_STATUS =
+    "bound_noaa_dscovr_overall_quality"
 
 const _OPERATIONAL_V22_ARRIVAL_PAIR_PAYLOAD_FIELDS = (
     :schema_version,
@@ -400,8 +409,8 @@ function _operational_v22_arrival_normalize_pair(pair)
     ))
 
     source = _operational_v22_arrival_string(pair.source, "source")
-    source == "DSCOVR" || throw(ArgumentError(
-        "V2.2-M2 receipt pair is not from DSCOVR",
+    source in OPERATIONAL_V22_ARRIVAL_ADMISSIBLE_SOURCES || throw(ArgumentError(
+        "V2.2-M2 receipt pair is not from an admitted L1 source",
     ))
     mag_source_product = _operational_v22_arrival_string(
         pair.mag_source_product_id, "mag_source_product_id",
@@ -460,7 +469,7 @@ function _operational_v22_arrival_normalize_pair(pair)
         "V2.2-M2 position units must be exactly km",
     ))
     method = _operational_v22_arrival_string(pair.position_method, "position_method")
-    method in ("exact", "linear") || throw(ArgumentError(
+    method in ("exact", "linear", "hold") || throw(ArgumentError(
         "V2.2-M2 position interpolation method changed",
     ))
     lower = _operational_v22_arrival_parse_utc(
@@ -473,13 +482,26 @@ function _operational_v22_arrival_normalize_pair(pair)
         pair.position_interpolation_fraction,
         "position_interpolation_fraction",
     )
-    lower <= measurement <= upper || throw(ArgumentError(
-        "V2.2-M2 position bracket does not contain the measurement time",
-    ))
-    upper - lower <= Hour(1) || throw(ArgumentError(
-        "V2.2-M2 position bracket exceeds one hour",
-    ))
-    if method == "exact"
+    if method == "hold"
+        # Bounded causal hold: one earlier ephemeris row, zero fraction, aged at
+        # most 90 minutes at the measurement time.
+        lower == upper && lower < measurement && fraction == 0.0 &&
+            measurement - lower <=
+                Minute(OPERATIONAL_V22_ARRIVAL_MAX_POSITION_HOLD_MINUTES) ||
+            throw(ArgumentError(
+                "V2.2-M2 held position metadata is inconsistent or stale",
+            ))
+    else
+        lower <= measurement <= upper || throw(ArgumentError(
+            "V2.2-M2 position bracket does not contain the measurement time",
+        ))
+        upper - lower <= Hour(1) || throw(ArgumentError(
+            "V2.2-M2 position bracket exceeds one hour",
+        ))
+    end
+    if method == "hold"
+        nothing
+    elseif method == "exact"
         lower == measurement == upper && fraction == 0.0 || throw(ArgumentError(
             "V2.2-M2 exact position metadata is inconsistent",
         ))
@@ -521,9 +543,11 @@ function _operational_v22_arrival_normalize_pair(pair)
     wind_quality_binding = _operational_v22_arrival_string(
         pair.wind_quality_binding_status, "wind_quality_binding_status",
     )
-    mag_quality_binding == wind_quality_binding ==
-        "bound_noaa_dscovr_overall_quality" || throw(ArgumentError(
-        "V2.2-M2 receipt pair lacks bound NOAA DSCOVR quality",
+    mag_quality_binding == wind_quality_binding &&
+        (mag_quality_binding == _OPERATIONAL_V22_ARRIVAL_QUALITY_STATUS ||
+         (mag_quality_binding == _OPERATIONAL_V22_ARRIVAL_LEGACY_QUALITY_STATUS &&
+          source == "DSCOVR")) || throw(ArgumentError(
+        "V2.2-M2 receipt pair lacks bound NOAA RTSW quality for its source",
     ))
     mag_quality_decision = _operational_v22_arrival_string(
         pair.mag_quality_decision, "mag_quality_decision",

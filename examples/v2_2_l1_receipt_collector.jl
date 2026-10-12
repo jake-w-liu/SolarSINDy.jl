@@ -13,7 +13,20 @@ using SHA
 
 const V22_L1_RECEIPT_SCHEMA_VERSION = "v2_2_l1_receipt_v4"
 const V22_L1_ISSUE_CUTOFF_SCHEMA_VERSION = "v2_2_l1_issue_cutoff_v1"
-const V22_L1_METADATA_CONTRACT_VERSION = "noaa_rtsw_metadata_v2"
+# Protocol amendment (v3): SWPC stopped ingesting DSCOVR (news 2026-06-30) and
+# SOLAR-1 (`SOLAR1`, formerly SWFO-L1) is the primary real-time source with the
+# same RTSW schema. v3 admits the allow-listed sources and a bounded causal
+# ephemeris hold. v2 records are still recomputed under their own v2 rules.
+const V22_L1_METADATA_CONTRACT_VERSION = "noaa_rtsw_metadata_v3"
+const V22_L1_LEGACY_METADATA_CONTRACT_VERSION = "noaa_rtsw_metadata_v2"
+const V22_L1_METADATA_CONTRACT_VERSIONS = (
+    V22_L1_LEGACY_METADATA_CONTRACT_VERSION, V22_L1_METADATA_CONTRACT_VERSION,
+)
+const V22_L1_ADMISSIBLE_SOURCES = ("DSCOVR", "SOLAR1")
+const V22_L1_LEGACY_ADMISSIBLE_SOURCES = ("DSCOVR",)
+const V22_L1_QUALITY_BINDING_STATUS = "bound_noaa_rtsw_overall_quality"
+const V22_L1_LEGACY_QUALITY_BINDING_STATUS = "bound_noaa_dscovr_overall_quality"
+const V22_L1_EPHEMERIS_MAX_HOLD = Minute(90)
 const V22_L1_NOAA_METADATA_AUTHORITY_URL =
     "https://www.weather.gov/media/notification/pdf_2026/" *
     "scn26-21_Data_Format_Changes_Impacting_SWPC_Products.pdf"
@@ -41,10 +54,17 @@ const V22_L1_SOURCE_FIELD_SEMANTICS =
 const V22_L1_ACTIVE_FIELD_SEMANTICS =
     "active indicates whether SWPC forecasters considered the satellite active at the time"
 const V22_L1_QUALITY_SEMANTICS =
+    "NOAA RTSW overall_quality for active DSCOVR or SOLAR1 rows: " *
+    "0 normal, 1 suspect, 2 error"
+const V22_L1_LEGACY_QUALITY_SEMANTICS =
     "NOAA DSCOVR overall_quality: 0 normal, 1 suspect, 2 error"
 const V22_L1_ARCHIVE_QUALITY_SEMANTICS =
     "NASA CDAWeb DSCOVR quality flags have dataset-specific definitions"
 const V22_L1_EPHEMERIS_INTERPOLATION_RULE =
+    "same-source active GSE exact match or bracketed linear interpolation; " *
+    "maximum one-hour bracket; without a later row, causal hold of the newest " *
+    "earlier row aged at most 90 minutes; no extrapolation"
+const V22_L1_LEGACY_EPHEMERIS_INTERPOLATION_RULE =
     "same-source active GSE exact match or bracketed linear interpolation; " *
     "maximum one-hour bracket; no extrapolation"
 const V22_L1_EPHEMERIS_POSITION_FRAME = "GSE"
@@ -80,13 +100,14 @@ end
 
 function _v22_l1_parse_source_utc(value)
     text = String(value)
-    endswith(text, "Z") || throw(ArgumentError(
-        "V2.2 L1 source timestamp must end in Z",
-    ))
-    parsed = DateTime(text[1:(end - 1)])
-    canonical = _v22_l1_utc(parsed)
-    (text == canonical ||
-     (endswith(canonical, ".000Z") && text == canonical[1:(end - 5)] * "Z")) ||
+    # Live SWPC RTSW JSON `time_tag` values are UTC but carry no zone suffix
+    # (e.g. "2026-10-12T09:24:00"). Only source timestamps accept that form;
+    # the package's own timestamps stay strict through `_v22_l1_parse_utc`.
+    stem = endswith(text, "Z") ? text[1:(end - 1)] : text
+    parsed = DateTime(stem)
+    canonical = _v22_l1_utc(parsed)[1:(end - 1)]
+    (stem == canonical ||
+     (endswith(canonical, ".000") && stem == canonical[1:(end - 4)])) ||
         throw(ArgumentError("V2.2 L1 source timestamp is not canonical"))
     return parsed
 end
@@ -468,8 +489,13 @@ function _v22_l1_measurement_target(parsed)
         ))
     end
     isempty(candidates) && return (status="missing_measurement_time", target=nothing)
-    latest_time = maximum(candidate.timestamp for candidate in candidates)
-    latest = filter(candidate -> candidate.timestamp == latest_time, candidates)
+    # Live RTSW feeds interleave inactive spacecraft rows (ACE, IMAP) with the
+    # NOAA-active stream. Select the target and run the tie check within the
+    # active stream only; with no active row, the newest row is diagnosed.
+    active_candidates = filter(candidate -> candidate.active === true, candidates)
+    stream = isempty(active_candidates) ? candidates : active_candidates
+    latest_time = maximum(candidate.timestamp for candidate in stream)
+    latest = filter(candidate -> candidate.timestamp == latest_time, stream)
     length(latest) == 1 || return (
         status="ambiguous_latest_measurement_time", target=nothing,
     )
@@ -493,8 +519,41 @@ function _v22_l1_bounded_measurement(row, key::Symbol,
     return lower <= value <= upper ? value : nothing
 end
 
+function _v22_l1_check_contract(contract::AbstractString)
+    String(contract) in V22_L1_METADATA_CONTRACT_VERSIONS || error(
+        "V2.2 L1 metadata contract version is unsupported: $contract",
+    )
+    return String(contract)
+end
+
+_v22_l1_is_legacy_contract(contract::AbstractString) =
+    _v22_l1_check_contract(contract) == V22_L1_LEGACY_METADATA_CONTRACT_VERSION
+
+function _v22_l1_admissible_sources(contract::AbstractString)
+    return _v22_l1_is_legacy_contract(contract) ?
+           V22_L1_LEGACY_ADMISSIBLE_SOURCES : V22_L1_ADMISSIBLE_SOURCES
+end
+
+function _v22_l1_quality_binding_status(contract::AbstractString)
+    return _v22_l1_is_legacy_contract(contract) ?
+           V22_L1_LEGACY_QUALITY_BINDING_STATUS : V22_L1_QUALITY_BINDING_STATUS
+end
+
+# Reader-side check: the source-neutral status (any allow-listed source) or the
+# legacy v2 DSCOVR status (DSCOVR rows only).
+function _v22_l1_bound_quality_status(status::AbstractString,
+                                      source::AbstractString)
+    String(source) in V22_L1_ADMISSIBLE_SOURCES || return false
+    String(status) == V22_L1_QUALITY_BINDING_STATUS && return true
+    return String(status) == V22_L1_LEGACY_QUALITY_BINDING_STATUS &&
+           String(source) == "DSCOVR"
+end
+
 function _v22_l1_quality_binding(source_url::AbstractString,
-                                 measurement_target)
+                                 measurement_target;
+                                 contract::AbstractString=
+                                     V22_L1_METADATA_CONTRACT_VERSION)
+    _v22_l1_check_contract(contract)
     default = (
         authority_url=V22_L1_NOAA_QUALITY_AUTHORITY_URL,
         source_product="",
@@ -547,10 +606,15 @@ function _v22_l1_quality_binding(source_url::AbstractString,
         source_product=product,
         required_fields_status=fields_status,
     ))
-    measurement_target.source == "DSCOVR" || return merge(source_binding, (
-        binding_status="unverified_non_dscovr_quality_semantics",
-        decision="reject_unverified_source_quality_semantics",
-    ))
+    # Admission requires an allow-listed source (the target row is already the
+    # newest SWPC-active row). v2 records keep their DSCOVR-only status text.
+    measurement_target.source in _v22_l1_admissible_sources(contract) ||
+        return merge(source_binding, (
+            binding_status=_v22_l1_is_legacy_contract(contract) ?
+                           "unverified_non_dscovr_quality_semantics" :
+                           "unverified_non_admitted_source_quality_semantics",
+            decision="reject_unverified_source_quality_semantics",
+        ))
 
     value = _v22_l1_object_field(measurement_target.row, :overall_quality)
     number = _v22_l1_finite_number(value)
@@ -577,7 +641,7 @@ function _v22_l1_quality_binding(source_url::AbstractString,
     end
     return merge(source_binding, (
         value=quality,
-        binding_status="bound_noaa_dscovr_overall_quality",
+        binding_status=_v22_l1_quality_binding_status(contract),
         decision=decision,
         accepted=quality == 0 && fields_valid,
     ))
@@ -586,7 +650,10 @@ end
 function _v22_l1_ephemeris_position(capture, measurement_target,
                                     measurement_request_started::DateTime,
                                     measurement_receipt_completed::DateTime,
-                                    measurement_monotonic_started_ns::Int)
+                                    measurement_monotonic_started_ns::Int;
+                                    contract::AbstractString=
+                                        V22_L1_METADATA_CONTRACT_VERSION)
+    legacy = _v22_l1_is_legacy_contract(contract)
     capture.capture_outcome == "http_response" || return (
         status="ephemeris_$(capture.capture_outcome)", record=nothing,
         available_before_issue=false,
@@ -641,7 +708,10 @@ function _v22_l1_ephemeris_position(capture, measurement_target,
         available_before_issue=true,
     )
     sort!(rows; by=row -> row.timestamp)
-    length(unique(row.timestamp for row in rows)) == length(rows) || return (
+    # Duplicate same-source times matter only for the rows actually used
+    # (the exact match or the bracketing pair), not the whole history.
+    duplicate_time(time) = count(row -> row.timestamp == time, rows) != 1
+    duplicate = (
         status="duplicate_same_source_ephemeris_time", record=nothing,
         available_before_issue=true,
     )
@@ -649,18 +719,38 @@ function _v22_l1_ephemeris_position(capture, measurement_target,
     target_time = measurement_target.timestamp
     exact = findfirst(row -> row.timestamp == target_time, rows)
     if exact !== nothing
+        duplicate_time(target_time) && return duplicate
         lower = upper = rows[exact]
         fraction = 0.0
         method = "exact"
     else
         lower_index = findlast(row -> row.timestamp < target_time, rows)
         upper_index = findfirst(row -> row.timestamp > target_time, rows)
-        (lower_index !== nothing && upper_index !== nothing) || return (
+        extrapolation = (
             status="ephemeris_extrapolation_required", record=nothing,
             available_before_issue=true,
         )
+        lower_index === nothing && return extrapolation
+        upper_index === nothing && legacy && return extrapolation
+    end
+    if exact === nothing && upper_index === nothing
+        # v3 bounded causal hold: no later same-source row exists, so hold the
+        # newest earlier row when it is at most 90 minutes older than the
+        # measurement; older positions fail closed.
+        held = rows[lower_index]
+        duplicate_time(held.timestamp) && return duplicate
+        target_time - held.timestamp <= V22_L1_EPHEMERIS_MAX_HOLD || return (
+            status="ephemeris_stale", record=nothing,
+            available_before_issue=true,
+        )
+        lower = upper = held
+        fraction = 0.0
+        method = "hold"
+    elseif exact === nothing
         lower = rows[lower_index]
         upper = rows[upper_index]
+        (duplicate_time(lower.timestamp) || duplicate_time(upper.timestamp)) &&
+            return duplicate
         span_ms = Dates.value(upper.timestamp - lower.timestamp)
         0 < span_ms <= Dates.value(Millisecond(Hour(1))) || return (
             status="ephemeris_bracket_exceeds_one_hour", record=nothing,
@@ -686,6 +776,13 @@ function _v22_l1_ephemeris_position(capture, measurement_target,
         y_gse=interpolate(lower.y, upper.y),
         z_gse=interpolate(lower.z, upper.z),
     )
+    if !legacy
+        # v3 records carry the hold age (zero for exact or linear positions).
+        record = merge(record, (
+            hold_age_seconds=method == "hold" ?
+                Dates.value(target_time - lower.timestamp) / 1000.0 : 0.0,
+        ))
+    end
     return (
         status="bound_issue_causal_swpc_ephemeris",
         record=record,
@@ -788,9 +885,13 @@ function _v22_l1_metadata_record(source_tokens, source_rows::Integer,
                                  active_status::AbstractString;
                                  quality_binding=nothing,
                                  ephemeris_capture=nothing,
-                                 ephemeris_binding=nothing)
+                                 ephemeris_binding=nothing,
+                                 contract::AbstractString=
+                                     V22_L1_METADATA_CONTRACT_VERSION)
+    legacy = _v22_l1_is_legacy_contract(contract)
     quality = quality_binding === nothing ?
-              _v22_l1_quality_binding("", nothing) : quality_binding
+              _v22_l1_quality_binding("", nothing; contract=contract) :
+              quality_binding
     capture = ephemeris_capture === nothing ?
               _v22_l1_ephemeris_capture_unavailable("not_requested") :
               ephemeris_capture
@@ -815,7 +916,7 @@ function _v22_l1_metadata_record(source_tokens, source_rows::Integer,
                  quality.accepted &&
                  binding.status == "bound_issue_causal_swpc_ephemeris"
     return (
-        metadata_contract_version=V22_L1_METADATA_CONTRACT_VERSION,
+        metadata_contract_version=String(contract),
         identity_authority_url=V22_L1_NOAA_METADATA_AUTHORITY_URL,
         source_field_semantics=V22_L1_SOURCE_FIELD_SEMANTICS,
         source_tokens=sort!(unique!(String.(collect(source_tokens)))),
@@ -827,7 +928,8 @@ function _v22_l1_metadata_record(source_tokens, source_rows::Integer,
         active_status=String(active_status),
         quality_authority_url=String(quality.authority_url),
         quality_operational_context_url=V22_L1_NOAA_QUALITY_AUTHORITY_URL,
-        quality_semantics=V22_L1_QUALITY_SEMANTICS,
+        quality_semantics=legacy ? V22_L1_LEGACY_QUALITY_SEMANTICS :
+                          V22_L1_QUALITY_SEMANTICS,
         quality_source_product=String(quality.source_product),
         quality_row_timestamp_utc=String(quality.row_timestamp_utc),
         quality_row_source=String(quality.row_source),
@@ -842,7 +944,9 @@ function _v22_l1_metadata_record(source_tokens, source_rows::Integer,
         ephemeris_schema_authority_url=V22_L1_NOAA_EPHEMERIS_SCHEMA_URL,
         ephemeris_archive_contract_url=V22_L1_NOAA_EPHEMERIS_ARCHIVE_CONTRACT_URL,
         ephemeris_independent_authority_url=V22_L1_NASA_EPHEMERIS_AUTHORITY_URL,
-        ephemeris_interpolation_rule=V22_L1_EPHEMERIS_INTERPOLATION_RULE,
+        ephemeris_interpolation_rule=legacy ?
+            V22_L1_LEGACY_EPHEMERIS_INTERPOLATION_RULE :
+            V22_L1_EPHEMERIS_INTERPOLATION_RULE,
         ephemeris_position_frame=V22_L1_EPHEMERIS_POSITION_FRAME,
         ephemeris_position_units=V22_L1_EPHEMERIS_POSITION_UNITS,
         ephemeris_position_timestamp_utc=binding.record === nothing ? "" :
@@ -883,7 +987,10 @@ function _v22_l1_metadata_diagnostics(body::Vector{UInt8},
                                       ephemeris_capture=nothing,
                                       request_started=nothing,
                                       receipt_completed=nothing,
-                                      monotonic_started_ns::Integer=0)
+                                      monotonic_started_ns::Integer=0,
+                                      contract::AbstractString=
+                                          V22_L1_METADATA_CONTRACT_VERSION)
+    _v22_l1_check_contract(contract)
     parsed = try
         JSON3.read(String(copy(body)))
     catch error
@@ -894,6 +1001,7 @@ function _v22_l1_metadata_diagnostics(body::Vector{UInt8},
         String[], 0, "missing_noaa_source_field",
         String[], 0, "missing_noaa_active_field";
         ephemeris_capture=ephemeris_capture,
+        contract=contract,
     )
 
     source_tokens = String[]
@@ -936,7 +1044,7 @@ function _v22_l1_metadata_diagnostics(body::Vector{UInt8},
     end
     target = _v22_l1_measurement_target(parsed)
     quality_binding = _v22_l1_quality_binding(
-        source_url, target.target,
+        source_url, target.target; contract=contract,
     )
     ephemeris_binding = nothing
     if ephemeris_capture !== nothing
@@ -953,7 +1061,8 @@ function _v22_l1_metadata_diagnostics(body::Vector{UInt8},
             _v22_l1_ephemeris_position(
                 ephemeris_capture, target.target,
                 request_started, receipt_completed,
-                Int(monotonic_started_ns),
+                Int(monotonic_started_ns);
+                contract=contract,
             )
         end
     end
@@ -963,6 +1072,7 @@ function _v22_l1_metadata_diagnostics(body::Vector{UInt8},
         quality_binding=quality_binding,
         ephemeris_capture=ephemeris_capture,
         ephemeris_binding=ephemeris_binding,
+        contract=contract,
     )
     _v22_l1_authoritative_rtsw_url(source_url) && return metadata
     return _v22_l1_metadata_record(
@@ -970,13 +1080,18 @@ function _v22_l1_metadata_diagnostics(body::Vector{UInt8},
         "untrusted_non_noaa_rtsw_endpoint",
         metadata.active_source_tokens, metadata.active_boolean_rows,
         "untrusted_non_noaa_rtsw_endpoint";
-        quality_binding=_v22_l1_quality_binding("", target.target),
+        quality_binding=_v22_l1_quality_binding(
+            "", target.target; contract=contract,
+        ),
         ephemeris_capture=ephemeris_capture,
         ephemeris_binding=ephemeris_binding,
+        contract=contract,
     )
 end
 
-function _v22_l1_no_response_metadata(ephemeris_capture=nothing)
+function _v22_l1_no_response_metadata(ephemeris_capture=nothing;
+                                      contract::AbstractString=
+                                          V22_L1_METADATA_CONTRACT_VERSION)
     ephemeris_binding = ephemeris_capture === nothing ? nothing : (
         status="unavailable_no_measurement_response",
         record=nothing,
@@ -987,6 +1102,7 @@ function _v22_l1_no_response_metadata(ephemeris_capture=nothing)
         String[], 0, "unavailable_no_http_response";
         ephemeris_capture=ephemeris_capture,
         ephemeris_binding=ephemeris_binding,
+        contract=contract,
     )
 end
 
@@ -1537,6 +1653,7 @@ function _v22_l1_ephemeris_capture_from_metadata(root::AbstractString,
     isfile(path) && !islink(path) || error(
         "V2.2 L1 ephemeris source object is missing or not regular",
     )
+    _v22_l1_count_read!(:ephemeris_raw)
     body = read(path)
     _v22_l1_sha256(body) == checksum || error(
         "V2.2 L1 ephemeris source-object checksum mismatch",
@@ -1564,6 +1681,17 @@ function _v22_l1_ephemeris_capture_from_metadata(root::AbstractString,
     )
 end
 
+# Archived metadata is recomputed under the contract version it declares, so
+# pre-amendment v2 records keep verifying with their DSCOVR-only rules.
+function _v22_l1_record_contract(record)
+    value = _v22_l1_object_field(record.metadata_provenance,
+                                 :metadata_contract_version)
+    value isa AbstractString || error(
+        "V2.2 L1 metadata contract version is missing",
+    )
+    return _v22_l1_check_contract(value)
+end
+
 function _v22_l1_verify_response_evidence(root::AbstractString, record,
                                           raw_paths::Set{String})
     isempty(String(record.transport_error_type)) &&
@@ -1587,6 +1715,7 @@ function _v22_l1_verify_response_evidence(root::AbstractString, record,
     isfile(raw_path) && !islink(raw_path) || error(
         "V2.2 L1 raw response is missing or not regular",
     )
+    _v22_l1_count_read!(:raw)
     bytes = read(raw_path)
     _v22_l1_sha256(bytes) == body_sha256 || error(
         "V2.2 L1 raw response checksum mismatch",
@@ -1612,6 +1741,7 @@ function _v22_l1_verify_response_evidence(root::AbstractString, record,
             request_started=_v22_l1_parse_utc(record.request_started_utc),
             receipt_completed=_v22_l1_parse_utc(record.receipt_completed_utc),
             monotonic_started_ns=Int(record.monotonic_started_ns),
+            contract=_v22_l1_record_contract(record),
         ) || error(
             "V2.2 L1 raw-response metadata provenance changed",
         )
@@ -1642,45 +1772,116 @@ function _v22_l1_verify_transport_error(root::AbstractString, record,
         root, record.metadata_provenance, raw_paths,
     )
     _v22_l1_metadata_payload(record.metadata_provenance) ==
-        _v22_l1_no_response_metadata(ephemeris_capture) || error(
+        _v22_l1_no_response_metadata(
+            ephemeris_capture; contract=_v22_l1_record_contract(record),
+        ) || error(
             "V2.2 L1 transport-error metadata provenance is inconsistent",
         )
     return nothing
 end
 
-function _v22_l1_verify_source(root::AbstractString, source;
-                               require_nonempty::Bool,
-                               head_only::Bool=false,
-                               fixed_head=nothing,
-                               require_complete_tree::Bool=true)
-    current = fixed_head === nothing ?
-        _v22_l1_read_latest(root, source.name) : fixed_head
-    if current.sequence == 0
-        require_nonempty && error(
-            "V2.2 L1 source has no receipt records: $(source.name)",
-        )
-        if require_complete_tree
-            isempty(_v22_l1_source_record_files(root, source.name)) || error(
-                "V2.2 L1 source has orphan records without a latest pointer",
-            )
-        end
-        return (
-            source_name=String(source.name), records=0,
-            latest_record_sha256=V22_L1_RECEIPT_ZERO_SHA256,
-            latest_receipt_completed_utc=nothing,
-            record_relative_paths=Set{String}(),
-            raw_relative_paths=Set{String}(),
-        )
-    end
+# Instrumentation for the per-issue cost tests (G11-06/G11-08): counts archive
+# file reads by kind (:record, :raw, :ephemeris_raw, :cutoff). Counting only.
+const _V22_L1_READ_COUNTS = Dict{Symbol,Int}()
+_v22_l1_count_read!(kind::Symbol) =
+    (_V22_L1_READ_COUNTS[kind] = get(_V22_L1_READ_COUNTS, kind, 0) + 1; nothing)
+_v22_l1_reset_read_counts!() = (empty!(_V22_L1_READ_COUNTS); nothing)
+_v22_l1_read_count(kind::Symbol) = get(_V22_L1_READ_COUNTS, kind, 0)
 
-    latest = current
-    records = 0
+# In-process memo of fully verified source-chain prefixes (G11-06/G11-08).
+# Keyed by (storage realpath, source name, source URL). A memo is used only when
+# its head record still hashes to the memoized checksum and its last FULL
+# verification is younger than V22_L1_VERIFY_MEMO_MAX_AGE_SEC[] (default 24 h);
+# otherwise the whole chain is verified again. Incremental verifications keep the
+# original full-verification time, so a full re-check happens at least once per
+# maximum age. Public verifiers default to full verification without the memo.
+const V22_L1_VERIFY_MEMO_MAX_AGE_SEC = Ref(24.0 * 3600.0)
+const _V22_L1_VERIFY_MEMO = Dict{Tuple{String,String,String},Any}()
+const _V22_L1_VERIFY_MEMO_LOCK = ReentrantLock()
+
+_v22_l1_memo_key(root::AbstractString, source) =
+    (String(root), String(source.name), String(source.url))
+
+function _v22_l1_clear_verify_memo!()
+    lock(() -> empty!(_V22_L1_VERIFY_MEMO), _V22_L1_VERIFY_MEMO_LOCK)
+    return nothing
+end
+
+function _v22_l1_memo_lookup(root::AbstractString, source)
+    key = _v22_l1_memo_key(root, source)
+    entry = lock(() -> get(_V22_L1_VERIFY_MEMO, key, nothing),
+                 _V22_L1_VERIFY_MEMO_LOCK)
+    entry === nothing && return nothing
+    age_sec = (time_ns() - entry.verified_ns) / 1.0e9
+    if !(0.0 <= age_sec <= Float64(V22_L1_VERIFY_MEMO_MAX_AGE_SEC[]))
+        lock(() -> delete!(_V22_L1_VERIFY_MEMO, key), _V22_L1_VERIFY_MEMO_LOCK)
+        return nothing
+    end
+    return entry
+end
+
+function _v22_l1_memo_store!(root::AbstractString, source, entry)
+    key = _v22_l1_memo_key(root, source)
+    lock(() -> (_V22_L1_VERIFY_MEMO[key] = entry), _V22_L1_VERIFY_MEMO_LOCK)
+    return nothing
+end
+
+function _v22_l1_memo_forget!(root::AbstractString, source)
+    key = _v22_l1_memo_key(root, source)
+    lock(() -> delete!(_V22_L1_VERIFY_MEMO, key), _V22_L1_VERIFY_MEMO_LOCK)
+    return nothing
+end
+
+# Re-read and rehash one memoized record: the memo is trusted only while the
+# record file at its sequence path still carries the memoized checksum.
+function _v22_l1_memo_head_intact(root::AbstractString, source, entry,
+                                  sequence::Int)
+    1 <= sequence <= entry.records || return false
+    relative = entry.paths[sequence]
+    relative == _v22_l1_record_relative(source.name, sequence) || return false
+    path = _v22_l1_resolve_relative(root, relative, "memoized record path")
+    isfile(path) && !islink(path) || return false
+    record = try
+        _v22_l1_count_read!(:record)
+        JSON3.read(read(path, String))
+    catch error
+        error isa InterruptException && rethrow()
+        return false
+    end
+    return try
+        _v22_l1_record_sha256(record) == String(record.record_sha256) ==
+            entry.shas[sequence] && Int(record.sequence) == sequence
+    catch error
+        error isa InterruptException && rethrow()
+        false
+    end
+end
+
+function _v22_l1_source_result(source, entry, sequence::Int)
+    return (
+        source_name=String(source.name),
+        records=sequence,
+        latest_record_sha256=entry.shas[sequence],
+        latest_receipt_completed_utc=entry.receipts[sequence],
+        record_relative_paths=Set{String}(entry.paths[1:sequence]),
+        raw_relative_paths=reduce(union!, entry.raws[1:sequence];
+                                  init=Set{String}()),
+    )
+end
+
+# Backward hash-chain walk from `current` that fully verifies every record with
+# sequence > stop_sequence. Returns per-record evidence in descending sequence.
+function _v22_l1_walk_source(root::AbstractString, source, current;
+                             head_only::Bool, stop_sequence::Int)
     seen = Set{String}()
-    raw_paths = Set{String}()
+    shas = String[]
+    receipts = DateTime[]
+    paths = String[]
+    raws = Set{String}[]
     expected_sequence = current.sequence
     newer_receipt = nothing
-    latest_receipt = nothing
-    while !isempty(current.record_relative_path)
+    while !isempty(current.record_relative_path) &&
+          (stop_sequence == 0 || expected_sequence > stop_sequence)
         relative = normpath(current.record_relative_path)
         relative in seen && error("V2.2 L1 receipt chain contains a cycle")
         push!(seen, relative)
@@ -1688,6 +1889,7 @@ function _v22_l1_verify_source(root::AbstractString, source;
         isfile(path) && !islink(path) || error(
             "V2.2 L1 receipt record is missing or not regular: $path",
         )
+        _v22_l1_count_read!(:record)
         record = JSON3.read(read(path, String))
         String(record.schema_version) == V22_L1_RECEIPT_SCHEMA_VERSION || error(
             "V2.2 L1 receipt record has the wrong schema",
@@ -1708,11 +1910,12 @@ function _v22_l1_verify_source(root::AbstractString, source;
         relative == _v22_l1_record_relative(source.name, expected_sequence) ||
             error("V2.2 L1 record path is not sequence addressed")
 
+        record_raws = Set{String}()
         outcome = String(record.capture_outcome)
         if outcome == "http_response"
-            _v22_l1_verify_response_evidence(root, record, raw_paths)
+            _v22_l1_verify_response_evidence(root, record, record_raws)
         elseif outcome == "transport_error"
-            _v22_l1_verify_transport_error(root, record, raw_paths)
+            _v22_l1_verify_transport_error(root, record, record_raws)
         else
             error("V2.2 L1 receipt record has an unknown capture outcome")
         end
@@ -1726,14 +1929,11 @@ function _v22_l1_verify_source(root::AbstractString, source;
             newer_receipt >= receipt_completed || error(
                 "V2.2 L1 receipt UTC regresses across sequence order",
             )
-        else
-            latest_receipt = receipt_completed
         end
         newer_receipt = receipt_completed
         Int(record.monotonic_completed_ns) >= Int(record.monotonic_started_ns) ||
             error("V2.2 L1 monotonic completion precedes request start")
 
-        records += 1
         previous_path = String(record.previous_record_relative_path)
         previous_sha = String(record.previous_record_sha256)
         if isempty(previous_path)
@@ -1745,16 +1945,11 @@ function _v22_l1_verify_source(root::AbstractString, source;
                 "V2.2 L1 predecessor checksum is malformed",
             )
         end
-        if head_only
-            return (
-                source_name=String(source.name),
-                records=latest.sequence,
-                latest_record_sha256=latest.record_sha256,
-                latest_receipt_completed_utc=latest_receipt,
-                record_relative_paths=seen,
-                raw_relative_paths=raw_paths,
-            )
-        end
+        push!(shas, checksum)
+        push!(receipts, receipt_completed)
+        push!(paths, relative)
+        push!(raws, record_raws)
+        head_only && break
         current = (
             sequence=expected_sequence - 1,
             record_relative_path=previous_path,
@@ -1762,20 +1957,125 @@ function _v22_l1_verify_source(root::AbstractString, source;
         )
         expected_sequence -= 1
     end
-    expected_sequence == 0 || error("V2.2 L1 receipt chain ended early")
+    return (
+        current=current, expected_sequence=expected_sequence, seen=seen,
+        shas=shas, receipts=receipts, paths=paths, raws=raws,
+    )
+end
+
+function _v22_l1_verify_source(root::AbstractString, source;
+                               require_nonempty::Bool,
+                               head_only::Bool=false,
+                               fixed_head=nothing,
+                               require_complete_tree::Bool=true,
+                               memo::Bool=false)
+    current = fixed_head === nothing ?
+        _v22_l1_read_latest(root, source.name) : fixed_head
+    if current.sequence == 0
+        require_nonempty && error(
+            "V2.2 L1 source has no receipt records: $(source.name)",
+        )
+        if require_complete_tree
+            isempty(_v22_l1_source_record_files(root, source.name)) || error(
+                "V2.2 L1 source has orphan records without a latest pointer",
+            )
+        end
+        return (
+            source_name=String(source.name), records=0,
+            latest_record_sha256=V22_L1_RECEIPT_ZERO_SHA256,
+            latest_receipt_completed_utc=nothing,
+            record_relative_paths=Set{String}(),
+            raw_relative_paths=Set{String}(),
+        )
+    end
+    latest = current
+
+    if head_only
+        walk = _v22_l1_walk_source(
+            root, source, current; head_only=true, stop_sequence=0,
+        )
+        isempty(walk.shas) && error("V2.2 L1 receipt chain ended early")
+        return (
+            source_name=String(source.name),
+            records=latest.sequence,
+            latest_record_sha256=latest.record_sha256,
+            latest_receipt_completed_utc=only(walk.receipts),
+            record_relative_paths=walk.seen,
+            raw_relative_paths=only(walk.raws),
+        )
+    end
+
+    entry = memo ? _v22_l1_memo_lookup(root, source) : nothing
+    if entry !== nothing && current.sequence <= entry.records
+        # Requested head lies inside the memoized prefix: trust it only if the
+        # head identity matches and its record file still hashes correctly.
+        sequence = Int(current.sequence)
+        if normpath(current.record_relative_path) == entry.paths[sequence] &&
+           current.record_sha256 == entry.shas[sequence] &&
+           _v22_l1_memo_head_intact(root, source, entry, sequence)
+            result = _v22_l1_source_result(source, entry, sequence)
+            if require_complete_tree
+                _v22_l1_source_record_files(root, source.name) ==
+                    result.record_relative_paths || error(
+                    "V2.2 L1 source contains orphan or unchained record files",
+                )
+            end
+            return result
+        end
+        _v22_l1_memo_forget!(root, source)
+        entry = nothing
+    end
+
+    stop_sequence = entry === nothing ? 0 : Int(entry.records)
+    walk = _v22_l1_walk_source(
+        root, source, current; head_only=false, stop_sequence=stop_sequence,
+    )
+    if entry !== nothing
+        # Suffix verified; require chain continuity into the memoized head.
+        boundary = walk.current
+        continuous = walk.expected_sequence == stop_sequence &&
+            !isempty(boundary.record_relative_path) &&
+            normpath(boundary.record_relative_path) == entry.paths[stop_sequence] &&
+            boundary.record_sha256 == entry.shas[stop_sequence] &&
+            last(walk.receipts) >= entry.receipts[stop_sequence] &&
+            _v22_l1_memo_head_intact(root, source, entry, stop_sequence)
+        if !continuous
+            _v22_l1_memo_forget!(root, source)
+            return _v22_l1_verify_source(
+                root, source; require_nonempty=require_nonempty,
+                fixed_head=fixed_head,
+                require_complete_tree=require_complete_tree, memo=memo,
+            )
+        end
+        shas = vcat(entry.shas, reverse(walk.shas))
+        receipts = vcat(entry.receipts, reverse(walk.receipts))
+        paths = vcat(entry.paths, reverse(walk.paths))
+        raws = vcat(entry.raws, reverse(walk.raws))
+        verified_ns = entry.verified_ns
+    else
+        walk.expected_sequence == 0 || error("V2.2 L1 receipt chain ended early")
+        shas = reverse(walk.shas)
+        receipts = reverse(walk.receipts)
+        paths = reverse(walk.paths)
+        raws = reverse(walk.raws)
+        verified_ns = time_ns()
+    end
+    merged = (
+        records=length(shas), shas=shas, receipts=receipts, paths=paths,
+        raws=raws, verified_ns=verified_ns,
+    )
+    merged.records == latest.sequence || error(
+        "V2.2 L1 receipt chain ended early",
+    )
+    result = _v22_l1_source_result(source, merged, merged.records)
     if require_complete_tree
-        _v22_l1_source_record_files(root, source.name) == seen || error(
+        _v22_l1_source_record_files(root, source.name) ==
+            result.record_relative_paths || error(
             "V2.2 L1 source contains orphan or unchained record files",
         )
     end
-    return (
-        source_name=String(source.name),
-        records=records,
-        latest_record_sha256=latest.record_sha256,
-        latest_receipt_completed_utc=latest_receipt,
-        record_relative_paths=seen,
-        raw_relative_paths=raw_paths,
-    )
+    memo && _v22_l1_memo_store!(root, source, merged)
+    return result
 end
 
 function _v22_l1_shallow_entries(root::AbstractString,
@@ -1821,7 +2121,8 @@ function _v22_l1_tree_files(root::AbstractString,
 end
 
 function verify_v2_2_l1_receipts(root::AbstractString;
-                                 sources=V22_L1_RECEIPT_SOURCES)
+                                 sources=V22_L1_RECEIPT_SOURCES,
+                                 memo::Bool=false)
     isempty(sources) && throw(ArgumentError(
         "V2.2 L1 verification sources must not be empty",
     ))
@@ -1847,7 +2148,9 @@ function verify_v2_2_l1_receipts(root::AbstractString;
     result = NamedTuple[]
     expected_raw = Set{String}()
     for source in validated_sources
-        verified = _v22_l1_verify_source(storage, source; require_nonempty=true)
+        verified = _v22_l1_verify_source(
+            storage, source; require_nonempty=true, memo=memo,
+        )
         union!(expected_raw, verified.raw_relative_paths)
         push!(result, (
             source_name=verified.source_name,
@@ -1927,7 +2230,8 @@ function _v22_l1_verify_issue_cutoff(
         storage::AbstractString,
         issue_time_utc::DateTime,
         cutoff_relative_path::AbstractString,
-        sources)
+        sources;
+        memo::Bool=false)
     expected_relative = _v22_l1_issue_cutoff_relative(issue_time_utc)
     relative = normpath(String(cutoff_relative_path))
     relative == expected_relative || throw(ArgumentError(
@@ -1993,6 +2297,7 @@ function _v22_l1_verify_issue_cutoff(
                 record_sha256=record_sha,
             ),
             require_complete_tree=false,
+            memo=memo,
         )
         verified.records == sequence &&
             verified.latest_record_sha256 == record_sha &&
@@ -2033,7 +2338,8 @@ function _v22_l1_capture_issue_cutoff_unlocked(
         storage::AbstractString,
         issue_time_utc::DateTime,
         sources)
-    verified = verify_v2_2_l1_receipts(storage; sources=sources)
+    # Issue-time cutoffs reuse the in-process verified-prefix memo (G11-06).
+    verified = verify_v2_2_l1_receipts(storage; sources=sources, memo=true)
     rows = NamedTuple[]
     for (source, result) in zip(sources, verified)
         latest_receipt = _v22_l1_parse_utc(
@@ -2067,7 +2373,7 @@ function _v22_l1_capture_issue_cutoff_unlocked(
     path = _v22_l1_resolve_relative(storage, relative, "issue cutoff path")
     if ispath(path)
         existing = _v22_l1_verify_issue_cutoff(
-            storage, issue_time_utc, relative, sources,
+            storage, issue_time_utc, relative, sources; memo=true,
         )
         existing.cutoff_sha256 == record.cutoff_sha256 || throw(ArgumentError(
             "V2.2 L1 immutable issue cutoff already exists with different heads",
@@ -2076,7 +2382,7 @@ function _v22_l1_capture_issue_cutoff_unlocked(
     end
     _v22_l1_atomic_text(storage, relative, JSON3.write(record))
     return _v22_l1_verify_issue_cutoff(
-        storage, issue_time_utc, relative, sources,
+        storage, issue_time_utc, relative, sources; memo=true,
     )
 end
 

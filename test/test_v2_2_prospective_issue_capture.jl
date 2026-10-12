@@ -655,6 +655,61 @@ end
         end
     end
 
+    @testset "issue-time L1 work is independent of archive length (G11-08)" begin
+        # Two cohorts share the same recent L1 receipts; the long one also has
+        # older receipts outside the 2 h pair lookback of the 04:00 issue. After
+        # the first issue (full verification), the second issue's raw-object and
+        # record reads, including the capture's independent re-selection in
+        # _verify_issue_record, are identical in both cohorts.
+        function run_cohort(old_records)
+            mktempdir() do root
+                for k in 1:old_records
+                    receipt = DateTime(2026, 8, 12, 0, 5) + Minute(5 * k)
+                    _pic_capture_l1!(
+                        root, receipt,
+                        PICL1._v22_l1_utc(floor(receipt, Minute)),
+                    )
+                end
+                _pic_capture_l1!(
+                    root, DateTime(2026, 8, 12, 3, 29), "2026-08-12T03:28:00Z",
+                )
+                PICL1._v22_l1_reset_read_counts!()
+                first = _pic_issue!(root, DateTime(2026, 8, 12, 3, 30))
+                first_raw = PICL1._v22_l1_read_count(:raw) +
+                            PICL1._v22_l1_read_count(:ephemeris_raw)
+                _pic_capture_l1!(
+                    root, DateTime(2026, 8, 12, 3, 59), "2026-08-12T03:58:00Z",
+                )
+                PICL1._v22_l1_reset_read_counts!()
+                second = _pic_issue!(
+                    root, DateTime(2026, 8, 12, 4);
+                    prepared=DateTime(2026, 8, 12, 4, 0, 30), monotonic=20_000,
+                )
+                return (
+                    first=first, second=second, first_raw=first_raw,
+                    raw=PICL1._v22_l1_read_count(:raw) +
+                        PICL1._v22_l1_read_count(:ephemeris_raw),
+                    record=PICL1._v22_l1_read_count(:record),
+                )
+            end
+        end
+        short = run_cohort(1)
+        long = run_cohort(12)
+        for cohort in (short, long)
+            # 03:28 binds the 02:00 ephemeris row by an 88-minute hold.
+            @test cohort.first.l1_pair_status == "available_verified_cutoff_pair"
+            @test cohort.first.l1_pair_measurement_time_utc ==
+                  "2026-08-12T03:28:00.000Z"
+            @test cohort.second.l1_pair_status == "available_verified_cutoff_pair"
+        end
+        # The first issue verifies every archived record ...
+        @test long.first_raw > short.first_raw
+        # ... later issues do not depend on how long the archive is.
+        @test long.raw == short.raw
+        @test long.record == short.record
+        @test long.raw > 0
+    end
+
     @testset "an issue binds explicit L1-pair unavailability" begin
         mktempdir() do root
             _pic_capture_l1!(

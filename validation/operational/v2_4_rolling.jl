@@ -36,7 +36,8 @@
 #       validation/operational/v2_4_rolling.jl --smoke
 #   JULIA_NUM_THREADS=8 julia --startup-file=no --project=. \
 #       validation/operational/v2_4_rolling.jl
-#   … --years=2015,2016      score a subset of folds into the study tree
+#   … --years=2015,2016      score a subset of folds into the study tree; every
+#                            earlier fold must already be current on disk
 #   … --reuse-stale-folds=<reason>   consume persisted folds whose signature no
 #                                    longer matches, recording the reason
 
@@ -885,17 +886,21 @@ end
 # ---------------------------------------------------------------------------
 
 """
-    v24_fold_signature(ctx, plan, fold) -> String
+    v24_fold_signature(ctx, plan, fold, prior_years) -> String
 
 Resume key of one fold: the fold itself, the scale of the run, the base table,
 the hourly frame, the V2.3 sources, this runner and the contract. A persisted
 fold is consumed only when this string still matches, so a changed input or a
 changed stage invalidates it instead of mixing two generations of centers inside
-one study.
+one study. `prior_years` are the out-of-fold years the store held when the fold
+was fitted: a fold computed on a different history (a `--years` subset run that
+fitted it as a seed fold) must never be reused as the study's own.
 """
-function v24_fold_signature(ctx::V23Context, plan::V24Plan, fold::V24Fold)
+function v24_fold_signature(ctx::V23Context, plan::V24Plan, fold::V24Fold,
+                            prior_years::AbstractVector{<:Integer})
     payload = Dict{String,Any}(
         "year" => fold.year,
+        "prior_years" => sort(collect(Int, prior_years)),
         "cutoff" => string(fold.cutoff),
         "train_anchors" => length(fold.train),
         "query_anchors" => length(fold.query),
@@ -918,17 +923,63 @@ function v24_fold_signature(ctx::V23Context, plan::V24Plan, fold::V24Fold)
 end
 
 """
-    v24_fold_is_current(ctx, plan, fold) -> Bool
+    v24_fold_is_current(ctx, plan, fold, prior_years) -> Bool
 
-Whether the persisted fold artifacts can be consumed as this run's own output.
+Whether the persisted fold artifacts can be consumed as this run's own output,
+given the out-of-fold years `prior_years` this run holds before the fold.
 """
-function v24_fold_is_current(ctx::V23Context, plan::V24Plan, fold::V24Fold)
+function v24_fold_is_current(ctx::V23Context, plan::V24Plan, fold::V24Fold,
+                             prior_years::AbstractVector{<:Integer})
     signature_path = v24_signature_year_path(plan.outdir, fold.year)
     for path in (signature_path, v24_oof_year_path(plan.outdir, fold.year),
                  v24_manifest_year_path(plan.outdir, fold.year))
         isfile(path) || return false
     end
-    return strip(read(signature_path, String)) == v24_fold_signature(ctx, plan, fold)
+    return strip(read(signature_path, String)) ==
+           v24_fold_signature(ctx, plan, fold, prior_years)
+end
+
+"""
+    v24_run_folds(ctx, plan) -> Vector{V24Fold}
+
+Folds a run walks, in year order. A study fold fits its correction layers on the
+out-of-fold history of every earlier fold, so a study plan also walks each
+preregistered fold year earlier than its latest requested year; such a history
+fold is loaded from disk, never recomputed (see `v24_fold_action`). The smoke
+plan is a seed fold by design and walks only its own year.
+"""
+function v24_run_folds(ctx::V23Context, plan::V24Plan)
+    plan.smoke && return v24_folds(ctx, plan)
+    history = [y for y in V24_FOLD_YEARS if y < maximum(plan.years) && !(y in plan.years)]
+    isempty(history) && return v24_folds(ctx, plan)
+    walked = V24Plan(plan.label, plan.outdir, plan.smoke, sort(vcat(plan.years, history)),
+                     plan.max_anchors, plan.direct_grid, plan.direct_max_train,
+                     plan.seed_max_anchors, plan.e_layers)
+    return v24_folds(ctx, walked)
+end
+
+"""
+    v24_fold_action(ctx, plan, fold, prior_years; reuse_stale_reason) -> Symbol
+
+`:reused`, `:reused_stale` or `:compute`. A history fold the plan did not request
+must be loadable from disk; computing it here would silently widen the run, and
+skipping it would fit the requested folds on a truncated history, so it is an
+error instead.
+"""
+function v24_fold_action(ctx::V23Context, plan::V24Plan, fold::V24Fold,
+                         prior_years::AbstractVector{<:Integer};
+                         reuse_stale_reason::Union{Nothing,String}=nothing)
+    current = v24_fold_is_current(ctx, plan, fold, prior_years)
+    current && return :reused
+    isfile(v24_oof_year_path(plan.outdir, fold.year)) && reuse_stale_reason !== nothing &&
+        return :reused_stale
+    fold.year in plan.years || error(
+        "fold $(fold.year) is not among the requested years $(join(sort(plan.years), ",")) " *
+        "but a later requested fold fits on its out-of-fold history, and no current fold " *
+        "$(fold.year) is on disk under $(plan.outdir); include $(fold.year) in --years or " *
+        "run the full plan",
+    )
+    return :compute
 end
 
 """
@@ -1183,7 +1234,7 @@ function v24_run_fold!(ctx::V23Context, plan::V24Plan, fold::V24Fold, store::V24
     v23_manifest!(manifest, "seconds", "fold_total", time() - total_started, "")
     v24_write_fold_manifest(plan, ctx, fold, manifest)
     write(v24_signature_year_path(plan.outdir, fold.year),
-          v24_fold_signature(ctx, plan, fold))
+          v24_fold_signature(ctx, plan, fold, store.years))
     v24_store_add!(store, fold.year, rows, [!usable[i] for i in eachindex(usable)],
                    centers["t1_analog_raw"], t1r, lat_centers)
     _v23_log(@sprintf("  + fold %d written: %d rows in %.1f s → %s", fold.year,
@@ -1274,7 +1325,7 @@ function v24_run(plan::V24Plan; reuse_stale_reason::Union{Nothing,String}=nothin
         time() - started,
     ))
 
-    folds = v24_folds(ctx, plan)
+    folds = v24_run_folds(ctx, plan)
     store = V24Store(length(ctx.anchors))
     summary = NamedTuple[]
     run_manifest = V23Manifest()
@@ -1292,9 +1343,10 @@ function v24_run(plan::V24Plan; reuse_stale_reason::Union{Nothing,String}=nothin
 
     for fold in folds
         fold_started = time()
-        current = v24_fold_is_current(ctx, plan, fold)
-        stale = !current && isfile(v24_oof_year_path(plan.outdir, fold.year)) &&
-                reuse_stale_reason !== nothing
+        action = v24_fold_action(ctx, plan, fold, store.years;
+                                 reuse_stale_reason=reuse_stale_reason)
+        current = action === :reused
+        stale = action === :reused_stale
         if current || stale
             loaded = v24_load_fold!(store, ctx, plan, fold)
             state = current ? "reused" : "reused_stale"

@@ -435,6 +435,31 @@ function _latest_covered_common_time(plasma_times::AbstractVector{<:DateTime},
     return newest::DateTime
 end
 
+# Raw L1 measurement time of the sample(s) whose propagated arrival time equals
+# `t_arrival`. `_latest_covered_common_time` returns the minimum of a plasma and a
+# magnetic-field arrival time of finite samples, so at least one sample matches
+# exactly; arrival and raw vectors share row order (`_l1_earth_arrival_times`).
+function _measured_time_of_arrival(t_arrival::DateTime,
+                                   plasma_arrival::AbstractVector{<:DateTime},
+                                   plasma_speed::AbstractVector{<:Real},
+                                   plasma_raw::AbstractVector{<:DateTime},
+                                   mag_arrival::AbstractVector{<:DateTime},
+                                   mag_bz::AbstractVector{<:Real},
+                                   mag_raw::AbstractVector{<:DateTime})
+    measured = nothing
+    for (arrival, value, raw) in ((plasma_arrival, plasma_speed, plasma_raw),
+                                  (mag_arrival, mag_bz, mag_raw))
+        for i in eachindex(arrival, value, raw)
+            arrival[i] == t_arrival && isfinite(value[i]) || continue
+            measured = measured === nothing ? raw[i] : max(measured, raw[i])
+        end
+    end
+    measured === nothing && throw(ArgumentError(
+        "freshness stamp does not correspond to any finite propagated sample",
+    ))
+    return measured::DateTime
+end
+
 """
     fetch_realtime_solar_wind(; hours=168, min_hourly_samples=MIN_HOURLY_DRIVER_SAMPLES)
 
@@ -454,6 +479,11 @@ driver bins share the time base of the OMNI2 hourly data the model was fit on an
 of the Earth-UT Kyoto Dst anchor. The operational monitor uses this; it defaults
 to `false` so callers that inject their own coarse time base (fixtures) keep raw
 L1-time binning.
+
+Returns `(swd, t_hr, t_fresh, t_measured)`: `t_fresh` is the newest covered common
+sample time on the binning time base (Earth-arrival when propagated), and
+`t_measured` is the same stamp on the raw L1 measurement time base, which is what
+data-age/staleness must be measured from.
 """
 function fetch_realtime_solar_wind(; hours::Int=168,
                                     plasma::Union{Nothing,DataFrame}=nothing,
@@ -539,6 +569,18 @@ function fetch_realtime_solar_wind(; hours::Int=168,
         plasma_times, plasma_data.speed, mag_times, mag_data.bz_gsm,
         t_start, t_end, min_hourly_samples,
     )
+    # Data-age/staleness must be measured in MEASUREMENT time. With propagation,
+    # t_fresh is an Earth-arrival time (measurement + L1 transit, ~1 h), i.e. in
+    # the future relative to the newest sample. Report the raw L1 measurement time
+    # of the very sample that defines t_fresh. Mapping the already coverage-gated
+    # stamp back (instead of re-gating on raw L1 hours) cannot fail when the
+    # Earth-binned coverage passed: propagation can merge two sparse raw hours into
+    # one covered arrival hour.
+    t_measured = propagate_l1_to_earth ?
+        _measured_time_of_arrival(t_fresh,
+                                  plasma_times, plasma_data.speed, plasma_data.time_tag,
+                                  mag_times, mag_data.bz_gsm, mag_data.time_tag) :
+        t_fresh
 
     for i in 1:n_bins
         t0 = t_edges[i]
@@ -582,8 +624,10 @@ function fetch_realtime_solar_wind(; hours::Int=168,
     # Third return is the newest actual common sample time in an hour meeting the
     # configured coverage floor. A lone recent brownout sample cannot make an old
     # usable driver bin look fresh. The floored t_hr remains the Dst-anchor key.
+    # Fourth return is the same freshness stamp in raw measurement time (equal to
+    # t_fresh unless propagate_l1_to_earth=true); use it for data-age/staleness.
     return SolarWindData(t_hours, V_hr, Bz_hr, By_hr, n_hr, Pdyn_hr,
-                         Dst_hr, Dst_star_hr), t_hr, t_fresh
+                         Dst_hr, Dst_star_hr), t_hr, t_fresh, t_measured
 end
 
 # ---------------------------------------------------------------------------

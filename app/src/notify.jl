@@ -31,6 +31,10 @@ _status_stale(status) = hasproperty(status, :stale) && getproperty(status, :stal
 # marker survives a restart. It is what separates "the feed died" from "no data yet": once a
 # deployment has produced a cycle, a payload with no cycle at all is an outage, not a cold start.
 const _SEEN_DATA = Ref{Bool}(false)
+# Whether the state file on disk already records `seen_data = true`. The marker can flip without a
+# delivered transition (a cold-start baseline followed by quiet data), so `maybe_notify!` persists it
+# on that flip as well; this flag keeps that write to once per process.
+const _SEEN_DATA_PERSISTED = Ref{Bool}(false)
 
 # The primary Dst forecast layer is "blind" whenever an unavailable status is reported after this
 # deployment has already served data. A cycle that exists but is not fresh (stale, expired, or
@@ -107,6 +111,7 @@ function reset_notify!()
     _LAST_ALERT_STALE[] = false
     _ALERT_STATE_LOADED[] = false
     _SEEN_DATA[] = false
+    _SEEN_DATA_PERSISTED[] = false
     return nothing
 end
 
@@ -139,7 +144,7 @@ function _load_alert_state!(state_path::AbstractString)
         # already-running deployment from re-entering the cold-start exemption across an upgrade,
         # while a fresh install (no state file) still baselines silently.
         seen = get(d, :seen_data, nothing)
-        (seen === nothing || seen == true) && (_SEEN_DATA[] = true)
+        (seen === nothing || seen == true) && (_SEEN_DATA[] = true; _SEEN_DATA_PERSISTED[] = true)
     catch e
         e isa InterruptException && rethrow()
         @warn "could not load persisted alert state; re-baselining" state_path
@@ -155,11 +160,13 @@ function _persist_alert_state(state_path::AbstractString, level::Int, stale::Boo
         dir = dirname(state_path)
         isempty(dir) || isdir(dir) || mkpath(dir)
         tmp = state_path * ".tmp"
+        seen = _SEEN_DATA[]
         open(tmp, "w") do io
-            JSON3.write(io, (level = level, stale = stale, seen_data = _SEEN_DATA[],
+            JSON3.write(io, (level = level, stale = stale, seen_data = seen,
                              updated_utc = string(now(UTC)) * "Z"))
         end
         mv(tmp, state_path; force = true)
+        seen && (_SEEN_DATA_PERSISTED[] = true)
     catch e
         e isa InterruptException && rethrow()
         @warn "could not persist alert state" state_path error_type=string(nameof(typeof(e)))
@@ -242,6 +249,10 @@ function maybe_notify!(state; url::AbstractString = get(ENV, "SWM_WEBHOOK_URL", 
         return (fired = false, changed = false, level = cur_level, stale = cur_stale,
                 reason = "baseline set")
     end
+
+    # The first-data marker may have been raised without any delivered transition. Mirror it to disk
+    # now, re-writing the unchanged delivered state, so a restart into an emptied log is an outage.
+    _SEEN_DATA[] && !_SEEN_DATA_PERSISTED[] && _persist_alert_state(state_path, prev_level, prev_stale)
 
     # Decide whether a transition should be delivered and with what message.
     kind::Symbol = :none

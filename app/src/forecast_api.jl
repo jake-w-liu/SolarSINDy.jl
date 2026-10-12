@@ -958,7 +958,8 @@ function _compute_calibration_summary(df::DataFrame, cyc::DataFrame)
             n_verified_current_served_model=n_live_served,
             by_served_model=by_served_model,
             deepest_obs_dst_nt=jnum(round(minimum(obs[product_mask]); digits=1)),
-            n_storm_verified=count(obs[product_mask] .<= -50),
+            # Distinct target hours: each target is verified once per horizon that forecast it.
+            n_storm_verified=length(unique(v.target_time_utc_dt[product_mask][obs[product_mask] .<= -50])),
             by_source=by_source,
             calibration_shadow)
 end

@@ -279,6 +279,210 @@ exit 0
     end
 end
 
+# G10-01: the pid_of identity mark embeds ROOT, so ROOT must be the physical clone path. A
+# daemon started via the real path must still be recognized (and its pidfile kept) when the CLI
+# is invoked through a symlink to the same clone. `ps` is stubbed so no real daemon is needed.
+@testset "CLI recognizes its daemon through a symlinked clone path" begin
+    cli_bash = Sys.isunix() ? Sys.which("bash") : nothing
+    if cli_bash !== nothing
+        mktempdir() do root
+            repo = normpath(joinpath(@__DIR__, ".."))
+            link = joinpath(root, "clone_link")
+            symlink(repo, link)
+            physical = readchomp(`$cli_bash -c 'cd "$1" && pwd -P' _ $repo`)
+            stub_bin = joinpath(root, "bin"); mkpath(stub_bin)
+            write(joinpath(stub_bin, "ps"), """#!/bin/sh
+case "\$*" in
+  *etime*) echo 01:00 ;;
+  *) echo "julia --startup-file=no --project=$physical $physical/examples/live_monitor.jl" ;;
+esac
+""")
+            chmod(joinpath(stub_bin, "ps"), 0o755)
+            state = joinpath(root, "state"); mkpath(joinpath(state, "run"))
+            pidfile = joinpath(state, "run", "monitor.pid")
+            write(pidfile, "4242\n")
+            env = merge(ENV, Dict("SOLARSINDY_IGNORE_SERVICE" => "1",
+                "SOLARSINDY_MONITOR_DIR" => state, "SWM_PORT" => "65124",
+                "SOLARSINDY_ENV_FILE" => "/dev/null",
+                "PATH" => string(stub_bin, ":", get(ENV, "PATH", ""))))
+            out = IOBuffer()
+            st = run(pipeline(setenv(ignorestatus(`$cli_bash $(joinpath(link, "bin", "solarsindy")) status`), env);
+                              stdout=out, stderr=devnull))
+            @test st.exitcode == 1                           # monitor up, dashboard stopped
+            @test occursin("monitor:   RUNNING (pid 4242", String(take!(out)))
+            @test isfile(pidfile)                            # live daemon's pidfile kept
+        end
+    end
+end
+
+# G12-02: an IPv6 SWM_HOST must be bracketed in every probe/browse URL; unbracketed
+# http://::1:8723 is rejected by curl, so the watchdog would report a permanent false outage.
+@testset "IPv6 dashboard host is bracketed in probe URLs" begin
+    cli_bash = Sys.isunix() ? Sys.which("bash") : nothing
+    if cli_bash !== nothing
+        mktempdir() do root
+            repo = normpath(joinpath(@__DIR__, ".."))
+            cli = joinpath(repo, "bin", "solarsindy")
+            env = merge(ENV, Dict("SOLARSINDY_IGNORE_SERVICE" => "1",
+                "SOLARSINDY_MONITOR_DIR" => joinpath(root, "state"), "SWM_PORT" => "65125",
+                "SOLARSINDY_ENV_FILE" => "/dev/null", "SWM_HOST" => "::1"))
+            trace = IOBuffer()
+            run(pipeline(setenv(ignorestatus(`$cli_bash -x $cli help`), env);
+                         stdout=devnull, stderr=trace))
+            urls = filter(l -> occursin("URL=", l), split(String(take!(trace)), '\n'))
+            @test any(l -> occursin("http://[::1]:65125", l), urls)
+            @test !any(l -> occursin("http://::1", l), urls)
+
+            # Installer: macOS-only tools stubbed, nothing loaded.
+            stub_bin = joinpath(root, "bin"); mkpath(stub_bin)
+            for tool in ("plutil", "launchctl", "julia")
+                write(joinpath(stub_bin, tool), "#!/bin/sh\nexit 0\n")
+                chmod(joinpath(stub_bin, tool), 0o755)
+            end
+            home = joinpath(root, "home"); mkpath(home)
+            ienv = merge(ENV, Dict("HOME" => home, "SOLARSINDY_LOAD" => "0",
+                "PATH" => string(stub_bin, ":", get(ENV, "PATH", "")),
+                "SOLARSINDY_JULIA" => joinpath(stub_bin, "julia"),
+                "SOLARSINDY_MONITOR_DIR" => joinpath(root, "monitor"),
+                "SWM_HOST" => "::1", "SWM_PORT" => "8723"))
+            delete!(ienv, "SWM_WEBHOOK_URL"); delete!(ienv, "SOLARSINDY_WATCHDOG_DASH_URL")
+            installer = joinpath(repo, "deploy", "install_launchd.sh")
+            @test success(pipeline(setenv(`$cli_bash $installer watchdog`, ienv);
+                                   stdout=devnull, stderr=devnull))
+            plist = read(joinpath(home, "Library", "LaunchAgents",
+                                  "com.empire.solarsindy.watchdog.plist"), String)
+            @test occursin("http://[::1]:8723/api/health", plist)
+        end
+    end
+end
+
+# G12-03: a watchdog-authored OUTAGE.md is refreshed when the problem set changes (the dashboard
+# serves its Summary), but a daemon-authored sentinel is never clobbered.
+@testset "watchdog refreshes its own outage sentinel" begin
+    cli_bash = Sys.isunix() ? Sys.which("bash") : nothing
+    if cli_bash !== nothing && Sys.which("curl") !== nothing
+        mktempdir() do mon
+            wd = normpath(joinpath(@__DIR__, "..", "deploy", "watchdog.sh"))
+            env = merge(ENV, Dict("SOLARSINDY_MONITOR_DIR" => mon,
+                "SOLARSINDY_WATCHDOG_DASH_URL" => "http://127.0.0.1:1/api/health"))
+            delete!(env, "SWM_WEBHOOK_URL")
+            probe() = run(pipeline(setenv(ignorestatus(`$cli_bash $wd`), env);
+                                   stdout=devnull, stderr=devnull))
+            sentinel = joinpath(mon, "OUTAGE.md")
+            probe()                                          # no log + dashboard down
+            @test occursin("forecast log missing", read(sentinel, String))
+            write(joinpath(mon, "live_forecast_log.csv"), "x\n")
+            probe()                                          # only dashboard down now
+            s2 = read(sentinel, String)
+            @test occursin("Source: external watchdog", s2)
+            @test occursin("dashboard health endpoint unreachable", s2)
+            @test !occursin("forecast log missing", s2)
+            @test !isfile(sentinel * ".tmp")
+            daemon = "# OUTAGE\nSource: live monitor\nSummary: issuance failing\n"
+            write(sentinel, daemon)
+            rm(joinpath(mon, "live_forecast_log.csv"))      # problem set changes again
+            probe()
+            @test read(sentinel, String) == daemon           # daemon sentinel never clobbered
+        end
+    end
+end
+
+# G12-04 / G12-05: release activation must install services with the operator's solarsindy.env
+# (env vars win, like bin/solarsindy), and a relative RELEASES_ROOT is resolved against the
+# caller's cwd into an absolute path so `current` never dangles.
+@testset "Release activation loads operator config; relative releases root" begin
+    cli_bash = Sys.isunix() ? Sys.which("bash") : nothing
+    if cli_bash !== nothing && Sys.which("git") !== nothing
+        mktempdir() do root
+            clone = joinpath(root, "clone"); mkpath(joinpath(clone, "deploy"))
+            cp(joinpath(@__DIR__, "../deploy/deploy_release.sh"),
+               joinpath(clone, "deploy/deploy_release.sh"))
+            stub = joinpath(clone, "deploy/install_launchd.sh")
+            write(stub, raw"""#!/bin/bash
+echo "STUB webhook=${SWM_WEBHOOK_URL-<unset>} port=${SWM_PORT-<unset>} mon=${SOLARSINDY_MONITOR_DIR-<unset>}"
+""")
+            chmod(stub, 0o755)
+            write(joinpath(clone, ".gitignore"), "solarsindy.env\n")
+            run(`git -C $clone init --quiet`)
+            run(`git -C $clone add .`)
+            run(`git -C $clone -c user.name=Test -c user.email=test@example.invalid commit -qm fixture`)
+            filemon = joinpath(root, "filemon")
+            write(joinpath(clone, "solarsindy.env"),
+                  "SWM_WEBHOOK_URL=https://hooks.example/x\nSWM_PORT=9100\nSOLARSINDY_MONITOR_DIR='$filemon'\n")
+            script = joinpath(clone, "deploy/deploy_release.sh")
+            base = copy(ENV)
+            for k in ("SWM_WEBHOOK_URL", "SWM_PORT", "SOLARSINDY_MONITOR_DIR", "SOLARSINDY_ENV_FILE")
+                delete!(base, k)
+            end
+            base["HOME"] = joinpath(root, "home")
+            base["SOLARSINDY_INSTANTIATE"] = "0"
+            deploy(args, extra) = begin
+                out = IOBuffer()
+                r = run(pipeline(Cmd(setenv(ignorestatus(`$cli_bash $script HEAD $args`),
+                                            merge(base, extra)); dir=root);
+                                 stdout=out, stderr=devnull))
+                (r.exitcode, String(take!(out)))
+            end
+            rc, out = deploy(joinpath(root, "releases"), Dict("SOLARSINDY_ACTIVATE" => "1"))
+            @test rc == 0
+            @test occursin("STUB webhook=https://hooks.example/x port=9100 mon=$filemon", out)
+            rc, out = deploy(joinpath(root, "releases"),
+                             Dict("SOLARSINDY_ACTIVATE" => "1", "SWM_PORT" => "7777"))
+            @test rc == 0
+            @test occursin("port=7777", out)                 # env wins over the file
+
+            rc, _ = deploy("relreleases", Dict("SOLARSINDY_ACTIVATE" => "0"))
+            @test rc == 0
+            @test isdir(joinpath(root, "relreleases"))      # caller-relative, not clone-relative
+            @test !ispath(joinpath(clone, "relreleases"))
+            current = joinpath(root, "relreleases", "current")
+            @test ispath(current) && isfile(joinpath(realpath(current), "RELEASE.json"))
+        end
+    end
+end
+
+# G12-07: the V2.2 receipt collector's launchd streams live outside $MONITOR_DIR/logs; the watchdog
+# must size-bound them too, and the installer must render their directory into the watchdog job.
+@testset "watchdog bounds the V2.2 receipt-collector streams" begin
+    cli_bash = Sys.isunix() ? Sys.which("bash") : nothing
+    if cli_bash !== nothing
+        mktempdir() do root
+            repo = normpath(joinpath(@__DIR__, ".."))
+            mon = joinpath(root, "mon"); rlogs = joinpath(root, "rlogs"); mkpath(rlogs)
+            write(joinpath(rlogs, "launchd.out"), repeat("x", 5000))
+            write(joinpath(rlogs, "launchd.err"), repeat("x", 500))
+            env = merge(ENV, Dict("SOLARSINDY_MONITOR_DIR" => mon,
+                "SOLARSINDY_V22_RECEIPT_LOG_DIR" => rlogs,
+                "SOLARSINDY_WATCHDOG_STREAM_MAX_BYTES" => "1000",
+                "SOLARSINDY_WATCHDOG_DASH_URL" => "http://127.0.0.1:1/api/health"))
+            delete!(env, "SWM_WEBHOOK_URL")
+            run(pipeline(setenv(ignorestatus(`$cli_bash $(joinpath(repo, "deploy", "watchdog.sh"))`), env);
+                         stdout=devnull, stderr=devnull))
+            @test filesize(joinpath(rlogs, "launchd.out")) == 0          # oversized: truncated
+            @test filesize(joinpath(rlogs, "launchd.out.1")) == 5000     # previous copy kept
+            @test filesize(joinpath(rlogs, "launchd.err")) == 500        # under the bound
+
+            stub_bin = joinpath(root, "bin"); mkpath(stub_bin)
+            for tool in ("plutil", "launchctl", "julia")
+                write(joinpath(stub_bin, tool), "#!/bin/sh\nexit 0\n")
+                chmod(joinpath(stub_bin, tool), 0o755)
+            end
+            home = joinpath(root, "home"); mkpath(home)
+            ienv = merge(ENV, Dict("HOME" => home, "SOLARSINDY_LOAD" => "0",
+                "PATH" => string(stub_bin, ":", get(ENV, "PATH", "")),
+                "SOLARSINDY_JULIA" => joinpath(stub_bin, "julia"),
+                "SOLARSINDY_MONITOR_DIR" => mon, "SOLARSINDY_V22_RECEIPT_LOG_DIR" => rlogs))
+            delete!(ienv, "SWM_WEBHOOK_URL")
+            installer = joinpath(repo, "deploy", "install_launchd.sh")
+            @test success(pipeline(setenv(`$cli_bash $installer watchdog`, ienv);
+                                   stdout=devnull, stderr=devnull))
+            plist = read(joinpath(home, "Library", "LaunchAgents",
+                                  "com.empire.solarsindy.watchdog.plist"), String)
+            @test occursin("<key>SOLARSINDY_V22_RECEIPT_LOG_DIR</key>\n    <string>$rlogs</string>", plist)
+        end
+    end
+end
+
 @testset "Pinned release rejects failed environments" begin
     if Sys.isunix()
         mktempdir() do root
@@ -320,6 +524,139 @@ exit 0
                 @test (readlink(current) == previous) == (expected != 0)
                 expected == 0 && @test isfile(joinpath(realpath(current), "RELEASE.json"))
             end
+        end
+    end
+end
+
+# G12-06: under plain docker compose `restart: always` never acts on an unhealthy HEALTHCHECK; the
+# `autoheal` sidecar runs deploy/autoheal.sh against the Docker socket. Exercised here against a
+# stub `docker` that emulates `ps -q --filter` (AND of filters) over a fake container table:
+# only labelled, unhealthy containers of this compose project are restarted (`-t 30`), a failed
+# restart or a failed `docker ps` never stops the loop, and AUTOHEAL_ONCE=1 runs a single pass.
+@testset "autoheal sidecar restarts only labelled unhealthy containers" begin
+    ah_sh = Sys.isunix() ? Sys.which("sh") : nothing
+    if ah_sh !== nothing
+        script = normpath(joinpath(@__DIR__, "..", "deploy", "autoheal.sh"))
+        stub = raw"""#!/bin/sh
+echo "$*" >> "$STUB_DIR/calls"
+cmd=$1; shift
+case "$cmd" in
+  ps)
+    if [ -f "$STUB_DIR/ps_fail" ]; then rm -f "$STUB_DIR/ps_fail"; echo "Cannot connect to the Docker daemon" >&2; exit 1; fi
+    lab=""; proj=""; health=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --filter) shift
+          case "$1" in
+            label=com.docker.compose.project=*) proj=${1#label=com.docker.compose.project=} ;;
+            label=*) lab=${1#label=} ;;
+            health=*) health=${1#health=} ;;
+            *) echo "stub: unknown filter $1" >&2; exit 2 ;;
+          esac ;;
+      esac
+      shift
+    done
+    while read -r id h p l; do
+      [ -n "$health" ] && [ "$h" != "$health" ] && continue
+      [ -n "$proj" ] && [ "$p" != "$proj" ] && continue
+      [ -n "$lab" ] && [ "$l" != "$lab" ] && continue
+      echo "$id"
+    done < "$STUB_DIR/containers"
+    ;;
+  restart)
+    for a in "$@"; do id=$a; done
+    echo "$*" >> "$STUB_DIR/restarts"
+    grep -qx "$id" "$STUB_DIR/restart_fail" 2>/dev/null && { echo "stub: restart failed" >&2; exit 1; }
+    echo "$id"
+    ;;
+  inspect)
+    for a in "$@"; do id=$a; done
+    case "$*" in
+      *com.docker.compose.project*)
+        row=$(grep "^$id " "$STUB_DIR/containers") || { echo "No such container" >&2; exit 1; }
+        set -- $row; echo "$3" ;;
+      *) echo "/c-$id" ;;
+    esac
+    ;;
+  *) exit 2 ;;
+esac
+"""
+        table = """
+            5e1f00 none proj -
+            f0f666 unhealthy proj com.solarsindy.autoheal=true
+            aaa111 unhealthy proj com.solarsindy.autoheal=true
+            bbb222 healthy proj com.solarsindy.autoheal=true
+            ccc333 unhealthy proj -
+            ddd444 unhealthy other com.solarsindy.autoheal=true
+            eee555 starting proj com.solarsindy.autoheal=true
+            """
+        function stub_env(dir; extra...)
+            mkpath(joinpath(dir, "bin"))
+            write(joinpath(dir, "bin", "docker"), stub)
+            chmod(joinpath(dir, "bin", "docker"), 0o755)
+            write(joinpath(dir, "containers"), join(strip.(split(strip(table), '\n')), '\n') * "\n")
+            write(joinpath(dir, "restart_fail"), "f0f666\n")
+            env = merge(ENV, Dict("STUB_DIR" => dir,
+                "PATH" => joinpath(dir, "bin") * (Sys.iswindows() ? ";" : ":") * get(ENV, "PATH", "")))
+            for k in ("AUTOHEAL_ONCE", "AUTOHEAL_PROJECT", "AUTOHEAL_LABEL", "AUTOHEAL_INTERVAL_SEC")
+                delete!(env, k)
+            end
+            for (k, v) in extra
+                env[string(k)] = string(v)
+            end
+            return env
+        end
+        restarts(dir) = isfile(joinpath(dir, "restarts")) ?
+            readlines(joinpath(dir, "restarts")) : String[]
+        # AUTOHEAL_ONCE=1 must exit by itself; bounded so a regression fails instead of hanging.
+        function run_once(env, logfile)
+            proc = open(logfile, "w") do io
+                run(pipeline(setenv(ignorestatus(`$ah_sh $script`), env); stdout = io, stderr = io);
+                    wait = false)
+            end
+            deadline = time() + 30
+            while time() < deadline && process_running(proc)
+                sleep(0.1)
+            end
+            exited = process_exited(proc)
+            exited || (kill(proc); wait(proc))
+            return exited && proc.exitcode == 0
+        end
+
+        # Single scoped pass: own project resolved from this container's label (HOSTNAME = id).
+        mktempdir() do dir
+            env = stub_env(dir; HOSTNAME = "5e1f00", AUTOHEAL_ONCE = 1)
+            @test run_once(env, joinpath(dir, "log"))
+            ahlog = read(joinpath(dir, "log"), String)
+            @test restarts(dir) == ["-t 30 f0f666", "-t 30 aaa111"]
+            @test occursin("restart of f0f666 (/c-f0f666) failed", ahlog)
+            @test occursin("restarted aaa111 (/c-aaa111)", ahlog)
+            @test any(l -> occursin("label=com.docker.compose.project=proj", l),
+                      readlines(joinpath(dir, "calls")))
+        end
+        # No resolvable project: the label alone scopes the restarts.
+        mktempdir() do dir
+            env = stub_env(dir; HOSTNAME = "", AUTOHEAL_ONCE = 1)
+            @test run_once(env, joinpath(dir, "log"))
+            @test sort(last.(split.(restarts(dir)))) == ["aaa111", "ddd444", "f0f666"]
+        end
+        # A failing `docker ps` is logged and the loop keeps running.
+        mktempdir() do dir
+            env = stub_env(dir; HOSTNAME = "5e1f00", AUTOHEAL_INTERVAL_SEC = 1)
+            touch(joinpath(dir, "ps_fail"))
+            logfile = joinpath(dir, "log")
+            proc = open(logfile, "w") do io
+                run(pipeline(setenv(`$ah_sh $script`, env); stdout = io, stderr = io); wait = false)
+            end
+            deadline = time() + 30
+            while time() < deadline && !("-t 30 aaa111" in restarts(dir))
+                sleep(0.2)
+            end
+            @test process_running(proc)
+            kill(proc)
+            wait(proc)
+            @test occursin("docker ps failed", read(logfile, String))
+            @test "-t 30 aaa111" in restarts(dir)
         end
     end
 end

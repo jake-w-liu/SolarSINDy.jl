@@ -541,6 +541,12 @@ struct OperationalV22ShadowChainArtifact
         m3_kind in (:ar_control, :exogenous) || throw(ArgumentError(
             "V2.2 shadow-chain M3 kind is unsupported: $m3_kind",
         ))
+        expected_schema = m3_kind == :ar_control ?
+            OPERATIONAL_V22_SHADOW_DEFAULT_FEATURE_SCHEMA :
+            Tuple(String.(OPERATIONAL_V22_ERROR_EXOGENOUS_FEATURES))
+        bindings.feature_schema == expected_schema || throw(ArgumentError(
+            "V2.2 shadow-chain feature schema does not match M3 kind $m3_kind",
+        ))
         return new(
             label,
             bindings,

@@ -1662,6 +1662,46 @@ end
     @test_throws ErrorException v24_read_year(2014; dir=source)
 end
 
+@testset "the deployment bundle ships only the residual models the layer accepted" begin
+    # V05-01: v24_fit_l2 builds a per-step model only for accepted steps and a
+    # joint model only when some step is accepted; the writer must not index a
+    # model that was never fitted.
+    cell = V24StackCell(1, :pooled, :pooled, 100, collect(V24_EXPERTS),
+                        fill(1 / V24_EXPERT_COUNT, V24_EXPERT_COUNT), 1.0,
+                        collect(1:V24_EXPERT_COUNT), 0.0, 0.0, false)
+    cells = Dict{V24CellKey,V24StackCell}((1, :pooled, :pooled) => cell)
+    conformal = Dict{Tuple{Int,Symbol},NamedTuple}(
+        (step, depth) => (half_width=10.0, n=50, coverage_floor=0.9, source="pooled")
+        for step in V24_STEPS for depth in (V24_POOLED_DEPTH, V24_DEPTH_BINS...))
+    rng = MersenneTwister(11)
+    X = randn(rng, 200, V24_L2_FEATURE_COUNT)
+    model = SolarSINDy.v23_fit_gbm(X, X[:, 1]; max_depth=2, nrounds=5, min_weight=8,
+                                   feature_names=v24_l2_feature_names())
+    bundle_with(layer) = (fold_year=2025, l1_cells=cells, l1_floor_cells=cells,
+        l1_ten_cells=cells, pool_cutoff=DateTime(2024, 12, 25), l2_layer=layer,
+        conformal=conformal, selected_variant=:v2_4e, seed=1, l1_pool_years=[2013],
+        l2_pool_years=[2014], conformal_pool_years=[2014])
+    partial_step = last(V24_STEPS)
+    for (layer, expected) in (
+            ((form="per_step", models=Dict{Int,Any}(partial_step => model), max_depth=2,
+              nrounds=5, accepted_steps=[partial_step]),
+             ["residual_model_step$(partial_step).bson"]),
+            ((form="joint", models=Dict{Int,Any}(), max_depth=2, nrounds=5,
+              accepted_steps=Int[]), String[]),
+            ((form="joint", models=Dict{Int,Any}(0 => model), max_depth=2, nrounds=5,
+              accepted_steps=[partial_step]), ["residual_model_joint.bson"]),
+        )
+        outdir = mktempdir()
+        deployment = v24_write_deployment(outdir, bundle_with(layer))
+        directory = joinpath(outdir, V24_DEPLOY_SUBDIR)
+        guard_json = JSON3.read(read(joinpath(directory, "guard.json"), String))
+        @test collect(String, guard_json.residual_model_files) == expected
+        @test sort(filter(name -> endswith(name, ".bson"), readdir(directory))) ==
+              sort(expected)
+        @test all(path -> isfile(path), deployment.files)
+    end
+end
+
 # ---------------------------------------------------------------------------
 # End to end, and the property the whole study rests on
 # ---------------------------------------------------------------------------

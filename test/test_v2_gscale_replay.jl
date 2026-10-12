@@ -10,12 +10,26 @@ include(GSCALE_REPLAY_SCRIPT)
 
 @testset "V2 exact Kp/G-scale replay helpers" begin
         @testset "GFZ Kp parsing and NOAA G-scale event selection" begin
-            @test noaa_g_level(4.999) == 0
+            # SWPC mapping (owner decision V11-02): a Kp third belongs to its integer class
+            # (SWPC prints "4.67 (G1)"); G4 is "Kp = 8, including a 9-"; G5 is 9o only.
+            # The former integer pins (noaa_g_level(4.999) == 0 etc.) encoded Kp >= 5o/6o/...,
+            # which contradicts SWPC, and were replaced by these thirds-scale pins.
             @test noaa_g_level(5.0) == 1
             @test noaa_g_level(6.0) == 2
             @test noaa_g_level(7.0) == 3
             @test noaa_g_level(8.0) == 4
             @test noaa_g_level(9.0) == 5
+            # GFZ thirds as stored in the GFZ file (3 decimals) and SWPC's 2-decimal print.
+            @test noaa_g_level(4.333) == 0
+            @test noaa_g_level(4.667) == 1
+            @test noaa_g_level(4.67) == 1
+            @test noaa_g_level(5.667) == 2
+            @test noaa_g_level(6.333) == 2
+            @test noaa_g_level(6.667) == 3
+            @test noaa_g_level(7.667) == 4
+            @test noaa_g_level(8.667) == 4
+            @test noaa_g_level(8.67) == 4
+            @test noaa_g_level(0.0) == 0
 
             kp = load_gfz_kp()
             @test nrow(kp) > 250_000
@@ -34,6 +48,16 @@ include(GSCALE_REPLAY_SCRIPT)
             @test all(events_g3.replay_start_utc[2:end] .> events_g3.replay_end_utc[1:end-1])
             @test minimum(Float64.(events_g3.peak_kp)) >= 7.0
             @test maximum(Int.(events_g3.peak_g_level)) == 5
+            # Selection stays GFZ Kp >= 7o (311 events, supervisor Option B); the G level of
+            # each peak follows SWPC, so the 49 events peaking at 7.667 (8-) are G4, not G3.
+            @test all(Int.(events_g3.peak_g_level) .== noaa_g_level.(Float64.(events_g3.peak_kp)))
+            @test count(==(3), Int.(events_g3.peak_g_level)) == 163
+            @test count(==(4), Int.(events_g3.peak_g_level)) == 139
+            @test count(==(5), Int.(events_g3.peak_g_level)) == 9
+            # Human-readable selection label no longer claims the cohort is NOAA G3+.
+            @test occursin("7o", _gscale_selection_text(GSCALE_MIN_KP))
+            @test occursin("7- (6.67)", _gscale_selection_text(GSCALE_MIN_KP))
+            @test occursin("G4 = 8- through 9-", NOAA_G_SCALE_NOTE)
         end
 
         @testset "row CRC catches causality and computes independent RMSE" begin

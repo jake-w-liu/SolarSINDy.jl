@@ -2,6 +2,67 @@
 
 All notable changes to `SolarSINDy.jl` will be documented in this file.
 
+## [Unreleased] - 2026-10-12 (fresh deep-debug campaign; served bundle unchanged; version stays 0.2.1)
+
+A full re-audit of `src/`, `app/`, `examples/`, `bin/`, `deploy/`, CI and `validation/`
+confirmed and fixed about 60 defects, each with a regression test (or a standalone check where
+no test file covers the script) that fails on the previous code. The deployed V2.4e bundle,
+stack weights, conformal strata and served identity are untouched.
+
+Package and live path:
+
+- `stlsq` solves with pivoted QR at every step, so a square rank-deficient design returns the
+  same least-squares solution as its tall counterpart instead of throwing.
+- The monitor measures data age from the raw L1 measurement time (`fetch_realtime_solar_wind`
+  returns a fourth value, `t_measured`); a live feed no longer reads about -1 h old and a frozen
+  feed is flagged stale on time. After an interior driver gap the monitor no longer re-anchors
+  on an unbridgeable pre-gap Dst, and a recovery re-warm serves a real forecast instead of an
+  empty one (`examples/storm_monitor.jl` mirrors both).
+- Artifact readers keep text columns as text (single-step calibration steps, numeric-looking
+  labels in the V2.2 M1/boost/driver/error-state artifacts, the optional V2.4 conformal
+  `source` column); the M1 eta3 stability bound is representable in floating point; atomic CSV
+  writes accept a bare relative file name on Windows; the AR-control shadow manifest checks its
+  feature schema against its kind.
+- The locked-live comparison report and `summarize_log` keep V2.1-fallback rows in the headline
+  cohort; an embargo-emptied validation split fails closed with a named
+  `validation_split_too_thin` error and the holdout is purged against the latest prior target.
+
+Dashboard, CLI and deployment:
+
+- Kp freshness tolerates SWPC's start-labelled 3-h publication latency (420 min); the seen-data
+  marker is persisted on its first flip; the calibration panel no longer calls a stormy period
+  quiet and counts distinct storm target hours.
+- `bin/solarsindy` uses the physical clone path; IPv6 hosts are bracketed in URLs; the watchdog
+  refreshes its own outage sentinel and rotates the V2.2 receipt-collector streams;
+  `deploy_release.sh` loads `solarsindy.env` and canonicalises a relative releases root.
+- `docker compose` now restarts an unhealthy monitor or dashboard through a label-scoped
+  `autoheal` sidecar (`docker:29-cli`, `deploy/autoheal.sh`). It mounts the Docker socket, which
+  is root-equivalent on the host; delete the service when an orchestrator already restarts
+  unhealthy containers.
+
+V2.2 L1 receipt study (protocol amendment A1, see CODE_NOTES): live RTSW time tags without a
+trailing `Z` parse; SOLAR1 is admitted alongside DSCOVR after SWPC ended DSCOVR ingest
+(contract `noaa_rtsw_metadata_v3`, same-source pairs, legacy v2 records still verify); a
+bounded 90-min ephemeris hold replaces the extrapolation refusal for the newest minute;
+issue-time verification is incremental so per-issue work no longer grows with the archive.
+
+Validation and research scripts:
+
+- NOAA G levels follow SWPC (a Kp third belongs to its integer class; G4 includes 9-; G5 is 9o),
+  with a fail-closed cross-check against printed "(Gn)" labels. The G-scale replay cohort is
+  labelled honestly as GFZ Kp >= 7o.
+- Fixed: forward baselines start from the observed Dst* (legacy `run_validation.jl`; the two
+  forward rows of `data/model_metrics.csv` were regenerated), the scalability sweep label (9
+  storms), the conformal-sidecar builder's model steps, readiness-audit crashes and spurious
+  FAILs, a fail-open serving-identity oracle, `--years` subset folds being stamped current, a
+  KeyError in the V2.4 deployment writer, gapped OOF pools, vacuous V2.3 integrity checks,
+  stale-signature selection inputs, the V2.3 identity oracle's anchor set, true 1-h Dst rates
+  and storm-cluster bootstrap CIs in research replays, a one-hour label shift in the sustained-Bz
+  stress replay, and EKF bootstrap leakage.
+- Removed the superseded `validation/assimilation_forecast_value.jl`, whose inputs no longer
+  exist.
+- The readiness self-test no longer builds fixtures from a dated (pre-V2.4) identity snapshot.
+
 ## [Unreleased] - 2026-08-19 (deep-debug fix pass; no served number moves; version stays 0.2.1)
 
 A six-way independent audit of the shipped tree produced 44 confirmed code-side findings. None of

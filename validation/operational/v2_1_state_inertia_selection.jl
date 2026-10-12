@@ -1,7 +1,7 @@
 #!/usr/bin/env julia
 
 # Select the causal state-inertia safeguard from development evidence only.
-# Broad-replay test storms and the exact G3+ archive remain evaluation cohorts.
+# Broad-replay test storms and the exact GFZ Kp >= 7o archive (legacy key exact_G3plus; not the full NOAA G3+ class) remain evaluation cohorts.
 
 using CSV
 using DataFrames
@@ -251,7 +251,7 @@ function main_state_inertia()
     CSV.write(STATE_REGIMES_CSV, regimes)
     open(STATE_REPORT, "w") do io
         println(io, "# Operational V2.1 state-inertia selection\n")
-        @printf(io, "The development selector evaluated %d causal weight tuples. It required every broad-replay training/validation lead to beat historical V2.0 and persistence and every populated severe-development target-Dst/rate cell to be non-inferior to historical V2.0. Validation RMSE sums within %.3f nT of the minimum were treated as tied at observational precision; the tie-break retained the most one-hour model signal before minimizing intervention in the remaining branches. The broad test partition and exact G3+ archive were then used as post-selection safety evaluations.\n\n", nrow(candidates), STATE_VALIDATION_TIE_TOL_NT)
+        @printf(io, "The development selector evaluated %d causal weight tuples. It required every broad-replay training/validation lead to beat historical V2.0 and persistence and every populated severe-development target-Dst/rate cell to be non-inferior to historical V2.0. Validation RMSE sums within %.3f nT of the minimum were treated as tied at observational precision; the tie-break retained the most one-hour model signal before minimizing intervention in the remaining branches. The broad test partition and exact GFZ Kp >= 7o archive (legacy key exact_G3plus) were then used as post-selection safety evaluations.\n\n", nrow(candidates), STATE_VALIDATION_TIE_TOL_NT)
         @printf(io, "Minimum passing validation RMSE sum: %.6f nT; selected tied-candidate sum: %.6f nT.\n\n", selected.minimum_score, selected.selected_score)
         @printf(io, "Selected weights: one-hour near-quiet %.3f, one-hour moderate deepening %.3f, two-hour near-quiet %.3f, and three-hour near-quiet %.3f. The live operator uses only issue-time Dst, issue-time Dst rate, lead, and the V2.1 center.\n\n", weights...)
         println(io, "| cohort | lead h | rows | groups | RMSE historical V2.0 | RMSE V2.1 | RMSE persistence | improvement vs stronger comparator |")

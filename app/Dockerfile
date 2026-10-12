@@ -37,7 +37,10 @@ ENV SWM_HOST=0.0.0.0 SWM_PORT=8723 SOLARSINDY_LOG=/data/live_forecast_log.csv \
     SOLARSINDY_OPERATIONAL_EVIDENCE_DIR=/app/data/operational_validation JULIA_NUM_THREADS=4
 EXPOSE 8723
 USER swm
-# Orchestrator-visible liveness: a hung or crashed server fails the check so it can be restarted.
+# Orchestrator-visible liveness: a hung or crashed server fails the check and is reported unhealthy.
+# `restart: always` alone restarts only on process exit, not on unhealthy; under deploy/docker-compose.yml
+# the `autoheal` sidecar (deploy/autoheal.sh) restarts this container once Docker marks it unhealthy
+# (label com.solarsindy.autoheal=true). Elsewhere, the orchestrator must act on the health status.
 HEALTHCHECK --interval=30s --timeout=8s --start-period=180s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${SWM_PORT}/api/health" || exit 1
 CMD ["julia", "--project=.", "src/server.jl"]

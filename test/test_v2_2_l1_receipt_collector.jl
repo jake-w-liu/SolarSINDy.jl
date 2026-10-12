@@ -687,7 +687,7 @@ end
             @test metadata.quality_row_source == "DSCOVR"
             @test metadata.quality_value == 0
             @test metadata.quality_binding_status ==
-                  "bound_noaa_dscovr_overall_quality"
+                  "bound_noaa_rtsw_overall_quality"
             @test metadata.quality_required_fields_status ==
                   "bound_required_bx_by_bz_gsm"
             @test metadata.quality_decision ==
@@ -736,14 +736,14 @@ end
                     body="""[{"time_tag":"2022-05-05T00:30:00Z",\
                                "source":"DSCOVR","active":true,\
                                "overall_quality":1,"bz_gsm":-5.0}]""",
-                    status="bound_noaa_dscovr_overall_quality",
+                    status=L1C.V22_L1_QUALITY_BINDING_STATUS,
                     decision="reject_suspect_overall_quality",
                 ),
                 (
                     body="""[{"time_tag":"2022-05-05T00:30:00Z",\
                                "source":"DSCOVR","active":true,\
                                "overall_quality":2,"bz_gsm":-5.0}]""",
-                    status="bound_noaa_dscovr_overall_quality",
+                    status=L1C.V22_L1_QUALITY_BINDING_STATUS,
                     decision="reject_error_overall_quality",
                 ),
                 (
@@ -758,14 +758,14 @@ end
                                "source":"DSCOVR","active":true,\
                                "overall_quality":0,"by_gsm":-2.0,
                                "bz_gsm":-5.0}]""",
-                    status="bound_noaa_dscovr_overall_quality",
+                    status=L1C.V22_L1_QUALITY_BINDING_STATUS,
                     decision="reject_missing_or_invalid_required_forecast_fields",
                 ),
                 (
                     body="""[{"time_tag":"2022-05-05T00:30:00Z",\
                                "source":"ACE","active":true,\
                                "overall_quality":0,"bz_gsm":-5.0}]""",
-                    status="unverified_non_dscovr_quality_semantics",
+                    status="unverified_non_admitted_source_quality_semantics",
                     decision="reject_unverified_source_quality_semantics",
                 ),
             )
@@ -857,7 +857,7 @@ end
                         capture_source=wind_source,
                     ).metadata_provenance
                     @test metadata.quality_binding_status ==
-                          "bound_noaa_dscovr_overall_quality"
+                          L1C.V22_L1_QUALITY_BINDING_STATUS
                     @test metadata.quality_required_fields_status ==
                           "missing_or_invalid_required_speed_density_vx_gse"
                     @test metadata.quality_decision ==
@@ -968,6 +968,290 @@ end
                 )
             end
         end
+    end
+
+    @testset "live SWPC RTSW row forms bind the active stream (G11-01/02/04)" begin
+        # G11-01: live RTSW `time_tag` values are UTC with no zone suffix.
+        @test L1C._v22_l1_parse_source_utc("2026-10-12T09:24:00") ==
+              DateTime(2026, 10, 12, 9, 24)
+        @test L1C._v22_l1_parse_source_utc("2026-10-12T09:24:00.000") ==
+              DateTime(2026, 10, 12, 9, 24)
+        @test L1C._v22_l1_parse_source_utc("2026-10-12T09:24:00Z") ==
+              DateTime(2026, 10, 12, 9, 24)
+        for invalid in ("2026-10-12", "2026-10-12T09:24:00+00:00",
+                        "2026-10-12T09:24:00.0", "2026-10-12T09:24:00ZZ")
+            @test_throws ArgumentError L1C._v22_l1_parse_source_utc(invalid)
+        end
+        # The package's own timestamps stay strict.
+        @test_throws ArgumentError L1C._v22_l1_parse_utc("2026-10-12T09:24:00.000")
+
+        # G11-02: rows copied from the 2026-10-12 live mag feed (active source
+        # renamed SOLAR1 -> DSCOVR per the DSCOVR-only contract). Inactive ACE
+        # shares the minute; inactive IMAP is newer.
+        live_mag = JSON3.read("""[
+            {"time_tag": "2026-10-12T09:26:01", "active": false, "source": "IMAP",
+             "bx_gsm": 5.9, "by_gsm": -0.59, "bz_gsm": -0.05, "overall_quality": 0},
+            {"time_tag": "2026-10-12T09:24:00", "active": true, "source": "DSCOVR",
+             "bx_gsm": 6.34, "by_gsm": -0.72, "bz_gsm": 0.28, "overall_quality": 0},
+            {"time_tag": "2026-10-12T09:24:00", "active": false, "source": "ACE",
+             "bx_gsm": 5.75, "by_gsm": -0.42, "bz_gsm": 0.01, "overall_quality": 0},
+            {"time_tag": "2026-10-12T09:23:00", "active": true, "source": "DSCOVR",
+             "bx_gsm": 6.34, "by_gsm": -0.73, "bz_gsm": 0.17, "overall_quality": 0}
+        ]""")
+        target = L1C._v22_l1_measurement_target(live_mag)
+        @test target.status == "bound"
+        @test target.target.source == "DSCOVR"
+        @test target.target.timestamp == DateTime(2026, 10, 12, 9, 24)
+        # A same-minute duplicate inside the active stream is still ambiguous.
+        duplicated = JSON3.read(JSON3.write(vcat(collect(live_mag), [live_mag[2]])))
+        @test L1C._v22_l1_measurement_target(duplicated).status ==
+              "ambiguous_latest_measurement_time"
+        # With no active row the newest row is still diagnosed as inactive.
+        inactive = JSON3.read(JSON3.write([live_mag[1], live_mag[3]]))
+        @test L1C._v22_l1_measurement_target(inactive).status ==
+              "latest_measurement_source_not_active"
+
+        # G11-04: live ephemeris rows (SOLAR1 -> DSCOVR). 05:00 is a real
+        # duplicated active hour unrelated to the 08:00/09:00 bracket.
+        eph_row(t, x, y, z; source="DSCOVR", active=true) = (
+            time_tag=t, active=active, source=source, cadence=3600,
+            x_gse=x, y_gse=y, z_gse=z,
+        )
+        clean_bracket = [
+            eph_row("2026-10-12T09:00:00", 1563515, -79442, 81890;
+                    source="IMAP", active=false),
+            eph_row("2026-10-12T09:00:00", 1576421, -113113, 88675),
+            eph_row("2026-10-12T08:00:00", 1576509, -112727, 88879),
+            eph_row("2026-10-12T05:00:00", 1576770, -111565, 89492),
+            eph_row("2026-10-12T05:00:00", 1576770, -111564, 89492),
+        ]
+        eph_capture(rows) = (
+            capture_outcome="http_response", http_status=200,
+            receipt_completed_utc=L1C._v22_l1_utc(DateTime(2026, 10, 12, 9, 30)),
+            monotonic_completed_ns=1,
+            body=Vector{UInt8}(codeunits(JSON3.write(rows))),
+        )
+        bind(rows, time) = L1C._v22_l1_ephemeris_position(
+            eph_capture(rows),
+            (timestamp=time, source="DSCOVR", active=true, row=nothing),
+            DateTime(2026, 10, 12, 9, 31), DateTime(2026, 10, 12, 9, 31, 1), 2,
+        )
+        bound = bind(clean_bracket, DateTime(2026, 10, 12, 8, 24))
+        @test bound.status == "bound_issue_causal_swpc_ephemeris"
+        @test bound.record.lower_time_utc == "2026-10-12T08:00:00.000Z"
+        @test bound.record.upper_time_utc == "2026-10-12T09:00:00.000Z"
+        @test bound.record.x_gse ≈ 1576509 + 0.4 * (1576421 - 1576509)
+        @test bind(clean_bracket, DateTime(2026, 10, 12, 8, 0)).status ==
+              "bound_issue_causal_swpc_ephemeris"
+        # Duplicates among the rows actually used still fail closed.
+        @test bind(clean_bracket, DateTime(2026, 10, 12, 5, 0)).status ==
+              "duplicate_same_source_ephemeris_time"
+        @test bind(clean_bracket, DateTime(2026, 10, 12, 5, 30)).status ==
+              "duplicate_same_source_ephemeris_time"
+        dup_upper = vcat(clean_bracket,
+                         [eph_row("2026-10-12T09:00:00", 1576422, -113113, 88675)])
+        @test bind(dup_upper, DateTime(2026, 10, 12, 8, 24)).status ==
+              "duplicate_same_source_ephemeris_time"
+    end
+
+    @testset "SOLAR1 admission and bounded ephemeris hold (protocol amendment)" begin
+        @test L1C.V22_L1_ADMISSIBLE_SOURCES == ("DSCOVR", "SOLAR1")
+        @test L1C.V22_L1_METADATA_CONTRACT_VERSION == "noaa_rtsw_metadata_v3"
+        @test L1C.V22_L1_EPHEMERIS_MAX_HOLD == Minute(90)
+        # Unmodified rows from the 2026-10-12T09:31Z live SWPC snapshot. SOLAR1
+        # publishes max_data_flag=-9999 (fill); the rule reads only
+        # overall_quality and the required fields, so the fill is irrelevant.
+        live_mag = _v22_l1_fake_response(200, """[
+            {"time_tag": "2026-10-12T09:26:01", "active": false, "source": "IMAP",
+             "bx_gsm": 5.9, "by_gsm": -0.59, "bz_gsm": -0.05,
+             "max_telemetry_flag": 0, "max_data_flag": 0, "overall_quality": 0},
+            {"time_tag": "2026-10-12T09:24:00", "active": true, "source": "SOLAR1",
+             "bx_gsm": 6.34, "by_gsm": -0.72, "bz_gsm": 0.28,
+             "max_telemetry_flag": 0, "max_data_flag": -9999, "overall_quality": 0},
+            {"time_tag": "2026-10-12T09:24:00", "active": false, "source": "ACE",
+             "bx_gsm": 5.75, "by_gsm": -0.42, "bz_gsm": 0.01, "overall_quality": 0}
+        ]""")
+        # The hourly feed ends at 09:00 although the newest active minute is 09:24.
+        live_ephemeris = _v22_l1_fake_response(200, """[
+            {"time_tag": "2026-10-12T09:00:00", "active": false, "source": "ACE",
+             "x_gse": 1415916, "y_gse": 57402, "z_gse": 51024},
+            {"time_tag": "2026-10-12T09:00:00", "active": true, "source": "SOLAR1",
+             "x_gse": 1576421, "y_gse": -113113, "z_gse": 88675},
+            {"time_tag": "2026-10-12T08:00:00", "active": true, "source": "SOLAR1",
+             "x_gse": 1576509, "y_gse": -112727, "z_gse": 88879}
+        ]""")
+        function capture_live(root; measurement=live_mag,
+                              ephemeris=live_ephemeris)
+            base = DateTime(2026, 10, 12, 9, 31)
+            return only(L1C.capture_v2_2_l1_receipts!(
+                root;
+                sources=(source,),
+                http_get=(url; kwargs...) -> measurement,
+                ephemeris_http_get=(url; kwargs...) -> ephemeris,
+                utc_clock=_v22_l1_sequence_clock([
+                    base, base + Millisecond(10),
+                    base + Second(1), base + Second(1) + Millisecond(10),
+                ]),
+                monotonic_clock=_v22_l1_sequence_clock([100, 110, 120, 130]),
+            ))
+        end
+
+        mktempdir() do root
+            record = capture_live(root)
+            metadata = record.metadata_provenance
+            @test metadata.metadata_contract_version == "noaa_rtsw_metadata_v3"
+            @test metadata.quality_row_source == "SOLAR1"
+            @test metadata.quality_row_timestamp_utc == "2026-10-12T09:24:00.000Z"
+            @test metadata.quality_binding_status == "bound_noaa_rtsw_overall_quality"
+            @test metadata.quality_decision == "accept_normal_overall_quality"
+            @test metadata.ephemeris_binding_status ==
+                  "bound_issue_causal_swpc_ephemeris"
+            @test metadata.ephemeris_interpolation_rule ==
+                  L1C.V22_L1_EPHEMERIS_INTERPOLATION_RULE
+            @test occursin("90 minutes", metadata.ephemeris_interpolation_rule)
+            position = JSON3.read(metadata.ephemeris_record_json)
+            @test position.source == "SOLAR1"
+            @test position.method == "hold"
+            @test position.position_time_utc == "2026-10-12T09:24:00.000Z"
+            @test position.lower_time_utc == position.upper_time_utc ==
+                  "2026-10-12T09:00:00.000Z"
+            @test position.interpolation_fraction == 0.0
+            @test position.hold_age_seconds == 1440.0
+            @test (position.x_gse, position.y_gse, position.z_gse) ==
+                  (1576421.0, -113113.0, 88675.0)
+            @test metadata.rows_admissible
+            @test isempty(metadata.admissibility_blockers)
+            @test only(L1C.verify_v2_2_l1_receipts(
+                root; sources=(source,),
+            )).records == 1
+
+            # Pre-amendment v2 records still verify under their own rules:
+            # rewrite this record as the v2 recomputation (DSCOVR-only, no
+            # hold) and re-hash it; the verifier recomputes v2 and accepts.
+            raw = read(joinpath(root, record.raw_relative_path))
+            eph = L1C._v22_l1_ephemeris_capture_from_metadata(
+                realpath(root), metadata, Set{String}(),
+            )
+            legacy = L1C._v22_l1_metadata_payload(L1C._v22_l1_metadata_diagnostics(
+                raw, source.url;
+                ephemeris_capture=eph,
+                request_started=L1C._v22_l1_parse_utc(record.request_started_utc),
+                receipt_completed=L1C._v22_l1_parse_utc(record.receipt_completed_utc),
+                monotonic_started_ns=Int(record.monotonic_started_ns),
+                contract=L1C.V22_L1_LEGACY_METADATA_CONTRACT_VERSION,
+            ))
+            @test legacy.metadata_contract_version == "noaa_rtsw_metadata_v2"
+            @test legacy.quality_binding_status ==
+                  "unverified_non_dscovr_quality_semantics"
+            @test legacy.ephemeris_binding_status ==
+                  "ephemeris_extrapolation_required"
+            @test legacy.ephemeris_interpolation_rule ==
+                  L1C.V22_L1_LEGACY_EPHEMERIS_INTERPOLATION_RULE
+            @test !legacy.rows_admissible
+            _v22_l1_rehash_metadata!(root, source, record, legacy)
+            @test only(L1C.verify_v2_2_l1_receipts(
+                root; sources=(source,),
+            )).records == 1
+            # A v2 label on v3 results, or an unknown contract, fails closed.
+            _v22_l1_rehash_metadata!(root, source, record, merge(
+                L1C._v22_l1_metadata_payload(metadata),
+                (metadata_contract_version="noaa_rtsw_metadata_v2",),
+            ))
+            @test_throws ErrorException L1C.verify_v2_2_l1_receipts(
+                root; sources=(source,),
+            )
+            _v22_l1_rehash_metadata!(root, source, record, merge(
+                L1C._v22_l1_metadata_payload(metadata),
+                (metadata_contract_version="noaa_rtsw_metadata_v9",),
+            ))
+            @test_throws ErrorException L1C.verify_v2_2_l1_receipts(
+                root; sources=(source,),
+            )
+        end
+
+        # A v2 DSCOVR record keeps the legacy writer status.
+        dscovr_row = (timestamp=DateTime(2026, 10, 12, 9, 24), source="DSCOVR",
+                      active=true, row=JSON3.read("""{"overall_quality": 0,
+                      "bx_gsm": 1.0, "by_gsm": 2.0, "bz_gsm": 3.0}"""))
+        @test L1C._v22_l1_quality_binding(
+            source.url, dscovr_row;
+            contract=L1C.V22_L1_LEGACY_METADATA_CONTRACT_VERSION,
+        ).binding_status == "bound_noaa_dscovr_overall_quality"
+        @test L1C._v22_l1_quality_binding(source.url, dscovr_row).binding_status ==
+              "bound_noaa_rtsw_overall_quality"
+        @test_throws ErrorException L1C._v22_l1_quality_binding(
+            source.url, dscovr_row; contract="noaa_rtsw_metadata_v9",
+        )
+        # Reader rule: new status for any admitted source, legacy for DSCOVR only.
+        @test L1C._v22_l1_bound_quality_status("bound_noaa_rtsw_overall_quality", "SOLAR1")
+        @test L1C._v22_l1_bound_quality_status("bound_noaa_rtsw_overall_quality", "DSCOVR")
+        @test L1C._v22_l1_bound_quality_status("bound_noaa_dscovr_overall_quality", "DSCOVR")
+        @test !L1C._v22_l1_bound_quality_status("bound_noaa_dscovr_overall_quality", "SOLAR1")
+        @test !L1C._v22_l1_bound_quality_status("bound_noaa_rtsw_overall_quality", "ACE")
+
+        # SOLAR1 fill or non-normal overall_quality still fails closed.
+        for (value, status) in (("-9999", "invalid_noaa_overall_quality"),
+                                ("1", "bound_noaa_rtsw_overall_quality"),
+                                ("null", "missing_noaa_overall_quality"))
+            body = """[{"time_tag": "2026-10-12T09:24:00", "active": true,
+                       "source": "SOLAR1", "bx_gsm": 6.34, "by_gsm": -0.72,
+                       "bz_gsm": 0.28, "overall_quality": $value}]"""
+            mktempdir() do root
+                metadata = capture_live(
+                    root; measurement=_v22_l1_fake_response(200, body),
+                ).metadata_provenance
+                @test metadata.quality_binding_status == status
+                @test !metadata.rows_admissible
+            end
+        end
+
+        # Hold boundaries: <= 90 min holds, older is stale; a duplicated held
+        # hour is still a duplicate; no earlier row still needs extrapolation.
+        eph_row(t, x; source="SOLAR1") = (
+            time_tag=t, active=true, source=source, x_gse=x, y_gse=0.0, z_gse=0.0,
+        )
+        eph_capture(rows) = (
+            capture_outcome="http_response", http_status=200,
+            receipt_completed_utc=L1C._v22_l1_utc(DateTime(2026, 10, 12, 9, 30)),
+            monotonic_completed_ns=1,
+            body=Vector{UInt8}(codeunits(JSON3.write(rows))),
+        )
+        bind(rows, time; contract=L1C.V22_L1_METADATA_CONTRACT_VERSION) =
+            L1C._v22_l1_ephemeris_position(
+                eph_capture(rows),
+                (timestamp=time, source="SOLAR1", active=true, row=nothing),
+                DateTime(2026, 10, 12, 9, 31), DateTime(2026, 10, 12, 9, 31, 1), 2;
+                contract=contract,
+            )
+        rows = [eph_row("2026-10-12T08:00:00", 1.0e6),
+                eph_row("2026-10-12T09:00:00", 1.1e6),
+                eph_row("2026-10-12T09:00:00", 2.0e6; source="DSCOVR")]
+        held = bind(rows, DateTime(2026, 10, 12, 9, 24))
+        @test held.status == "bound_issue_causal_swpc_ephemeris"
+        @test held.record.method == "hold"
+        @test held.record.hold_age_seconds == 1440.0
+        @test held.record.x_gse == 1.1e6
+        at_limit = bind(rows[1:1], DateTime(2026, 10, 12, 9, 30))
+        @test at_limit.record.method == "hold"
+        @test at_limit.record.hold_age_seconds == 5400.0
+        @test bind(rows[1:1], DateTime(2026, 10, 12, 9, 30, 0, 1)).status ==
+              "ephemeris_stale"
+        @test bind(rows[1:1], DateTime(2026, 10, 12, 9, 30, 0, 1)).record === nothing
+        @test bind(vcat(rows, [eph_row("2026-10-12T09:00:00", 1.2e6)]),
+                   DateTime(2026, 10, 12, 9, 24)).status ==
+              "duplicate_same_source_ephemeris_time"
+        @test bind(rows, DateTime(2026, 10, 12, 7, 59)).status ==
+              "ephemeris_extrapolation_required"
+        # Exact and linear records carry hold_age_seconds = 0 under v3.
+        @test bind(rows, DateTime(2026, 10, 12, 8, 30)).record.method == "linear"
+        @test bind(rows, DateTime(2026, 10, 12, 8, 30)).record.hold_age_seconds == 0.0
+        # The v2 contract never holds and records no hold age.
+        legacy_bound = bind(rows, DateTime(2026, 10, 12, 9, 24);
+                            contract=L1C.V22_L1_LEGACY_METADATA_CONTRACT_VERSION)
+        @test legacy_bound.status == "ephemeris_extrapolation_required"
+        @test !hasproperty(bind(rows, DateTime(2026, 10, 12, 8, 30);
+                                contract=L1C.V22_L1_LEGACY_METADATA_CONTRACT_VERSION).record,
+                           :hold_age_seconds)
     end
 
     @testset "transport exceptions are durable and do not stop sibling sources" begin

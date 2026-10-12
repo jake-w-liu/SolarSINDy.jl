@@ -145,6 +145,60 @@ const AUDIT_PATH = normpath(joinpath(@__DIR__, "..", "validation", "operational"
         @test !occursin("# Operational V2.1 Readiness Audit", text)
         @test !occursin("recomputes Operational V2.1 readiness", text)
     end
+
+    @testset "deep-debug regressions (V04)" begin
+        # V04-01: a non-finite issue rate has no regime. It used to fall through every comparison and
+        # be pooled into the "recovering" scorecard cell, and the replay finite check ignored :rate.
+        @test audit.issue_rate_regime(NaN) == "undefined"
+        @test audit.issue_rate_regime(Inf) == "undefined"
+        @test audit.issue_rate_regime(missing) == "undefined"
+        @test audit.issue_rate_regime(10.0) == "recovering"
+        @test audit.issue_rate_regime(0.0) == "steady"
+        nan_rate = DataFrame(lead = fill(1, 50), obs = fill(-10.0, 50), v2_0 = fill(-12.0, 50),
+                             v2_1 = fill(-11.0, 50), persistence = fill(-13.0, 50),
+                             rate = fill(NaN, 50))
+        metrics = audit.replay_regime_metrics(nan_rate; min_n = 40)
+        @test !any(metrics.axis .== "issue_rate")
+        @test occursin(r"numeric_cols = \[:obs, :v2_1, :v2_1_pre_rate_guard,\s+:v2_1_pre_one_hour_inertia, :v2_1_pre_state_inertia,\s+:v2_0, :v2_1_frozen, :persistence, :rate\]",
+                       source)
+
+        # V04-02: every return path of the V2.4 bundle audit must carry `identity`; audit_live_log!
+        # reads it unconditionally, so the absent-bundle path crashed instead of recording its FAIL.
+        mktempdir() do dir
+            absent_state = audit.AuditState()
+            absent = audit.audit_v2_4_bundle!(absent_state; dir = joinpath(dir, "no_such_bundle"))
+            @test absent.ok === false
+            @test hasproperty(absent, :identity) && ismissing(absent.identity)
+            @test any(c -> c.level == :fail && c.name == "served V2.4 bundle", absent_state.checks)
+        end
+
+        # V04-03: a zero-row hot log (fresh deployment) with an API reporting 0 verified rows and no
+        # RMSE must not FAIL the dashboard count/RMSE checks.
+        mktempdir() do dir
+            zero_log = joinpath(dir, "live_forecast_log.csv")
+            write(zero_log, join(String.(audit.REQUIRED_LIVE_COLS), ",") * "\n")
+            zero_state = audit.AuditState()
+            zero_state.live_metrics[:served_rmse] = 9.99     # stale value from a previous read
+            zero_state.live_metrics[:baseline_rmse] = 9.99
+            refreshed = audit.refresh_live_log_metrics_for_dashboard!(zero_state; path = zero_log)
+            @test refreshed.ok
+            @test zero_state.live_metrics[:served_n] == 0
+            @test !haskey(zero_state.live_metrics, :served_rmse)
+            @test !haskey(zero_state.live_metrics, :baseline_rmse)
+            zero_state.live_metrics[:newest_cycle_served_label] = audit.EXPECTED_SUBHOURLY
+            zero_payload = deepcopy(payload)
+            audit.audit_dashboard_payload!(zero_state, zero_payload, "test://zero-row";
+                                           now_utc = DateTime(2026, 6, 26, 7, 15, 0))
+            for name in ("dashboard API V2-row count", "dashboard API V2 RMSE",
+                         "dashboard API audit-baseline RMSE")
+                @test any(c -> c.level == :pass && c.name == name, zero_state.checks)
+                @test !any(c -> c.level == :fail && c.name == name, zero_state.checks)
+            end
+        end
+        # audit_live_log! reads the fixed LIVE_LOG_PATH, so its zero-row branch is pinned at source level.
+        @test occursin(r"if nrow\(df\) == 0\s+state\.live_metrics\[:served_n\] = 0\s+pass!\(state, \"current V2\.1 hot-log boundary\"",
+                       source)
+    end
 end
 
 end # module

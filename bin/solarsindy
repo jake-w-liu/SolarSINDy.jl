@@ -39,7 +39,9 @@
 #                                a value pointing at a missing file warns and loads no config
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Physical path (pwd -P, as deploy/install_launchd.sh does): the daemon argv and the pid_of identity
+# mark embed ROOT, so the same clone reached via a symlink must yield the same ROOT.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 # SOLARSINDY_ENV_FILE overrides the config location (tests point it at /dev/null).
 CONFIG="${SOLARSINDY_ENV_FILE:-$ROOT/solarsindy.env}"
 if [ -f "$CONFIG" ]; then
@@ -108,7 +110,14 @@ BROWSE_HOST="$HOST"
 case "$HOST" in
   0.0.0.0|::|'[::]') BROWSE_HOST="127.0.0.1" ;;
 esac
-URL="http://$BROWSE_HOST:$PORT"
+# An IPv6 literal (e.g. ::1) must be bracketed in a URL (curl/browsers reject it otherwise);
+# BROWSE_HOST itself stays unbracketed for the /dev/tcp port probe.
+URL_HOST="$BROWSE_HOST"
+case "$URL_HOST" in
+  \[*) ;;
+  *:*) URL_HOST="[$URL_HOST]" ;;
+esac
+URL="http://$URL_HOST:$PORT"
 MIN_JULIA="1.12.6"
 
 if [ -n "${JULIA:-}" ]; then
@@ -485,7 +494,7 @@ cmd_status() {
     # A CLI-started dashboard binds $PORT by construction; an installed service binds whatever its
     # plist was rendered with, which is the authority once it exists.
     if installed_port="$(installed_dashboard_port)" && [ "$installed_port" != "$PORT" ]; then
-      url="http://$BROWSE_HOST:$installed_port"
+      url="http://$URL_HOST:$installed_port"
       note "installed dashboard service binds port $installed_port; the config file says $PORT — probing the installed port"
     fi
     say "dashboard: RUNNING  [installed service] — $url"
