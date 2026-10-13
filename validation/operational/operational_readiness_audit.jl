@@ -2038,17 +2038,19 @@ function audit_live_log!(state::AuditState)
     end
 end
 
-function audit_historical_sindy_core_live_log!(state::AuditState)
-    df = read_csv_checked!(state, HISTORICAL_SINDY_CORE_LIVE_LOG_PATH,
+function audit_historical_sindy_core_live_log!(state::AuditState;
+        path::AbstractString=HISTORICAL_SINDY_CORE_LIVE_LOG_PATH,
+        manifest_path::AbstractString=HISTORICAL_SINDY_CORE_LIVE_MANIFEST_PATH)
+    df = read_csv_checked!(state, path,
                            "historical SINDy core live forecast log")
     df === nothing && return
     require_columns!(state, df, REQUIRED_LIVE_COLS,
                      "historical SINDy core live forecast log") || return
 
     versions = sort(unique(String.(collect(skipmissing(df.model_version)))))
-    if versions == ["inertial_sindy"]
+    if versions == ["sindy_core"]
         pass!(state, "historical live model boundary",
-              "all $(length(collect(skipmissing(df.model_version)))) nonmissing versioned rows are SINDy core (`operational`)")
+              "all $(length(collect(skipmissing(df.model_version)))) nonmissing versioned rows are SINDy core (`sindy_core`)")
     else
         fail!(state, "historical live model boundary",
               "unexpected historical model versions: $(join(versions, ", "))")
@@ -2062,11 +2064,11 @@ function audit_historical_sindy_core_live_log!(state::AuditState)
               "historical archive contains a inertial-SINDy served label")
     end
 
-    manifest = read_csv_checked!(state, HISTORICAL_SINDY_CORE_LIVE_MANIFEST_PATH,
+    manifest = read_csv_checked!(state, manifest_path,
                                  "historical SINDy core live manifest")
     if manifest !== nothing && nrow(manifest) == 1 &&
        all(c -> has_col(manifest, c), [:rows, :verified_rows, :sha256, :operational_version])
-        digest = bytes2hex(sha256(read(HISTORICAL_SINDY_CORE_LIVE_LOG_PATH)))
+        digest = bytes2hex(sha256(read(path)))
         verified = count(!ismissing, df.observation_dst_nt)
         ok = Int(manifest.rows[1]) == nrow(df) &&
              Int(manifest.verified_rows[1]) == verified &&

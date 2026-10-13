@@ -37,6 +37,30 @@ const AUDIT_PATH = normpath(joinpath(@__DIR__, "..", "validation", "operational"
     @test audit.SELFTEST_CHECK_COUNT[] >= audit.SELFTEST_MIN_CHECKS
     @test audit.SELFTEST_MIN_CHECKS >= 38
 
+    @testset "historical core boundary matches its preserved identity" begin
+        archive = audit.CSV.read(audit.HISTORICAL_SINDY_CORE_LIVE_LOG_PATH, DataFrame)
+        # Unversioned legacy rows are preserved; the contract classifies only
+        # the nonmissing identities, as stated by the audit's boundary message.
+        @test unique(collect(skipmissing(archive.model_version))) == ["sindy_core"]
+        @test audit.CSV.read(audit.HISTORICAL_SINDY_CORE_LIVE_MANIFEST_PATH,
+                            DataFrame).operational_version == ["sindy_core"]
+        mktempdir() do directory
+            path = joinpath(directory, "historical.csv")
+            manifest_path = joinpath(directory, "missing-manifest.csv")
+            for (version, expected_level) in (("sindy_core", :pass),
+                                              ("inertial_sindy", :fail))
+                fixture = first(archive, 2)
+                fixture.model_version .= version
+                audit.CSV.write(path, fixture)
+                state = audit.AuditState()
+                audit.audit_historical_sindy_core_live_log!(state; path, manifest_path)
+                boundary = only(filter(check -> check.name == "historical live model boundary",
+                                       state.checks))
+                @test boundary.level == expected_level
+            end
+        end
+    end
+
     @testset "external scores require completed receipt before target" begin
         # Hand-set errors 100, 3, and 4: only 3 and 4 have valid prospective receipts.
         external = DataFrame(
