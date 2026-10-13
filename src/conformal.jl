@@ -172,9 +172,10 @@ function fit_conformal(points::AbstractVector{<:Real},
         all(isfinite, (p64, o64, h64)) || throw(ArgumentError(
             "finite conformal inputs exceed the supported Float64 range",
         ))
-        # Convert before subtraction: fixed-width integer endpoints can otherwise
-        # wrap to a tiny residual and produce a dangerously narrow interval.
-        r = abs(o64 - p64)
+        # Subtract integers exactly before narrowing: converting adjacent Int64
+        # endpoints above 2^53 first can erase a real residual. The metric helper
+        # also prevents fixed-width subtraction overflow.
+        r = abs(_metric_difference(o, p))
         isfinite(r) || throw(ArgumentError(
             "conformal residual exceeds the supported Float64 range",
         ))
@@ -409,11 +410,19 @@ function init_adaptive_conformal(; target_coverage::Real=0.90, gamma::Real=0.02,
     warmup >= 0 || throw(ArgumentError("warmup must be ≥ 0"))
     window >= warmup || throw(ArgumentError("window must be ≥ warmup"))
     window_int = Int(window)
+    coverage_float = Float64(target_coverage)
+    gamma_float = Float64(gamma)
+    isfinite(coverage_float) && 0 < coverage_float < 1 || throw(ArgumentError(
+        "target_coverage must remain in (0, 1) after Float64 conversion",
+    ))
+    isfinite(gamma_float) && gamma_float > 0 || throw(ArgumentError(
+        "gamma must remain finite and positive after Float64 conversion",
+    ))
     initial_capacity = min(window_int, _DEFAULT_ACI_WINDOW)
     history = sizehint!(Float64[], initial_capacity)
     scratch = sizehint!(Float64[], initial_capacity)
-    return AdaptiveConformal(Float64(target_coverage), Float64(gamma),
-                             1.0 - Float64(target_coverage), window_int,
+    return AdaptiveConformal(coverage_float, gamma_float,
+                             1.0 - coverage_float, window_int,
                              history, scratch, Int(warmup))
 end
 
@@ -503,14 +512,15 @@ const AdaptiveConformalStep = @NamedTuple{
 }
 
 function _adaptive_conformal_step!(ac::AdaptiveConformal, point::Float64,
-                                   observed::Float64)
+                                   observed::Float64,
+                                   residual::Float64=abs(observed - point))
     level = clamp(1.0 - ac.alpha_t, 0.0, 1.0)
     hw = length(ac.history) < ac.warmup ?
          _widest_finite(ac.history) :
          _empirical_halfwidth!(ac.scratch, ac.history, level)
     lo = point - hw
     hi = point + hw
-    r = abs(observed - point)
+    r = residual
     isfinite(point) && isfinite(observed) && !isfinite(r) &&
         throw(ArgumentError("adaptive conformal residual exceeds the supported range"))
     # Gap step: a non-finite residual carries no coverage information. Report the
@@ -547,7 +557,8 @@ function adaptive_conformal_step!(ac::AdaptiveConformal, point::Real, observed::
     _validate_adaptive_conformal(ac)
     point_float = _conformal_stream_value(point, "adaptive conformal point")
     observed_float = _conformal_stream_value(observed, "adaptive conformal observation")
-    return _adaptive_conformal_step!(ac, point_float, observed_float)
+    residual = abs(_metric_difference(observed, point))
+    return _adaptive_conformal_step!(ac, point_float, observed_float, residual)
 end
 
 """
@@ -581,7 +592,8 @@ function run_adaptive_conformal(points::AbstractVector{<:Real},
         # A non-finite point/obs is a gap step (no residual pushed); it carries no
         # coverage information and must not be scored as a miss.
         gap = !(isfinite(point) && isfinite(observed))
-        s = _adaptive_conformal_step!(ac, point, observed)
+        residual = abs(_metric_difference(observations[t], points[t]))
+        s = _adaptive_conformal_step!(ac, point, observed, residual)
         lo[t] = s.lo; hi[t] = s.hi; covered[t] = s.covered; alpha[t] = s.alpha
         if !warm && !gap
             post_total += 1

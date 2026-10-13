@@ -817,6 +817,8 @@ using DataFrames
     end
 
     include("test_compat.jl")
+    include("test_conformal_precision.jl")
+    include("test_metric_precision.jl")
     include("test_ground_delay_check.jl")
     include("test_calibration_diagnosis.jl")
     include("test_ground_adaptive_calibration.jl")

@@ -22,9 +22,29 @@ function _metric_float_vectors(name::AbstractString, vectors::AbstractVector...)
     return converted
 end
 
+# Metric kernels compute paired differences/centering from the original values
+# to preserve exact integers. Validate representability without materializing
+# unused Float64 copies of every input channel.
+function _validate_float64_metric_vectors(name::AbstractString, vectors::AbstractVector...)
+    _validate_metric_vectors(name, vectors...)
+    all(vector -> all(value -> isfinite(Float64(value)), vector), vectors) ||
+        throw(ArgumentError(
+            "$name inputs must be representable as finite Float64 values",
+        ))
+    return nothing
+end
+
 _metric_difference(left::Integer, right::Integer) =
     Float64(BigInt(left) - BigInt(right))
-_metric_difference(left::Real, right::Real) = Float64(left - right)
+_metric_difference(left::Union{Float16,Float32}, right::Union{Float16,Float32}) =
+    Float64(left) - Float64(right)
+function _metric_difference(left::Real, right::Real)
+    difference = left - right
+    converted = Float64(difference)
+    isfinite(difference) && !iszero(difference) && iszero(converted) &&
+        throw(ArgumentError("paired difference underflows the supported Float64 range"))
+    return converted
+end
 
 function _metric_differences(name::AbstractString, left::AbstractVector,
                              right::AbstractVector)
@@ -87,7 +107,7 @@ end
 Root Mean Square Error.
 """
 function rmse(predicted::AbstractVector, observed::AbstractVector)
-    _metric_float_vectors("rmse", predicted, observed)
+    _validate_float64_metric_vectors("rmse", predicted, observed)
     differences = _metric_differences("rmse", predicted, observed)
     return _stable_root_mean_square(differences)
 end
@@ -99,7 +119,7 @@ Mean Absolute Error, evaluated with scaled accumulation to avoid integer and
 floating-point overflow for representable inputs.
 """
 function mae(predicted::AbstractVector, observed::AbstractVector)
-    _metric_float_vectors("mae", predicted, observed)
+    _validate_float64_metric_vectors("mae", predicted, observed)
     differences = _metric_differences("mae", predicted, observed)
     return _stable_mean_absolute(differences)
 end
@@ -112,7 +132,7 @@ input rather than letting `cor` emit a warning/`NaN` implicitly, so callers can
 filter undefined correlations explicitly.
 """
 function correlation(predicted::AbstractVector, observed::AbstractVector)
-    _metric_float_vectors("correlation", predicted, observed)
+    _validate_float64_metric_vectors("correlation", predicted, observed)
     predicted_centered = _metric_centered("correlation", predicted)
     observed_centered = _metric_centered("correlation", observed)
     predicted_scale = maximum(abs, predicted_centered)
@@ -136,7 +156,7 @@ SS > 0 means predicted is better than reference.
 """
 function skill_score(predicted::AbstractVector, observed::AbstractVector,
                      reference::AbstractVector)
-    _metric_float_vectors("skill_score", predicted, observed, reference)
+    _validate_float64_metric_vectors("skill_score", predicted, observed, reference)
     predicted_error = _metric_differences(
         "skill_score", predicted, observed,
     )
@@ -160,7 +180,7 @@ PE = 1 is perfect, PE = 0 is no better than mean, PE < 0 is worse.
 """
 function prediction_efficiency(predicted::AbstractVector,
                                observed::AbstractVector)
-    _metric_float_vectors("prediction_efficiency", predicted, observed)
+    _validate_float64_metric_vectors("prediction_efficiency", predicted, observed)
     residual = _metric_differences(
         "prediction_efficiency", predicted, observed,
     )
