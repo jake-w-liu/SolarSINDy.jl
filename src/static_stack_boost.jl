@@ -286,7 +286,11 @@ function _static_stack_boost_validate_matrix(X::AbstractMatrix,
     ))
     all(value -> value isa Real && !(value isa Bool) && isfinite(value), X) ||
         throw(ArgumentError("boost training features must be finite real values"))
-    return Matrix{Float64}(X), features
+    matrix = Matrix{Float64}(X)
+    all(isfinite, matrix) || throw(ArgumentError(
+        "boost training features must remain finite in Float64",
+    ))
+    return matrix, features
 end
 
 """
@@ -478,7 +482,11 @@ function _static_stack_boost_feature_tuple(artifact::StaticStackBoostArtifact,
         value = getfield(features, index)
         value isa Real && !(value isa Bool) && isfinite(value) ||
             throw(ArgumentError("boost prediction feature values must be finite real numbers"))
-        Float64(value)
+        converted = Float64(value)
+        isfinite(converted) || throw(ArgumentError(
+            "boost prediction features must remain finite in Float64",
+        ))
+        converted
     end
     return values
 end
@@ -504,6 +512,9 @@ function _static_stack_boost_sum(contributions::AbstractVector{Float32})
     for contribution in contributions
         total += contribution
     end
+    isfinite(total) || throw(ArgumentError(
+        "boost raw correction is outside the finite Float32 inference range",
+    ))
     return total
 end
 
