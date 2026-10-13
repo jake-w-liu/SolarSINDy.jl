@@ -105,6 +105,7 @@ end
 const _LAST_ALERT_LEVEL = Ref{Int}(-1)
 const _LAST_ALERT_STALE = Ref{Bool}(false)
 const _ALERT_STATE_LOADED = Ref{Bool}(false)
+const _ALERT_STATE_LOCK = ReentrantLock()
 
 function reset_notify!()
     _LAST_ALERT_LEVEL[] = -1
@@ -127,27 +128,34 @@ end
 # Load the persisted delivered-state into the in-memory Refs. Best-effort: a missing or corrupt
 # file leaves the baseline uninitialized so the first live evaluation re-baselines rather than
 # firing spuriously. Idempotent per process (guarded by `_ALERT_STATE_LOADED`).
-function _load_alert_state!(state_path::AbstractString)
-    _ALERT_STATE_LOADED[] = true
-    (isempty(state_path) || !isfile(state_path)) && return nothing
-    try
-        d = JSON3.read(read(state_path, String))
-        lvl = get(d, :level, nothing)
-        if lvl isa Integer
-            _LAST_ALERT_LEVEL[] = Int(lvl)
-            _LAST_ALERT_STALE[] = get(d, :stale, false) == true
+function _load_alert_state!(state_path::AbstractString; read_fn::Function=read)
+    lock(_ALERT_STATE_LOCK) do
+        _ALERT_STATE_LOADED[] && return nothing
+        if !isempty(state_path) && isfile(state_path)
+            try
+                d = JSON3.read(read_fn(state_path, String))
+                lvl = get(d, :level, nothing)
+                if lvl isa Integer
+                    _LAST_ALERT_LEVEL[] = Int(lvl)
+                    _LAST_ALERT_STALE[] = get(d, :stale, false) == true
+                end
+                # The marker is only ever raised, never cleared: this load can run after the first
+                # available status of the process has already set it in memory, and a state file written
+                # before the marker existed carries no field at all. A state file is written only after an
+                # evaluation has run, so treating that legacy absence as "data has been seen" keeps an
+                # already-running deployment from re-entering the cold-start exemption across an upgrade,
+                # while a fresh install (no state file) still baselines silently.
+                seen = get(d, :seen_data, nothing)
+                (seen === nothing || seen == true) && (_SEEN_DATA[] = true; _SEEN_DATA_PERSISTED[] = true)
+            catch e
+                e isa InterruptException && rethrow()
+                @warn "could not load persisted alert state; re-baselining" state_path
+            end
         end
-        # The marker is only ever raised, never cleared: this load can run after the first
-        # available status of the process has already set it in memory, and a state file written
-        # before the marker existed carries no field at all. A state file is written only after an
-        # evaluation has run, so treating that legacy absence as "data has been seen" keeps an
-        # already-running deployment from re-entering the cold-start exemption across an upgrade,
-        # while a fresh install (no state file) still baselines silently.
-        seen = get(d, :seen_data, nothing)
-        (seen === nothing || seen == true) && (_SEEN_DATA[] = true; _SEEN_DATA_PERSISTED[] = true)
-    catch e
-        e isa InterruptException && rethrow()
-        @warn "could not load persisted alert state; re-baselining" state_path
+        # Publish completion only after the persisted baseline and first-data marker
+        # are restored. A second request/notify task must wait through a yielding read,
+        # otherwise it can treat an existing deployment as a cold start during an outage.
+        _ALERT_STATE_LOADED[] = true
     end
     return nothing
 end
@@ -233,7 +241,7 @@ function maybe_notify!(state; url::AbstractString = get(ENV, "SWM_WEBHOOK_URL", 
                        post_fn = _default_post)
     # Lazily load persisted delivered-state the first time we run against a state file, so a
     # restart compares against the last delivered level instead of re-baselining.
-    _ALERT_STATE_LOADED[] || _load_alert_state!(state_path)
+    _load_alert_state!(state_path)
 
     cur_level = state.level
     cur_stale = hasproperty(state, :stale) && getproperty(state, :stale) == true
@@ -326,7 +334,7 @@ function notify_cycle!(log_path::AbstractString;
     # composed: the marker decides whether a cycle-less status is an outage or a cold start, so
     # loading it after the composition would re-read the first evaluation of every restart as a
     # deployment that has never served anything.
-    _ALERT_STATE_LOADED[] || _load_alert_state!(state_path)
+    _load_alert_state!(state_path)
     status = build_status(get_log(log_path))
     state = compose_alert_state(status, upstream_assessment(snapshot_fn()), dbdt_fn(),
                                 outage_state(log_path))

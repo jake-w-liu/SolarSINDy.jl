@@ -281,7 +281,7 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
         # the notification cannot disagree about whether the monitor is blind. The persisted
         # first-data marker is restored once per process for the same reason: without it a restart
         # into an outage would report the cycle-less log as a deployment that never served data.
-        _ALERT_STATE_LOADED[] || _load_alert_state!(_default_alert_state_path(log_path))
+        _load_alert_state!(_default_alert_state_path(log_path))
         outage = outage_state(log_path)
         combined = compose_alert_state(status, upstream_assessment(snap),
                                        dashboard_dbdt_nowcast(; wait_timeout=0.0), outage)

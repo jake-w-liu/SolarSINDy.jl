@@ -16,6 +16,7 @@ const APPSRC = normpath(joinpath(@__DIR__, "..", "src"))
 # auto-start the HTTP server on include.
 include(joinpath(APPSRC, "server.jl"))
 include(joinpath(@__DIR__, "test_dbdt_freshness.jl"))
+include(joinpath(@__DIR__, "test_notify_restore.jl"))
 
 usgs_metadata(station="TST", product="adjusted") =
     (intermagnet=(imo=(iaga_code=station, coordinates=[-77.0,39.0,0.0], name="Test"),
