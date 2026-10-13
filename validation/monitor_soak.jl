@@ -83,6 +83,8 @@ function _quiet(f)
     end
 end
 
+_timed_issue_batch!(configs, inputs) = @timed _issue_batch!(configs, inputs)
+
 function _log_rows(path::AbstractString)
     isfile(path) || return 0
     return max(countlines(path) - 1, 0)
@@ -93,7 +95,35 @@ function _live_heap_bytes()
     return Int(getfield(Base, :gc_live_bytes)())
 end
 
+@static if Sys.iswindows()
+    # Win32 PROCESS_MEMORY_COUNTERS: DWORD fields followed by SIZE_T fields.
+    # WorkingSetSize is the current resident footprint, not the lifetime peak.
+    struct _WindowsMemoryCounters
+        cb::UInt32
+        page_faults::UInt32
+        peak_working_set::UInt
+        working_set::UInt
+        quota_peak_paged::UInt
+        quota_paged::UInt
+        quota_peak_nonpaged::UInt
+        quota_nonpaged::UInt
+        pagefile::UInt
+        peak_pagefile::UInt
+    end
+    _current_process_handle() =
+        ccall((:GetCurrentProcess, "kernel32"), Ptr{Cvoid}, ())
+end
+
 function _rss_bytes()
+    @static if Sys.iswindows()
+        size = UInt32(sizeof(_WindowsMemoryCounters))
+        counters = Ref(_WindowsMemoryCounters(size, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        ok = ccall((:GetProcessMemoryInfo, "psapi"), Cint,
+                   (Ptr{Cvoid}, Ref{_WindowsMemoryCounters}, UInt32),
+                   _current_process_handle(), counters, size)
+        ok != 0 || error("GetProcessMemoryInfo failed during resource audit")
+        return Int(counters[].working_set)
+    end
     try
         return 1024 * parse(Int, strip(read(`ps -o rss= -p $(getpid())`, String)))
     catch
@@ -102,6 +132,15 @@ function _rss_bytes()
 end
 
 function _fd_count()
+    @static if Sys.iswindows()
+        # Windows kernel handles cover files and other owned OS resources.
+        # Keep the existing no-growth gate, using this platform's counter.
+        count = Ref{UInt32}(0)
+        ok = ccall((:GetProcessHandleCount, "kernel32"), Cint,
+                   (Ptr{Cvoid}, Ref{UInt32}), _current_process_handle(), count)
+        ok != 0 || error("GetProcessHandleCount failed during resource audit")
+        return Int(count[])
+    end
     path = isdir("/proc/$(getpid())/fd") ? "/proc/$(getpid())/fd" : "/dev/fd"
     return length(readdir(path))
 end
@@ -142,7 +181,7 @@ end
 function _run_warmup!(configs, inputs, warmup)
     _quiet() do
         for _ in 1:warmup
-            _issue_batch!(configs, inputs)
+            _timed_issue_batch!(configs, inputs)
         end
     end
     return nothing
@@ -193,21 +232,24 @@ function monitor_soak_main()
         )
 
         samples = NamedTuple[]
-        push!(samples, _resource_sample(0, log_path, 0.0, 0, 0))
-        baseline_fd = samples[1].fd_count
         elapsed = 0.0
         allocated = 0
         measured = 0
         _quiet() do
+            # Take both baseline and measured counters under the same stdout
+            # redirection. Windows owns an extra handle while devnull is open.
+            _resource_sample(0, log_path, 0.0, 0, 0)
+            push!(samples, _resource_sample(0, log_path, 0.0, 0, 0))
+            baseline_fd = samples[1].fd_count
             for batch in 1:batches
-                timing = @timed _issue_batch!(setup.configs, setup.inputs)
+                timing = _timed_issue_batch!(setup.configs, setup.inputs)
                 elapsed += timing.time
                 allocated += timing.bytes
                 measured += 1
                 if batch % sample_every == 0 || batch == batches
                     sample = _resource_sample(batch, log_path, elapsed, allocated, measured)
                     sample.fd_count <= baseline_fd || error(
-                        "file descriptors grew from $baseline_fd to $(sample.fd_count)",
+                        "owned OS resources grew from $baseline_fd to $(sample.fd_count) at batch $batch",
                     )
                     sample.log_rows <= expected_rows || error(
                         "fixed input snapshot grew the log from $expected_rows to $(sample.log_rows) rows",
@@ -235,7 +277,8 @@ function monitor_soak_main()
 
         println("monitor soak: PASS input=$(setup.source) batches=$batches warmup=$warmup sample_every=$sample_every")
         setup.fallback === nothing || println("real-input fallback: $(setup.fallback)")
-        println("batch  heap_MiB  rss_MiB  fd  rows  seconds/batch  alloc_MiB/batch")
+        resource_label = Sys.iswindows() ? "handles" : "fd"
+        println("batch  heap_MiB  rss_MiB  $resource_label  rows  seconds/batch  alloc_MiB/batch")
         for sample in samples
             @printf("%5d  %8s  %7s  %2d  %4d  %13.4f  %15.2f\n",
                     sample.batch, _fmt_mib(sample.live_heap_bytes),

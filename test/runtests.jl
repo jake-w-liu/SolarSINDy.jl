@@ -817,6 +817,7 @@ using DataFrames
     end
 
     include("test_compat.jl")
+    include("test_monitor_resources.jl")
     include("test_forecast_decay_oracle.jl")
     include("test_point_kernel_oracle.jl")
     include("test_parameter_narrowing.jl")
