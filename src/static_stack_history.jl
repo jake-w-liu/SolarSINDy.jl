@@ -347,7 +347,12 @@ function static_stack_history_memory(
         "static stack-M1 memory time constant must be positive",
     ))
     rho = exp(-1.0 / tau)
-    updated = rho * memory + (1.0 - rho) * coupling
+    gain = 1.0 - rho
+    # Subtraction near one loses the small response and eventually freezes it
+    # completely. Keep the validated ordinary-tau arithmetic, using expm1 only
+    # where this cancellation is ill-conditioned.
+    gain <= sqrt(eps(Float64)) && (gain = -expm1(-1.0 / tau))
+    updated = rho * memory + gain * coupling
     isfinite(updated) || throw(ArgumentError("static stack-M1 memory update is non-finite"))
     return updated
 end
