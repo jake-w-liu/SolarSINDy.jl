@@ -1,5 +1,5 @@
 #!/usr/bin/env julia
-# storm_monitor.jl — Real-time geomagnetic storm monitor (Operational V2.1)
+# storm_monitor.jl — Real-time geomagnetic storm monitor (Operational inertial-SINDy)
 #
 # Usage:
 #   julia --project=SolarSINDy.jl examples/storm_monitor.jl
@@ -18,7 +18,7 @@
 using SolarSINDy
 using Dates
 
-const CORE_VERSION = OPERATIONAL_V2_1_MODEL_VERSION
+const CORE_VERSION = OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION
 const CORE_ARTIFACTS = operational_core_artifacts(CORE_VERSION)
 const DATA_DIR = get_data_dir()
 const COEF_CSV  = CORE_ARTIFACTS.coefficients_csv
@@ -28,14 +28,14 @@ const DRAWS_CSV = CORE_ARTIFACTS.draws_csv
 # All three current artifacts are versioned with the package and validated as
 # one exact 20-candidate/11-active-term identity before monitoring begins.
 for f in (COEF_CSV, INCL_CSV, DRAWS_CSV)
-    isfile(f) || error("Missing Operational V2.1 artifact: $f")
+    isfile(f) || error("Missing Operational inertial-SINDy artifact: $f")
 end
 load_operational_core(CORE_VERSION)
 
 function print_banner()
     println("=" ^ 60)
     println("  SINDy Real-Time Storm Monitor")
-    println("  Equation: Operational V2.1 (20 candidates, 11 active terms)")
+    println("  Equation: Operational inertial-SINDy (20 candidates, 11 active terms)")
     println("  Ensemble: 500 coefficient sets for UQ")
     println("  Data: NOAA SWPC (DSCOVR L1)")
     println("=" ^ 60)
@@ -50,15 +50,15 @@ const ALARM_CONFIG = AlarmConfig(
 )
 
 """
-    build_v2_1_state(swd, t_tags; history_cap=2000)
+    build_inertial_sindy_state(swd, t_tags; history_cap=2000)
 
-Warm the current V2.1 forecaster over the newest strictly-hourly contiguous
+Warm the current inertial-SINDy forecaster over the newest strictly-hourly contiguous
 driver block and return `(state, last_result, last_obs_time)`. The versioned
 initializer validates and loads the canonical 20/11 point and joint-draw
 artifacts. Row `k` advances the state from
 `t[k]` to `t[k+1]`, so the transition into row `i` uses driver row `i-1`.
 """
-function build_v2_1_state(swd::SolarWindData, t_tags::AbstractVector{DateTime};
+function build_inertial_sindy_state(swd::SolarWindData, t_tags::AbstractVector{DateTime};
                           history_cap::Int=2000)
     warm_start, warm_end, anchor_idx = SolarSINDy._monitor_warmup_window(swd, t_tags)
     if anchor_idx !== nothing
@@ -96,11 +96,11 @@ function build_v2_1_state(swd::SolarWindData, t_tags::AbstractVector{DateTime};
 end
 
 """
-    run_v2_1_monitor(; poll_interval_min=5, forecast_horizon_hr=6,
+    run_inertial_sindy_monitor(; poll_interval_min=5, forecast_horizon_hr=6,
                         alarm_config=ALARM_CONFIG, log_file="storm_monitor.log",
                         display=true, max_cycles=typemax(Int))
 
-Live monitoring loop for the current V2.1 forecaster. Each new hourly bin
+Live monitoring loop for the current inertial-SINDy forecaster. Each new hourly bin
 advances exactly one hour of ODE dynamics (`step_forecast!` via the shared
 per-cycle advance), re-anchors on the most recent observed Dst*, projects the
 multi-hour forecast with ensemble prediction intervals, and checks alarms.
@@ -110,7 +110,7 @@ synchronized with the wall clock. `max_cycles` bounds the loop for verification.
 The per-cycle advance and warm-up reuse the package's tested monitor internals,
 so the direct monitor and the locked operational workflow use the same core.
 """
-function run_v2_1_monitor(; poll_interval_min::Int=5,
+function run_inertial_sindy_monitor(; poll_interval_min::Int=5,
                             forecast_horizon_hr::Int=6,
                             alarm_config::AlarmConfig=ALARM_CONFIG,
                             log_file::String="storm_monitor.log",
@@ -130,7 +130,7 @@ function run_v2_1_monitor(; poll_interval_min::Int=5,
     end
 
     swd, t_tags = SolarSINDy._fetch_with_retry(; hours=48, max_retries=3, dst=dst_feed)
-    state, last_result, last_obs_time = build_v2_1_state(swd, t_tags; history_cap=history_cap)
+    state, last_result, last_obs_time = build_inertial_sindy_state(swd, t_tags; history_cap=history_cap)
 
     last_alarm_time::Union{DateTime,SolarSINDy.AlarmCooldownState} = DateTime(1970)
     last_forecast = ForecastResult[]
@@ -208,12 +208,12 @@ function run_v2_1_monitor(; poll_interval_min::Int=5,
                 e isa InterruptException && rethrow()
                 cycle_failures += 1
                 display && println("  [WARN] Forecast cycle failed (attempt $cycle_failures): $(sprint(showerror, e))")
-                # Best-effort recovery: rebuild the V2.1 forecaster from the
+                # Best-effort recovery: rebuild the inertial-SINDy forecaster from the
                 # freshest contiguous driver block (Dst re-anchors from the feed).
                 # If re-warm also fails, stay alive and retry on the next poll.
                 try
                     state, last_result, last_obs_time =
-                        build_v2_1_state(swd_new, t_new; history_cap=history_cap)
+                        build_inertial_sindy_state(swd_new, t_new; history_cap=history_cap)
                     # Serve a real forecast after recovery, never an empty one
                     # (mirrors run_monitor's _rewarm_monitor).
                     last_forecast = forecast_ahead(state, V, Bz, By, n_val, Pdyn,
@@ -285,7 +285,7 @@ function main()
     max_cycles = let v = get(ENV, "STORM_MONITOR_MAX_CYCLES", "")
         isempty(v) ? typemax(Int) : parse(Int, v)
     end
-    run_v2_1_monitor(; alarm_config=ALARM_CONFIG, log_file="storm_monitor.log",
+    run_inertial_sindy_monitor(; alarm_config=ALARM_CONFIG, log_file="storm_monitor.log",
                      display=true, max_cycles=max_cycles)
 end
 

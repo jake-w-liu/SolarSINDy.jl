@@ -91,7 +91,7 @@ using DataFrames
         copied_names[1] = "mutated"
         @test get_term_names(lib)[1] == "1"
 
-        legacy_lib = build_solar_wind_library(include_redundant_n_v2=true)
+        legacy_lib = build_solar_wind_library(include_redundant_n_operational=true)
         @test length(legacy_lib) == 21
         @test "n*V^2" in get_term_names(legacy_lib)
 
@@ -130,8 +130,8 @@ using DataFrames
         physical["Pdyn"] = dynamic_pressure.(physical["n"], physical["V"])
         Θlegacy = evaluate_library(legacy_lib, physical)
         ip = findfirst(==("Pdyn"), get_term_names(legacy_lib))
-        inv2 = findfirst(==("n*V^2"), get_term_names(legacy_lib))
-        @test Θlegacy[:, ip] ≈ 1.6726e-6 .* Θlegacy[:, inv2]
+        inv_sq = findfirst(==("n*V^2"), get_term_names(legacy_lib))
+        @test Θlegacy[:, ip] ≈ 1.6726e-6 .* Θlegacy[:, inv_sq]
 
         # Minimal library
         mlib = build_minimal_library()
@@ -831,32 +831,32 @@ using DataFrames
     include("test_assimilation.jl")
     include("test_forecast_alarm.jl")
     include("test_prototype_refit.jl")
-    include("test_v2_1_calibration.jl")
-    include("test_v2_1_served_holdout.jl")
+    include("test_inertial_sindy_calibration.jl")
+    include("test_inertial_sindy_served_holdout.jl")
     include("test_subhourly_validation.jl")
-    include("test_v2_features_and_ensemble.jl")
-    include("test_operational_v22_history.jl")
-    include("test_v2_2_history_crossfit.jl")
-    include("test_v2_2_recoverability_probe.jl")
-    include("test_v2_2_l1_receipt_collector.jl")
-    include("test_v2_2_l1_receipt_pairing.jl")
-    include("test_v2_2_collector_launchd.jl")
-    include("test_v2_2_prospective_issue_capture.jl")
-    include("test_operational_v22.jl")
-    include("test_operational_v22_residual.jl")
-    include("test_operational_v22_boost.jl")
-    include("test_operational_v22_driver.jl")
-    include("test_v2_2_m2_omni_diagnostic.jl")
-    include("test_v2_2_m2_core_omni_diagnostic.jl")
-    include("test_v2_2_m3_omni_diagnostic.jl")
-    include("test_v2_2_m3_boost_omni_diagnostic.jl")
-    include("test_operational_v22_arrival.jl")
-    include("test_operational_v22_core_path.jl")
-    include("test_operational_v22_error_state.jl")
-    include("test_operational_v22_error_exogenous.jl")
-    include("test_operational_v22_shadow_chain.jl")
-    include("test_v2_2_served_replay.jl")
-    include("test_v2_2_crossfit.jl")
+    include("test_inertial_sindy_features_and_ensemble.jl")
+    include("test_static_stack_history.jl")
+    include("test_static_stack_history_crossfit.jl")
+    include("test_static_stack_recoverability_probe.jl")
+    include("test_l1_receipt_collector.jl")
+    include("test_l1_receipt_pairing.jl")
+    include("test_l1_collector_launchd.jl")
+    include("test_l1_prospective_issue_capture.jl")
+    include("test_static_stack.jl")
+    include("test_static_stack_residual.jl")
+    include("test_static_stack_boost.jl")
+    include("test_static_stack_driver.jl")
+    include("test_static_stack_driver_omni_diagnostic.jl")
+    include("test_static_stack_driver_core_omni_diagnostic.jl")
+    include("test_static_stack_error_omni_diagnostic.jl")
+    include("test_static_stack_error_boost_omni_diagnostic.jl")
+    include("test_static_stack_arrival.jl")
+    include("test_static_stack_core_path.jl")
+    include("test_static_stack_error_state.jl")
+    include("test_static_stack_error_exogenous.jl")
+    include("test_static_stack_shadow_chain.jl")
+    include("test_static_stack_served_replay.jl")
+    include("test_static_stack_crossfit.jl")
     include("test_data_pipeline_cleaning.jl")
     include("test_validation_paths.jl")
     include("test_canonical_provenance.jl")
@@ -868,37 +868,37 @@ using DataFrames
     include("test_coupled_discovery.jl")
     include("test_realtime_monitor.jl")
     include("test_tls_transport.jl")
-    include("test_v2_broad_replay.jl")
-    include("test_v2_gscale_replay.jl")
-    include("test_v2_1_one_hour_inertia.jl")
-    include("test_v2_1_state_inertia.jl")
+    include("test_operational_broad_replay.jl")
+    include("test_operational_gscale_replay.jl")
+    include("test_inertial_sindy_one_hour_inertia.jl")
+    include("test_inertial_sindy_state_inertia.jl")
     include("test_noaa_kp_forecast_replay.jl")
     include("test_temerin_dst_archive_replay.jl")
     include("test_external_dst_snapshot_collector.jl")
     include("test_external_dst_receipt_timing.jl")
     include("test_cli_smoke.jl")
-    include("test_operational_v23_gbm.jl")
-    include("test_v2_3_base_table.jl")
-    include("test_operational_v23_features.jl")
-    include("test_operational_v23_analog.jl")
-    include("test_v2_3_kernel.jl")
-    include("test_operational_v23_stats.jl")
-    include("test_v2_3_runners.jl")
-    include("test_v2_3_t1r.jl")
-    include("test_v2_3_select.jl")
-    include("test_v2_3_confirmatory.jl")
-    include("test_v2_4_rolling.jl")
-    include("test_v2_4_learn.jl")
-include("test_v2_4_live_calibration.jl")
-include("test_v2_4_interval_upgrade.jl")
-include("test_v2_4_point_upgrade.jl")
-include("test_v2_4_point_evaluation.jl")
-include("test_v2_4_live_claim_audit.jl")
-    include("test_operational_v22_serving.jl")
-    include("test_operational_v23_serving.jl")
-    include("test_operational_v24_serving.jl")
+    include("test_analog_gbm.jl")
+    include("test_analog_base_table.jl")
+    include("test_analog_features.jl")
+    include("test_analog.jl")
+    include("test_analog_kernel.jl")
+    include("test_analog_stats.jl")
+    include("test_analog_runners.jl")
+    include("test_analog_t1r.jl")
+    include("test_analog_select.jl")
+    include("test_analog_confirmatory.jl")
+    include("test_superlearner_rolling.jl")
+    include("test_superlearner_learn.jl")
+include("test_superlearner_live_calibration.jl")
+include("test_superlearner_interval_upgrade.jl")
+include("test_superlearner_point_upgrade.jl")
+include("test_superlearner_point_evaluation.jl")
+include("test_superlearner_live_claim_audit.jl")
+    include("test_static_stack_serving.jl")
+    include("test_analog_serving.jl")
+    include("test_superlearner_serving.jl")
     include("test_serving_identity_oracles.jl")
-    include("test_v2_readiness_selftest.jl")
+    include("test_operational_readiness_selftest.jl")
 
     # Bundled operational dashboard (app/): golden-vector forecaster<->export contract,
     # traversal guard, physical regimes. Network-free (local models + mocks).
@@ -915,7 +915,7 @@ include("test_v2_4_live_claim_audit.jl")
     include("test_live_forecast_verify.jl")
 
     # Real-data oracles that depend on locally generated, untracked artifacts (the OMNI archive, the
-    # V2.3 base table and hourly frame, the three served-identity tables) register themselves in the
+    # analog ensemble base table and hourly frame, the three served-identity tables) register themselves in the
     # ledger before deciding whether to run. A clean checkout legitimately cannot run them; what it
     # must not do is report a green suite without saying so. The ledger is printed, its shape is
     # pinned so a gate cannot be deleted unnoticed, and an environment that has the artifacts —
@@ -927,12 +927,11 @@ include("test_v2_4_live_claim_audit.jl")
         gate.report()
         registered = sort([entry.oracle for entry in gate.LEDGER])
         @test registered == sort([
-            "V2 replay driver lookups on the OMNI archive",
-            "V2.2 served-identity table",
-            "V2.2 static-stack identity on the archived base table",
-            "V2.3 self-origin analog identity on the archived hourly frame",
-            "V2.3 serving-identity table",
-            "V2.4e serving-identity table",
+            "Operational replay driver lookups on the OMNI archive",
+            "static stack served-identity table",
+            "static-stack identity on the archived base table",
+            "analog ensemble self-origin analog identity on the archived hourly frame",
+            "super-learner serving-identity table",
         ])
         @test all(!isempty(entry.artifact) for entry in gate.LEDGER)
         @test all(entry.present == ispath(entry.artifact) for entry in gate.LEDGER)

@@ -720,8 +720,8 @@ function print_status(result::ForecastResult,
     #   Label:   pos 0-9    (10 chars: "  Dst*    " or "  90% CI  ")
     #   Col 1:   pos 10-31  (22 chars for Current value)
     #   Col 2:   pos 32-57  (26 chars for Forecast value)
-    function _row(label::String, v1::String, v2::String)
-        buf = rpad(label, 10) * rpad(v1, 22) * v2
+    function _row(label::String, core::String, operational::String)
+        buf = rpad(label, 10) * rpad(core, 22) * operational
         return _boxline(rpad(buf, BOX_W))
     end
 

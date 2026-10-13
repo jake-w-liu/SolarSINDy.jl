@@ -728,9 +728,14 @@ function _future_rows_for_source(source; fetched_utc::DateTime = now(UTC),
     return staged.rows
 end
 
+
+# Buffer the bytes before parsing: a memory-mapped read pins the source file, which blocks the
+# atomic log rewrite on filesystems that lock mapped files.
+_csv_read(path::AbstractString, sink; kwargs...) = CSV.read(IOBuffer(read(path)), sink; kwargs...)
+
 function _load_external_log(path::AbstractString)
     isfile(path) || return _external_empty_log()
-    df = CSV.read(path, DataFrame; missingstring = "")
+    df = _csv_read(path, DataFrame; missingstring = "")
     for col in EXTERNAL_DST_SCHEMA[1:end-1]
         col in propertynames(df) || error("external Dst log missing column $col")
     end
@@ -929,7 +934,7 @@ function _emit_external_dst_report(
     println(io, "# Prospective external Dst forecast snapshots\n")
     println(io, "This archive retains public same-unit Dst product rows after the inferred source issue, including rows already past target when collected. Raw-response SHA-256 hashes preserve payload provenance. Eligible forecasts are scored later against the SWPC-served Kyoto Dst product within $(Float64(max_obs_gap_min)) min.\n")
     write_external_dst_metrics(io, summary)
-    println(io, "\nBoundary: collection does not backfill missing historical completion receipts. Public products may provide only sub-hour receipt-future rows rather than the full 1--6 h V2 lead set.")
+    println(io, "\nBoundary: collection does not backfill missing historical completion receipts. Public products may provide only sub-hour receipt-future rows rather than the full 1--6 h Operational lead set.")
     return nothing
 end
 
@@ -1190,7 +1195,7 @@ function _selftest_external_dst_collector()
             http_get = fake_get,
         )
         @assert result.rows_total == 4 "future-row filtering should keep 4 rows"
-        df = CSV.read(cfg.log_path, DataFrame)
+        df = _csv_read(cfg.log_path, DataFrame)
         @assert _validate_external_dst_log(df)
         @assert all(DateTime.(replace.(df.target_utc, "Z" => "")) .>
                     DateTime.(replace.(df.issue_utc, "Z" => "")))
@@ -1205,7 +1210,7 @@ function _selftest_external_dst_collector()
             http_get = fake_get,
         )
         @assert result2.rows_total == 4 "dedupe should not append duplicate source issue/target/hash rows"
-        @assert isequal(CSV.read(cfg.log_path, DataFrame), df)
+        @assert isequal(_csv_read(cfg.log_path, DataFrame), df)
         @assert score_external_dst_rows!(df, _parse_observed_dst_json(obs);
             scored_utc=DateTime(2026, 6, 27, 6)) == 3
         @assert _validate_external_dst_log(df)

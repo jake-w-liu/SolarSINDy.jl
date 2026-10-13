@@ -23,8 +23,8 @@
                             the configured port (packaged default: see deploy/solarsindy.env.example)
     __WATCHDOG_STALE_SEC__  forecast-log staleness threshold, whole seconds; two issuance cycles is
                             the packaged setting (see deploy/solarsindy.env.example)
-    __RECEIPT_LOG_DIR__     V2.2 receipt-collector console-capture directory, size-bounded by the
-                            watchdog like the monitor logs (default __CLONE_DIR__/var/v2_2_l1_logs)
+    __RECEIPT_LOG_DIR__     L1 receipt-collector console-capture directory, size-bounded by the
+                            watchdog like the monitor logs (default __CLONE_DIR__/var/l1_logs)
     EXTRA_ENV marker        the commented marker line inside EnvironmentVariables. The install
                             script replaces that line with the allow-listed solarsindy.env keys this
                             service reads (SWM_WEBHOOK_URL, SOLARSINDY_WATCHDOG_DATA_URL,
@@ -63,7 +63,7 @@
     <string>__WATCHDOG_DASH_URL__</string>
     <key>SOLARSINDY_WATCHDOG_STALE_SEC</key>
     <string>__WATCHDOG_STALE_SEC__</string>
-    <key>SOLARSINDY_V22_RECEIPT_LOG_DIR</key>
+    <key>SOLARSINDY_L1_RECEIPT_LOG_DIR</key>
     <string>__RECEIPT_LOG_DIR__</string>
     <!-- __EXTRA_ENV__ -->
   </dict>

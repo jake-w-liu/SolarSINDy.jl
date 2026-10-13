@@ -5,9 +5,9 @@ using DataFrames
 using SolarSINDy
 
 include(joinpath(@__DIR__, "live_forecast_verify.jl"))
-include(joinpath(@__DIR__, "..", "validation", "operational", "v2_4_interval_upgrade.jl"))
-include(joinpath(@__DIR__, "..", "validation", "operational", "v2_4_point_upgrade.jl"))
-include(joinpath(@__DIR__, "..", "validation", "operational", "v2_4_point_evaluation.jl"))
+include(joinpath(@__DIR__, "..", "validation", "operational", "superlearner_interval_upgrade.jl"))
+include(joinpath(@__DIR__, "..", "validation", "operational", "superlearner_point_upgrade.jl"))
+include(joinpath(@__DIR__, "..", "validation", "operational", "superlearner_point_evaluation.jl"))
 include(joinpath(@__DIR__, "..", "validation", "operational", "ground_delay_check.jl"))
 
 function main()
@@ -20,31 +20,31 @@ function main()
     @assert isapprox(first(ground.prediction),5;atol=1e-14)
     @assert GroundDelayCheck.metrics(ground,ground_model).n == 30
 
-    cal = default_operational_v2_calibration()
+    cal = default_inertial_sindy_calibration()
     latest_dst = -80.0
     drivers = (V=420.0, Bz=-10.0, By=3.0, n=6.0, Pdyn=2.0)
-    v1_pred = -95.0
+    sindy_core_pred = -95.0
     v1_ci05 = -115.0
     v1_ci95 = -75.0
     baselines = (persistence=latest_dst, burton=-90.0, burton_full=-92.0, obrien=-98.0)
 
     selected = _select_model_prediction(
-        :v2,
+        :inertial_sindy,
         cal,
         latest_dst,
         drivers,
-        v1_pred,
+        sindy_core_pred,
         v1_ci05,
         v1_ci95;
         baselines=baselines,
     )
-    @assert selected.model_version == OPERATIONAL_V2_1_MODEL_VERSION
-    @assert selected.v2_correction == 0.0
-    @assert selected.v2_pred_dst == v1_pred
-    @assert selected.v2_ci05_dst == v1_ci05
-    @assert selected.v2_ci95_dst == v1_ci95
+    @assert selected.model_version == OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION
+    @assert selected.inertial_sindy_correction == 0.0
+    @assert selected.inertial_sindy_pred_dst == sindy_core_pred
+    @assert selected.operational_ci05_dst == v1_ci05
+    @assert selected.operational_ci95_dst == v1_ci95
 
-    @assert _v2_tail_tau(-30.0) > _v2_tail_tau(5.0)
+    @assert _operational_tail_tau(-30.0) > _operational_tail_tau(5.0)
     @assert _rapid_deepening_projection_guard(-100.0, -80.0, 6, -20.0) == -125.0
     @assert _one_hour_inertia_blend(-120.0, -100.0, 1) == -115.0
     @assert _one_hour_inertia_blend(-120.0, -100.0, 2) == -120.0
@@ -68,68 +68,65 @@ function main()
     core = load_operational_core()
     @assert length(core.library) == 20
     @assert count(!=(0.0), core.coefficients) == 11
-    @assert V2_SERVED_TAIL_VERSION ==
-            "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
-    # V2.2 predecessor: the V2.1 operator followed by the fitted static regime stack.
-    @assert V2_2_SERVED_TAIL_VERSION ==
-            "v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)"
-    # The V2.3 analog candidate is a shadow forecast; its confirmatory decision was NO_GO.
-    @assert V2_3_SHADOW_TAIL_VERSION ==
-            "v2.3-shadow+sindy20x11+L1A+ADC(magnetic,K25)+T1rcal+LAT+E"
-    # Served pipeline: the V2.4e super-learner over the ten experts, the static stack among them.
-    @assert V2_4_SERVED_TAIL_VERSION ==
-            "v2.4+sindy20x11+superlearner10floor+conformal"
-    @assert v22_serving_coupling_active(2.5, -4.0) == 2.5
-    @assert v22_serving_coupling_active(2.5, 1.0) == 0.0
-    @assert v22_serving_coupling_active(0.0, -4.0) == 0.0
-    @assert v22_serving_depth_safe_center(-90.0, -120.0) == -120.0
-    @assert v22_serving_depth_safe_center(-150.0, -120.0) == -150.0
+    @assert OPERATIONAL_SERVED_TAIL_VERSION ==
+            "inertial-sindy+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+    # static stack predecessor: the inertial-SINDy operator followed by the fitted static regime stack.
+    @assert STATIC_STACK_SERVED_TAIL_VERSION ==
+            "staticstack+sindy60_fit407598+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+    # Served pipeline: the super-learner over the ten experts, the static stack among them.
+    @assert SUPERLEARNER_SERVED_TAIL_VERSION ==
+            "dst-superlearner+sindyfloor+conformal"
+    @assert static_stack_serving_coupling_active(2.5, -4.0) == 2.5
+    @assert static_stack_serving_coupling_active(2.5, 1.0) == 0.0
+    @assert static_stack_serving_coupling_active(0.0, -4.0) == 0.0
+    @assert static_stack_serving_depth_safe_center(-90.0, -120.0) == -120.0
+    @assert static_stack_serving_depth_safe_center(-150.0, -120.0) == -150.0
     # Published severity is the deepest of the served center and both continuity partners.
-    @assert v24_serving_depth_safe_center(-90.0, -120.0, -60.0) == -120.0
-    @assert v24_serving_depth_safe_center(-150.0, -120.0, -60.0) == -150.0
-    @assert v24_serving_depth_safe_center(-90.0, NaN, -95.0) == -95.0
+    @assert superlearner_serving_depth_safe_center(-90.0, -120.0, -60.0) == -120.0
+    @assert superlearner_serving_depth_safe_center(-150.0, -120.0, -60.0) == -150.0
+    @assert superlearner_serving_depth_safe_center(-90.0, NaN, -95.0) == -95.0
     # The published watch edge is the same rule on the edges themselves, so a narrower served band
     # cannot lower a watch tier a predecessor's own edge would have raised.
-    @assert v24_serving_depth_safe_center(-92.0, -100.0, -105.0) == -105.0
-    @assert v24_serving_depth_safe_center(-160.0, -100.0, -105.0) == -160.0
-    @assert v24_serving_depth_safe_center(-92.0, NaN, -105.0) == -105.0
-    # Depth bins and the deepening cell of the V2.4 guard, on their closed-from-below edges.
-    @assert v24_serving_depth_bin(-29.9) === :shallow
-    @assert v24_serving_depth_bin(-30.0) === :moderate
-    @assert v24_serving_depth_bin(-70.0) === :deep
-    @assert v24_serving_deepening(-16.0, 0.0, 0.0)
-    @assert !v24_serving_deepening(-14.0, 0.0, 0.0)
-    @assert v24_serving_deepening(-1.0, 2.0, -50.0)
-    @assert !v24_serving_deepening(-1.0, 0.0, -50.0)
-    @assert v24_serving_guard(-80.0, -60.0, -20.0, 0.0, -10.0) == -80.0
-    @assert v24_serving_guard(-80.0, -60.0, -1.0, 0.0, -10.0) == -60.0
+    @assert superlearner_serving_depth_safe_center(-92.0, -100.0, -105.0) == -105.0
+    @assert superlearner_serving_depth_safe_center(-160.0, -100.0, -105.0) == -160.0
+    @assert superlearner_serving_depth_safe_center(-92.0, NaN, -105.0) == -105.0
+    # Depth bins and the deepening cell of the super-learner guard, on their closed-from-below edges.
+    @assert superlearner_serving_depth_bin(-29.9) === :shallow
+    @assert superlearner_serving_depth_bin(-30.0) === :moderate
+    @assert superlearner_serving_depth_bin(-70.0) === :deep
+    @assert superlearner_serving_deepening(-16.0, 0.0, 0.0)
+    @assert !superlearner_serving_deepening(-14.0, 0.0, 0.0)
+    @assert superlearner_serving_deepening(-1.0, 2.0, -50.0)
+    @assert !superlearner_serving_deepening(-1.0, 0.0, -50.0)
+    @assert superlearner_serving_guard(-80.0, -60.0, -20.0, 0.0, -10.0) == -80.0
+    @assert superlearner_serving_guard(-80.0, -60.0, -1.0, 0.0, -10.0) == -60.0
 
-    serve_deployed_v24_row()
+    serve_deployed_superlearner_row()
 
     # The development-only interval layer keeps the point at zero. Hand values:
     # median(2,4)=3; static half-widths 2/4; the standardized upper score is 2.
-    translated = V24IntervalUpgrade.candidate_interval(
+    translated = SuperlearnerIntervalUpgrade.candidate_interval(
         "L24", 0.0, -2.0, 4.0, [2.0, 4.0], Float64[]; warmup=2)
-    standardized = V24IntervalUpgrade.candidate_interval(
+    standardized = SuperlearnerIntervalUpgrade.candidate_interval(
         "S48", 0.0, -2.0, 4.0, [2.0, 4.0], [0.5, 2.0]; warmup=2)
     @assert (translated.lo, translated.hi) == (0.5, 8.0)
     @assert (standardized.lo, standardized.hi) == (-1.0, 11.0)
 
     correction_history = [fill(1.0,29);31.0]
-    mean_point = V24PointUpgrade.corrected_point("Mean24",-10,-12,-6,1,correction_history)
-    median_point = V24PointUpgrade.corrected_point("Median24",-10,-12,-6,1,correction_history)
+    mean_point = SuperlearnerPointUpgrade.corrected_point("Mean24",-10,-12,-6,1,correction_history)
+    median_point = SuperlearnerPointUpgrade.corrected_point("Median24",-10,-12,-6,1,correction_history)
     @assert (mean_point.point,mean_point.lower,mean_point.upper) == (-7.75,-10.25,-2.75)
     @assert (median_point.point,median_point.lower,median_point.upper) == (-9.0,-11.5,-4.0)
-    names=collect(V24PointUpgrade.POINT_CANDIDATES)
+    names=collect(SuperlearnerPointUpgrade.POINT_CANDIDATES)
     gates=DataFrame(candidate=names,condition=fill("worked_example",6),dataset=fill("toy",6),
         delay_hours=zeros(Int,6),cell=fill("all",6),model_step_hours=zeros(Int,6),pass=falses(6))
     ranks=DataFrame(candidate=names,worst_step_gain_nt=ones(6),live_rmse_nt=ones(6))
-    @assert V24PointEvaluation.choose_candidate(gates,ranks)===nothing
+    @assert SuperlearnerPointEvaluation.choose_candidate(gates,ranks)===nothing
     gates.pass.=true
     gates.pass[1]=false
-    @assert V24PointEvaluation.choose_candidate(gates,ranks)=="Mean48"
+    @assert SuperlearnerPointEvaluation.choose_candidate(gates,ranks)=="Mean48"
 
-    println("SolarSINDy experiments: V2.4e serving and predecessor smoke PASS")
+    println("SolarSINDy experiments: super-learner serving and predecessor smoke PASS")
     println("Interval-development arithmetic smoke PASS; served policy unchanged")
     println("Point-development arithmetic smoke PASS; served policy unchanged")
     println("Point-development no-winner and all-gate selection smoke PASS")
@@ -137,23 +134,23 @@ function main()
 end
 
 """
-    serve_deployed_v24_row()
+    serve_deployed_superlearner_row()
 
-Load the deployed V2.4e bundle and serve one row through the operator that publishes the forecast.
+Load the deployed super-learner bundle and serve one row through the operator that publishes the forecast.
 
-The rest of this smoke exercises the V2.1 tail and the serving helpers in isolation; without this
+The rest of this smoke exercises the inertial-SINDy tail and the serving helpers in isolation; without this
 step nothing here touches the artifact that actually produces the published center, and the file
 could not be cited as evidence for it. The row's center is recomputed from the resolved cell's own
 weights and its band from the bundle's own conformal stratum, so the check is an independent
 combination rather than a repetition of the operator's output.
 """
-function serve_deployed_v24_row()
-    dir = _v2_4_deploy_dir()
-    isdir(dir) || error("deployed V2.4e bundle absent at $dir")
-    artifacts = load_v24_serving_artifacts(dir)
-    @assert artifacts.identity == V2_4_SERVED_TAIL_VERSION
-    @assert artifacts.identity == V24_SERVED_IDENTITY
-    @assert artifacts.served_variant == V24_SERVED_VARIANT
+function serve_deployed_superlearner_row()
+    dir = _superlearner_deploy_dir()
+    isdir(dir) || error("deployed super-learner bundle absent at $dir")
+    artifacts = load_superlearner_serving_artifacts(dir)
+    @assert artifacts.identity == SUPERLEARNER_SERVED_TAIL_VERSION
+    @assert artifacts.identity == SUPERLEARNER_SERVED_IDENTITY
+    @assert artifacts.served_variant == SUPERLEARNER_SERVED_VARIANT
     @assert !artifacts.guard_applied
 
     # A deep, actively deepening state, so the row resolves a storm cell rather than the pooled one.
@@ -161,33 +158,33 @@ function serve_deployed_v24_row()
     latest_dst = -120.0
     rate = -25.0
     vbsouth = 3.0
-    experts = NamedTuple{V24_SERVING_EXPERTS}((
+    experts = NamedTuple{SUPERLEARNER_SERVING_EXPERTS}((
         -128.0, -124.0, -131.0, latest_dst, -119.0, -121.5, -117.0, -134.0, -95.0, -126.0,
     ))
-    row = v24_serving_center(artifacts; model_steps=step, latest_dst=latest_dst,
+    row = superlearner_serving_center(artifacts; model_steps=step, latest_dst=latest_dst,
                              dst_delta_1h_nt=rate, vbsouth_mvm=vbsouth, experts=experts)
 
-    resolved = v24_serving_cell(artifacts, step, row.cell_regime, row.cell_depth)
+    resolved = superlearner_serving_cell(artifacts, step, row.cell_regime, row.cell_depth)
     expected_center = sum(resolved.cell.weights[j] * values(experts)[j]
-                          for j in 1:V24_SERVING_EXPERT_COUNT)
+                          for j in 1:SUPERLEARNER_SERVING_EXPERT_COUNT)
     @assert isapprox(row.l1_center, expected_center; atol=1e-12)
     @assert !row.guard_applied
     @assert !row.projection_applied
     @assert row.center == row.l1_center
-    @assert row.depth_bin === v24_serving_depth_bin(latest_dst)
+    @assert row.depth_bin === superlearner_serving_depth_bin(latest_dst)
     @assert row.deepening_cell
     # A deep but flat, uncoupled state is not a deepening cell. This distinguishes
     # the observed Dst from its hourly rate in the label's argument mapping.
-    flat = v24_serving_center(artifacts; model_steps=step, latest_dst=latest_dst,
+    flat = superlearner_serving_center(artifacts; model_steps=step, latest_dst=latest_dst,
                               dst_delta_1h_nt=0.0, vbsouth_mvm=0.0, experts=experts)
     @assert !flat.deepening_cell
     half = artifacts.conformal[(step, row.cell_depth)].half_width_nt
     @assert row.half_width_nt == half
     @assert isapprox(row.ci05_nt, row.center - half; atol=1e-12)
     @assert isapprox(row.ci95_nt, row.center + half; atol=1e-12)
-    @assert row.sindy_family_mass >= V24_SERVING_SINDY_FLOOR - 1e-9
+    @assert row.sindy_family_mass >= SUPERLEARNER_SERVING_SINDY_FLOOR - 1e-9
 
-    println("Deployed V2.4e operator ($(artifacts.identity)) served one row from $(dir): " *
+    println("Deployed super-learner operator ($(artifacts.identity)) served one row from $(dir): " *
             "cell $(row.regime_cell), center $(round(row.center; digits=3)) nT, " *
             "band ±$(round(half; digits=3)) nT")
     return true

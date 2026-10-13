@@ -12,7 +12,7 @@ include(joinpath(
 @testset "Subhourly target-pressure conversion" begin
     lib, ξ, _ = _shadow_library()
     ξ .= 0.0
-    cal = default_operational_v2_calibration()
+    cal = default_inertial_sindy_calibration()
     issue = DateTime(2024, 5, 10, 18)
     issue_pdyn = dynamic_pressure(5.0, 400.0)
     issue_drv = (V=400.0, Bz=-5.0, By=1.0, n=5.0, Pdyn=issue_pdyn)
@@ -66,14 +66,14 @@ include(joinpath(
 end
 
 # V10-01 regression: the lineage replays must label the anchor Dst rate with the TRUE 1 h delta
-# Dst(it) - Dst(it-1h) from the Dst series (as ekf_storm/v2/lookahead/improved replays do), never the
+# Dst(it) - Dst(it-1h) from the Dst series (as ekf_storm/operational/lookahead/improved replays do), never the
 # delta to the previous *processed* issue (which reads a multi-hour gap as nT/h and makes the first
 # issue of every storm NaN). The storm loops need the OMNI HRO archive, which is not shipped, so this
 # pins the loop source; a real-OMNI behavioural check of the envelope loop is kept in deep_debug/FIX_K.md.
 @testset "Lineage replays use the true 1 h Dst rate (V10-01)" begin
     opdir = joinpath(@__DIR__, "..", "validation", "operational")
-    for (file, fname) in (("v2_envelope_replay.jl", "replay_env_storm"),
-                          ("v2_subhourly_A_replay.jl", "replay_subA_storm"),
+    for (file, fname) in (("operational_envelope_replay.jl", "replay_env_storm"),
+                          ("operational_subhourly_A_replay.jl", "replay_subA_storm"),
                           ("validate_ballistic_subhourly.jl", "replay_ballistic_storm"))
         src = read(joinpath(opdir, file), String)
         start = findfirst("function $fname(", src)

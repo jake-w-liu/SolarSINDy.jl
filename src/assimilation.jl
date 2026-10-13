@@ -20,14 +20,14 @@
 #
 # OPERATIONAL STATUS: retired from the live forecast path. The EKF predict/update math
 # remains useful research infrastructure, but both deployment candidates failed the later
-# promotion gate recorded in docs/src/ekf-v3-decision.md:
-#   * decay-only constrained EKF: no lead/regime beat the stronger of {v2, persistence}
+# promotion gate recorded in docs/src/ekf-overlay-decision.md:
+#   * decay-only constrained EKF: no lead/regime beat the stronger of {operational, persistence}
 #     with a positive 95% CI on the causal G4/G5 storm replay;
 #   * injection-adaptive EKF: worse than decay-only and robustly not promotable across
 #     the tested injection-walk variance sweep.
 # Keep this module for reproducible negative evidence and future assimilation experiments,
-# but do not wire EKF output into dashboard, daemon, alerting, or V2 forecast columns
-# without a new promotion report that passes the V2 readiness gate.
+# but do not wire EKF output into dashboard, daemon, alerting, or Operational forecast columns
+# without a new promotion report that passes the Operational readiness gate.
 
 """
     AssimilationFilter

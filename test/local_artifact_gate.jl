@@ -2,7 +2,7 @@
 Ledger of oracles that depend on a locally generated artifact.
 
 Several of this package's strongest oracles read artifacts that are produced by the offline
-validation scripts and are deliberately not tracked: the OMNI archive, the 400 MB V2.3 base table and
+validation scripts and are deliberately not tracked: the OMNI archive, the 400 MB analog ensemble base table and
 hourly frame, and the three served-identity tables. A clean checkout does not have them, so those
 oracles cannot run there — and an oracle that silently disappears is worse than one that is absent,
 because the suite still reports success.

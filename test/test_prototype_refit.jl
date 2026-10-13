@@ -3,40 +3,40 @@ using DataFrames
 using Dates
 using Statistics
 
-@testset "Operational V2.1 artifact boundary" begin
+@testset "Operational inertial-SINDy artifact boundary" begin
     data_dir = get_data_dir()
 
     @testset "current and historical identities are explicit" begin
-        @test canonical_operational_version() == "v2.1"
-        @test canonical_operational_version(:v2) == "v2.1"
-        @test canonical_operational_version("v2_1") == "v2.1"
-        @test canonical_operational_version(:v2_0) == "v2.0"
+        @test canonical_operational_version() == "inertial_sindy"
+        @test canonical_operational_version(:inertial_sindy) == "inertial_sindy"
+        @test canonical_operational_version("inertial_sindy") == "inertial_sindy"
+        @test canonical_operational_version(:sindy_core) == "sindy_core"
         @test_throws ArgumentError canonical_operational_version(:legacy)
         @test_throws ArgumentError canonical_operational_version("v3")
 
         current = operational_core_artifacts()
-        alias = operational_core_artifacts(:v2)
-        historical = operational_core_artifacts(:v2_0)
+        alias = operational_core_artifacts(:inertial_sindy)
+        historical = operational_core_artifacts(:sindy_core)
         @test current == alias
-        @test current.version == "v2.1"
+        @test current.version == "inertial_sindy"
         @test current.candidate_count == 20
         @test current.active_count == 11
         @test dirname(current.coefficients_csv) == normpath(data_dir)
-        @test historical.version == "v2.0"
+        @test historical.version == "sindy_core"
         @test historical.candidate_count == 21
         @test historical.active_count == 10
         @test dirname(historical.coefficients_csv) ==
-              normpath(joinpath(data_dir, "historical", "v2_0"))
+              normpath(joinpath(data_dir, "historical", "sindy_core"))
 
         @test !isfile(joinpath(data_dir, "real_sindy_discovery_coefficients_refit.csv"))
         @test !isfile(joinpath(data_dir, "real_ensemble_inclusion_refit.csv"))
         @test !isfile(joinpath(data_dir, "real_sindy_ensemble_draws_refit.csv"))
     end
 
-    @testset "validated V2.1 is exactly 20 candidates and 11 active terms" begin
+    @testset "validated inertial-SINDy is exactly 20 candidates and 11 active terms" begin
         core = load_operational_core()
         terms = get_term_names(core.library)
-        @test core.artifacts.version == "v2.1"
+        @test core.artifacts.version == "inertial_sindy"
         @test length(terms) == 20
         @test !("n*V^2" in terms)
         @test count(!=(0.0), core.coefficients) == 11
@@ -75,8 +75,8 @@ using Statistics
         @test !("n*V^2" in string.(stability.term))
     end
 
-    @testset "V2.0 is preserved only through its explicit historical request" begin
-        old = load_operational_core(:v2_0)
+    @testset "SINDy core is preserved only through its explicit historical request" begin
+        old = load_operational_core(:sindy_core)
         terms = get_term_names(old.library)
         @test length(terms) == 21
         @test "n*V^2" in terms
@@ -85,11 +85,11 @@ using Statistics
         @test old.coefficients[nvv] == -1.4748104360738998e-6
 
         current_cal = operational_calibration_artifacts()
-        old_cal = operational_calibration_artifacts(:v2_0)
+        old_cal = operational_calibration_artifacts(:sindy_core)
         @test dirname(current_cal.point_csv) ==
               normpath(joinpath(@__DIR__, "..", "deploy"))
         @test dirname(old_cal.point_csv) ==
-              normpath(joinpath(@__DIR__, "..", "deploy", "historical", "v2_0"))
+              normpath(joinpath(@__DIR__, "..", "deploy", "historical", "sindy_core"))
         @test isfile(old_cal.point_csv)
         @test isfile(old_cal.conformal_csv)
     end
@@ -142,9 +142,9 @@ using Statistics
     end
 
     @testset "direct monitor uses canonical artifacts" begin
-        probe = Module(:StormMonitorV21Probe)
+        probe = Module(:StormMonitorInertialProbe)
         Base.include(probe, joinpath(@__DIR__, "..", "examples", "storm_monitor.jl"))
-        @test probe.CORE_VERSION == "v2.1"
+        @test probe.CORE_VERSION == "inertial_sindy"
         @test probe.COEF_CSV == operational_core_artifacts().coefficients_csv
         @test probe.INCL_CSV == operational_core_artifacts().ensemble_csv
         @test probe.DRAWS_CSV == operational_core_artifacts().draws_csv

@@ -7,7 +7,7 @@ forecast **with its empirically evaluated 90% target band**, a **rolling forecas
 statement, the scored track record, and the Sun → grid warning chain.
 
 This dashboard ships **as part of [`SolarSINDy.jl`](../)** and presents the package's effective
-served forecast. Normal cycles use Operational V2.4e; any fallback to static V2.2 or the V2.1
+served forecast. Normal cycles use Operational super-learner; any fallback to static stack or the inertial-SINDy
 predecessor is named explicitly from the row-level served identity. A Julia REST backend (no web
 framework, only `HTTP.jl`) serves a Plotly UI from one origin with no build step.
 
@@ -100,10 +100,10 @@ The integrity rules of this project carry into the UI:
   for a *new* disturbance is the L1 advection time (~30–60 min). Multi-day
   confident-severity lead needs CME models not yet in this system.
 - **Live evaluation is computed from the log.** Coverage and RMSE are recomputed from the
-  scored rows every load. The matched RMSE table includes the effective served product, the V2.1
-  frozen-tail ablation, SINDy v1, persistence, Burton, Burton full, and O'Brien--McPherron on
+  scored rows every load. The matched RMSE table includes the effective served product, the inertial-SINDy
+  frozen-tail ablation, SINDy core, persistence, Burton, Burton full, and O'Brien--McPherron on
   exactly the same observed targets. Counts and scores are also separated by exact served label,
-  so earlier V2.1/V2.2 rows are not attributed to V2.4e. No best method is highlighted before 48
+  so earlier inertial-SINDy/static stack rows are not attributed to super-learner. No best method is highlighted before 48
   common rows mature, and the storm-row count remains visible so quiet-only evidence cannot be
   mistaken for storm skill.
 
@@ -126,11 +126,11 @@ These thresholds follow the classifications used by
 
 ## Data & provenance
 
-- **Dst forecast**: **Operational V2.4e**, a nonnegative ten-expert super learner with a
+- **Dst forecast**: **Operational super-learner**, a nonnegative ten-expert super learner with a
   SINDy-family weight floor and depth-stratified split-conformal target intervals. Its inputs
-  include two V2.1 predecessor forms, a causal analog forecast, static V2.2, persistence, three
-  physical baselines, direct gradient boosting, and climatological relaxation. Static V2.2 and
-  V2.1 remain explicit fail-closed fallbacks; the V2.1 frozen-tail center remains a same-row
+  include two inertial-SINDy predecessor forms, a causal analog forecast, static stack, persistence, three
+  physical baselines, direct gradient boosting, and climatological relaxation. Static stack and
+  inertial-SINDy remain explicit fail-closed fallbacks; the inertial-SINDy frozen-tail center remains a same-row
   ablation rather than the current served product.
 - **Solar wind (L1)**: NOAA SWPC real-time products (`rtsw_wind_1m`, `rtsw_mag_1m`) for live
   issuance; the NASA OMNI archive (CDAWeb) is used for offline calibration and historical replay.

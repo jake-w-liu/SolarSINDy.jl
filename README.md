@@ -7,13 +7,13 @@ operational monitor and web dashboard. It has two layers:
    compact solar-wind–magnetosphere coupling equation for Dst (20 candidate terms,
    11 active), alongside classical baselines (Burton, Burton-full,
    O'Brien–McPherron).
-2. **Operational forecasting (V2.4e)** — a nonnegative super learner combines ten
+2. **Operational forecasting (super-learner)** — a nonnegative super learner combines ten
    causal experts with weights fitted per model step, issue-time regime, and
    ring-current depth, plus depth-stratified split-conformal intervals. Served
    identity:
 
    ```text
-   v2.4+sindy20x11+superlearner10floor+conformal
+   dst-superlearner+sindyfloor+conformal
    ```
 
 ## Requirements
@@ -41,45 +41,46 @@ watchdog; systemd templates in [`deploy/`](deploy/)).
 
 ## The served product
 
-**Experts.** The ten inputs are: the V2.1 operator, the frozen-tail V2.1 form,
+**Experts.** The ten inputs are: the inertial-SINDy operator, the frozen-tail inertial-SINDy form,
 an analog driver-continuation expert with refit ridge correction, persistence,
 Burton, Burton-full, O'Brien–McPherron, a direct increment-GBM, climatology, and
-the static V2.2 regime stack. A 0.60 floor on the four SINDy-lineage experts
+the static stack regime stack. A 0.60 floor on the four SINDy-lineage experts
 applies per cell; because the static stack is itself a six-expert mixture, that
 constraint is an expert taxonomy, not a lower bound on sparse-equation
 contribution.
 
-**Fallback chain (fail-closed):** V2.4e → static V2.2 stack → V2.1 operator.
+**Fallback chain (fail-closed):** super-learner → static stack → inertial-SINDy operator.
 Every issued row records which stage served it (`model_version`), the chosen
 cell, the bundle digest, and the partner centers used for alerting.
 
 **Alerting is separate from the point forecast.** The published severity is the
-*deepest* of the served center, the static-stack center, and the V2.1 center, so
+*deepest* of the served center, the static-stack center, and the inertial-SINDy center, so
 a blended forecast can never downgrade a warning a predecessor would have
 raised.
 
-**Bundle.** Served artifacts live in `deploy/v2_4/` (stack weights, boosted
+**Bundle.** Served artifacts live in `deploy/dst_superlearner/` (stack weights, boosted
 models, analog archive, refit correction, climatology timescale, conformal
 half-widths, guard record, SHA-256 manifest) and are rebuilt by
-`validation/operational/v2_4_build_deploy.jl`. Every file is digest-verified on
+`validation/operational/superlearner_build_deploy.jl`. Every file is digest-verified on
 load; a bundle that fails any check does not serve.
 
-**Shadow product.** The V2.3 analog-continuation model is recorded for
-monitoring only — its confirmatory scoring returned `NO_GO`, so it never reaches
-the served center or alerts. It ships in `deploy/v2_3_shadow/`.
+**Analog machinery.** The analog-continuation ensemble is not a served product of its
+own — its confirmatory scoring returned `NO_GO` as a standalone forecast — but the
+same kNN driver-continuation machinery is one of the ten experts the super-learner
+combines, so its archive, feature and correction code ship inside the
+`deploy/dst_superlearner/` bundle.
 
-**Identity oracles** reproduce the served, stack, and shadow centers offline:
+**Identity oracles** reproduce the served and static-stack centers offline:
 
 ```bash
-julia --project=. validation/operational/v2_4_serving_identity.jl
-julia --project=. validation/operational/v2_2_served_identity.jl
-julia --project=. validation/operational/v2_3_serving_identity.jl
+julia --project=. validation/operational/superlearner_serving_identity.jl
+julia --project=. validation/operational/static_stack_served_identity.jl
 ```
 
 **Readiness audit** (while services run):
 
 ```bash
-julia --project=. validation/operational/v2_readiness_audit.jl \
+julia --project=. validation/operational/operational_readiness_audit.jl \
   --write-report --require-api --require-fresh
 ```
 
@@ -142,8 +143,8 @@ Calibration example:
 cal = fit_conformal(points, observations, horizons, latest_dsts; coverage=0.90)
 lo, hi = conformal_interval(cal, point_forecast, horizon, latest_dst)
 
-v2cal = fit_operational_v2_calibration(replay_df)          # β·z fit, causal
-out = operational_v2_predict(v2cal, v1_point, v1_ci05, v1_ci95, features)
+calop = fit_inertial_sindy_calibration(replay_df)          # β·z fit, causal
+out = operational_inertial_sindy_predict(calop, core_point, core_ci05, core_ci95, features)
 ```
 
 ## Data
@@ -151,9 +152,9 @@ out = operational_v2_predict(v2cal, v1_point, v1_ci05, v1_ci95, features)
 - Pre-computed SINDy coefficients and validation data ship in `data/` (tracked).
 - The large NASA OMNI2 hourly archive is **not** committed; fetch and prepare it
   with `prepare_omni_data()` — downloads, parses, and cleans in one call.
-- The historical 21/10 V2.0 core is kept under `data/historical/v2_0/` and
-  `deploy/historical/v2_0/` for provenance comparisons only; the `v2` API alias
-  resolves to V2.1, so loading V2.0 requires an explicit version.
+- The historical 21/10 SINDy core is kept under `data/historical/sindy_core/` and
+  `deploy/historical/sindy_core/` for provenance comparisons only; the `operational` API alias
+  resolves to inertial-SINDy, so loading SINDy core requires an explicit version.
 
 ## Development
 

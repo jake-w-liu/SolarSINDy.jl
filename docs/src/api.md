@@ -3,9 +3,9 @@
 Discovery, data preparation, baselines, metrics and utilities: the layer the forecasts are built
 from. Forecast issuance, alarms, intervals and assimilation are documented in
 [forecasting and alarms](forecast-api.md). The served operational path is documented in the
-[operational API](operational-api.md), the V2.2 research chain in the
-[V2.2 research chain](operational-v22-research-api.md), and the V2.3 study machinery in the
-[V2.3 study API](operational-v23-api.md).
+[operational API](operational-api.md), the static stack research chain in the
+[static stack research chain](static-stack-research-api.md), and the analog ensemble study machinery in the
+[analog ensemble study API](analog-api.md).
 
 Each section renders every exported binding of the source file it names, so a new export appears here
 without an edit and cannot go missing from the manual.

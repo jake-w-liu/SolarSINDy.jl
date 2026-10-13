@@ -38,75 +38,75 @@ end
 # (-30..-50 nT). Sources recorded in app/README.md. Dst is in nT; more negative = stronger.
 const THREAT_LABELS = ("Quiet", "Minor storm", "Moderate storm", "Intense storm", "Extreme storm")
 const THREAT_BANDS_NT = (-30.0, -50.0, -100.0, -200.0)   # upper edge of levels 1..4
-const CURRENT_V2_MODEL_VERSION = "v2.1"
-# Served pipeline: the V2.4e ten-expert super-learner with the SINDy-family mass floor, which counts
-# the fixed static V2.2 stack among the family and takes it as an expert. The two earlier labels remain
+const CURRENT_OPERATIONAL_MODEL_VERSION = "inertial_sindy"
+# Served pipeline: the super-learner ten-expert super-learner with the SINDy-family mass floor, which counts
+# the fixed static stack among the family and takes it as an expert. The two earlier labels remain
 # acceptable
-# because the served stage falls back through them and says so per row: a cycle whose V2.4 stage could
-# not act is served by the static stack, and a cycle that also lost the stack is served by the V2.1
+# because the served stage falls back through them and says so per row: a cycle whose super-learner stage could
+# not act is served by the static stack, and a cycle that also lost the stack is served by the inertial-SINDy
 # operator. Refusing those labels would blank the dashboard during a disclosed degradation instead of
 # showing the forecast that was actually issued.
-const CURRENT_V2_SERVED_MODEL_VERSION =
-    "v2.4+sindy20x11+superlearner10floor+conformal"
-const STACK_V2_SERVED_MODEL_VERSION =
-    "v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)"
-const PREVIOUS_V2_SERVED_MODEL_VERSION =
-    "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+const CURRENT_OPERATIONAL_SERVED_MODEL_VERSION =
+    "dst-superlearner+sindyfloor+conformal"
+const STACK_OPERATIONAL_SERVED_MODEL_VERSION =
+    "staticstack+sindy60_fit407598+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+const PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION =
+    "inertial-sindy+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
 # Ordered strongest to weakest: a cycle whose horizons were served by different stages is published
 # under the weakest label any of its rows carries, which is the stage that actually produced it.
-const ACCEPTED_V2_SERVED_MODEL_VERSIONS =
-    (CURRENT_V2_SERVED_MODEL_VERSION, STACK_V2_SERVED_MODEL_VERSION,
-     PREVIOUS_V2_SERVED_MODEL_VERSION)
-# The V2.3 analog candidate is logged as a shadow forecast: its confirmatory scoring returned NO_GO,
-# so it never reaches the served center, the threat level or an alert.
-const V2_3_SHADOW_MODEL_VERSION =
-    "v2.3-shadow+sindy20x11+L1A+ADC(magnetic,K25)+T1rcal+LAT+E"
-const V2_4_CALIBRATION_SHADOW_MODEL_VERSION =
-    "v2.4e-cal-shadow-A3+median24+width1h1.50+widthOther1.20+warm30"
-const V2_4_CALIBRATION_SHADOW_CONFIG_SHA256 =
+const ACCEPTED_OPERATIONAL_SERVED_MODEL_VERSIONS =
+    (CURRENT_OPERATIONAL_SERVED_MODEL_VERSION, STACK_OPERATIONAL_SERVED_MODEL_VERSION,
+     PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION)
+const SUPERLEARNER_CALIBRATION_SHADOW_MODEL_VERSION =
+    "superlearner_e-cal-shadow-A3+median24+width1h1.50+widthOther1.20+warm30"
+const SUPERLEARNER_CALIBRATION_SHADOW_CONFIG_SHA256 =
     "31d67e5077ae6fe69cee133fa07dceec3aa639903a17861d179d3877ed0c21af"
-const V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256 =
+const SUPERLEARNER_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256 =
     "057aec0df488314cd682e212e9ba64233e2674a7c641d68b72aa729982093ede"
-const V2_4_CALIBRATION_SHADOW_SUPPORTED_STEPS = (1, 2, 3, 4, 6, 7)
+const SUPERLEARNER_CALIBRATION_SHADOW_SUPPORTED_STEPS = (1, 2, 3, 4, 6, 7)
 const LIVE_SKILL_MIN_VERIFIED = 48
 
-# Reader-facing product name of a served-pipeline label. The selected V2.4e variant keeps its suffix;
+# Reader-facing product name of a served-pipeline label. The selected super-learner variant keeps its suffix;
 # fallback labels use their leading version token, so the UI still names the stage the log recorded.
 function served_product_name(label)
     label isa AbstractString || return "unknown"
-    label == CURRENT_V2_SERVED_MODEL_VERSION && return "V2.4e"
+    label == CURRENT_OPERATIONAL_SERVED_MODEL_VERSION && return "super-learner"
     token = first(split(String(label), "+"))
     isempty(token) && return "unknown"
-    return startswith(token, "v") ? uppercase(token) : token
+    token == "staticstack" && return "static stack"
+    token in ("inertial_sindy", "inertial-sindy") && return "inertial-SINDy"
+    token == "sindy_core" && return "SINDy core"
+    token == "analog" && return "analog ensemble"
+    return token
 end
 
 # Reader-facing driver-assumption sentence of a served row. The log records a machine token per row,
-# and a cycle whose stack stage could not act records the V2.1 token; reading the row is what keeps a
+# and a cycle whose stack stage could not act records the inertial-SINDy token; reading the row is what keeps a
 # disclosed degradation from being described as the full stack pipeline.
-const _V2_4_DRIVER_TOKEN =
+const _SUPERLEARNER_DRIVER_TOKEN =
     "ballistically_propagated_l1_then_ten_expert_nnls_superlearner_with_sindy_family_floor_over_" *
     "served_frozen_analog_and_the_static_regime_stack_then_depth_stratified_conformal_interval"
-const _V2_2_DRIVER_TOKEN =
+const _STATIC_STACK_DRIVER_TOKEN =
     "ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_" *
     "inertia_blend_then_state_inertia_then_extreme_inertia_guard_then_static_regime_stack"
-const _V2_1_DRIVER_TOKEN =
+const _INERTIAL_SINDY_DRIVER_TOKEN =
     "ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_" *
     "inertia_blend_then_state_inertia_then_extreme_inertia_guard"
-const _V2_1_DRIVER_SENTENCE =
+const _INERTIAL_SINDY_DRIVER_SENTENCE =
     "Ballistically propagated L1 forcing, then regime-aware relaxation beyond the measured L1 " *
     "window, followed by a causal rate projection, validation-selected one-hour and " *
     "state-conditioned inertia blends, and an extreme-Dst inertia guard"
-const _V2_2_DRIVER_SENTENCE =
-    _V2_1_DRIVER_SENTENCE * ", and a fitted static regime stack over the six point components"
-const _V2_4_DRIVER_SENTENCE =
+const _STATIC_STACK_DRIVER_SENTENCE =
+    _INERTIAL_SINDY_DRIVER_SENTENCE * ", and a fitted static regime stack over the six point components"
+const _SUPERLEARNER_DRIVER_SENTENCE =
     "Ballistically propagated L1 forcing through a fitted combination of ten causal forecasts, " *
     "weighted per lead, activity regime and ring-current depth with a majority weight held by the " *
     "SINDy family, which includes the static regime stack among the combined forecasts, with a " *
     "conformal interval calibrated per lead and depth"
 const _DRIVER_ASSUMPTION_SENTENCES = Dict(
-    _V2_4_DRIVER_TOKEN => _V2_4_DRIVER_SENTENCE,
-    _V2_2_DRIVER_TOKEN => _V2_2_DRIVER_SENTENCE,
-    _V2_1_DRIVER_TOKEN => _V2_1_DRIVER_SENTENCE,
+    _SUPERLEARNER_DRIVER_TOKEN => _SUPERLEARNER_DRIVER_SENTENCE,
+    _STATIC_STACK_DRIVER_TOKEN => _STATIC_STACK_DRIVER_SENTENCE,
+    _INERTIAL_SINDY_DRIVER_TOKEN => _INERTIAL_SINDY_DRIVER_SENTENCE,
     "ballistically_propagated_l1_then_regime_aware_relaxation" =>
         "Ballistically propagated L1 forcing, then regime-aware relaxation beyond the measured " *
         "L1 window",
@@ -120,7 +120,7 @@ end
 
 "True for a served-pipeline label this build knows how to present."
 _is_accepted_served_model(value) =
-    value isa AbstractString && value in ACCEPTED_V2_SERVED_MODEL_VERSIONS
+    value isa AbstractString && value in ACCEPTED_OPERATIONAL_SERVED_MODEL_VERSIONS
 
 """Return `(level, label)` for a finite Dst value in nT; non-finite input is unknown."""
 function dst_threat_level(dst::Real)
@@ -210,7 +210,9 @@ end
 
 function _load_log(path::AbstractString)
     # Read time columns as String and parse ourselves (robust to fractional-second variation).
-    df = CSV.read(path, DataFrame;
+    # Buffered read: CSV can memory-map a path, and on Windows a mapped file cannot be truncated
+    # by the monitor's next atomic rewrite — or by a repair write — while the map is open.
+    df = CSV.read(IOBuffer(read(path)), DataFrame;
                   types=Dict(c => String for c in _TIME_COLS),
                   validate=false, missingstring=["", "NaN", "missing"], silencewarnings=true)
     for c in _TIME_COLS
@@ -319,52 +321,52 @@ function _col(row, a::Symbol, b::Symbol)
     hasproperty(row, a) && getproperty(row, a) !== missing && return getproperty(row, a)
     hasproperty(row, b) ? getproperty(row, b) : missing
 end
-_audit_pred(row) = _col(row, :v2_pred_dst_nt,      :pred_dst_nt)
-_audit_ci05(row) = _col(row, :v2_pred_dst_ci05_nt, :pred_dst_ci05_nt)
-_audit_ci95(row) = _col(row, :v2_pred_dst_ci95_nt, :pred_dst_ci95_nt)
+_audit_pred(row) = _col(row, :inertial_sindy_pred_dst_nt,      :pred_dst_nt)
+_audit_ci05(row) = _col(row, :inertial_sindy_pred_dst_ci05_nt, :pred_dst_ci05_nt)
+_audit_ci95(row) = _col(row, :inertial_sindy_pred_dst_ci95_nt, :pred_dst_ci95_nt)
 
-# Upgraded V2 is the product forecast. The live CSV keeps older product-column
-# names, with fallback to older v2_/pred_* columns for legacy rows.
-_v2_pred(row) = (x = _col(row, :served_pred_dst_nt,      :v2_pred_dst_nt);      x === missing ? _audit_pred(row) : x)
-_v2_ci05(row) = (x = _col(row, :served_pred_dst_ci05_nt, :v2_pred_dst_ci05_nt); x === missing ? _audit_ci05(row) : x)
-_v2_ci95(row) = (x = _col(row, :served_pred_dst_ci95_nt, :v2_pred_dst_ci95_nt); x === missing ? _audit_ci95(row) : x)
+# Upgraded Operational is the product forecast. The live CSV keeps older product-column
+# names, with fallback to older operational_/pred_* columns for legacy rows.
+_inertial_sindy_pred(row) = (x = _col(row, :served_pred_dst_nt,      :inertial_sindy_pred_dst_nt);      x === missing ? _audit_pred(row) : x)
+_operational_ci05(row) = (x = _col(row, :served_pred_dst_ci05_nt, :inertial_sindy_pred_dst_ci05_nt); x === missing ? _audit_ci05(row) : x)
+_operational_ci95(row) = (x = _col(row, :served_pred_dst_ci95_nt, :inertial_sindy_pred_dst_ci95_nt); x === missing ? _audit_ci95(row) : x)
 _rowget(row, name::Symbol) = hasproperty(row, name) ? getproperty(row, name) : missing
 
-function _row_is_current_v2(row)
+function _row_is_current_operational(row)
     model = _rowget(row, :model_version)
     served_model = _rowget(row, :sub_hourly_model_version)
-    return model isa AbstractString && model == CURRENT_V2_MODEL_VERSION &&
+    return model isa AbstractString && model == CURRENT_OPERATIONAL_MODEL_VERSION &&
            _is_accepted_served_model(served_model)
 end
 
 # Depth-safe alerting center. A fitted combination can blend toward persistence and therefore report a
 # shallower storm than the stages it replaced; the published threat level is taken against the deepest
-# of the served center, the static-stack center and the V2.1 operator center, so a conservative
+# of the served center, the static-stack center and the inertial-SINDy operator center, so a conservative
 # candidate cannot lower a warning either predecessor would have raised, while a deeper candidate still
 # escalates one. Rows written before a stage existed carry no column for it and are simply skipped.
 #
-# The comparison itself is `v24_serving_depth_safe_center`, loaded from the shared definition the
+# The comparison itself is `superlearner_serving_depth_safe_center`, loaded from the shared definition the
 # package serves under, so the published severity and the packaged serving contract are one rule.
-_severity_partners(row) = (_rowget(row, :v2_2_stack_pred_dst_nt),
-                           _rowget(row, :v2_1_served_pred_dst_nt))
+_severity_partners(row) = (_rowget(row, :static_stack_pred_dst_nt),
+                           _rowget(row, :inertial_sindy_served_pred_dst_nt))
 
 function _severity_pred(row)
-    served = _v2_pred(row)
+    served = _inertial_sindy_pred(row)
     (served isa Real && !(served isa Bool)) || return served
     partners = Float64[Float64(v) for v in _severity_partners(row)
                        if v isa Real && !(v isa Bool)]
     isempty(partners) && return served
-    return v24_serving_depth_safe_center(Float64(served), partners...)
+    return superlearner_serving_depth_safe_center(Float64(served), partners...)
 end
 
-# Predecessor watch edges of a row: the lower band edge the static-stack stage and the V2.1 operator
+# Predecessor watch edges of a row: the lower band edge the static-stack stage and the inertial-SINDy operator
 # would each have published for this issue, in the same strongest-to-weakest order as the centers. The
 # engine forms them from the band machinery those stages served under and logs them per row.
-_severity_partner_edges(row) = (_rowget(row, :v2_2_stack_ci05_dst_nt),
-                                _rowget(row, :v2_1_served_ci05_dst_nt))
+_severity_partner_edges(row) = (_rowget(row, :static_stack_ci05_dst_nt),
+                                _rowget(row, :inertial_sindy_served_ci05_dst_nt))
 
 # Names the payload uses for the stage whose own edge is published, aligned with the tuple above.
-const _SEVERITY_EDGE_PARTNERS = ("v2_2_stack", "v2_1_served")
+const _SEVERITY_EDGE_PARTNERS = ("static_stack", "inertial_sindy_served")
 
 # Depth-safe interval lower edge, and the stage whose own edge it is.
 #
@@ -381,7 +383,7 @@ const _SEVERITY_EDGE_PARTNERS = ("v2_2_stack", "v2_1_served")
 # rows written before the predecessor edges were logged, where nothing deeper is on record, and such a
 # row is disclosed as using the fallback rule.
 function _severity_ci05_with_source(row)
-    lower = _v2_ci05(row)
+    lower = _operational_ci05(row)
     (lower isa Real && !(lower isa Bool)) || return (lower, "unavailable")
     edge = Float64(lower)
     logged = Union{Nothing,Float64}[
@@ -393,19 +395,19 @@ function _severity_ci05_with_source(row)
         isfinite(edge) || return (lower, "served")
         finite = Float64[v for v in logged if v !== nothing]
         isempty(finite) && return (lower, "served")
-        value = v24_serving_depth_safe_center(edge, finite...)
+        value = superlearner_serving_depth_safe_center(edge, finite...)
         value == edge && return (value, "served")
         hit = findfirst(v -> v !== nothing && v == value, logged)
         return (value, hit === nothing ? "served" : _SEVERITY_EDGE_PARTNERS[hit])
     end
     # Legacy row: no predecessor edge on record, so the earlier center-shift rule is kept unchanged.
-    served = _v2_pred(row)
+    served = _inertial_sindy_pred(row)
     (served isa Real && !(served isa Bool)) || return (lower, "served")
     partners = Float64[Float64(v) for v in _severity_partners(row)
                        if v isa Real && !(v isa Bool)]
     isempty(partners) && return (lower, "served")
     isfinite(edge) || return (lower, "served")
-    shift = v24_serving_depth_safe_center(Float64(served), partners...) - Float64(served)
+    shift = superlearner_serving_depth_safe_center(Float64(served), partners...) - Float64(served)
     isfinite(shift) || return (lower, "served")
     shift < 0.0 || return (edge, "served")
     return (edge + shift, "legacy_center_shift")
@@ -533,7 +535,7 @@ end
 
 # Verified rows: a real forecast (target strictly AFTER both the issue time and the last observed Dst — a
 # 0-lead row is not a forecast and is what the locked comparison report excludes), with a FINITE observation
-# and a finite V2 point + band. jnum(obs) rejects NaN/Inf observations that would otherwise reach the
+# and a finite Operational point + band. jnum(obs) rejects NaN/Inf observations that would otherwise reach the
 # calibration summary and make JSON serialization throw.
 function _verified_rows_uncached(df::DataFrame)
     nrow(df) == 0 && return view(df, Int[], :)
@@ -549,11 +551,11 @@ function _verified_rows_uncached(df::DataFrame)
         anchor = _rowget(r, :latest_dst_time_utc_dt)
         valid_lead = tt isa DateTime && issue isa DateTime && anchor isa DateTime &&
                      tt > issue && tt > anchor
-        lo = jnum(_v2_ci05(r))
-        hi = jnum(_v2_ci95(r))
-        keep[i] = _row_is_current_v2(r) && valid_lead &&
+        lo = jnum(_operational_ci05(r))
+        hi = jnum(_operational_ci95(r))
+        keep[i] = _row_is_current_operational(r) && valid_lead &&
                   jnum(_rowget(r, :observation_dst_nt)) !== nothing &&
-                  jnum(_v2_pred(r)) !== nothing && lo !== nothing && hi !== nothing && lo <= hi
+                  jnum(_inertial_sindy_pred(r)) !== nothing && lo !== nothing && hi !== nothing && lo <= hi
     end
     return view(df, keep, :)
 end
@@ -647,50 +649,50 @@ function _max_consecutive_days(days::Vector{Date})
 end
 
 function _calibration_shadow_summary(v::AbstractDataFrame, cyc::DataFrame)
-    current_identity = _common_cycle_field(cyc, :v24_cal_shadow_model_version)
-    current_digest = _common_cycle_field(cyc, :v24_cal_shadow_config_sha256)
-    current_manifest = _common_cycle_field(cyc, :v24_manifest_sha256)
-    status_values = hasproperty(cyc, :v24_cal_shadow_status) ?
-        String[String(value) for value in cyc.v24_cal_shadow_status
+    current_identity = _common_cycle_field(cyc, :superlearner_cal_shadow_model_version)
+    current_digest = _common_cycle_field(cyc, :superlearner_cal_shadow_config_sha256)
+    current_manifest = _common_cycle_field(cyc, :superlearner_manifest_sha256)
+    status_values = hasproperty(cyc, :superlearner_cal_shadow_status) ?
+        String[String(value) for value in cyc.superlearner_cal_shadow_status
                if value isa AbstractString] : String[]
     current_status = isempty(status_values) ? "not_logged" :
                      length(unique(status_values)) == 1 ? first(status_values) :
                      "mixed:" * join(sort(unique(status_values)), ",")
-    configured = current_identity == V2_4_CALIBRATION_SHADOW_MODEL_VERSION &&
-                 current_digest == V2_4_CALIBRATION_SHADOW_CONFIG_SHA256 &&
-                 current_manifest == V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256
+    configured = current_identity == SUPERLEARNER_CALIBRATION_SHADOW_MODEL_VERSION &&
+                 current_digest == SUPERLEARNER_CALIBRATION_SHADOW_CONFIG_SHA256 &&
+                 current_manifest == SUPERLEARNER_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256
     collecting = configured && !isempty(status_values) &&
                  all(_calibration_shadow_collecting_status, status_values)
     current_cycle_ready = configured && !isempty(status_values) && all(==("ok"), status_values)
 
-    required = (:v24_cal_shadow_model_version, :v24_cal_shadow_config_sha256,
-                :v24_cal_shadow_status, :v24_cal_shadow_ci05_nt,
-                :v24_cal_shadow_ci95_nt, :observation_dst_nt, :model_step_hours,
-                :sub_hourly_model_version, :v24_status, :v24_manifest_sha256)
+    required = (:superlearner_cal_shadow_model_version, :superlearner_cal_shadow_config_sha256,
+                :superlearner_cal_shadow_status, :superlearner_cal_shadow_ci05_nt,
+                :superlearner_cal_shadow_ci95_nt, :observation_dst_nt, :model_step_hours,
+                :sub_hourly_model_version, :superlearner_status, :superlearner_manifest_sha256)
     has_issue_time = hasproperty(v, :issue_time_utc_dt) || hasproperty(v, :issue_time_utc)
     has_target_time = hasproperty(v, :target_time_utc_dt) || hasproperty(v, :target_time_utc)
     chosen = Dict{Tuple{DateTime,DateTime,String},Tuple{DateTime,Int}}()
     if has_issue_time && has_target_time && all(hasproperty(v, column) for column in required)
         for row_idx in 1:nrow(v)
             row = v[row_idx, :]
-            identity = _rowget(row, :v24_cal_shadow_model_version)
-            digest = _rowget(row, :v24_cal_shadow_config_sha256)
-            status = _rowget(row, :v24_cal_shadow_status)
+            identity = _rowget(row, :superlearner_cal_shadow_model_version)
+            digest = _rowget(row, :superlearner_cal_shadow_config_sha256)
+            status = _rowget(row, :superlearner_cal_shadow_status)
             served_model = _rowget(row, :sub_hourly_model_version)
-            v24_status = _rowget(row, :v24_status)
-            manifest = _rowget(row, :v24_manifest_sha256)
-            lo = jnum(_rowget(row, :v24_cal_shadow_ci05_nt))
-            hi = jnum(_rowget(row, :v24_cal_shadow_ci95_nt))
+            superlearner_status = _rowget(row, :superlearner_status)
+            manifest = _rowget(row, :superlearner_manifest_sha256)
+            lo = jnum(_rowget(row, :superlearner_cal_shadow_ci05_nt))
+            hi = jnum(_rowget(row, :superlearner_cal_shadow_ci95_nt))
             obs = jnum(_rowget(row, :observation_dst_nt))
             valid = identity isa AbstractString &&
-                    identity == V2_4_CALIBRATION_SHADOW_MODEL_VERSION &&
+                    identity == SUPERLEARNER_CALIBRATION_SHADOW_MODEL_VERSION &&
                     digest isa AbstractString &&
-                    digest == V2_4_CALIBRATION_SHADOW_CONFIG_SHA256 &&
+                    digest == SUPERLEARNER_CALIBRATION_SHADOW_CONFIG_SHA256 &&
                     served_model isa AbstractString &&
-                    served_model == CURRENT_V2_SERVED_MODEL_VERSION &&
+                    served_model == CURRENT_OPERATIONAL_SERVED_MODEL_VERSION &&
                     manifest isa AbstractString &&
-                    manifest == V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256 &&
-                    v24_status isa AbstractString && v24_status == "ok" &&
+                    manifest == SUPERLEARNER_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256 &&
+                    superlearner_status isa AbstractString && superlearner_status == "ok" &&
                     status isa AbstractString && status == "ok" &&
                     lo !== nothing && hi !== nothing &&
                     obs !== nothing && lo <= hi
@@ -698,7 +700,7 @@ function _calibration_shadow_summary(v::AbstractDataFrame, cyc::DataFrame)
             issue = _calibration_shadow_time(row, :issue_time_utc_dt, :issue_time_utc)
             target = _calibration_shadow_time(row, :target_time_utc_dt, :target_time_utc)
             (issue isa DateTime && target isa DateTime) || continue
-            key = (floor(issue, Hour), target, V2_4_CALIBRATION_SHADOW_MODEL_VERSION)
+            key = (floor(issue, Hour), target, SUPERLEARNER_CALIBRATION_SHADOW_MODEL_VERSION)
             previous = get(chosen, key, nothing)
             (previous === nothing || issue > previous[1]) && (chosen[key] = (issue, row_idx))
         end
@@ -711,8 +713,8 @@ function _calibration_shadow_summary(v::AbstractDataFrame, cyc::DataFrame)
     n = length(indices)
     observations = n == 0 ? Float64[] : Float64[v[index, :observation_dst_nt] for index in indices]
     covered = n == 0 ? Bool[] : Bool[
-        Float64(v[index, :v24_cal_shadow_ci05_nt]) <= observations[position] <=
-        Float64(v[index, :v24_cal_shadow_ci95_nt])
+        Float64(v[index, :superlearner_cal_shadow_ci05_nt]) <= observations[position] <=
+        Float64(v[index, :superlearner_cal_shadow_ci95_nt])
         for (position, index) in enumerate(indices)
     ]
     issues = DateTime[]
@@ -750,7 +752,7 @@ function _calibration_shadow_summary(v::AbstractDataFrame, cyc::DataFrame)
     end
     step_counts = Dict(row.model_step_hours => row.n for row in by_step)
     supported_step_min_rows = minimum([
-        get(step_counts, step, 0) for step in V2_4_CALIBRATION_SHADOW_SUPPORTED_STEPS
+        get(step_counts, step, 0) for step in SUPERLEARNER_CALIBRATION_SHADOW_SUPPORTED_STEPS
     ])
     return (
         model_version=(current_identity isa AbstractString ? String(current_identity) : nothing),
@@ -764,7 +766,7 @@ function _calibration_shadow_summary(v::AbstractDataFrame, cyc::DataFrame)
         issue_cycles, calendar_days=length(issue_days), consecutive_days,
         first_issue_utc=isempty(issues) ? nothing : jdt(minimum(issues)),
         latest_issue_utc=isempty(issues) ? nothing : jdt(maximum(issues)),
-        supported_steps=collect(V2_4_CALIBRATION_SHADOW_SUPPORTED_STEPS),
+        supported_steps=collect(SUPERLEARNER_CALIBRATION_SHADOW_SUPPORTED_STEPS),
         supported_step_min_rows, by_step,
         deepest_obs_dst_nt=n == 0 ? nothing : round(minimum(observations); digits=1),
         n_storm_rows=count(value -> value <= -50.0, observations),
@@ -809,16 +811,16 @@ function _compute_calibration_summary(df::DataFrame, cyc::DataFrame)
     n = nrow(v)
     calibration_shadow = _calibration_shadow_summary(v, cyc)
     n == 0 && return (n_verified=0, coverage_90=nothing, rmse_nt=nothing,
-                      v2_n_verified=0, v2_coverage_90=nothing, v2_rmse_nt=nothing,
+                      operational_n_verified=0, operational_coverage_90=nothing, operational_rmse_nt=nothing,
                       frozen_tail_ablation_rmse_nt=nothing,
                       audit_baseline_rmse_nt=nothing,
-                      rmse_sindy_v1_nt=nothing, rmse_persistence_nt=nothing,
+                      rmse_sindy_core_nt=nothing, rmse_persistence_nt=nothing,
                       rmse_burton_nt=nothing, rmse_burton_full_nt=nothing,
                       rmse_obrien_nt=nothing,
                       comparison_n_verified=0,
-                      v2_matched_rmse_nt=nothing,
+                      operational_matched_rmse_nt=nothing,
                       frozen_tail_ablation_matched_rmse_nt=nothing,
-                      sindy_v1_matched_rmse_nt=nothing,
+                      sindy_core_matched_rmse_nt=nothing,
                       persistence_matched_rmse_nt=nothing,
                       burton_matched_rmse_nt=nothing,
                       burton_full_matched_rmse_nt=nothing,
@@ -836,9 +838,9 @@ function _compute_calibration_summary(df::DataFrame, cyc::DataFrame)
                       deepest_obs_dst_nt=nothing, n_storm_verified=0, by_source=[],
                       calibration_shadow)
     obs   = Float64.(v.observation_dst_nt)
-    pred  = Float64.(_v2_pred.(eachrow(v)))
-    ci05  = Float64.(_v2_ci05.(eachrow(v)))
-    ci95  = Float64.(_v2_ci95.(eachrow(v)))
+    pred  = Float64.(_inertial_sindy_pred.(eachrow(v)))
+    ci05  = Float64.(_operational_ci05.(eachrow(v)))
+    ci95  = Float64.(_operational_ci95.(eachrow(v)))
     audit_pred = [jnum(_audit_pred(r)) for r in eachrow(v)]
     inside = (obs .>= ci05) .& (obs .<= ci95)
     rmse(p) = _stable_rmse_or_nothing(obs, p)
@@ -876,7 +878,7 @@ function _compute_calibration_summary(df::DataFrame, cyc::DataFrame)
     fallback_rmse = rmse(pred)
     product_rmse = product_col_n > 0 ? product_col_rmse :
         fallback_rmse === nothing ? nothing : jnum(round(fallback_rmse; digits=2))
-    v1   = "v1_pred_dst_nt" in names(v) ? jnum.(v.v1_pred_dst_nt) : fill(nothing, n)
+    core = "sindy_core_pred_dst_nt" in names(v) ? jnum.(v.sindy_core_pred_dst_nt) : fill(nothing, n)
     pers = "persistence_dst_nt" in names(v) ? jnum.(v.persistence_dst_nt) : fill(nothing, n)
     burt = "burton_dst_nt" in names(v) ? jnum.(v.burton_dst_nt) : fill(nothing, n)
     burf = "burton_full_dst_nt" in names(v) ? jnum.(v.burton_full_dst_nt) : fill(nothing, n)
@@ -886,12 +888,12 @@ function _compute_calibration_summary(df::DataFrame, cyc::DataFrame)
     # the served product, frozen-tail ablation, and every declared comparator are finite.
     # This prevents a method with missing hard cases from receiving an incomparable RMSE.
     comparison_mask = copy(product_mask)
-    for values in (audit_pred, v1, pers, burt, burf, obri)
+    for values in (audit_pred, core, pers, burt, burf, obri)
         comparison_mask .&= .!isnothing.(values)
     end
     comparison_n = count(comparison_mask)
     matched_rmse(values) = rmse_optional(values, comparison_mask)
-    v2_values = jnum.(pred)
+    operational_values = jnum.(pred)
     live_skill_mature = comparison_n >= LIVE_SKILL_MIN_VERIFIED
 
     # per-method coverage breakdown
@@ -924,22 +926,22 @@ function _compute_calibration_summary(df::DataFrame, cyc::DataFrame)
     return (n_verified=product_n,
             coverage_90=product_cov,
             rmse_nt=product_rmse,
-            v2_n_verified=product_n,
-            v2_coverage_90=product_cov,
-            v2_rmse_nt=product_rmse,
+            operational_n_verified=product_n,
+            operational_coverage_90=product_cov,
+            operational_rmse_nt=product_rmse,
             frozen_tail_ablation_rmse_nt=audit_rmse,
             # Deprecated compatibility alias. New clients should use the
-            # explicit V2.1 frozen-tail-ablation field above.
+            # explicit inertial-SINDy frozen-tail-ablation field above.
             audit_baseline_rmse_nt=audit_rmse,
-            rmse_sindy_v1_nt=rmse_optional(v1, product_mask),
+            rmse_sindy_core_nt=rmse_optional(core, product_mask),
             rmse_persistence_nt=rmse_optional(pers, product_mask),
             rmse_burton_nt=rmse_optional(burt, product_mask),
             rmse_burton_full_nt=rmse_optional(burf, product_mask),
             rmse_obrien_nt=rmse_optional(obri, product_mask),
             comparison_n_verified=comparison_n,
-            v2_matched_rmse_nt=matched_rmse(v2_values),
+            operational_matched_rmse_nt=matched_rmse(operational_values),
             frozen_tail_ablation_matched_rmse_nt=matched_rmse(audit_pred),
-            sindy_v1_matched_rmse_nt=matched_rmse(v1),
+            sindy_core_matched_rmse_nt=matched_rmse(core),
             persistence_matched_rmse_nt=matched_rmse(pers),
             burton_matched_rmse_nt=matched_rmse(burt),
             burton_full_matched_rmse_nt=matched_rmse(burf),
@@ -1039,27 +1041,27 @@ end
 
 # The interval the super-learner stage serves under, and the per-row status that says the stage
 # produced this row's center. The engine writes exactly this pair, and the two must agree row by row:
-# the depth-stratified conformal band is calibrated on the V2.4e center, so a row carrying that
+# the depth-stratified conformal band is calibrated on the super-learner center, so a row carrying that
 # source while its own status records a fallback would publish an interval nothing calibrated for the
 # center it is drawn around.
-const V2_4_INTERVAL_SOURCE = "v24_conformal_depth"
-const V2_4_STATUS_OK = "ok"
+const SUPERLEARNER_INTERVAL_SOURCE = "superlearner_conformal_depth"
+const SUPERLEARNER_STATUS_OK = "ok"
 
-_row_v2_4_acted(row) = (v = _rowget(row, :v24_status);
-                        v isa AbstractString && String(v) == V2_4_STATUS_OK)
+_row_superlearner_acted(row) = (v = _rowget(row, :superlearner_status);
+                        v isa AbstractString && String(v) == SUPERLEARNER_STATUS_OK)
 
 """Per-row coherence of a cycle's interval disclosure with the stage that served each row.
 
-V2.4 made `interval_source` a per-row field: a horizon whose super-learner stage acted carries the
+super-learner made `interval_source` a per-row field: a horizon whose super-learner stage acted carries the
 study's depth-stratified conformal band, while a horizon whose stage could not act carries the band
 the batch's own interval policy issued. Requiring one source across the four horizons therefore
 rejects precisely the cycles that per-row disclosure exists to describe — a stage that healed or
 failed between the horizons of one batch — and blanks the product over a degradation the log is
 being honest about, exactly as accepting only one served label would.
 
-Coherence is checked instead: a row records the V2.4e source when, and only when, its own status
-records that the V2.4e stage produced its center, and every remaining row carries the one source the
-batch issued them under. A cycle written before the per-row status existed carries no `v24_status`
+Coherence is checked instead: a row records the super-learner source when, and only when, its own status
+records that the super-learner stage produced its center, and every remaining row carries the one source the
+batch issued them under. A cycle written before the per-row status existed carries no `superlearner_status`
 column at all, and there the only statement the log can make is the batch one, so those cycles keep
 the original common-source rule."""
 function _coherent_interval_sources(cyc::DataFrame)
@@ -1071,13 +1073,13 @@ function _coherent_interval_sources(cyc::DataFrame)
         push!(sources, String(value))
     end
     isempty(sources) && return false
-    hasproperty(cyc, :v24_status) || return all(isequal(first(sources)), sources)
+    hasproperty(cyc, :superlearner_status) || return all(isequal(first(sources)), sources)
     batch = String[]
     for (index, r) in enumerate(eachrow(cyc))
-        if _row_v2_4_acted(r)
-            sources[index] == V2_4_INTERVAL_SOURCE || return false
+        if _row_superlearner_acted(r)
+            sources[index] == SUPERLEARNER_INTERVAL_SOURCE || return false
         else
-            sources[index] == V2_4_INTERVAL_SOURCE && return false
+            sources[index] == SUPERLEARNER_INTERVAL_SOURCE && return false
             push!(batch, sources[index])
         end
     end
@@ -1117,7 +1119,7 @@ function _cycle_served_model(cyc::DataFrame)
     labels = [_rowget(r, :sub_hourly_model_version) for r in eachrow(cyc)]
     isempty(labels) && return nothing
     all(_is_accepted_served_model, labels) || return nothing
-    for candidate in reverse(ACCEPTED_V2_SERVED_MODEL_VERSIONS)
+    for candidate in reverse(ACCEPTED_OPERATIONAL_SERVED_MODEL_VERSIONS)
         any(l -> isequal(l, candidate), labels) && return String(candidate)
     end
     return nothing
@@ -1148,7 +1150,7 @@ function _valid_live_cycle(cyc::DataFrame)
     anchor = _common_cycle_field(cyc, :latest_dst_time_utc_dt)
     anchor_dst = jnum(_common_cycle_field(cyc, :latest_dst_nt))
     vintage = _common_cycle_field(cyc, :latest_solar_wind_utc_dt)
-    model == CURRENT_V2_MODEL_VERSION || return false
+    model == CURRENT_OPERATIONAL_MODEL_VERSION || return false
     served_model === nothing && return false
     _coherent_interval_sources(cyc) || return false
     anchor isa DateTime && anchor_dst !== nothing && vintage isa DateTime || return false
@@ -1159,9 +1161,9 @@ function _valid_live_cycle(cyc::DataFrame)
         issue = _rowget(r, :issue_time_utc_dt)
         target = _rowget(r, :target_time_utc_dt)
         horizon = jnum(_rowget(r, :horizon_hours))
-        pred = jnum(_v2_pred(r))
-        lo = jnum(_v2_ci05(r))
-        hi = jnum(_v2_ci95(r))
+        pred = jnum(_inertial_sindy_pred(r))
+        lo = jnum(_operational_ci05(r))
+        hi = jnum(_operational_ci95(r))
         issue isa DateTime && target isa DateTime || return false
         target > issue || return false
         target > anchor || return false
@@ -1202,9 +1204,9 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
     horizons = NamedTuple[]
     for r in eachrow(cyc)
         target = _rowget(r, :target_time_utc_dt)
-        pred = jnum(_v2_pred(r))
-        lo = jnum(_v2_ci05(r))
-        hi = jnum(_v2_ci95(r))
+        pred = jnum(_inertial_sindy_pred(r))
+        lo = jnum(_operational_ci05(r))
+        hi = jnum(_operational_ci95(r))
         push!(horizons, (target_utc=jdt(target),
                          horizon_hours=jnum(_rowget(r, :horizon_hours)),
                          pred_dst_nt=pred,
@@ -1216,7 +1218,7 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
                          # the band a reader sees is only described by the row that produced it.
                          interval_source=(v = _rowget(r, :interval_source);
                                           v isa AbstractString ? String(v) : nothing),
-                         # Alerting depth of this horizon and the V2.1 center it is taken against, so
+                         # Alerting depth of this horizon and the inertial-SINDy center it is taken against, so
                          # an operator can see why a warning is deeper than the served center.
                          severity_dst_nt=jnum(_severity_pred(r)),
                          severity_ci05_dst_nt=jnum(_severity_ci05(r)),
@@ -1224,39 +1226,39 @@ function build_forecast(df::DataFrame, log_path::AbstractString="")
                          # one of the two predecessors, or the legacy center-shift rule for a row
                          # written before the predecessor edges were logged.
                          severity_ci05_source=_severity_ci05_source(r),
-                         v2_1_served_pred_dst_nt=jnum(_rowget(r, :v2_1_served_pred_dst_nt)),
-                         v2_2_stack_pred_dst_nt=jnum(_rowget(r, :v2_2_stack_pred_dst_nt)),
-                         v2_1_served_ci05_dst_nt=jnum(_rowget(r, :v2_1_served_ci05_dst_nt)),
-                         v2_2_stack_ci05_dst_nt=jnum(_rowget(r, :v2_2_stack_ci05_dst_nt)),
+                         inertial_sindy_served_pred_dst_nt=jnum(_rowget(r, :inertial_sindy_served_pred_dst_nt)),
+                         static_stack_pred_dst_nt=jnum(_rowget(r, :static_stack_pred_dst_nt)),
+                         inertial_sindy_served_ci05_dst_nt=jnum(_rowget(r, :inertial_sindy_served_ci05_dst_nt)),
+                         static_stack_ci05_dst_nt=jnum(_rowget(r, :static_stack_ci05_dst_nt)),
                          served_model_version=(v = _rowget(r, :sub_hourly_model_version);
                                                v isa AbstractString ? String(v) : nothing),
-                         v2_2_status=(v = _rowget(r, :v2_2_status);
+                         static_stack_status=(v = _rowget(r, :static_stack_status);
                                       v isa AbstractString ? String(v) : nothing),
                          # Per-row served-stage disclosure of the super-learner: `ok` when this
-                         # horizon's center is the V2.4e center, otherwise the reason it fell back.
-                         v24_status=(v = _rowget(r, :v24_status);
+                         # horizon's center is the super-learner center, otherwise the reason it fell back.
+                         superlearner_status=(v = _rowget(r, :superlearner_status);
                                      v isa AbstractString ? String(v) : nothing),
-                         v24_pred_dst_nt=jnum(_rowget(r, :v24_pred_dst_nt)),
-                         v24_guard_applied=(v = _rowget(r, :v24_guard_applied);
+                         superlearner_pred_dst_nt=jnum(_rowget(r, :superlearner_pred_dst_nt)),
+                         superlearner_guard_applied=(v = _rowget(r, :superlearner_guard_applied);
                                             v isa Bool ? v : nothing),
                          # The physical +50/-2000 nT projection of the served center. Separate from the
                          # guard, and the reason the served center can differ from the combination's
                          # own output on a row where no guard acted.
-                         v24_projection_applied=(v = _rowget(r, :v24_projection_applied);
+                         superlearner_projection_applied=(v = _rowget(r, :superlearner_projection_applied);
                                                  v isa Bool ? v : nothing),
-                         v24_regime_cell=(v = _rowget(r, :v24_regime_cell);
+                         superlearner_regime_cell=(v = _rowget(r, :superlearner_regime_cell);
                                           v isa AbstractString ? String(v) : nothing),
                          # Prospective interval shadow: disclosed beside the served band, but never
                          # substituted into `pred_dst_nt`, `ci05_dst_nt`, `ci95_dst_nt` or alerting.
-                         v24_cal_shadow_model_version=(v = _rowget(r, :v24_cal_shadow_model_version);
+                         superlearner_cal_shadow_model_version=(v = _rowget(r, :superlearner_cal_shadow_model_version);
                                                        v isa AbstractString ? String(v) : nothing),
-                         v24_cal_shadow_status=(v = _rowget(r, :v24_cal_shadow_status);
+                         superlearner_cal_shadow_status=(v = _rowget(r, :superlearner_cal_shadow_status);
                                                 v isa AbstractString ? String(v) : nothing),
-                         v24_cal_shadow_ci05_nt=jnum(_rowget(r, :v24_cal_shadow_ci05_nt)),
-                         v24_cal_shadow_ci95_nt=jnum(_rowget(r, :v24_cal_shadow_ci95_nt)),
-                         v24_cal_shadow_history_n=jnum(_rowget(r, :v24_cal_shadow_history_n)),
-                         v24_cal_shadow_location_shift_nt=
-                             jnum(_rowget(r, :v24_cal_shadow_location_shift_nt)),
+                         superlearner_cal_shadow_ci05_nt=jnum(_rowget(r, :superlearner_cal_shadow_ci05_nt)),
+                         superlearner_cal_shadow_ci95_nt=jnum(_rowget(r, :superlearner_cal_shadow_ci95_nt)),
+                         superlearner_cal_shadow_history_n=jnum(_rowget(r, :superlearner_cal_shadow_history_n)),
+                         superlearner_cal_shadow_location_shift_nt=
+                             jnum(_rowget(r, :superlearner_cal_shadow_location_shift_nt)),
                          frozen_tail_ablation_dst_nt=jnum(_audit_pred(r)),
                          audit_baseline_dst_nt=jnum(_audit_pred(r))))
     end
@@ -1299,7 +1301,7 @@ function build_storm_replay(log_path::AbstractString; evidence_dir=nothing)
     n = 0; storms = String[]
     if isfile(scored)
         try
-            df = CSV.read(scored, DataFrame)
+            df = CSV.read(IOBuffer(read(scored)), DataFrame)
             n = nrow(df)
             "storm" in names(df) && (storms = unique(string.(skipmissing(df.storm))))
         catch e
@@ -1328,10 +1330,7 @@ function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES
                     served_fallback_cycles_24h=0, served_fallback_window_24h_cycles=0,
                     served_fallback_rate_24h=nothing,
                     newest_cycle_is_fallback=nothing, served_stack_cycles=0,
-                    served_v2_1_cycles=0, shadow_model_version=nothing,
-                    shadow_cycles_considered=0, shadow_available_cycles=0,
-                    shadow_available_rate=nothing, shadow_e_layer_cycles=0,
-                    shadow_e_layer_rate=nothing)
+                    served_inertial_sindy_cycles=0)
     nrow(df) == 0 && return empty_result
     hasproperty(df, :issue_time_utc_dt) || return empty_result
     hours = [issue === missing ? missing : floor(issue, Hour) for issue in df.issue_time_utc_dt]
@@ -1353,12 +1352,8 @@ function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES
     staged = 0
     pre_stage = 0
     stack_served = 0
-    v2_1_served = 0
-    shadow_staged = 0
-    shadow_ok = 0
-    e_layer = 0
+    inertial_sindy_served = 0
     newest_fallback = nothing
-    shadow_labels = String[]
     for (index, hour) in enumerate(window)
         rows = df[coalesce.(hours .== hour, false), :]
         labels = [_rowget(r, :sub_hourly_model_version) for r in eachrow(rows)]
@@ -1368,35 +1363,25 @@ function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES
         # `any` would return `missing` and the health summary would throw instead of reporting the
         # trailing window that spans the schema change.
         #
-        # Only cycles issued by the current served stage (they carry `v24_status`) enter the
+        # Only cycles issued by the current served stage (they carry `superlearner_status`) enter the
         # fallback rate; rows written before the stage existed are disclosed as excluded rather
         # than counted as fallbacks, mirroring the readiness audit's transition rule.
-        cycle_staged = any(r -> _rowget(r, :v24_status) isa AbstractString, eachrow(rows))
+        cycle_staged = any(r -> _rowget(r, :superlearner_status) isa AbstractString, eachrow(rows))
         if cycle_staged
             staged += 1
-            is_fallback = any(label -> !isequal(label, CURRENT_V2_SERVED_MODEL_VERSION), labels)
+            is_fallback = any(label -> !isequal(label, CURRENT_OPERATIONAL_SERVED_MODEL_VERSION), labels)
             is_fallback && (fallback += 1)
             if hour >= day_cutoff
                 staged_24h += 1
                 is_fallback && (fallback_24h += 1)
             end
-            any(label -> isequal(label, STACK_V2_SERVED_MODEL_VERSION), labels) &&
+            any(label -> isequal(label, STACK_OPERATIONAL_SERVED_MODEL_VERSION), labels) &&
                 (stack_served += 1)
-            any(label -> isequal(label, PREVIOUS_V2_SERVED_MODEL_VERSION), labels) &&
-                (v2_1_served += 1)
+            any(label -> isequal(label, PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION), labels) &&
+                (inertial_sindy_served += 1)
             index == length(window) && (newest_fallback = is_fallback)
         else
             pre_stage += 1
-        end
-        statuses = [_rowget(r, :v23_status) for r in eachrow(rows)]
-        if any(st -> st isa AbstractString, statuses)
-            shadow_staged += 1
-            any(st -> st isa AbstractString && startswith(st, "ok"), statuses) && (shadow_ok += 1)
-            applied = [_rowget(r, :v23_e_layer_applied) for r in eachrow(rows)]
-            any(flag -> flag === true || isequal(flag, 1), applied) && (e_layer += 1)
-        end
-        for label in (_rowget(r, :v23_shadow_model_version) for r in eachrow(rows))
-            label isa AbstractString && push!(shadow_labels, String(label))
         end
     end
     newest = df[coalesce.(hours .== last(keys_present), false), :]
@@ -1419,13 +1404,7 @@ function build_served_health(df::DataFrame, cycles::Integer=SERVED_HEALTH_CYCLES
                 round(fallback_24h / staged_24h; digits=4),
             newest_cycle_is_fallback=newest_fallback,
             served_stack_cycles=stack_served,
-            served_v2_1_cycles=v2_1_served,
-            shadow_model_version=isempty(shadow_labels) ? nothing : first(sort(unique(shadow_labels))),
-            shadow_cycles_considered=shadow_staged,
-            shadow_available_cycles=shadow_ok,
-            shadow_available_rate=shadow_staged == 0 ? nothing : round(shadow_ok / shadow_staged; digits=4),
-            shadow_e_layer_cycles=e_layer,
-            shadow_e_layer_rate=shadow_staged == 0 ? nothing : round(e_layer / shadow_staged; digits=4))
+            served_inertial_sindy_cycles=inertial_sindy_served)
 end
 
 """Threat status: current observation and most negative edge among the latest 90% intervals."""
@@ -1537,8 +1516,8 @@ function _build_history_uncached(df::DataFrame, hours::Real, reference_time::Dat
     for r in eachrow(v)
         t = _rowget(r, :target_time_utc_dt)
         (t === missing || t < cutoff) && continue
-        obs = jnum(_rowget(r, :observation_dst_nt)); p = jnum(_v2_pred(r))
-        lo = jnum(_v2_ci05(r)); hi = jnum(_v2_ci95(r))
+        obs = jnum(_rowget(r, :observation_dst_nt)); p = jnum(_inertial_sindy_pred(r))
+        lo = jnum(_operational_ci05(r)); hi = jnum(_operational_ci95(r))
         inside = (obs !== nothing && lo !== nothing && hi !== nothing) ? (obs >= lo && obs <= hi) : nothing
         push!(rows, (target_utc=jdt(t), horizon_hours=jnum(_rowget(r, :horizon_hours)),
                      observed_dst_nt=obs, pred_dst_nt=p, ci05_dst_nt=lo, ci95_dst_nt=hi,
@@ -1560,8 +1539,8 @@ function _build_history_uncached(df::DataFrame, hours::Real, reference_time::Dat
     cal = calibration_summary(df)
     return (rows=rows, hours=hours, n=length(rows),
             coverage_90=win_cov, rmse_nt=win_rmse,
-            coverage_90_all=_prefer_metric(cal.v2_coverage_90, cal.coverage_90),
-            rmse_nt_all=_prefer_metric(cal.v2_rmse_nt, cal.rmse_nt))
+            coverage_90_all=_prefer_metric(cal.operational_coverage_90, cal.coverage_90),
+            rmse_nt_all=_prefer_metric(cal.operational_rmse_nt, cal.rmse_nt))
 end
 
 

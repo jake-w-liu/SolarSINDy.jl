@@ -1,8 +1,8 @@
 module CalibrationDiagnosis
 
 using CSV, DataFrames, Dates, JSON3, SHA, Statistics
-include(joinpath(@__DIR__, "v2_4_live_claim_audit.jl"))
-const Audit = V24LiveClaimAudit
+include(joinpath(@__DIR__, "superlearner_live_claim_audit.jl"))
+const Audit = SuperlearnerLiveClaimAudit
 
 function interval_metrics(observed, point, lo, hi, static_lo, static_hi)
     n = length(observed)
@@ -121,7 +121,7 @@ function run_diagnosis(snapshot, delay_directory, output)
     CSV.write(joinpath(output, "ground_phase.csv"), DataFrame(ground_phase))
     receipt = (;generated_utc=string(now(UTC))*"Z", source_sha256=sources,
         source_code_sha256=bytes2hex(sha256(read(@__FILE__))),
-        cohort_code_sha256=bytes2hex(sha256(read(joinpath(@__DIR__,"v2_4_live_claim_audit.jl")))),
+        cohort_code_sha256=bytes2hex(sha256(read(joinpath(@__DIR__,"superlearner_live_claim_audit.jl")))),
         a3_integrity_findings=violations, diagnosis_only=true,
         candidate_selected=false, serving_changed=false)
     write(joinpath(output, "receipt.json"), JSON3.write(receipt))

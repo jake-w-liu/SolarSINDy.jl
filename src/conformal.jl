@@ -290,15 +290,15 @@ function conformal_interval(cal::ConformalCalibration, point::Real,
 end
 
 """
-    _v24_calibration_shadow_interval(point, static_lo, static_hi, residuals;
+    _superlearner_calibration_shadow_interval(point, static_lo, static_hi, residuals;
                                      window=24, warmup=30, width_scale=1.5)
 
 Translate the deployed interval by the median of the trailing matured signed
-residuals and scale each deployed half-width. This is the frozen V2.4e A3
+residuals and scale each deployed half-width. This is the frozen super-learner A3
 prospective-shadow rule; it never changes the point forecast. Returns an
 explicit unavailable result until `warmup` residuals exist.
 """
-function _v24_calibration_shadow_interval(point::Real, static_lo::Real,
+function _superlearner_calibration_shadow_interval(point::Real, static_lo::Real,
                                           static_hi::Real,
                                           residuals::AbstractVector{<:Real};
                                           window::Integer=24,
@@ -306,18 +306,18 @@ function _v24_calibration_shadow_interval(point::Real, static_lo::Real,
                                           width_scale::Real=1.5)
     values = Float64.((point, static_lo, static_hi, width_scale))
     all(isfinite, values) || throw(ArgumentError(
-        "V2.4e calibration-shadow point, endpoints, and width scale must be finite",
+        "super-learner calibration-shadow point, endpoints, and width scale must be finite",
     ))
     center, lo, hi, scale = values
     lo <= center <= hi || throw(ArgumentError(
-        "V2.4e calibration-shadow point must lie inside the deployed interval",
+        "super-learner calibration-shadow point must lie inside the deployed interval",
     ))
-    window >= 1 || throw(ArgumentError("V2.4e calibration-shadow window must be positive"))
-    warmup >= 1 || throw(ArgumentError("V2.4e calibration-shadow warmup must be positive"))
-    scale > 0 || throw(ArgumentError("V2.4e calibration-shadow width scale must be positive"))
+    window >= 1 || throw(ArgumentError("super-learner calibration-shadow window must be positive"))
+    warmup >= 1 || throw(ArgumentError("super-learner calibration-shadow warmup must be positive"))
+    scale > 0 || throw(ArgumentError("super-learner calibration-shadow width scale must be positive"))
     history = Float64.(residuals)
     all(isfinite, history) || throw(ArgumentError(
-        "V2.4e calibration-shadow residual history must be finite",
+        "super-learner calibration-shadow residual history must be finite",
     ))
     n = length(history)
     if n < warmup
@@ -328,10 +328,10 @@ function _v24_calibration_shadow_interval(point::Real, static_lo::Real,
     shadow_lo = center + location - scale * (center - lo)
     shadow_hi = center + location + scale * (hi - center)
     all(isfinite, (shadow_lo, shadow_hi, location)) || throw(ArgumentError(
-        "V2.4e calibration-shadow output exceeds the supported finite range",
+        "super-learner calibration-shadow output exceeds the supported finite range",
     ))
     shadow_lo <= shadow_hi || throw(ArgumentError(
-        "V2.4e calibration-shadow endpoints are reversed",
+        "super-learner calibration-shadow endpoints are reversed",
     ))
     return (available=true, lo=shadow_lo, hi=shadow_hi,
             location=location, history_n=n)
@@ -660,7 +660,7 @@ Load a [`ConformalCalibration`](@ref) written by
 [`write_conformal_calibration`](@ref).
 """
 function read_conformal_calibration(path::String)
-    df = CSV.read(path, DataFrame)
+    df = CSV.read(path, DataFrame; buffer_in_memory = true)
     nrow(df) >= 2 || throw(ArgumentError("conformal calibration file has no strata: $path"))
     String(df.stratum[1]) == "__meta__" ||
         throw(ArgumentError("first conformal row must be __meta__"))

@@ -7,7 +7,7 @@ using Downloads
 using Printf
 using Statistics
 
-include(joinpath(@__DIR__, "v2_gscale_replay.jl"))
+include(joinpath(@__DIR__, "operational_gscale_replay.jl"))
 
 const NOAA_3DAY_BASE =
     "https://www.ngdc.noaa.gov/stp/space-weather/swpc-products/daily_reports/3day_forecast"
@@ -450,7 +450,7 @@ function _write_noaa_report(path::AbstractString, scored::DataFrame, summary::Da
                     r.scope, r.lead_band, r.threshold_g, r.n_rows, r.hits, r.misses,
                     r.false_alarms, r.pod, r.far, r.csi, r.bias, r.rmse_kp)
         end
-        println(io, "\nInterpretation boundary: this is an external operational Kp/G-scale forecast audit. It is not a same-unit Dst RMSE baseline for V2.")
+        println(io, "\nInterpretation boundary: this is an external operational Kp/G-scale forecast audit. It is not a same-unit Dst RMSE baseline for Operational.")
     end
 end
 

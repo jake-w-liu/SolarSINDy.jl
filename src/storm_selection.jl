@@ -356,7 +356,7 @@ function _read_selection_csv_set(paths)
             isfile(path) && !islink(path) || error(
                 "selection output must be a regular non-symlink file: $path",
             )
-            CSV.read(path, DataFrame)
+            CSV.read(path, DataFrame; buffer_in_memory = true)
         end
         NamedTuple{fields}(Tuple(frames))
     end

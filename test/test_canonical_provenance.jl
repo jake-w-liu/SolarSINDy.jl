@@ -102,14 +102,14 @@ end
         write(joinpath(root, "Manifest.toml"), "julia_version = \"$(VERSION)\"\n")
         source = joinpath(root, "src", "Fixture.jl")
         producer = joinpath(root, "validation", "produce.jl")
-        generated = joinpath(root, "validation", "output", "operational", "V2_READINESS.md")
+        generated = joinpath(root, "validation", "output", "operational", "OPERATIONAL_READINESS.md")
         write(source, "module Fixture\nend\n")
         write(producer, "# fixture producer\n")
         write(generated, "generated at 2026-01-01T00:00:00Z\n")
 
         included = _provenance_relpath.(_provenance_source_files(root), Ref(root))
         @test "validation/produce.jl" in included
-        @test "validation/output/operational/V2_READINESS.md" ∉ included
+        @test "validation/output/operational/OPERATIONAL_READINESS.md" ∉ included
         initial_hash = provenance_source_tree_sha256(root)
         write(generated, "generated at 2026-01-02T00:00:00Z\n")
         @test provenance_source_tree_sha256(root) == initial_hash

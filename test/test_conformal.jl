@@ -26,9 +26,9 @@ end
 
 @testset "Conformal UQ" begin
 
-    @testset "V2.4e A1 calibration-shadow interval" begin
+    @testset "super-learner A1 calibration-shadow interval" begin
         history = collect(1.0:30.0)
-        result = SolarSINDy._v24_calibration_shadow_interval(
+        result = SolarSINDy._superlearner_calibration_shadow_interval(
             -10.0, -12.0, -7.0, history; window=24, warmup=30, width_scale=1.5,
         )
         # Trailing 24 residuals are 7:30, whose median is 18.5. The two deployed
@@ -38,15 +38,15 @@ end
         @test result.location == 18.5
         @test result.lo == 5.5
         @test result.hi == 13.0
-        immature = SolarSINDy._v24_calibration_shadow_interval(
+        immature = SolarSINDy._superlearner_calibration_shadow_interval(
             -10.0, -12.0, -7.0, history[1:29]; window=24, warmup=30,
         )
         @test !immature.available
         @test ismissing(immature.lo)
-        @test_throws ArgumentError SolarSINDy._v24_calibration_shadow_interval(
+        @test_throws ArgumentError SolarSINDy._superlearner_calibration_shadow_interval(
             -10.0, -12.0, -7.0, [1.0, NaN]; warmup=1,
         )
-        @test_throws ArgumentError SolarSINDy._v24_calibration_shadow_interval(
+        @test_throws ArgumentError SolarSINDy._superlearner_calibration_shadow_interval(
             -10.0, -9.0, -7.0, history,
         )
     end
@@ -569,7 +569,7 @@ end
         # must be banded by the disturbed half-width, not the quiet one. The two
         # differ by ~1.7x at h=1, so this locks the served 90% band width.
         sidecar = joinpath(@__DIR__, "..", "deploy",
-                           "operational_v2_calibration_conformal.csv")
+                           "inertial_sindy_calibration_conformal.csv")
         @test isfile(sidecar)
         cal = read_conformal_calibration(sidecar)
         for (h, key_dist, key_quiet) in (

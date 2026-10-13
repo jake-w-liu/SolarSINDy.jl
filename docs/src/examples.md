@@ -15,13 +15,13 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/storm_monitor.jl
 This example:
 
 - pulls near-real-time solar wind data from NOAA SWPC
-- loads the versioned V2.1 discovery artifacts from the package `data/` directory
+- loads the versioned inertial-SINDy discovery artifacts from the package `data/` directory
 - advances rolling forecasts with ensemble intervals
 - prints storm alarms based on configurable thresholds
 
 This is the package's primary discovery-core forecasting example. The managed
-live product uses `examples/live_monitor.jl`, which issues Operational V2.4e at
-1, 2, 3, and 6 h. V2.4e combines ten experts, including two forms of the V2.1
+live product uses `examples/live_monitor.jl`, which issues Operational super-learner at
+1, 2, 3, and 6 h. The super-learner combines ten experts, including two forms of the inertial-SINDy
 predecessor, and records any fallback stage explicitly.
 
 ## Live Verification Example
@@ -39,8 +39,8 @@ then updates the same row with the observed Dst and residual after the target
 hour is published. It also logs persistence, Burton, BurtonFull, and
 O'Brien--McPherron baselines for the same target.
 
-The default `--model=v2` option selects the V2.1 base operator used to construct
-the served V2.4e cycle. Pass `--model=v1` only for an explicit uncalibrated-core
+The default `--model=inertial-sindy` option (alias `operational`) selects the base operator used to construct
+the served super-learner cycle. Pass `--model=sindy-core` only for an explicit uncalibrated-core
 comparison. The served-model field, rather than the base-model option, identifies
 which operational stage produced each row.
 

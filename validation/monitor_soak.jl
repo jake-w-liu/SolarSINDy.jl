@@ -57,11 +57,11 @@ function _configs(monitor_dir::AbstractString, calibration_path::AbstractString)
     log_path = joinpath(monitor_dir, "live_forecast_log.csv")
     report_path = joinpath(monitor_dir, "live_comparison_report.md")
     return [LiveVerifyConfig(;
-        model=:v2,
+        model=:inertial_sindy,
         horizon_hours=h,
         log_path,
         report_path,
-        v2_calibration_path=calibration_path,
+        inertial_sindy_calibration_path=calibration_path,
     ) for h in SOAK_HORIZONS]
 end
 
@@ -184,7 +184,7 @@ function monitor_soak_main()
         error("SOLARSINDY_SOAK_INPUT must be auto, real, or synthetic")
 
     mktempdir(; prefix="solarsindy-monitor-soak-") do monitor_dir
-        calibration_path = DEFAULT_V2_CALIBRATION_PATH
+        calibration_path = DEFAULT_OPERATIONAL_CALIBRATION_PATH
         setup = _prepare_and_warm!(mode, monitor_dir, warmup, calibration_path)
         log_path = first(setup.configs).log_path
         expected_rows = _log_rows(log_path)

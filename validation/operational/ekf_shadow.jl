@@ -1,15 +1,15 @@
 # ekf_shadow.jl — retired shadow-EKF implementation retained for reproducibility.
 #
 # The constrained EKF holds the adapted decay coefficient at or below the
-# current V2.1 discovered decay. Earlier V2.0 numerical findings motivated this
-# retired shadow module; they are not treated as V2.1 performance evidence. The
+# current inertial-SINDy discovered decay. Earlier SINDy core numerical findings motivated this
+# retired shadow module; they are not treated as inertial-SINDy performance evidence. The
 # retired module can:
 #   * bootstrap a persistent constrained-EKF state from the historical OMNI record (so the adapted decay
 #     reflects long history, not just the short live tail),
 #   * each monitor cycle, advance one constrained update with the latest locked-log anchor Dst*,
-#   * emit a 1 h constrained-EKF v1+v2 forecast to a separate validation log,
-#   * fall back to the locked v2 forecast (flagged) if state/inputs/output are unsafe.
-# The locked v1/v2 record is never modified. This output is not part of the live product.
+#   * emit a 1 h constrained-EKF SINDy-core+operational forecast to a separate validation log,
+#   * fall back to the locked operational forecast (flagged) if state/inputs/output are unsafe.
+# The locked SINDy-core/operational record is never modified. This output is not part of the live product.
 #
 # Reads the current anchor + drivers from the latest locked-log row the monitor just wrote (no feed
 # coupling, reuses the locked forecast's gap-checked inputs). Assumes SolarSINDy is loaded.
@@ -30,7 +30,7 @@ const Q_COEFF=1e-4; const Q_DST=1.0; const R_OBS=4.0; const DST_VAR0=25.0; const
 
 function _shadow_decay_cap(ξ0, i_decay)
     cap = Float64(ξ0[i_decay])
-    isfinite(cap) && cap < 0.0 || error("current V2.1 decay coefficient is not stable")
+    isfinite(cap) && cap < 0.0 || error("current inertial-SINDy decay coefficient is not stable")
     return cap
 end
 
@@ -39,11 +39,11 @@ _new_filter(lib, ξ0, i_decay, dst0) =
                       dst_var0=DST_VAR0, coeff_var0=COEFF_VAR0,
                       coeff_bounds=[(-Inf, _shadow_decay_cap(ξ0, i_decay))])
 
-# --- current V2.1 library + deployed coefficients ---
+# --- current inertial-SINDy library + deployed coefficients ---
 function _shadow_library()
-    core = load_operational_core(OPERATIONAL_V2_1_MODEL_VERSION)
+    core = load_operational_core(OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION)
     i_decay = findfirst(==("Dst_star"), get_term_names(core.library))
-    i_decay === nothing && error("Operational V2.1 core omits Dst_star")
+    i_decay === nothing && error("Operational inertial-SINDy core omits Dst_star")
     return core.library, copy(core.coefficients), i_decay
 end
 
@@ -92,10 +92,10 @@ function _load_state(lib, ξ0, i_decay)
     return f, lt, last
 end
 
-# --- h-step forecast with the adapted decay, then the V2 correction ---
+# --- h-step forecast with the adapted decay, then the Operational correction ---
 # `nsteps` defaults to 1 (the live 1 h path — byte-identical to the original single predict). nsteps>1
 # free-runs the discovered ODE forward h hours holding the issue-time drivers constant, matching the
-# locked v2 engine's multi-step rollout, so the only EKF-vs-v2 difference at any lead is the adapted decay.
+# locked operational engine's multi-step rollout, so the only EKF-vs-operational difference at any lead is the adapted decay.
 function _shadow_forecast(lib, ξ0, i_decay, adapted_decay, anchor_dst_star, drv, latest_dst, cal;
                           nsteps::Int=1, calibration_features=nothing)
     ξ = copy(ξ0); ξ[i_decay] = adapted_decay
@@ -106,8 +106,8 @@ function _shadow_forecast(lib, ξ0, i_decay, adapted_decay, anchor_dst_star, drv
     end
     pred_dst_star = current_dst(fc)
     pred_dst = pred_dst_star + 7.26 * sqrt(max(drv.Pdyn, 0.0)) - 11.0   # _dst_from_dst_star
-    fallback_features = _v2_features(
-        latest_dst, drv; v1_pred_dst=pred_dst, model_steps=nsteps,
+    fallback_features = _inertial_sindy_features(
+        latest_dst, drv; sindy_core_pred_dst=pred_dst, model_steps=nsteps,
     )
     feature_source = calibration_features === nothing ? fallback_features : calibration_features
     available = propertynames(feature_source)
@@ -118,10 +118,10 @@ function _shadow_forecast(lib, ξ0, i_decay, adapted_decay, anchor_dst_star, drv
     feats = NamedTuple{Tuple(cal.feature_names)}(
         Tuple(Float64(getproperty(feature_source, c)) for c in cal.feature_names),
     )
-    corr = SolarSINDy.operational_v2_correction(cal, feats)
-    # Apply the SAME physical Dst ceiling the locked v2 engine uses (clamp to [-2000, 50] nT; see
-    # forecast.jl operational_v2 corrected-center). Without it the shadow over-predicts positive Dst on
-    # quiet sudden-commencement hours where v2 is clamped to +50 — a spurious shadow-vs-v2 gap. Storm-time
+    corr = SolarSINDy.operational_inertial_sindy_correction(cal, feats)
+    # Apply the SAME physical Dst ceiling the locked operational engine uses (clamp to [-2000, 50] nT; see
+    # forecast.jl inertial_sindy corrected-center). Without it the shadow over-predicts positive Dst on
+    # quiet sudden-commencement hours where operational is clamped to +50 — a spurious shadow-vs-operational gap. Storm-time
     # (deeply negative Dst) is unaffected: clamp(-300, -2000, 50) = -300.
     return clamp(pred_dst, -2000.0, 50.0), clamp(pred_dst + corr, -2000.0, 50.0)
 end
@@ -134,7 +134,7 @@ function issue_ekf_shadow!(locked_log::AbstractString, calibration_csv::Abstract
     # Most recent cycle = latest anchor (latest_dst_time). Among rows for it, take the FRESHEST
     # re-issuance (max issue_time) for the anchor/drivers the EKF assimilates — a later cycle may carry a
     # revised Dst for the same hour, and using the stale one would mis-feed the filter. For the 1 h
-    # locked-v2 comparison + the target, use that anchor's h=1 row (its true 1 h forecast) when present.
+    # locked-operational comparison + the target, use that anchor's h=1 row (its true 1 h forecast) when present.
     latest_anchor = maximum(string.(log.latest_dst_time_utc))
     cyc = log[string.(log.latest_dst_time_utc) .== latest_anchor, :]
     fresh = cyc[argmax(string.(cyc.issue_time_utc)), :]
@@ -145,7 +145,7 @@ function issue_ekf_shadow!(locked_log::AbstractString, calibration_csv::Abstract
     drv = (V=Float64(fresh.V_kms), Bz=Float64(fresh.Bz_nt), By=Float64(fresh.By_nt),
            n=Float64(fresh.n_cm3), Pdyn=Float64(fresh.Pdyn_npa))
     obs_time = DateTime(first(split(string(fresh.latest_dst_time_utc), ".")))
-    locked_v2 = ismissing(cmp.v2_pred_dst_nt) ? NaN : Float64(cmp.v2_pred_dst_nt)
+    locked_operational = ismissing(cmp.inertial_sindy_pred_dst_nt) ? NaN : Float64(cmp.inertial_sindy_pred_dst_nt)
 
     f, stime, last = recover_shadow_state(
         () -> _load_state(lib, ξ0, i_decay),
@@ -178,31 +178,31 @@ function issue_ekf_shadow!(locked_log::AbstractString, calibration_csv::Abstract
     _save_state(stime, f, last)
     decay = current_coeffs(f)[1]
 
-    cal = read_operational_v2_calibration(calibration_csv)
-    ekf_v1 = NaN; ekf_v2 = NaN
+    cal = read_inertial_sindy_calibration(calibration_csv)
+    ekf_v1 = NaN; ekf_operational = NaN
     try
-        ekf_v1, ekf_v2 = _shadow_forecast(lib, ξ0, i_decay, decay, anchor, drv, latest_dst, cal)
+        ekf_v1, ekf_operational = _shadow_forecast(lib, ξ0, i_decay, decay, anchor, drv, latest_dst, cal)
     catch e
         fallback = true; reason = "forecast_error:" * sprint(showerror, e)
     end
-    # guards: decay must stay in a stable band; shadow must not wildly disagree with locked v2
+    # guards: decay must stay in a stable band; shadow must not wildly disagree with locked operational
     decay_cap = _shadow_decay_cap(ξ0, i_decay)
-    if !fallback && !(decay_cap - 2.0 <= decay <= decay_cap + 1e-9 && isfinite(ekf_v2))
+    if !fallback && !(decay_cap - 2.0 <= decay <= decay_cap + 1e-9 && isfinite(ekf_operational))
         fallback = true; reason = "decay_or_pred_out_of_range(decay=$(round(decay,digits=4)))"
     end
-    if !fallback && isfinite(locked_v2) && abs(ekf_v2 - locked_v2) > FALLBACK_NT
-        fallback = true; reason = "shadow_far_from_locked(Δ=$(round(ekf_v2-locked_v2,digits=1)))"
+    if !fallback && isfinite(locked_operational) && abs(ekf_operational - locked_operational) > FALLBACK_NT
+        fallback = true; reason = "shadow_far_from_locked(Δ=$(round(ekf_operational-locked_operational,digits=1)))"
     end
-    out_v1 = fallback ? locked_v2 : ekf_v1
-    out_v2 = fallback ? locked_v2 : ekf_v2
+    out_v1 = fallback ? locked_operational : ekf_v1
+    out_operational = fallback ? locked_operational : ekf_operational
 
     # 1 h target: the locked h=1 row's target when present (exact join), else anchor + 1 h.
     target = nrow(h1) > 0 ? DateTime(first(split(string(cmp.target_time_utc), "."))) : obs_time + Hour(1)
     srow = DataFrame(issue_time_utc=[string(issue_latest)], latest_dst_time_utc=[string(obs_time)],
                      target_time_utc=[string(target)], anchor_dst_star_nt=[anchor], latest_dst_nt=[latest_dst],
                      adapted_decay=[decay], fixed_decay=[ξ0[i_decay]],
-                     ekf_v1_pred_dst_nt=[out_v1], ekf_v2_pred_dst_nt=[out_v2],
-                     locked_v2_pred_dst_nt=[locked_v2], fallback=[fallback], fallback_reason=[reason])
+                     ekf_sindy_core_pred_dst_nt=[out_v1], ekf_inertial_sindy_pred_dst_nt=[out_operational],
+                     locked_inertial_sindy_pred_dst_nt=[locked_operational], fallback=[fallback], fallback_reason=[reason])
     out = if isfile(SHADOW_LOG)
         prev = CSV.read(SHADOW_LOG, DataFrame)
         # idempotent: one shadow row per cycle, keyed on the anchor (latest_dst_time, stable per cycle)
@@ -212,13 +212,13 @@ function issue_ekf_shadow!(locked_log::AbstractString, calibration_csv::Abstract
         srow
     end
     tmp = SHADOW_LOG * ".tmp"; CSV.write(tmp, out); mv(tmp, SHADOW_LOG; force=true)  # atomic write: reader never sees a torn file
-    return (; decay, ekf_v2=out_v2, locked_v2, fallback, reason)
+    return (; decay, ekf_operational=out_operational, locked_operational, fallback, reason)
 end
 
 const SHADOW_REPORT = joinpath(_SHADOW_DIR, "ekf_shadow_report.md")
 const STORM_DST = -50.0   # observed Dst below this counts as a storm row (matches the monitor convention)
 
-# Score the accumulated shadow 1 h forecasts against realized observations and compare to served V2.1.
+# Score the accumulated shadow 1 h forecasts against realized observations and compare to served inertial-SINDy.
 # The realized observation comes from the locked log's verified h=1 row for the same target time (the
 # shadow never re-fetches Dst). Non-fallback rows only. Writes a compact report and returns a summary.
 function score_ekf_shadow!(locked_log::AbstractString;
@@ -227,10 +227,10 @@ function score_ekf_shadow!(locked_log::AbstractString;
     sh = CSV.read(shadow_log, DataFrame)
     lk = CSV.read(locked_log, DataFrame)
     _norm(t) = replace(first(split(string(t), ".")), "Z" => "")
-    # Current h=1 verified rows: normalized target -> (observation, served V2.1 prediction).
+    # Current h=1 verified rows: normalized target -> (observation, served inertial-SINDy prediction).
     obsmap = Dict{String,Tuple{Float64,Float64}}()
     h1 = lk[(lk.model_step_hours .== 1) .& (.!ismissing.(lk.observation_dst_nt)), :]
-    served_col = "served_pred_dst_nt" in names(lk) ? :served_pred_dst_nt : :v2_pred_dst_nt
+    served_col = "served_pred_dst_nt" in names(lk) ? :served_pred_dst_nt : :inertial_sindy_pred_dst_nt
     for r in eachrow(h1)
         o = r.observation_dst_nt; v = r[served_col]
         (ismissing(o) || !isfinite(Float64(o))) && continue
@@ -240,9 +240,9 @@ function score_ekf_shadow!(locked_log::AbstractString;
     for r in eachrow(sh)
         (("fallback" in names(sh)) && r.fallback === true) && (nfb += 1; continue)
         k = _norm(r.target_time_utc); haskey(obsmap, k) || continue
-        obs, lockv2 = obsmap[k]; isfinite(lockv2) || continue
-        e = r.ekf_v2_pred_dst_nt; (ismissing(e) || !isfinite(Float64(e))) && continue
-        push!(ek, obs - Float64(e)); push!(lo, obs - lockv2); push!(isstorm, obs < STORM_DST)
+        obs, lockop = obsmap[k]; isfinite(lockop) || continue
+        e = r.ekf_inertial_sindy_pred_dst_nt; (ismissing(e) || !isfinite(Float64(e))) && continue
+        push!(ek, obs - Float64(e)); push!(lo, obs - lockop); push!(isstorm, obs < STORM_DST)
     end
     n = length(ek)
     rmse(v) = isempty(v) ? NaN : sqrt(sum(abs2, v) / length(v))
@@ -253,8 +253,8 @@ function score_ekf_shadow!(locked_log::AbstractString;
     fixed_decay = _shadow_decay_cap(ξ0, i_decay)
 
     open(report, "w") do io
-        println(io, "# Constrained-EKF Shadow vs Served V2.1 — live 1 h comparison\n")
-        println(io, "Experimental shadow series (separate log; the locked v1/v2 record is untouched). ",
+        println(io, "# Constrained-EKF Shadow vs Served inertial-SINDy — live 1 h comparison\n")
+        println(io, "Experimental shadow series (separate log; the locked SINDy-core/operational record is untouched). ",
                     "Lower 1 h RMSE is better; the EKF's validated edge is at storm hours.\n")
         println(io, "- scored (verified, non-fallback) rows: **$n**   (storm rows obs<$(STORM_DST) nT: **$(length(si))**)   fallback rows skipped: $nfb")
         println(io, "- latest adapted decay: $(isnan(decay_now) ? "n/a" : round(decay_now, digits=4))  (current fixed $(round(fixed_decay, digits=4)))\n")
@@ -262,11 +262,11 @@ function score_ekf_shadow!(locked_log::AbstractString;
             println(io, "No verified shadow rows yet — wait for shadow targets to be observed. ",
                         "During quiet conditions the EKF ≈ locked, so a meaningful gap needs storm hours.")
         else
-            println(io, "| set | n | EKF 1 h RMSE [nT] | served V2.1 1 h RMSE [nT] | EKF − V2.1 |")
+            println(io, "| set | n | EKF 1 h RMSE [nT] | served inertial-SINDy 1 h RMSE [nT] | EKF − inertial-SINDy |")
             println(io, "|---|---|---|---|---|")
             println(io, "| all | $n | $(round(re,digits=2)) | $(round(rl,digits=2)) | $(round(re-rl,digits=2)) |")
             length(si) > 0 && println(io, "| storm (obs<$(STORM_DST)) | $(length(si)) | $(round(rse,digits=2)) | $(round(rsl,digits=2)) | $(round(rse-rsl,digits=2)) |")
-            println(io, "\nNegative \"EKF − V2.1\" means the shadow EKF beats served V2.1 at 1 h. ",
+            println(io, "\nNegative \"EKF − inertial-SINDy\" means the shadow EKF beats served inertial-SINDy at 1 h. ",
                         n < 30 ? "n is small — treat as indicative until more rows (especially storm rows) accrue." :
                                  "")
         end

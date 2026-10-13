@@ -52,7 +52,7 @@ const TERM_BS = UInt8(3)
 const TERM_N = UInt8(4)
 const TERM_PDYN = UInt8(5)
 const TERM_DST_STAR = UInt8(6)
-const TERM_V2 = UInt8(7)
+const TERM_OPERATIONAL = UInt8(7)
 const TERM_BS2 = UInt8(8)
 const TERM_N2 = UInt8(9)
 const TERM_V_BS = UInt8(10)
@@ -60,7 +60,7 @@ const TERM_N_V = UInt8(11)
 const TERM_N_BS = UInt8(12)
 const TERM_PDYN_BS = UInt8(13)
 const TERM_N_V_BS = UInt8(14)
-const TERM_N_V2 = UInt8(15)
+const TERM_N_OPERATIONAL = UInt8(15)
 const TERM_SIN_HALF = UInt8(16)
 const TERM_SIN_HALF2 = UInt8(17)
 const TERM_SIN_HALF4 = UInt8(18)
@@ -75,7 +75,7 @@ function _term_code(name::String)
            name == "n" ? TERM_N :
            name == "Pdyn" ? TERM_PDYN :
            name == "Dst_star" ? TERM_DST_STAR :
-           name == "V^2" ? TERM_V2 :
+           name == "V^2" ? TERM_OPERATIONAL :
            name == "Bs^2" ? TERM_BS2 :
            name == "n^2" ? TERM_N2 :
            name == "V*Bs" ? TERM_V_BS :
@@ -83,7 +83,7 @@ function _term_code(name::String)
            name == "n*Bs" ? TERM_N_BS :
            name == "Pdyn*Bs" ? TERM_PDYN_BS :
            name == "n*V*Bs" ? TERM_N_V_BS :
-           name == "n*V^2" ? TERM_N_V2 :
+           name == "n*V^2" ? TERM_N_OPERATIONAL :
            name == "sin(θ_c/2)" ? TERM_SIN_HALF :
            name == "sin²(θ_c/2)" ? TERM_SIN_HALF2 :
            name == "sin⁴(θ_c/2)" ? TERM_SIN_HALF4 :
@@ -110,7 +110,7 @@ function _evaluate_coded_library_term(
     code == TERM_N && return data["n"]
     code == TERM_PDYN && return data["Pdyn"]
     code == TERM_DST_STAR && return data["Dst_star"]
-    code == TERM_V2 && return data["V"].^2
+    code == TERM_OPERATIONAL && return data["V"].^2
     code == TERM_BS2 && return data["Bs"].^2
     code == TERM_N2 && return data["n"].^2
     code == TERM_V_BS && return data["V"] .* data["Bs"]
@@ -118,7 +118,7 @@ function _evaluate_coded_library_term(
     code == TERM_N_BS && return data["n"] .* data["Bs"]
     code == TERM_PDYN_BS && return data["Pdyn"] .* data["Bs"]
     code == TERM_N_V_BS && return data["n"] .* data["V"] .* data["Bs"]
-    code == TERM_N_V2 && return data["n"] .* data["V"].^2
+    code == TERM_N_OPERATIONAL && return data["n"] .* data["V"].^2
 
     sin_half = sin.(data["theta_c"] ./ 2)
     code == TERM_SIN_HALF && return sin_half
@@ -237,7 +237,7 @@ end
 """
     build_solar_wind_library(; max_poly_order=2, include_trig=true,
                               include_cross=true, include_known=true,
-                              include_redundant_n_v2=false,
+                              include_redundant_n_operational=false,
                               clock_basis=:full)
 
 Build candidate library for solar wind-magnetosphere coupling.
@@ -255,7 +255,7 @@ Terms include:
 
 The canonical library omits `n*V^2` because the package's proton-only pressure
 convention makes it exactly proportional to `Pdyn`; including both makes their
-individual coefficients non-identifiable. Set `include_redundant_n_v2=true`
+individual coefficients non-identifiable. Set `include_redundant_n_operational=true`
 only to reproduce or load a legacy 21-term artifact.
 
 `clock_basis=:full` retains the five correlated empirical clock-angle terms.
@@ -267,7 +267,7 @@ function build_solar_wind_library(; max_poly_order::Int=2,
                                     include_trig::Bool=true,
                                     include_cross::Bool=true,
                                     include_known::Bool=true,
-                                    include_redundant_n_v2::Bool=false,
+                                    include_redundant_n_operational::Bool=false,
                                     clock_basis::Symbol=:full)
     max_poly_order in (1, 2) ||
         throw(ArgumentError("max_poly_order must be 1 or 2, got $max_poly_order"))
@@ -308,7 +308,7 @@ function build_solar_wind_library(; max_poly_order::Int=2,
             push!(names, "n*V*Bs")
             push!(funcs, d -> d["n"] .* d["V"] .* d["Bs"])
 
-            if include_redundant_n_v2
+            if include_redundant_n_operational
                 push!(names, "n*V^2")
                 push!(funcs, d -> d["n"] .* d["V"].^2)
             end

@@ -32,7 +32,7 @@ function app_operational_evidence_dir(required_files::AbstractString...)
     return select_operational_evidence_dir(
         required_files...;
         output_dir=output_dir,
-        paper_dir=joinpath(dirname(PKG_ROOT), "paper_v2_monitor", "data", "source", "operational"),
+        paper_dir=joinpath(dirname(PKG_ROOT), "paper_dst_superlearner", "data", "source", "operational"),
         package_dir=joinpath(PKG_ROOT, "data", "operational_validation"),
     )
 end
@@ -67,14 +67,14 @@ function dashboard_dbdt_nowcast(; wait_timeout::Real=0.0,
 end
 
 function claim_audit_status(log_path::AbstractString; reference::DateTime=now(UTC))
-    path = joinpath(dirname(log_path), "v2_4_live_claim_status.json")
+    path = joinpath(dirname(log_path), "superlearner_live_claim_status.json")
     isfile(path) || return (available=false, reason="assessment not yet available")
     try
         filesize(path) <= 1_048_576 || error("assessment exceeds size limit")
         assessment = JSON3.read(read(path, String))
-        assessment.shadow_identity == V2_4_CALIBRATION_SHADOW_MODEL_VERSION &&
-            assessment.shadow_config_sha256 == V2_4_CALIBRATION_SHADOW_CONFIG_SHA256 &&
-            assessment.served_manifest_sha256 == V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256 ||
+        assessment.shadow_identity == SUPERLEARNER_CALIBRATION_SHADOW_MODEL_VERSION &&
+            assessment.shadow_config_sha256 == SUPERLEARNER_CALIBRATION_SHADOW_CONFIG_SHA256 &&
+            assessment.served_manifest_sha256 == SUPERLEARNER_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256 ||
             error("assessment identity does not match this deployment")
         freshness = _source_freshness(assessment.generated_utc, 180.0; reference=reference)
         freshness.stale && return (available=false, reason="assessment is stale or future-dated")

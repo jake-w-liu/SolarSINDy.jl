@@ -1,15 +1,15 @@
-# ekf_inject_replay.jl — injection-adaptive EKF vs the V2.1 frozen-tail ablation.
+# ekf_inject_replay.jl — injection-adaptive EKF vs the inertial-SINDy frozen-tail ablation.
 #
 # Diagnosis of the decay-only shadow EKF: its sole adaptive lever is the ring-current DECAY coefficient
 # ("Dst_star"), a restoring/recovery term, so adaptation can only push the forecast toward zero — correct in
 # recovery, harmful at storm onset where Dst is still dropping (verified +3.37 nT main-phase bias). The
-# current V2.1 SINDy ODE contains a southward-field INJECTION term ("Bs") that
+# current inertial-SINDy SINDy ODE contains a southward-field INJECTION term ("Bs") that
 # drives Dst* DOWN; it is held fixed. This variant adds that injection coefficient to the EKF's adaptive
 # state, giving the filter a downward lever to track a fast drop — staying entirely within the discovered
 # sparse SINDy model (more of its coefficients adapted online, no new model, no swap to O'Brien).
 #
 # Everything else mirrors ekf_storm_replay.jl exactly: same 7 causal storms, leads [1,2,3,6], pooled +
-# main-phase regimes, paired-bootstrap CI vs the STRONGER of {V2.1 frozen-tail, persistence}, and the
+# main-phase regimes, paired-bootstrap CI vs the STRONGER of {inertial-SINDy frozen-tail, persistence}, and the
 # ekf_fixed fairness oracle (fixed discovered coefficients must reproduce the frozen-tail engine).
 #
 # Run from the package root: julia --project=. validation/operational/ekf_inject_replay.jl
@@ -27,7 +27,7 @@ const BS_TERM = "Bs"
 const BS_BOX  = (-2.0, 0.0)
 # Process-noise for the injection coefficient, set by RELATIVE-rate matching to the validated decay walk
 # (q/ξ² equal): q_Bs = Q_COEFF · (ξ_Bs/ξ_decay)². This is a principled, leakage-free choice — NOT tuned on
-# the test storms. The ratio is recomputed from the current V2.1 coefficients.
+# the test storms. The ratio is recomputed from the current inertial-SINDy coefficients.
 _q_bs(ξ0, i_decay, i_Bs) = Q_COEFF * (ξ0[i_Bs] / ξ0[i_decay])^2
 
 "Index of the discovered southward-injection term in the library."
@@ -47,7 +47,7 @@ function _new_inject_filter(lib, ξ0, i_decay, i_Bs, dst0; q_bs)
     return f
 end
 
-"h-step forecast with adapted [decay, Bs], engine-faithful per-step + final Dst* clamp, then the v2 correction.
+"h-step forecast with adapted [decay, Bs], engine-faithful per-step + final Dst* clamp, then the operational correction.
 Identical to _shadow_forecast except two discovered coefficients are overridden instead of one."
 function _inject_forecast(lib, ξ0, i_decay, i_Bs, decay, bscoef,
                           anchor_dst_star, drv, latest_dst, cal;
@@ -60,8 +60,8 @@ function _inject_forecast(lib, ξ0, i_decay, i_Bs, decay, bscoef,
     end
     pred_dst_star = current_dst(fc)
     pred_dst = pred_dst_star + 7.26 * sqrt(max(drv.Pdyn, 0.0)) - 11.0
-    fallback = _v2_features(
-        latest_dst, drv; v1_pred_dst=pred_dst, model_steps=nsteps,
+    fallback = _inertial_sindy_features(
+        latest_dst, drv; sindy_core_pred_dst=pred_dst, model_steps=nsteps,
     )
     source = calibration_features === nothing ? fallback : calibration_features
     missing_features = [c for c in cal.feature_names if !(c in propertynames(source))]
@@ -71,7 +71,7 @@ function _inject_forecast(lib, ξ0, i_decay, i_Bs, decay, bscoef,
     feats = NamedTuple{Tuple(cal.feature_names)}(
         Tuple(Float64(getproperty(source, c)) for c in cal.feature_names),
     )
-    corr = SolarSINDy.operational_v2_correction(cal, feats)
+    corr = SolarSINDy.operational_inertial_sindy_correction(cal, feats)
     return clamp(pred_dst, -2000.0, 50.0), clamp(pred_dst + corr, -2000.0, 50.0)
 end
 
@@ -104,7 +104,7 @@ function replay_inject_storm(storm, lib, ξ0, i_decay, i_Bs, cal, f)
     (nrow(plasma) > 0 && !isempty(dst_times)) || error("No finite OMNI drivers/Dst inside replay window")
     rh = Int(ceil(Dates.value(win_hi - win_lo) / 3_600_000))
     df = replay_recent_table(plasma, mag, dst_times, dst_vals;
-                             replay_hours = rh, horizons = LEADS, model = :v2, calibration = cal)
+                             replay_hours = rh, horizons = LEADS, model = :inertial_sindy, calibration = cal)
     df[!, :issue_dt] = DateTime.(df.issue_time_utc)
     df = df[(df.issue_dt .>= storm.t0) .& (df.issue_dt .<= storm.t1), :]
     sort!(df, [:issue_dt, :model_step_hours])
@@ -124,8 +124,8 @@ function replay_inject_storm(storm, lib, ξ0, i_decay, i_Bs, cal, f)
         prev1 = get(dst_map, it - Hour(1), NaN)
         rate = isfinite(prev1) ? latest - prev1 : NaN
         for r in eachrow(g)
-            (ismissing(r.observation_dst_nt) || ismissing(r.v2_pred_dst_nt)) && continue
-            isfinite(Float64(r.observation_dst_nt)) && isfinite(Float64(r.v2_pred_dst_nt)) || continue
+            (ismissing(r.observation_dst_nt) || ismissing(r.inertial_sindy_pred_dst_nt)) && continue
+            isfinite(Float64(r.observation_dst_nt)) && isfinite(Float64(r.inertial_sindy_pred_dst_nt)) || continue
             h = Int(r.model_step_hours)
             _, ekf_a = _inject_forecast(lib, ξ0, i_decay, i_Bs, decay, bs,
                 anchor_star, drv, latest, cal; nsteps=h, calibration_features=r)
@@ -133,7 +133,7 @@ function replay_inject_storm(storm, lib, ξ0, i_decay, i_Bs, cal, f)
                 ξ0[i_decay], ξ0[i_Bs], anchor_star, drv, latest, cal;
                 nsteps=h, calibration_features=r)
             isfinite(ekf_a) && isfinite(ekf_f) || continue
-            push!(out, (storm.name, it, h, Float64(r.observation_dst_nt), Float64(r.v2_pred_dst_nt),
+            push!(out, (storm.name, it, h, Float64(r.observation_dst_nt), Float64(r.inertial_sindy_pred_dst_nt),
                         ekf_a, ekf_f, latest, decay, bs, rate))
         end
     end
@@ -176,7 +176,7 @@ function _sweep(lib, ξ0, i_decay, i_Bs, cal)
         end
         println(io, "\nThe table is the current sensitivity result. A setting earns promotion only if its ",
                     "paired confidence interval and cross-storm checks satisfy the declared gates; no ",
-                    "historical V2.0 verdict is carried forward.")
+                    "historical SINDy core verdict is carried forward.")
     end
 end
 
@@ -185,11 +185,11 @@ function main_inject()
     i_Bs = _bs_index(lib)
     decay_cap = _shadow_decay_cap(ξ0, i_decay)
     q_bs = _q_bs(ξ0, i_decay, i_Bs)
-    println("Injection-adaptive EKF: adapt [decay, Bs] vs V2.1 frozen-tail ablation + persistence, leads ", LEADS)
+    println("Injection-adaptive EKF: adapt [decay, Bs] vs inertial-SINDy frozen-tail ablation + persistence, leads ", LEADS)
     @printf("  discovered ξ_Bs=%.4f  box=%s  q_Bs=%.3e  (decay cap %.4f, Q_decay=%.0e)\n",
             ξ0[i_Bs], string(BS_BOX), q_bs, decay_cap, Q_COEFF)
     println("="^80)
-    cal = _load_calibration_for_model(LiveVerifyConfig(model = :v2))
+    cal = _load_calibration_for_model(LiveVerifyConfig(model = :inertial_sindy))
     all_rows = replay_all(lib, ξ0, i_decay, i_Bs, cal, q_bs)
     for s in STORMS
         @printf("  %-24s rows=%d\n", s.name, nrow(all_rows[all_rows.storm .== s.name, :]))
@@ -198,11 +198,11 @@ function main_inject()
 
     candidates = NamedTuple[]
     open(OUT_MD_INJ, "w") do io
-        println(io, "# Injection-adaptive EKF — V2.1 frozen-tail ablation and persistence\n")
+        println(io, "# Injection-adaptive EKF — inertial-SINDy frozen-tail ablation and persistence\n")
         println(io, "Same causal protocol as the decay-only retirement test, but the EKF also adapts the discovered ",
                     "southward-injection coefficient `Bs` (box $(BS_BOX), q_Bs ≈ $(round(_q_bs(ξ0,i_decay,i_Bs);sigdigits=2))), ",
                     "giving the filter a downward lever. `improve` = paired RMSE(stronger baseline) − RMSE(EKF) ",
-                    "(positive = EKF beats the stronger of {V2.1 frozen-tail, persistence}); v3 needs its storm-cluster 95% CI > 0. `bias` = ",
+                    "(positive = EKF beats the stronger of {inertial-SINDy frozen-tail, persistence}); v3 needs its storm-cluster 95% CI > 0. `bias` = ",
                     "mean(obs − EKF). `fair` = ",
                     "max|ekf_fixed − frozen_tail|, must be ≈0.\n")
         println(io, "| lead [h] | regime | n | RMSE frozen-tail | RMSE EKF | RMSE pers | stronger | improve [nT] (95% CI) | bias | fair |")
@@ -237,7 +237,7 @@ function main_inject()
         end
         verdict = max_fair > 2.0 ? "INCONCLUSIVE: fairness gap $(round(max_fair;digits=2)) nT — rollout mismatch" :
                   promotable ? "PROMOTABLE: $detail" :
-                  "NOT PROMOTABLE: injection adaptation does not beat the stronger of {V2.1 frozen-tail, persistence} with CI>0 at any lead/regime"
+                  "NOT PROMOTABLE: injection adaptation does not beat the stronger of {inertial-SINDy frozen-tail, persistence} with CI>0 at any lead/regime"
         println(io, "\nAdapted decay ∈ [", round(dlo;digits=3), ", ", round(dhi;digits=3), "] (cap ", decay_cap,
                     "); adapted Bs ∈ [", round(blo;digits=3), ", ", round(bhi;digits=3), "] (box ", BS_BOX,
                     "). Max fairness gap: ", round(max_fair;digits=2), " nT.\n")
@@ -253,7 +253,7 @@ function _selftest_inject()
     lib, ξ0, i_decay = _shadow_library(); i_Bs = _bs_index(lib)
     decay_cap = _shadow_decay_cap(ξ0, i_decay)
     # Oracle A — discovered injection coefficient sanity (the lever we adapt is the real Bs term).
-    @assert isfinite(ξ0[i_Bs]) && ξ0[i_Bs] < 0.0 "V2.1 Bs coefficient is not a finite driver: $(ξ0[i_Bs])"
+    @assert isfinite(ξ0[i_Bs]) && ξ0[i_Bs] < 0.0 "inertial-SINDy Bs coefficient is not a finite driver: $(ξ0[i_Bs])"
     drv = (V = 500.0, Bz = -10.0, By = 0.0, n = 6.0, Pdyn = 2.0)   # Bs>0 (southward) → injection active
     # Oracle B — CONTINUITY: with the injection held at its discovered value, the 2-coeff forecast is
     # byte-identical to the decay-only _shadow_forecast. This is the strongest correctness check: injection
@@ -279,7 +279,7 @@ function _selftest_inject()
     return true
 end
 _cal_cache = Ref{Any}(nothing)
-cal_selftest() = (_cal_cache[] === nothing && (_cal_cache[] = _load_calibration_for_model(LiveVerifyConfig(model = :v2))); _cal_cache[])
+cal_selftest() = (_cal_cache[] === nothing && (_cal_cache[] = _load_calibration_for_model(LiveVerifyConfig(model = :inertial_sindy))); _cal_cache[])
 
 if abspath(PROGRAM_FILE) == @__FILE__
     _selftest_inject()

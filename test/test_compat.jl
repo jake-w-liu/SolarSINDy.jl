@@ -41,7 +41,7 @@ const ENVIRONMENT_ONLY_DEPS = Dict(
     "PlotlySupply" => "validation/canonical_figure_generation.jl (loaded by the test suite) and the " *
                       "figure scripts",
     "Printf" => "examples/external_dst_snapshot_collector.jl and the validation reports",
-    "Logging" => "validation/operational/v2_3_common.jl",
+    "Logging" => "validation/operational/analog_common.jl",
 )
 
 "Names loaded by `using`/`import` anywhere under `directory`."
@@ -93,7 +93,7 @@ end
         monitor = read(joinpath(PACKAGE_ROOT,"deploy/Dockerfile.monitor"),String)
         @test first(findfirst("COPY src ./src",monitor)) < first(findfirst("Pkg.precompile()",monitor))
         @test occursin("COPY data ./data",monitor)
-        @test occursin("COPY validation/operational/v2_4_live_claim_audit.jl",monitor)
+        @test occursin("COPY validation/operational/superlearner_live_claim_audit.jl",monitor)
         compose = read(joinpath(PACKAGE_ROOT,"deploy/docker-compose.yml"),String)
         @test occursin("SOLARSINDY_REVIEW_DASH_URL=http://dashboard:8723/api/health",compose)
     end

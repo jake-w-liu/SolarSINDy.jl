@@ -441,9 +441,9 @@ echo "STUB webhook=${SWM_WEBHOOK_URL-<unset>} port=${SWM_PORT-<unset>} mon=${SOL
     end
 end
 
-# G12-07: the V2.2 receipt collector's launchd streams live outside $MONITOR_DIR/logs; the watchdog
+# G12-07: the static stack receipt collector's launchd streams live outside $MONITOR_DIR/logs; the watchdog
 # must size-bound them too, and the installer must render their directory into the watchdog job.
-@testset "watchdog bounds the V2.2 receipt-collector streams" begin
+@testset "watchdog bounds the static stack receipt-collector streams" begin
     cli_bash = Sys.isunix() ? Sys.which("bash") : nothing
     if cli_bash !== nothing
         mktempdir() do root
@@ -452,7 +452,7 @@ end
             write(joinpath(rlogs, "launchd.out"), repeat("x", 5000))
             write(joinpath(rlogs, "launchd.err"), repeat("x", 500))
             env = merge(ENV, Dict("SOLARSINDY_MONITOR_DIR" => mon,
-                "SOLARSINDY_V22_RECEIPT_LOG_DIR" => rlogs,
+                "SOLARSINDY_L1_RECEIPT_LOG_DIR" => rlogs,
                 "SOLARSINDY_WATCHDOG_STREAM_MAX_BYTES" => "1000",
                 "SOLARSINDY_WATCHDOG_DASH_URL" => "http://127.0.0.1:1/api/health"))
             delete!(env, "SWM_WEBHOOK_URL")
@@ -471,14 +471,14 @@ end
             ienv = merge(ENV, Dict("HOME" => home, "SOLARSINDY_LOAD" => "0",
                 "PATH" => string(stub_bin, ":", get(ENV, "PATH", "")),
                 "SOLARSINDY_JULIA" => joinpath(stub_bin, "julia"),
-                "SOLARSINDY_MONITOR_DIR" => mon, "SOLARSINDY_V22_RECEIPT_LOG_DIR" => rlogs))
+                "SOLARSINDY_MONITOR_DIR" => mon, "SOLARSINDY_L1_RECEIPT_LOG_DIR" => rlogs))
             delete!(ienv, "SWM_WEBHOOK_URL")
             installer = joinpath(repo, "deploy", "install_launchd.sh")
             @test success(pipeline(setenv(`$cli_bash $installer watchdog`, ienv);
                                    stdout=devnull, stderr=devnull))
             plist = read(joinpath(home, "Library", "LaunchAgents",
                                   "com.empire.solarsindy.watchdog.plist"), String)
-            @test occursin("<key>SOLARSINDY_V22_RECEIPT_LOG_DIR</key>\n    <string>$rlogs</string>", plist)
+            @test occursin("<key>SOLARSINDY_L1_RECEIPT_LOG_DIR</key>\n    <string>$rlogs</string>", plist)
         end
     end
 end

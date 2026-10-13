@@ -5,10 +5,10 @@
 # online filter drives the decay coefficient across [-0.51, +0.54]; a POSITIVE decay coefficient is a
 # dynamically unstable ODE, so free-running rollout diverges. The fix tested here: an opt-in projected EKF
 # (init_assimilation(...; coeff_bounds)) that holds the adapted decay coefficient <= cap < 0 after every
-# update. We sweep a just-stable cap, a mild cap, and the current V2.1 discovered
+# update. We sweep a just-stable cap, a mild cap, and the current inertial-SINDy discovered
 # decay coefficient; for each, repeat the
-# powered multi-step comparison (n=31 cycle-25 storms, broad leakage-free v2 calibration, horizons 1/2/3/6 h):
-#   A=fixed raw  B=v2(fixed+corr)  C=ekf raw  D=ekf+corr ; paired B-D = EKF gain on top of v2 (>0 favours EKF).
+# powered multi-step comparison (n=31 cycle-25 storms, broad leakage-free operational calibration, horizons 1/2/3/6 h):
+#   A=fixed raw  B=operational(fixed+corr)  C=ekf raw  D=ekf+corr ; paired B-D = EKF gain on top of operational (>0 favours EKF).
 # The fixed pass + its calibration are computed once (cap-independent). We also print the CONSTRAINED decay
 # range to confirm the box binds. Verdict (variance-aware): a cap is a WIN only if D <= B at every horizon
 # (no multi-step harm, flagship not blown up) while keeping the 1-step behaviour — i.e. the constraint
@@ -17,14 +17,14 @@
 #
 # Historical numerical results from the former 21/10 core are intentionally not
 # embedded here. The current script derives the strongest decay cap from the
-# current V2.1 coefficient and asserts the 20/11 identity. Its correction fit is
-# diagnostic rather than the deployed 26-feature V2.1 calibration.
+# current inertial-SINDy coefficient and asserts the 20/11 identity. Its correction fit is
+# diagnostic rather than the deployed 26-feature inertial-SINDy calibration.
 
 using SolarSINDy, DataFrames, Statistics, LinearAlgebra, Printf, Dates
 
 const PKG  = pkgdir(SolarSINDy)
 const PROJ = normpath(joinpath(PKG, ".."))
-const EXTRACTED = joinpath(PROJ, "paper_v2_monitor", "data", "omni_extracted.csv")
+const EXTRACTED = joinpath(PROJ, "paper_dst_superlearner", "data", "omni_extracted.csv")
 const CATALOG   = joinpath(PKG, "data", "storm_catalog.csv")
 const QEKF = 1e-4
 const HORIZONS = [1, 2, 3, 6]
@@ -49,12 +49,12 @@ function main()
     sid = zeros(Int,N)
     for s in storms; lo=s.min_dst_time-Hour(36); hi=s.min_dst_time+Hour(72)
         @inbounds for k in 1:N; (df.datetime[k]>=lo && df.datetime[k]<=hi)&&(sid[k]=s.storm_id); end; end
-    core=load_operational_core(:v2); lib=core.library; tn=get_term_names(lib); ξ0=copy(core.coefficients)
+    core=load_operational_core(:inertial_sindy); lib=core.library; tn=get_term_names(lib); ξ0=copy(core.coefficients)
     length(tn)==20 && count(!=(0.0),ξ0)==11 && !("n*V^2" in tn) ||
-        error("constrained-EKF diagnostic did not load the current 20/11 V2.1 core")
+        error("constrained-EKF diagnostic did not load the current 20/11 inertial-SINDy core")
     i_decay=findfirst(==("Dst_star"),tn)
     decay_cap = ξ0[i_decay]
-    decay_cap < 0.0 || error("current V2.1 decay coefficient is not stable")
+    decay_cap < 0.0 || error("current inertial-SINDy decay coefficient is not stable")
     caps = [-1e-3, -0.02, decay_cap]
     drivers=[(V=df.V[k],Bz=df.Bz[k],By=df.By[k],n=df.n[k],Pdyn=df.Pdyn[k]) for k in 1:N]
     @printf("storms n=%d; flagship id=%d (%s, %.0f); fixed decay=%.5f\n",
@@ -85,18 +85,18 @@ function main()
     end
 
     corrected(testdf,cal)=begin
-        prep=SolarSINDy.add_operational_v2_features!(copy(testdf))
-        [prep.pred_dst_nt[i]+SolarSINDy.operational_v2_correction(cal,
+        prep=SolarSINDy.add_inertial_sindy_features!(copy(testdf))
+        [prep.pred_dst_nt[i]+SolarSINDy.operational_inertial_sindy_correction(cal,
             NamedTuple{Tuple(cal.feature_names)}(Tuple(Float64(prep[i,c]) for c in cal.feature_names))) for i in 1:nrow(prep)]
     end
 
-    calib_f, storm_f, _ = run(Int[], nothing); cal_f = fit_operational_v2_calibration(calib_f)
+    calib_f, storm_f, _ = run(Int[], nothing); cal_f = fit_inertial_sindy_calibration(calib_f)
 
     for cap in caps
-        calib_e, storm_e, cr = run([i_decay], cap); cal_e = fit_operational_v2_calibration(calib_e)
+        calib_e, storm_e, cr = run([i_decay], cap); cal_e = fit_inertial_sindy_calibration(calib_e)
         @printf("\n=== decay cap = %.4f  (constrained adapted-decay range [%.4f, %.4f]; was [-0.51,+0.54] unconstrained) ===\n",
                 cap, cr[1], cr[2])
-        @printf("%-5s %4s | %6s %6s %6s %6s | %-20s\n","horiz","n","A fix","B v2","C ekf","D e+c","B-D mean±SE (fav/hurt) flagship")
+        @printf("%-5s %4s | %6s %6s %6s %6s | %-20s\n","horiz","n","A fix","B operational","C ekf","D e+c","B-D mean±SE (fav/hurt) flagship")
         for Nh in HORIZONS
             A=Float64[];B=Float64[];C=Float64[];D=Float64[];bd=Float64[]; fav=0;hurt=0; flag=NaN
             for s in storms
@@ -113,7 +113,7 @@ function main()
         end
     end
     println("\nRead: D<=B at every horizon means the cap passes this diagnostic no-harm screen; it does not authorize")
-    println("deployment because the comparison uses a bespoke correction and omits the served V2.1 tail. D~B means")
+    println("deployment because the comparison uses a bespoke correction and omits the served inertial-SINDy tail. D~B means")
     println("redundancy. The later exact served-tail seven-storm replays failed the promotion gate, so EKF remains research-only.")
     return nothing
 end

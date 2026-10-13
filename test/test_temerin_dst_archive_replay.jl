@@ -25,8 +25,8 @@ include(TEMERIN_DST_REPLAY_SCRIPT)
                           DateTime(2024, 5, 1, 5)],
             lead = [1, 1, 1],
             obs = [-40.0, -50.0, -60.0],
-            v2_0 = [-39.0, -48.0, -61.0],
-            v2_1 = [-40.5, -49.0, -59.0],
+            sindy_core = [-39.0, -48.0, -61.0],
+            inertial_sindy = [-40.5, -49.0, -59.0],
             persistence = [-38.0, -45.0, -55.0],
         )
         scored = score_temerin_dst_archive(broad, rows;

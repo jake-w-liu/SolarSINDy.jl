@@ -90,13 +90,13 @@ Base.String(::_InterruptingSWPCText) = throw(InterruptException())
 @testset "Recorded claim assessment fails closed on missing, stale, or mismatched evidence" begin
     mktempdir() do directory
         log_path = joinpath(directory, "live_forecast_log.csv")
-        path = joinpath(directory, "v2_4_live_claim_status.json")
+        path = joinpath(directory, "superlearner_live_claim_status.json")
         reference = DateTime(2026, 9, 19, 12)
         @test !claim_audit_status(log_path; reference=reference).available
         assessment = Dict(
-            "shadow_identity" => V2_4_CALIBRATION_SHADOW_MODEL_VERSION,
-            "shadow_config_sha256" => V2_4_CALIBRATION_SHADOW_CONFIG_SHA256,
-            "served_manifest_sha256" => V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256,
+            "shadow_identity" => SUPERLEARNER_CALIBRATION_SHADOW_MODEL_VERSION,
+            "shadow_config_sha256" => SUPERLEARNER_CALIBRATION_SHADOW_CONFIG_SHA256,
+            "served_manifest_sha256" => SUPERLEARNER_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256,
             "generated_utc" => jdt(reference),
             "integrity" => Dict("gate_pass" => false, "violations" => ["historical mismatch"]),
             "marginal" => Dict("claim_ready" => false, "gates" => Dict("integrity" => false)),
@@ -140,15 +140,15 @@ end
 
 function live_cycle_fixture(issue::DateTime;
                             vintage=issue, anchor_time=issue - Hour(1), latest_dst=-20.0,
-                            model="v2.1", served_model="v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia",
+                            model="inertial_sindy", served_model="inertial-sindy+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia",
                             interval=nothing, observations=missing,
                             served_pred=-25.0, served_lo=-35.0, served_hi=-15.0,
                             audit_pred=served_pred, audit_lo=served_lo, audit_hi=served_hi,
-                            v2_1_served_pred=nothing, v2_2_stack_pred=nothing,
-                            v2_1_served_ci05=nothing, v2_2_stack_ci05=nothing,
-                            driver_assumption=nothing, v2_2_status=nothing,
-                            v24_status=nothing, v24_pred=nothing, v24_guard_applied=nothing,
-                            v24_projection_applied=nothing, v24_regime_cell=nothing,
+                            inertial_sindy_served_pred=nothing, static_stack_pred=nothing,
+                            inertial_sindy_served_ci05=nothing, static_stack_ci05=nothing,
+                            driver_assumption=nothing, static_stack_status=nothing,
+                            superlearner_status=nothing, superlearner_pred=nothing, superlearner_guard_applied=nothing,
+                            superlearner_projection_applied=nothing, superlearner_regime_cell=nothing,
                             cal_shadow_status=nothing, cal_shadow_lo=nothing,
                             cal_shadow_hi=nothing, cal_shadow_history_n=nothing,
                             cal_shadow_location=nothing)
@@ -157,15 +157,15 @@ function live_cycle_fixture(issue::DateTime;
     lead = [(target - issue) / Millisecond(3_600_000) for target in targets]
     expand(x) = x isa AbstractVector ? collect(x) : fill(x, length(requested))
     # The engine sets `interval_source` to the depth-stratified conformal source inside the branch
-    # that also records `v24_status = "ok"` — the status is returned only after the center and both
+    # that also records `superlearner_status = "ok"` — the status is returned only after the center and both
     # interval endpoints are finite — and leaves the batch policy's source on every other row. A
     # fixture that does not state the sources therefore derives them from the statuses, so a cycle
     # fixture is coherent the way the engine's own rows are. A test that needs an incoherent cycle
     # states the sources explicitly.
-    statuses = v24_status === nothing ? nothing : expand(v24_status)
+    statuses = superlearner_status === nothing ? nothing : expand(superlearner_status)
     sources = interval !== nothing ? expand(interval) :
               statuses === nothing ? fill("aci", length(requested)) :
-              [s isa AbstractString && s == "ok" ? "v24_conformal_depth" : "aci" for s in statuses]
+              [s isa AbstractString && s == "ok" ? "superlearner_conformal_depth" : "aci" for s in statuses]
     frame = DataFrame(
         issue_time_utc_dt=fill(issue, length(requested)),
         latest_solar_wind_utc_dt=fill(vintage, length(requested)),
@@ -177,9 +177,9 @@ function live_cycle_fixture(issue::DateTime;
         served_pred_dst_nt=expand(served_pred),
         served_pred_dst_ci05_nt=expand(served_lo),
         served_pred_dst_ci95_nt=expand(served_hi),
-        v2_pred_dst_nt=expand(audit_pred),
-        v2_pred_dst_ci05_nt=expand(audit_lo),
-        v2_pred_dst_ci95_nt=expand(audit_hi),
+        inertial_sindy_pred_dst_nt=expand(audit_pred),
+        inertial_sindy_pred_dst_ci05_nt=expand(audit_lo),
+        inertial_sindy_pred_dst_ci95_nt=expand(audit_hi),
         # The interval source and the served label are per-row fields: the super-learner stage acts
         # per horizon, so one batch can issue horizons under different stages and disclose it row by
         # row. Both accept a vector so a fixture can reproduce that cycle shape.
@@ -187,44 +187,44 @@ function live_cycle_fixture(issue::DateTime;
         model_version=fill(model, length(requested)),
         sub_hourly_model_version=expand(served_model),
     )
-    # The V2.1 continuity column exists only in the stacked-served schema; a fixture that omits it
+    # The inertial-SINDy continuity column exists only in the stacked-served schema; a fixture that omits it
     # reproduces a pre-stack log, which must keep behaving exactly as before.
-    v2_1_served_pred === nothing ||
-        (frame[!, :v2_1_served_pred_dst_nt] = expand(v2_1_served_pred))
+    inertial_sindy_served_pred === nothing ||
+        (frame[!, :inertial_sindy_served_pred_dst_nt] = expand(inertial_sindy_served_pred))
     # The static-stack continuity column exists only in the super-learner-served schema, and is the
     # second depth-safe partner of the published severity.
-    v2_2_stack_pred === nothing ||
-        (frame[!, :v2_2_stack_pred_dst_nt] = expand(v2_2_stack_pred))
+    static_stack_pred === nothing ||
+        (frame[!, :static_stack_pred_dst_nt] = expand(static_stack_pred))
     # The predecessor band edges: the lower edge each earlier stage would have published for this
     # issue. They exist only in the schema written after the watch edge became a minimum over the
     # partners' own edges; a fixture that omits them reproduces a row from before that change.
-    v2_1_served_ci05 === nothing ||
-        (frame[!, :v2_1_served_ci05_dst_nt] = expand(v2_1_served_ci05))
-    v2_2_stack_ci05 === nothing ||
-        (frame[!, :v2_2_stack_ci05_dst_nt] = expand(v2_2_stack_ci05))
+    inertial_sindy_served_ci05 === nothing ||
+        (frame[!, :inertial_sindy_served_ci05_dst_nt] = expand(inertial_sindy_served_ci05))
+    static_stack_ci05 === nothing ||
+        (frame[!, :static_stack_ci05_dst_nt] = expand(static_stack_ci05))
     # The per-row driver assumption and served-stage statuses likewise exist only in newer schemas.
     driver_assumption === nothing ||
         (frame[!, :driver_assumption] = expand(driver_assumption))
-    v2_2_status === nothing || (frame[!, :v2_2_status] = expand(v2_2_status))
-    statuses === nothing || (frame[!, :v24_status] = statuses)
-    v24_pred === nothing || (frame[!, :v24_pred_dst_nt] = expand(v24_pred))
-    v24_guard_applied === nothing ||
-        (frame[!, :v24_guard_applied] = expand(v24_guard_applied))
-    v24_projection_applied === nothing ||
-        (frame[!, :v24_projection_applied] = expand(v24_projection_applied))
-    v24_regime_cell === nothing || (frame[!, :v24_regime_cell] = expand(v24_regime_cell))
+    static_stack_status === nothing || (frame[!, :static_stack_status] = expand(static_stack_status))
+    statuses === nothing || (frame[!, :superlearner_status] = statuses)
+    superlearner_pred === nothing || (frame[!, :superlearner_pred_dst_nt] = expand(superlearner_pred))
+    superlearner_guard_applied === nothing ||
+        (frame[!, :superlearner_guard_applied] = expand(superlearner_guard_applied))
+    superlearner_projection_applied === nothing ||
+        (frame[!, :superlearner_projection_applied] = expand(superlearner_projection_applied))
+    superlearner_regime_cell === nothing || (frame[!, :superlearner_regime_cell] = expand(superlearner_regime_cell))
     if cal_shadow_status !== nothing
-        frame[!, :v24_cal_shadow_model_version] =
-            fill(V2_4_CALIBRATION_SHADOW_MODEL_VERSION, length(requested))
-        frame[!, :v24_cal_shadow_config_sha256] =
-            fill(V2_4_CALIBRATION_SHADOW_CONFIG_SHA256, length(requested))
-        frame[!, :v24_manifest_sha256] =
-            fill(V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256, length(requested))
-        frame[!, :v24_cal_shadow_status] = expand(cal_shadow_status)
-        frame[!, :v24_cal_shadow_ci05_nt] = expand(cal_shadow_lo)
-        frame[!, :v24_cal_shadow_ci95_nt] = expand(cal_shadow_hi)
-        frame[!, :v24_cal_shadow_history_n] = expand(cal_shadow_history_n)
-        frame[!, :v24_cal_shadow_location_shift_nt] = expand(cal_shadow_location)
+        frame[!, :superlearner_cal_shadow_model_version] =
+            fill(SUPERLEARNER_CALIBRATION_SHADOW_MODEL_VERSION, length(requested))
+        frame[!, :superlearner_cal_shadow_config_sha256] =
+            fill(SUPERLEARNER_CALIBRATION_SHADOW_CONFIG_SHA256, length(requested))
+        frame[!, :superlearner_manifest_sha256] =
+            fill(SUPERLEARNER_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256, length(requested))
+        frame[!, :superlearner_cal_shadow_status] = expand(cal_shadow_status)
+        frame[!, :superlearner_cal_shadow_ci05_nt] = expand(cal_shadow_lo)
+        frame[!, :superlearner_cal_shadow_ci95_nt] = expand(cal_shadow_hi)
+        frame[!, :superlearner_cal_shadow_history_n] = expand(cal_shadow_history_n)
+        frame[!, :superlearner_cal_shadow_location_shift_nt] = expand(cal_shadow_location)
         frame[!, :model_step_hours] = requested
     end
     return frame
@@ -260,26 +260,26 @@ const PAYLOADS = {
   "/api/health": { status: "ok", cycle_complete: true },
   "/api/status": {
     available: true, generated_utc: "@@ISSUE@@", forecast_issue_utc: "@@ISSUE@@",
-    latest_solar_wind_utc: "@@ISSUE@@", model_version: "v2.1",
-    served_model_version: "@@SERVED@@", served_product: "V2.4e" + MARKER,
+    latest_solar_wind_utc: "@@ISSUE@@", model_version: "inertial_sindy",
+    served_model_version: "@@SERVED@@", served_product: "super-learner" + MARKER,
     latest_observation: { dst_nt: -40.0, time_utc: "@@ISSUE@@" },
     threat: { level: 2, label: "Moderate storm", watch: true, watch_level: 3,
               watch_label: "Intense storm", point_min_dst_nt: -70.0,
               interval_lower_edge_min_dst_nt: -105.0,
-              interval_lower_edge_source: "v2_1_served",
+              interval_lower_edge_source: "inertial_sindy_served",
               basis: "Dst storm-intensity scale (-30/-50/-100/-200 nT)" },
     lead_time: { forecast_horizon_hours: 6.0, physical_upstream_lead_min: [30, 60],
                  driver_assumption: "Ballistically propagated L1 forcing" },
-    calibration: { n_verified: 60, v2_n_verified: 60, v2_rmse_nt: 4.2, v2_coverage_90: 0.9,
+    calibration: { n_verified: 60, operational_n_verified: 60, operational_rmse_nt: 4.2, operational_coverage_90: 0.9,
                    comparison_n_verified: 60, live_skill_min_verified: 48,
                    live_skill_mature: true, current_interval_source: MARKER,
                    current_interval_sources: [MARKER, "aci"],
                    n_verified_current_source: 10, n_verified_current_served_model: 10,
-                   v2_matched_rmse_nt: 4.2, persistence_matched_rmse_nt: 6.1,
+                   operational_matched_rmse_nt: 4.2, persistence_matched_rmse_nt: 6.1,
                    by_source: [{ source: MARKER, n: 3, coverage_90: 0.9 },
                                { source: "aci", n: 4, coverage_90: 0.88 }],
                    by_served_model: [{ product: MARKER, n: 3, coverage_90: 0.9, rmse_nt: 4.0 },
-                                     { product: "V2.4e", n: 4, coverage_90: 0.88, rmse_nt: 4.4 }],
+                                     { product: "super-learner", n: 4, coverage_90: 0.88, rmse_nt: 4.4 }],
                    calibration_shadow: { current_status: "ok", collecting: true,
                      n_verified: 0, issue_cycles: 0, calendar_days: 0, consecutive_days: 0,
                      coverage_90: null,
@@ -302,15 +302,15 @@ const PAYLOADS = {
   "/api/forecast": {
     available: true, issue_time_utc: "@@ISSUE@@", latest_solar_wind_utc: "@@ISSUE@@",
     anchor_dst_nt: -40.0, anchor_dst_time_utc: "@@ISSUE@@", interval_source: MARKER,
-    interval_sources: [MARKER, "v24_conformal_depth"], superseded_cycle_incomplete: false,
-    served_product: "V2.4e" + MARKER, served_model_version: "@@SERVED@@",
+    interval_sources: [MARKER, "superlearner_conformal_depth"], superseded_cycle_incomplete: false,
+    served_product: "super-learner" + MARKER, served_model_version: "@@SERVED@@",
     recent_observed: [{ target_utc: "@@ISSUE@@", observed_dst_nt: -40.0 }],
     subhour_trajectory: [{ target_utc: "2026-06-26T06:15:00Z", dst_nt: -999.0 }],
     horizons: [{ target_utc: "2026-06-26T07:00:00Z", horizon_hours: 1.0, pred_dst_nt: -70.0,
                  ci05_dst_nt: -95.0, ci95_dst_nt: -45.0, severity_dst_nt: -75.0,
-                 severity_ci05_dst_nt: -105.0, severity_ci05_source: "v2_1_served",
-                 interval_source: MARKER, v24_cal_shadow_status: "ok",
-                 v24_cal_shadow_ci05_nt: -110.0, v24_cal_shadow_ci95_nt: -30.0 }],
+                 severity_ci05_dst_nt: -105.0, severity_ci05_source: "inertial_sindy_served",
+                 interval_source: MARKER, superlearner_cal_shadow_status: "ok",
+                 superlearner_cal_shadow_ci05_nt: -110.0, superlearner_cal_shadow_ci95_nt: -30.0 }],
   },
   "/api/history": { hours: 72, coverage_90: 0.9, rmse_nt: 4.2,
                     rows: [{ target_utc: "@@ISSUE@@", observed_dst_nt: -40.0, pred_dst_nt: -42.0,
@@ -336,7 +336,7 @@ const SUPERLEARNER_DRIVER_TOKEN =
 const STACK_DRIVER_TOKEN =
     "ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_" *
     "inertia_blend_then_state_inertia_then_extreme_inertia_guard_then_static_regime_stack"
-const V2_1_DRIVER_TOKEN =
+const INERTIAL_SINDY_DRIVER_TOKEN =
     "ballistically_propagated_l1_then_regime_aware_relaxation_then_rate_projection_then_one_hour_" *
     "inertia_blend_then_state_inertia_then_extreme_inertia_guard"
 
@@ -525,7 +525,7 @@ const V2_1_DRIVER_TOKEN =
         @test _alerts_from(Any[], 6) == NamedTuple[]
     end
 
-    @eval @testset "forecast API exposes upgraded V2 as the product forecast" begin
+    @eval @testset "forecast API exposes upgraded Operational as the product forecast" begin
         issue = now(UTC) - Minute(10)
         df = live_cycle_fixture(
             issue;
@@ -538,26 +538,26 @@ const V2_1_DRIVER_TOKEN =
             served_lo=[-69.0, -70.0, -71.0, -72.0],
             served_hi=[-49.0, -50.0, -51.0, -52.0],
         )
-        df[!, :v1_pred_dst_nt] = [-55.0, -56.0, -57.0, -58.0]
+        df[!, :sindy_core_pred_dst_nt] = [-55.0, -56.0, -57.0, -58.0]
         df[!, :persistence_dst_nt] = fill(-50.0, nrow(df))
         df[!, :burton_dst_nt] = [-57.0, -58.0, -59.0, -60.0]
         df[!, :burton_full_dst_nt] = [-56.0, -57.0, -58.0, -59.0]
         df[!, :obrien_dst_nt] = [-58.0, -59.0, -60.0, -61.0]
         cal = calibration_summary(df)
-        expected_v2_rmse = round(sqrt(mean((df.observation_dst_nt .- df.served_pred_dst_nt).^2)); digits=2)
-        expected_audit_rmse = round(sqrt(mean((df.observation_dst_nt .- df.v2_pred_dst_nt).^2)); digits=2)
-        @test cal.v2_n_verified == 4
-        @test cal.v2_rmse_nt == expected_v2_rmse
-        @test cal.rmse_nt == expected_v2_rmse
+        expected_operational_rmse = round(sqrt(mean((df.observation_dst_nt .- df.served_pred_dst_nt).^2)); digits=2)
+        expected_audit_rmse = round(sqrt(mean((df.observation_dst_nt .- df.inertial_sindy_pred_dst_nt).^2)); digits=2)
+        @test cal.operational_n_verified == 4
+        @test cal.operational_rmse_nt == expected_operational_rmse
+        @test cal.rmse_nt == expected_operational_rmse
         @test cal.audit_baseline_rmse_nt == expected_audit_rmse
         @test cal.frozen_tail_ablation_rmse_nt == expected_audit_rmse
-        @test cal.v2_coverage_90 == 1.0
+        @test cal.operational_coverage_90 == 1.0
         # Hand-derived constant residuals verify every displayed method and catch a
         # dropped comparator or a substitution of the unmatched product RMSE.
         @test cal.comparison_n_verified == 4
-        @test cal.v2_matched_rmse_nt == 1.0
+        @test cal.operational_matched_rmse_nt == 1.0
         @test cal.frozen_tail_ablation_matched_rmse_nt == 15.0
-        @test cal.sindy_v1_matched_rmse_nt == 5.0
+        @test cal.sindy_core_matched_rmse_nt == 5.0
         @test cal.persistence_matched_rmse_nt == 11.55
         @test cal.burton_matched_rmse_nt == 3.0
         @test cal.burton_full_matched_rmse_nt == 4.0
@@ -598,7 +598,7 @@ const V2_1_DRIVER_TOKEN =
                       audit_pred=[-38.0, -39.0, -40.0, -41.0],
                       audit_lo=[-48.0, -49.0, -50.0, -51.0],
                       audit_hi=[-28.0, -29.0, -30.0, -31.0]) for k in 0:11)...)
-        mature[!, :v1_pred_dst_nt] = mature.observation_dst_nt .+ 5.0
+        mature[!, :sindy_core_pred_dst_nt] = mature.observation_dst_nt .+ 5.0
         mature[!, :persistence_dst_nt] = mature.observation_dst_nt .+ 6.0
         mature[!, :burton_dst_nt] = mature.observation_dst_nt .+ 3.0
         mature[!, :burton_full_dst_nt] = mature.observation_dst_nt .+ 4.0
@@ -612,26 +612,26 @@ const V2_1_DRIVER_TOKEN =
         @test !almost_mature_cal.live_skill_mature
         @test almost_mature_cal.live_skill_rows_remaining == 1
         hist = build_history(df, 24)
-        @test hist.rmse_nt == cal.v2_rmse_nt
+        @test hist.rmse_nt == cal.operational_rmse_nt
         @test hist.rows[1].pred_dst_nt == df.served_pred_dst_nt[1]
-        @test hist.rows[1].audit_baseline_dst_nt == df.v2_pred_dst_nt[1]
-        @test hist.rows[1].frozen_tail_ablation_dst_nt == df.v2_pred_dst_nt[1]
+        @test hist.rows[1].audit_baseline_dst_nt == df.inertial_sindy_pred_dst_nt[1]
+        @test hist.rows[1].frozen_tail_ablation_dst_nt == df.inertial_sindy_pred_dst_nt[1]
         fc = build_forecast(df)
         @test fc.available && length(fc.horizons) == 4
         @test fc.horizons[1].pred_dst_nt == df.served_pred_dst_nt[1]
-        @test fc.horizons[1].audit_baseline_dst_nt == df.v2_pred_dst_nt[1]
-        @test fc.horizons[1].frozen_tail_ablation_dst_nt == df.v2_pred_dst_nt[1]
+        @test fc.horizons[1].audit_baseline_dst_nt == df.inertial_sindy_pred_dst_nt[1]
+        @test fc.horizons[1].frozen_tail_ablation_dst_nt == df.inertial_sindy_pred_dst_nt[1]
 
         legacy = copy(df)
-        legacy.model_version .= "v2"
-        legacy.sub_hourly_model_version .= "v2+L1A+Bregime+Pinertia"
+        legacy.model_version .= "inertial_sindy"
+        legacy.sub_hourly_model_version .= "operational+L1A+Bregime+Pinertia"
         @test nrow(verified_rows(legacy)) == 0
-        @test calibration_summary(legacy).v2_n_verified == 0
+        @test calibration_summary(legacy).operational_n_verified == 0
         @test isempty(build_history(legacy, 24).rows)
         @test !build_forecast(legacy).available
 
         malformed_version = copy(df)
-        malformed_version[!, :model_version] = Any[1, "v2.1", "v2.1", "v2.1"]
+        malformed_version[!, :model_version] = Any[1, "inertial_sindy", "inertial_sindy", "inertial_sindy"]
         @test nrow(verified_rows(malformed_version)) == 3
 
         missing_issue = copy(df)
@@ -705,9 +705,21 @@ const V2_1_DRIVER_TOKEN =
         outside = joinpath(outside_dir, "secret.txt")
         write(outside, "must not be served")
         link = tempname(PUBLIC_DIR)
-        symlink(outside, link)
+        # Windows requires Administrator/Developer Mode to create symlinks; where the OS
+        # denies creation, the symlink-escape assertion cannot run and is skipped.
+        can_symlink = try
+            symlink(outside, link)
+            true
+        catch e
+            e isa Base.IOError || rethrow()
+            false
+        end
         try
-            @test serve_static("/" * basename(link)).status == 403
+            if can_symlink
+                @test serve_static("/" * basename(link)).status == 403
+            else
+                @warn "symlink creation denied by the OS; skipping symlink traversal check"
+            end
         finally
             rm(link; force=true)
             rm(outside_dir; recursive=true, force=true)
@@ -1020,8 +1032,8 @@ const V2_1_DRIVER_TOKEN =
         sort!(wrong_schedule, :target_time_utc_dt)
         push!(invalid, wrong_schedule)
         uniformly_historical = copy(valid)
-        uniformly_historical.model_version .= "v2"
-        uniformly_historical.sub_hourly_model_version .= "v2+L1A+Bregime+Pinertia"
+        uniformly_historical.model_version .= "inertial_sindy"
+        uniformly_historical.sub_hourly_model_version .= "operational+L1A+Bregime+Pinertia"
         push!(invalid, uniformly_historical)
         for (field, value) in (
             (:model_version, "v3"),
@@ -1047,11 +1059,11 @@ const V2_1_DRIVER_TOKEN =
 
     @eval @testset "a per-row-coherent cycle is served; an incoherent one is not" begin
         issue = now(UTC) - Minute(10)
-        mixed_labels = [CURRENT_V2_SERVED_MODEL_VERSION, CURRENT_V2_SERVED_MODEL_VERSION,
-                        CURRENT_V2_SERVED_MODEL_VERSION, STACK_V2_SERVED_MODEL_VERSION]
+        mixed_labels = [CURRENT_OPERATIONAL_SERVED_MODEL_VERSION, CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
+                        CURRENT_OPERATIONAL_SERVED_MODEL_VERSION, STACK_OPERATIONAL_SERVED_MODEL_VERSION]
         mixed_status = ["ok", "ok", "ok", "fallback:serving_error"]
-        depth = "v24_conformal_depth"
-        mixed = live_cycle_fixture(issue; served_model=mixed_labels, v24_status=mixed_status,
+        depth = "superlearner_conformal_depth"
+        mixed = live_cycle_fixture(issue; served_model=mixed_labels, superlearner_status=mixed_status,
                                    interval=[depth, depth, depth, "conformal"],
                                    served_pred=-60.0, served_lo=-80.0, served_hi=-40.0)
         # Three horizons served by the super-learner, one disclosed as a stack fallback: the log is
@@ -1064,7 +1076,7 @@ const V2_1_DRIVER_TOKEN =
         @test st.available && fc.available
         @test st.superseded_cycle_incomplete == false
         @test fc.superseded_cycle_incomplete == false
-        @test st.served_model_version == STACK_V2_SERVED_MODEL_VERSION   # weakest stage, as before
+        @test st.served_model_version == STACK_OPERATIONAL_SERVED_MODEL_VERSION   # weakest stage, as before
         @test fc.interval_source == "conformal"        # the interval the reported stage issued
         @test fc.interval_sources == ["conformal", depth]
         @test [h.interval_source for h in fc.horizons] == [depth, depth, depth, "conformal"]
@@ -1075,14 +1087,14 @@ const V2_1_DRIVER_TOKEN =
         # calibrated for a center it was not drawn around, and an acted row that disclaims it hides
         # which band was served. Both stay invalid, as does a batch that used two policies at once.
         incoherent = [
-            [depth, depth, depth, depth],              # the fallback row claims the V2.4e band
+            [depth, depth, depth, depth],              # the fallback row claims the super-learner band
             ["conformal", depth, depth, "conformal"],  # an acted row disclaims it
             [depth, depth, "aci", "conformal"],        # two batch policies in one cycle
         ]
         incoherent_status = [mixed_status, mixed_status,
                              ["ok", "ok", "fallback:serving_error", "fallback:serving_error"]]
         for (sources, statuses) in zip(incoherent, incoherent_status)
-            bad = live_cycle_fixture(issue; served_model=mixed_labels, v24_status=statuses,
+            bad = live_cycle_fixture(issue; served_model=mixed_labels, superlearner_status=statuses,
                                      interval=sources)
             @test !_valid_live_cycle(bad)
             @test !build_status(bad).available
@@ -1100,16 +1112,16 @@ const V2_1_DRIVER_TOKEN =
         # the method "unknown" while a complete forecast was on the page. Both readings must come
         # from the cycle the payloads actually publish.
         issue = now(UTC) - Minute(10)
-        depth = "v24_conformal_depth"
-        mixed_labels = [CURRENT_V2_SERVED_MODEL_VERSION, CURRENT_V2_SERVED_MODEL_VERSION,
-                        CURRENT_V2_SERVED_MODEL_VERSION, STACK_V2_SERVED_MODEL_VERSION]
+        depth = "superlearner_conformal_depth"
+        mixed_labels = [CURRENT_OPERATIONAL_SERVED_MODEL_VERSION, CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
+                        CURRENT_OPERATIONAL_SERVED_MODEL_VERSION, STACK_OPERATIONAL_SERVED_MODEL_VERSION]
         mixed_status = ["ok", "ok", "ok", "fallback:serving_error"]
         mixed_sources = [depth, depth, depth, "aci"]
 
         # Three horizons under the depth-stratified conformal band and one under the batch policy.
         # The cycle is published under its weakest served stage, so its interval method is the one
         # that stage issued, and it must match the forecast payload exactly.
-        mixed = live_cycle_fixture(issue; served_model=mixed_labels, v24_status=mixed_status,
+        mixed = live_cycle_fixture(issue; served_model=mixed_labels, superlearner_status=mixed_status,
                                    interval=mixed_sources,
                                    served_pred=-60.0, served_lo=-80.0, served_hi=-40.0)
         @test _valid_live_cycle(mixed)
@@ -1121,7 +1133,7 @@ const V2_1_DRIVER_TOKEN =
         @test mixed_cal.current_interval_sources == ["aci", depth]
         @test mixed_cal.current_interval_sources == mixed_fc.interval_sources
         @test mixed_cal.current_served_model == mixed_fc.served_model_version
-        @test mixed_cal.current_served_model == STACK_V2_SERVED_MODEL_VERSION
+        @test mixed_cal.current_served_model == STACK_OPERATIONAL_SERVED_MODEL_VERSION
         # The two strings this panel used to publish for exactly this cycle.
         @test mixed_cal.current_interval_source != "nothing"
         @test mixed_cal.current_interval_source != "unknown"
@@ -1130,8 +1142,8 @@ const V2_1_DRIVER_TOKEN =
 
         # A cycle whose reported stage itself served two methods: no single one describes it, so
         # none is named and the set is what is published — the same set the forecast payload sends.
-        two_sources = live_cycle_fixture(issue; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
-                                         v24_status=mixed_status, interval=mixed_sources,
+        two_sources = live_cycle_fixture(issue; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
+                                         superlearner_status=mixed_status, interval=mixed_sources,
                                          served_pred=-60.0, served_lo=-80.0, served_hi=-40.0)
         @test _valid_live_cycle(two_sources)
         two_cal = calibration_summary(two_sources)
@@ -1142,11 +1154,11 @@ const V2_1_DRIVER_TOKEN =
         # Superseded-cycle fallback: the newest issue hour is incomplete and the payloads publish the
         # newest complete one. The summary must describe that cycle, which has a method, rather than
         # the incomplete hour, which has none.
-        previous = live_cycle_fixture(issue - Hour(1); v24_status="ok",
-                                      served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        previous = live_cycle_fixture(issue - Hour(1); superlearner_status="ok",
+                                      served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
                                       served_pred=-40.0, served_lo=-55.0, served_hi=-25.0)
-        partial = live_cycle_fixture(issue; v24_status="ok",
-                                     served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        partial = live_cycle_fixture(issue; superlearner_status="ok",
+                                     served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
                                      served_pred=-70.0, served_lo=-95.0, served_hi=-45.0)[1:2, :]
         fallback = vcat(previous, partial)
         @test !_valid_live_cycle(latest_cycle(fallback))
@@ -1164,15 +1176,15 @@ const V2_1_DRIVER_TOKEN =
         now0 = floor(now(UTC), Hour)
         history = DataFrame()
         for k in 1:3
-            frame = live_cycle_fixture(now0 - Hour(30 + k); v24_status="ok",
-                                       served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            frame = live_cycle_fixture(now0 - Hour(30 + k); superlearner_status="ok",
+                                       served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
                                        observations=-25.0 - k)
             history = isempty(history) ? frame : vcat(history, frame; cols=:union)
         end
         for k in 4:5
             history = vcat(history,
                            live_cycle_fixture(now0 - Hour(30 + k); interval="aci",
-                                              served_model=PREVIOUS_V2_SERVED_MODEL_VERSION,
+                                              served_model=PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION,
                                               observations=-25.0 - k);
                            cols=:union)
         end
@@ -1283,7 +1295,7 @@ const V2_1_DRIVER_TOKEN =
             latest_dst_time_utc_dt = [old - Hour(1)], target_time_utc_dt = [old + Hour(1)],
             horizon_hours = [1.0], latest_dst_nt = [-60.0], observation_dst_nt = [missing],
             served_pred_dst_nt = [-70.0], served_pred_dst_ci05_nt = [-90.0], served_pred_dst_ci95_nt = [-50.0],
-            interval_source = ["aci"], model_version = ["v2.1"],
+            interval_source = ["aci"], model_version = ["inertial_sindy"],
         )
         st = build_status(df)
         @test st.available == false
@@ -1305,64 +1317,62 @@ const V2_1_DRIVER_TOKEN =
         iss = now(UTC) - Minute(20)
         # The super-learner label is the current product label; the two earlier labels remain
         # acceptable because the served stage falls back through them and discloses it per row.
-        for label in (CURRENT_V2_SERVED_MODEL_VERSION, STACK_V2_SERVED_MODEL_VERSION,
-                      PREVIOUS_V2_SERVED_MODEL_VERSION)
+        for label in (CURRENT_OPERATIONAL_SERVED_MODEL_VERSION, STACK_OPERATIONAL_SERVED_MODEL_VERSION,
+                      PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION)
             st = build_status(live_cycle_fixture(iss; served_model=label))
             @test st.available == true
             @test st.served_model_version == label
         end
-        @test !build_status(live_cycle_fixture(iss; served_model="v2.9+made+up")).available
-        @test CURRENT_V2_SERVED_MODEL_VERSION ==
-              "v2.4+sindy20x11+superlearner10floor+conformal"
-        @test STACK_V2_SERVED_MODEL_VERSION ==
-              "v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)"
-        @test V2_3_SHADOW_MODEL_VERSION ==
-              "v2.3-shadow+sindy20x11+L1A+ADC(magnetic,K25)+T1rcal+LAT+E"
+        @test !build_status(live_cycle_fixture(iss; served_model="unknown.9+made+up")).available
+        @test CURRENT_OPERATIONAL_SERVED_MODEL_VERSION ==
+              "dst-superlearner+sindyfloor+conformal"
+        @test STACK_OPERATIONAL_SERVED_MODEL_VERSION ==
+              "staticstack+sindy60_fit407598+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
         # The chain is ordered strongest to weakest, which is how a mixed cycle picks its label.
-        @test ACCEPTED_V2_SERVED_MODEL_VERSIONS ==
-              (CURRENT_V2_SERVED_MODEL_VERSION, STACK_V2_SERVED_MODEL_VERSION,
-               PREVIOUS_V2_SERVED_MODEL_VERSION)
+        @test ACCEPTED_OPERATIONAL_SERVED_MODEL_VERSIONS ==
+              (CURRENT_OPERATIONAL_SERVED_MODEL_VERSION, STACK_OPERATIONAL_SERVED_MODEL_VERSION,
+               PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION)
 
         # Depth-safe severity: a shallower served center must not lower the published threat below
         # what either stage it replaced would have warned.
-        shallow = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        shallow = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
                                      served_pred=-40.0, served_lo=-50.0, served_hi=-30.0,
-                                     v2_2_stack_pred=-60.0, v2_1_served_pred=-120.0)
+                                     static_stack_pred=-60.0, inertial_sindy_served_pred=-120.0)
         st_shallow = build_status(shallow)
         @test st_shallow.threat.point_min_dst_nt == -120.0
         @test st_shallow.threat.level == 3
         # The stack partner counts on its own: a candidate shallower than the stack but deeper than
-        # V2.1 is still held to the stack.
-        stack_partner = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        # inertial-SINDy is still held to the stack.
+        stack_partner = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
                                            served_pred=-40.0, served_lo=-50.0, served_hi=-30.0,
-                                           v2_2_stack_pred=-95.0, v2_1_served_pred=-60.0)
+                                           static_stack_pred=-95.0, inertial_sindy_served_pred=-60.0)
         @test build_status(stack_partner).threat.point_min_dst_nt == -95.0
         # A deeper served center still escalates past both partners.
-        deep = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        deep = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
                                   served_pred=-220.0, served_lo=-240.0, served_hi=-200.0,
-                                  v2_2_stack_pred=-130.0, v2_1_served_pred=-120.0)
+                                  static_stack_pred=-130.0, inertial_sindy_served_pred=-120.0)
         @test build_status(deep).threat.point_min_dst_nt == -220.0
         @test build_status(deep).threat.level == 4
-        # A cycle whose stack stage could not act has no stack column and is held to V2.1 alone.
-        no_stack = live_cycle_fixture(iss; served_model=PREVIOUS_V2_SERVED_MODEL_VERSION,
+        # A cycle whose stack stage could not act has no stack column and is held to inertial-SINDy alone.
+        no_stack = live_cycle_fixture(iss; served_model=PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION,
                                       served_pred=-40.0, served_lo=-50.0, served_hi=-30.0,
-                                      v2_1_served_pred=-120.0)
+                                      inertial_sindy_served_pred=-120.0)
         @test build_status(no_stack).threat.point_min_dst_nt == -120.0
         # A pre-stack row without either column keeps the served center as the severity input.
-        legacy = live_cycle_fixture(iss; served_model=PREVIOUS_V2_SERVED_MODEL_VERSION,
+        legacy = live_cycle_fixture(iss; served_model=PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION,
                                     served_pred=-40.0, served_lo=-50.0, served_hi=-30.0)
         @test build_status(legacy).threat.point_min_dst_nt == -40.0
     end
 
     @eval @testset "the watch tier is taken on the depth-safe center, not the served band" begin
         # Reproduces the escalation the stack stage could otherwise drop. Same physics, two products:
-        # the V2.1 operator warned at -95 nT with a [-105, -85] band, and the stack reports a shallower
+        # the inertial-SINDy operator warned at -95 nT with a [-105, -85] band, and the stack reports a shallower
         # -88 nT with the band shifted up to [-98, -78]. The point tier is depth-safe already, but a
         # watch taken on the shifted edge would fall from the intense tier to none, so the outbound
         # alert level would drop below the previous product on identical inputs.
         iss = now(UTC) - Minute(20)
         prior = build_status(live_cycle_fixture(iss;
-            served_model=PREVIOUS_V2_SERVED_MODEL_VERSION,
+            served_model=PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION,
             served_pred=-95.0, served_lo=-105.0, served_hi=-85.0))
         @test prior.threat.level == 2
         @test prior.threat.watch == true
@@ -1370,9 +1380,9 @@ const V2_1_DRIVER_TOKEN =
         @test compute_alert_state(prior, nothing, nothing).level == 3
 
         stacked = build_status(live_cycle_fixture(iss;
-            served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
             served_pred=-88.0, served_lo=-98.0, served_hi=-78.0,
-            v2_2_stack_pred=-90.0, v2_1_served_pred=-95.0))
+            static_stack_pred=-90.0, inertial_sindy_served_pred=-95.0))
         @test stacked.threat.level == 2
         @test stacked.threat.watch == true
         @test stacked.threat.watch_level == 3
@@ -1381,87 +1391,87 @@ const V2_1_DRIVER_TOKEN =
         @test compute_alert_state(stacked, nothing, nothing).level == 3
         # The alert text quotes the same depth-safe edge it escalated on.
         stacked_df = live_cycle_fixture(iss;
-            served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
             served_pred=-88.0, served_lo=-98.0, served_hi=-78.0,
-            v2_2_stack_pred=-90.0, v2_1_served_pred=-95.0)
+            static_stack_pred=-90.0, inertial_sindy_served_pred=-95.0)
         watch_alerts = [a for a in build_alerts(stacked_df, stacked).alerts if a.kind == "watch"]
         @test length(watch_alerts) == 1
         @test occursin("-105", watch_alerts[1].message)
 
         # A deeper stacked center must not have its band pulled down: the shift is one-sided.
         deeper = build_status(live_cycle_fixture(iss;
-            served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
             served_pred=-120.0, served_lo=-130.0, served_hi=-110.0,
-            v2_2_stack_pred=-100.0, v2_1_served_pred=-95.0))
+            static_stack_pred=-100.0, inertial_sindy_served_pred=-95.0))
         @test deeper.threat.interval_lower_edge_min_dst_nt == -130.0
         # A pre-stack row without the continuity column keeps the served edge unchanged.
         legacy = build_status(live_cycle_fixture(iss;
-            served_model=PREVIOUS_V2_SERVED_MODEL_VERSION,
+            served_model=PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION,
             served_pred=-88.0, served_lo=-98.0, served_hi=-78.0))
         @test legacy.threat.interval_lower_edge_min_dst_nt == -98.0
         @test legacy.threat.watch == false
 
         # The severity rule is the package's own, loaded from the shared definition rather than
         # restated here: a second copy in the app is exactly how the two could drift.
-        @test v22_serving_depth_safe_center(-88.0, -95.0) == -95.0
-        @test v22_serving_depth_safe_center(-120.0, -95.0) == -120.0
-        @test v22_serving_depth_safe_center(NaN, -95.0) == -95.0
-        @test v22_serving_depth_safe_center(-88.0, NaN) == -88.0
+        @test static_stack_serving_depth_safe_center(-88.0, -95.0) == -95.0
+        @test static_stack_serving_depth_safe_center(-120.0, -95.0) == -120.0
+        @test static_stack_serving_depth_safe_center(NaN, -95.0) == -95.0
+        @test static_stack_serving_depth_safe_center(-88.0, NaN) == -88.0
         # The three-stage rule is the same shared definition, and it must reduce to the two-stage one.
-        @test v24_serving_depth_safe_center(-88.0, -90.0, -95.0) == -95.0
-        @test v24_serving_depth_safe_center(-88.0, -95.0, -90.0) == -95.0
-        @test v24_serving_depth_safe_center(-120.0, -95.0, -90.0) == -120.0
-        @test v24_serving_depth_safe_center(-88.0, NaN, -95.0) == -95.0
-        @test v24_serving_depth_safe_center(-88.0, NaN, NaN) == -88.0
-        @test v24_serving_depth_safe_center(-88.0, -95.0) ==
-              v22_serving_depth_safe_center(-88.0, -95.0)
+        @test superlearner_serving_depth_safe_center(-88.0, -90.0, -95.0) == -95.0
+        @test superlearner_serving_depth_safe_center(-88.0, -95.0, -90.0) == -95.0
+        @test superlearner_serving_depth_safe_center(-120.0, -95.0, -90.0) == -120.0
+        @test superlearner_serving_depth_safe_center(-88.0, NaN, -95.0) == -95.0
+        @test superlearner_serving_depth_safe_center(-88.0, NaN, NaN) == -88.0
+        @test superlearner_serving_depth_safe_center(-88.0, -95.0) ==
+              static_stack_serving_depth_safe_center(-88.0, -95.0)
         @test count(f -> isfile(f), _DEPTH_SAFE_CANDIDATES) >= 1
         api_source = read(joinpath(APPSRC, "forecast_api.jl"), String)
         @test !occursin("min(Float64(served), Float64(previous))", api_source)
         # A second copy of the rule inside the application is exactly how the two could drift.
-        @test !occursin("function v24_serving_depth_safe_center", api_source)
+        @test !occursin("function superlearner_serving_depth_safe_center", api_source)
     end
 
     @eval @testset "the watch edge is the deepest predecessor edge, not the served band shifted" begin
-        # The band changed source with the super-learner: a V2.4e row carries the depth-stratified
+        # The band changed source with the super-learner: a super-learner row carries the depth-stratified
         # conformal half-width, which in the shallow bins is narrower than every band the earlier
         # products published. Shifting the served edge down by the amount the point was lowered
         # therefore still publishes a shallower edge than the predecessor's own: the served center is
-        # -88 nT with a +-4 nT band, while the V2.1 operator warned at -95 nT with a +-10 nT band, so
+        # -88 nT with a +-4 nT band, while the inertial-SINDy operator warned at -95 nT with a +-10 nT band, so
         # the shift gives -99 nT where the operator's edge was -105 nT — one storm tier shallower.
         iss = now(UTC) - Minute(20)
-        narrow = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        narrow = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
             served_pred=-88.0, served_lo=-92.0, served_hi=-84.0,
-            v2_2_stack_pred=-90.0, v2_1_served_pred=-95.0,
-            v2_2_stack_ci05=-100.0, v2_1_served_ci05=-105.0)
+            static_stack_pred=-90.0, inertial_sindy_served_pred=-95.0,
+            static_stack_ci05=-100.0, inertial_sindy_served_ci05=-105.0)
         st = build_status(narrow)
         @test st.threat.interval_lower_edge_min_dst_nt == -105.0
         @test st.threat.watch == true
         @test st.threat.watch_level == 3
         # The payload says which stage's own edge is published, so an operator can see why the watch
         # is deeper than the served band.
-        @test st.threat.interval_lower_edge_source == "v2_1_served"
+        @test st.threat.interval_lower_edge_source == "inertial_sindy_served"
         # The stack partner counts on its own, exactly as the center partner does.
-        stack_edge = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        stack_edge = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
             served_pred=-88.0, served_lo=-92.0, served_hi=-84.0,
-            v2_2_stack_pred=-90.0, v2_1_served_pred=-95.0,
-            v2_2_stack_ci05=-112.0, v2_1_served_ci05=-105.0)
+            static_stack_pred=-90.0, inertial_sindy_served_pred=-95.0,
+            static_stack_ci05=-112.0, inertial_sindy_served_ci05=-105.0)
         @test build_status(stack_edge).threat.interval_lower_edge_min_dst_nt == -112.0
-        @test build_status(stack_edge).threat.interval_lower_edge_source == "v2_2_stack"
+        @test build_status(stack_edge).threat.interval_lower_edge_source == "static_stack"
         # A served edge already deeper than both predecessors is published unchanged: the rule is a
         # minimum, so it is idempotent and never widens a band the served product did not issue.
-        deeper = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        deeper = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
             served_pred=-140.0, served_lo=-160.0, served_hi=-120.0,
-            v2_2_stack_pred=-90.0, v2_1_served_pred=-95.0,
-            v2_2_stack_ci05=-100.0, v2_1_served_ci05=-105.0)
+            static_stack_pred=-90.0, inertial_sindy_served_pred=-95.0,
+            static_stack_ci05=-100.0, inertial_sindy_served_ci05=-105.0)
         @test build_status(deeper).threat.interval_lower_edge_min_dst_nt == -160.0
         @test build_status(deeper).threat.interval_lower_edge_source == "served"
         # A non-finite predecessor edge is dropped rather than propagated, the same way a non-finite
         # center partner is.
-        holed = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        holed = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
             served_pred=-88.0, served_lo=-92.0, served_hi=-84.0,
-            v2_2_stack_pred=-90.0, v2_1_served_pred=-95.0,
-            v2_2_stack_ci05=NaN, v2_1_served_ci05=-105.0)
+            static_stack_pred=-90.0, inertial_sindy_served_pred=-95.0,
+            static_stack_ci05=NaN, inertial_sindy_served_ci05=-105.0)
         @test build_status(holed).threat.interval_lower_edge_min_dst_nt == -105.0
         # Per horizon the payload carries the published edge, its source and both partner edges.
         fc = build_forecast(narrow)
@@ -1469,80 +1479,80 @@ const V2_1_DRIVER_TOKEN =
             @test h.ci05_dst_nt == -92.0
             @test h.severity_dst_nt == -95.0
             @test h.severity_ci05_dst_nt == -105.0
-            @test h.severity_ci05_source == "v2_1_served"
-            @test h.v2_1_served_ci05_dst_nt == -105.0
-            @test h.v2_2_stack_ci05_dst_nt == -100.0
+            @test h.severity_ci05_source == "inertial_sindy_served"
+            @test h.inertial_sindy_served_ci05_dst_nt == -105.0
+            @test h.static_stack_ci05_dst_nt == -100.0
         end
         # Backwards compatibility: a row written before the predecessor edges were logged keeps the
         # earlier center-shift behaviour and discloses that it is the fallback rule.
-        legacy = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        legacy = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
             served_pred=-88.0, served_lo=-92.0, served_hi=-84.0,
-            v2_2_stack_pred=-90.0, v2_1_served_pred=-95.0)
+            static_stack_pred=-90.0, inertial_sindy_served_pred=-95.0)
         legacy_status = build_status(legacy)
         @test legacy_status.threat.interval_lower_edge_min_dst_nt == -99.0
         @test legacy_status.threat.interval_lower_edge_source == "legacy_center_shift"
         for h in build_forecast(legacy).horizons
             @test h.severity_ci05_source == "legacy_center_shift"
-            @test h.v2_1_served_ci05_dst_nt === nothing
-            @test h.v2_2_stack_ci05_dst_nt === nothing
+            @test h.inertial_sindy_served_ci05_dst_nt === nothing
+            @test h.static_stack_ci05_dst_nt === nothing
         end
     end
 
     @eval @testset "the forecast payload exposes the alerting center per horizon" begin
         iss = now(UTC) - Minute(20)
-        df = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        df = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
                                 served_pred=-88.0, served_lo=-98.0, served_hi=-78.0,
-                                v2_2_stack_pred=-90.0, v2_1_served_pred=-95.0,
-                                v2_2_status="ok", v24_status="ok", v24_pred=-88.0,
-                                v24_guard_applied=false, v24_projection_applied=false,
-                                v24_regime_cell="quiet/shallow")
+                                static_stack_pred=-90.0, inertial_sindy_served_pred=-95.0,
+                                static_stack_status="ok", superlearner_status="ok", superlearner_pred=-88.0,
+                                superlearner_guard_applied=false, superlearner_projection_applied=false,
+                                superlearner_regime_cell="quiet/shallow")
         fc = build_forecast(df)
         @test fc.available == true
-        @test fc.served_product == "V2.4e"
+        @test fc.served_product == "super-learner"
         for h in fc.horizons
             @test h.pred_dst_nt == -88.0
             @test h.severity_dst_nt == -95.0
             @test h.severity_ci05_dst_nt == -105.0
-            @test h.v2_1_served_pred_dst_nt == -95.0
-            @test h.v2_2_stack_pred_dst_nt == -90.0
-            @test h.served_model_version == CURRENT_V2_SERVED_MODEL_VERSION
-            @test h.v2_2_status == "ok"
+            @test h.inertial_sindy_served_pred_dst_nt == -95.0
+            @test h.static_stack_pred_dst_nt == -90.0
+            @test h.served_model_version == CURRENT_OPERATIONAL_SERVED_MODEL_VERSION
+            @test h.static_stack_status == "ok"
             # The served stage discloses itself per horizon: a fallback row says which stage acted.
-            @test h.v24_status == "ok"
-            @test h.v24_pred_dst_nt == -88.0
-            @test h.v24_guard_applied == false
+            @test h.superlearner_status == "ok"
+            @test h.superlearner_pred_dst_nt == -88.0
+            @test h.superlearner_guard_applied == false
             # The physical projection is disclosed alongside the guard, so an operator can tell a
             # clamped center from a combination that happened to land on the same number.
-            @test h.v24_projection_applied == false
-            @test h.v24_regime_cell == "quiet/shallow"
+            @test h.superlearner_projection_applied == false
+            @test h.superlearner_regime_cell == "quiet/shallow"
         end
         # A projected row surfaces the flag as true, so the disclosure is read from the row rather
         # than reported as false for every cycle.
         projected = build_forecast(live_cycle_fixture(iss;
-            served_model=CURRENT_V2_SERVED_MODEL_VERSION, served_pred=-88.0, served_lo=-98.0,
-            served_hi=-78.0, v2_2_stack_pred=-90.0, v2_1_served_pred=-95.0,
-            v2_2_status="ok", v24_status="ok", v24_pred=-88.0, v24_guard_applied=false,
-            v24_projection_applied=true, v24_regime_cell="quiet/shallow"))
+            served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION, served_pred=-88.0, served_lo=-98.0,
+            served_hi=-78.0, static_stack_pred=-90.0, inertial_sindy_served_pred=-95.0,
+            static_stack_status="ok", superlearner_status="ok", superlearner_pred=-88.0, superlearner_guard_applied=false,
+            superlearner_projection_applied=true, superlearner_regime_cell="quiet/shallow"))
         for h in projected.horizons
-            @test h.v24_projection_applied == true
+            @test h.superlearner_projection_applied == true
         end
         # A row from a log that predates the column reports `nothing`, not `false`: an absent
         # disclosure is not the same statement as a projection that did not act.
         for h in build_forecast(live_cycle_fixture(iss;
-                served_model=CURRENT_V2_SERVED_MODEL_VERSION, served_pred=-88.0,
-                served_lo=-98.0, served_hi=-78.0, v2_2_stack_pred=-90.0,
-                v2_1_served_pred=-95.0, v24_status="ok")).horizons
-            @test h.v24_projection_applied === nothing
+                served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION, served_pred=-88.0,
+                served_lo=-98.0, served_hi=-78.0, static_stack_pred=-90.0,
+                inertial_sindy_served_pred=-95.0, superlearner_status="ok")).horizons
+            @test h.superlearner_projection_applied === nothing
         end
         # A cycle served by the first fallback stage carries the stack label and its own status.
         fell_back = build_forecast(live_cycle_fixture(iss;
-            served_model=STACK_V2_SERVED_MODEL_VERSION, served_pred=-88.0, served_lo=-98.0,
-            served_hi=-78.0, v2_2_stack_pred=-88.0, v2_1_served_pred=-95.0,
-            v2_2_status="ok", v24_status="fallback:deployment_absent"))
-        @test fell_back.served_product == "V2.2"
+            served_model=STACK_OPERATIONAL_SERVED_MODEL_VERSION, served_pred=-88.0, served_lo=-98.0,
+            served_hi=-78.0, static_stack_pred=-88.0, inertial_sindy_served_pred=-95.0,
+            static_stack_status="ok", superlearner_status="fallback:deployment_absent"))
+        @test fell_back.served_product == "static stack"
         for h in fell_back.horizons
-            @test h.v24_status == "fallback:deployment_absent"
-            @test h.v24_pred_dst_nt === nothing
+            @test h.superlearner_status == "fallback:deployment_absent"
+            @test h.superlearner_pred_dst_nt === nothing
             @test h.severity_dst_nt == -95.0
         end
     end
@@ -1550,9 +1560,9 @@ const V2_1_DRIVER_TOKEN =
     @eval @testset "the calibration shadow is visible but never served" begin
         iss = now(UTC) - Minute(20)
         df = live_cycle_fixture(
-            iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
             served_pred=-25.0, served_lo=-35.0, served_hi=-15.0,
-            observations=-25.0, v24_status="ok", v24_pred=-25.0,
+            observations=-25.0, superlearner_status="ok", superlearner_pred=-25.0,
             cal_shadow_status="ok", cal_shadow_lo=-40.0, cal_shadow_hi=-10.0,
             cal_shadow_history_n=100, cal_shadow_location=2.0,
         )
@@ -1562,16 +1572,16 @@ const V2_1_DRIVER_TOKEN =
             @test horizon.pred_dst_nt == -25.0
             @test horizon.ci05_dst_nt == -35.0
             @test horizon.ci95_dst_nt == -15.0
-            @test horizon.v24_cal_shadow_status == "ok"
-            @test horizon.v24_cal_shadow_ci05_nt == -40.0
-            @test horizon.v24_cal_shadow_ci95_nt == -10.0
-            @test horizon.v24_cal_shadow_history_n == 100.0
+            @test horizon.superlearner_cal_shadow_status == "ok"
+            @test horizon.superlearner_cal_shadow_ci05_nt == -40.0
+            @test horizon.superlearner_cal_shadow_ci95_nt == -10.0
+            @test horizon.superlearner_cal_shadow_history_n == 100.0
         end
         shadow = calibration_summary(df).calibration_shadow
         @test shadow.collecting
         @test shadow.scope == "prospective_shadow_only_not_served"
         @test shadow.served_manifest_sha256 ==
-              V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256
+              SUPERLEARNER_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256
         @test shadow.n_verified == length(LIVE_CYCLE_HORIZONS)
         @test shadow.coverage_90 == 1.0
         @test shadow.issue_cycles == 1
@@ -1583,29 +1593,29 @@ const V2_1_DRIVER_TOKEN =
         @test !shadow.storm_skill_claim_ready
 
         shadow_on_fallback = copy(df)
-        shadow_on_fallback.v24_status .= "fallback:deployment_absent"
+        shadow_on_fallback.superlearner_status .= "fallback:deployment_absent"
         @test calibration_summary(shadow_on_fallback).calibration_shadow.n_verified == 0
 
         shadow_on_predecessor = copy(df)
-        shadow_on_predecessor.sub_hourly_model_version .= STACK_V2_SERVED_MODEL_VERSION
+        shadow_on_predecessor.sub_hourly_model_version .= STACK_OPERATIONAL_SERVED_MODEL_VERSION
         @test calibration_summary(shadow_on_predecessor).calibration_shadow.n_verified == 0
 
         shadow_on_wrong_manifest = copy(df)
-        shadow_on_wrong_manifest.v24_manifest_sha256 .= "0"^64
+        shadow_on_wrong_manifest.superlearner_manifest_sha256 .= "0"^64
         wrong_manifest_summary = calibration_summary(shadow_on_wrong_manifest).calibration_shadow
         @test !wrong_manifest_summary.configured
         @test wrong_manifest_summary.n_verified == 0
 
         pre_shadow = live_cycle_fixture(
-            iss - Hour(2); served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            iss - Hour(2); served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
             served_pred=-25.0, served_lo=-35.0, served_hi=-15.0,
-            observations=-25.0, v24_status="ok", v24_pred=-25.0,
+            observations=-25.0, superlearner_status="ok", superlearner_pred=-25.0,
             cal_shadow_status="ok", cal_shadow_lo=-40.0, cal_shadow_hi=-10.0,
             cal_shadow_history_n=100, cal_shadow_location=2.0,
         )
-        for column in (:v24_cal_shadow_model_version, :v24_cal_shadow_config_sha256,
-                       :v24_cal_shadow_status, :v24_cal_shadow_ci05_nt,
-                       :v24_cal_shadow_ci95_nt)
+        for column in (:superlearner_cal_shadow_model_version, :superlearner_cal_shadow_config_sha256,
+                       :superlearner_cal_shadow_status, :superlearner_cal_shadow_ci05_nt,
+                       :superlearner_cal_shadow_ci95_nt)
             allowmissing!(pre_shadow, column)
             pre_shadow[!, column] .= missing
         end
@@ -1615,9 +1625,9 @@ const V2_1_DRIVER_TOKEN =
         @test mixed_shadow.n_verified == length(LIVE_CYCLE_HORIZONS)
 
         warming = live_cycle_fixture(
-            iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
             served_pred=-25.0, served_lo=-35.0, served_hi=-15.0,
-            observations=-25.0, v24_status="ok", v24_pred=-25.0,
+            observations=-25.0, superlearner_status="ok", superlearner_pred=-25.0,
             cal_shadow_status=["ok", "ok", "warmup:16/30", "warmup:13/30"],
             cal_shadow_lo=[-40.0, -40.0, missing, missing],
             cal_shadow_hi=[-10.0, -10.0, missing, missing],
@@ -1634,9 +1644,9 @@ const V2_1_DRIVER_TOKEN =
     @eval @testset "the product name and driver assumption come from the served row" begin
         iss = now(UTC) - Minute(20)
         served = build_status(live_cycle_fixture(iss;
-            served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+            served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
             driver_assumption=SUPERLEARNER_DRIVER_TOKEN))
-        @test served.served_product == "V2.4e"
+        @test served.served_product == "super-learner"
         @test occursin("fitted combination of ten causal forecasts",
                        served.lead_time.driver_assumption)
         @test occursin("includes the static regime stack among the combined forecasts",
@@ -1644,41 +1654,43 @@ const V2_1_DRIVER_TOKEN =
         @test occursin("conformal interval", served.lead_time.driver_assumption)
 
         stacked = build_status(live_cycle_fixture(iss;
-            served_model=STACK_V2_SERVED_MODEL_VERSION,
+            served_model=STACK_OPERATIONAL_SERVED_MODEL_VERSION,
             driver_assumption=STACK_DRIVER_TOKEN))
-        @test stacked.served_product == "V2.2"
+        @test stacked.served_product == "static stack"
         @test occursin("static regime stack", stacked.lead_time.driver_assumption)
         @test occursin("Ballistically propagated L1 forcing", stacked.lead_time.driver_assumption)
         @test !occursin("ten causal forecasts", stacked.lead_time.driver_assumption)
 
-        # A cycle whose stack stage could not act is served by the V2.1 operator, and the payload must
+        # A cycle whose stack stage could not act is served by the inertial-SINDy operator, and the payload must
         # describe that operator rather than a stage that did not run.
         fell_back = build_status(live_cycle_fixture(iss;
-            served_model=PREVIOUS_V2_SERVED_MODEL_VERSION,
-            driver_assumption=V2_1_DRIVER_TOKEN,
-            v2_2_status="fallback_v2_1:stack_absent"))
-        @test fell_back.served_product == "V2.1"
+            served_model=PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION,
+            driver_assumption=INERTIAL_SINDY_DRIVER_TOKEN,
+            static_stack_status="fallback_inertial_sindy:stack_absent"))
+        @test fell_back.served_product == "inertial-SINDy"
         @test !occursin("static regime stack", fell_back.lead_time.driver_assumption)
         @test occursin("extreme-Dst inertia guard", fell_back.lead_time.driver_assumption)
 
         # An unrecorded assumption is reported as unrecorded, not as the full pipeline.
         silent = build_status(live_cycle_fixture(iss;
-            served_model=CURRENT_V2_SERVED_MODEL_VERSION))
+            served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION))
         @test silent.lead_time.driver_assumption == "unrecorded"
 
-        @test served_product_name("v2.1+sindy20x11+L1A") == "V2.1"
-        @test served_product_name(CURRENT_V2_SERVED_MODEL_VERSION) == "V2.4e"
+        @test served_product_name("inertial_sindy+sindy20x11+L1A") == "inertial-SINDy"
+        @test served_product_name(PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION) == "inertial-SINDy"
+        @test served_product_name("staticstack+x") == "static stack"
+        @test served_product_name(CURRENT_OPERATIONAL_SERVED_MODEL_VERSION) == "super-learner"
         @test served_product_name(nothing) == "unknown"
         # The dashboard names every stage of the served label it can be handed; an unknown token falls
         # back to the raw label rather than claiming a capability the pipeline does not have.
         app_js = read(joinpath(dirname(APPSRC), "public", "app.js"), String)
-        for token in ("superlearner10floor", "conformal")
+        for token in ("sindyfloor", "conformal")
             @test occursin(token, app_js)
         end
         app_source = read(joinpath(dirname(APPSRC), "public", "app.js"), String)
-        @test !occursin("Forecast: V2.1", app_source)
-        @test !occursin("Product forecast: V2.1.", app_source)
-        @test !occursin("V2.1 core trajectory (display)", app_source)
+        @test !occursin("Forecast: inertial-SINDy", app_source)
+        @test !occursin("Product forecast: inertial-SINDy.", app_source)
+        @test !occursin("inertial-SINDy core trajectory (display)", app_source)
         @test occursin("issued centers as a visual guide", app_source)
     end
 
@@ -1687,31 +1699,31 @@ const V2_1_DRIVER_TOKEN =
         # different accepted labels. Refusing such a cycle would blank the dashboard and suppress its
         # alerts over a per-row degradation that the log discloses, which reads as an all-clear.
         iss = now(UTC) - Minute(20)
-        mixed = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        mixed = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
                                    served_pred=-95.0, served_lo=-105.0, served_hi=-85.0)
-        mixed.sub_hourly_model_version[2] = PREVIOUS_V2_SERVED_MODEL_VERSION
+        mixed.sub_hourly_model_version[2] = PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION
         st = build_status(mixed)
         @test st.available == true
         # The cycle is reported under the weakest label any of its rows carries.
-        @test st.served_model_version == PREVIOUS_V2_SERVED_MODEL_VERSION
-        @test st.served_product == "V2.1"
+        @test st.served_model_version == PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION
+        @test st.served_product == "inertial-SINDy"
         @test length(st.served_model_versions) == 2
         # With all three stages present in one cycle the weakest still wins.
-        three = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        three = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
                                   served_pred=-95.0, served_lo=-105.0, served_hi=-85.0)
-        three.sub_hourly_model_version[2] = STACK_V2_SERVED_MODEL_VERSION
-        three.sub_hourly_model_version[3] = PREVIOUS_V2_SERVED_MODEL_VERSION
-        @test build_status(three).served_model_version == PREVIOUS_V2_SERVED_MODEL_VERSION
+        three.sub_hourly_model_version[2] = STACK_OPERATIONAL_SERVED_MODEL_VERSION
+        three.sub_hourly_model_version[3] = PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION
+        @test build_status(three).served_model_version == PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION
         # A cycle that lost only the super-learner is reported under the stack label.
-        stack_only = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        stack_only = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
                                        served_pred=-95.0, served_lo=-105.0, served_hi=-85.0)
-        stack_only.sub_hourly_model_version[4] = STACK_V2_SERVED_MODEL_VERSION
-        @test build_status(stack_only).served_model_version == STACK_V2_SERVED_MODEL_VERSION
-        @test build_forecast(mixed).served_model_version == PREVIOUS_V2_SERVED_MODEL_VERSION
+        stack_only.sub_hourly_model_version[4] = STACK_OPERATIONAL_SERVED_MODEL_VERSION
+        @test build_status(stack_only).served_model_version == STACK_OPERATIONAL_SERVED_MODEL_VERSION
+        @test build_forecast(mixed).served_model_version == PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION
         @test build_alerts(mixed, st).threat_level == st.threat.level
         # A label this build does not know still fails closed, mixed in or not.
-        unknown = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION)
-        unknown.sub_hourly_model_version[3] = CURRENT_V2_SERVED_MODEL_VERSION * "+unpinned"
+        unknown = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION)
+        unknown.sub_hourly_model_version[3] = CURRENT_OPERATIONAL_SERVED_MODEL_VERSION * "+unpinned"
         @test build_status(unknown).available == false
         @test build_forecast(unknown).available == false
     end
@@ -1721,24 +1733,24 @@ const V2_1_DRIVER_TOKEN =
         # earned by the previous pipeline as the current product's record.
         now0 = floor(now(UTC), Hour)
         rows = DataFrame()
-        for (k, label) in enumerate(vcat(fill(PREVIOUS_V2_SERVED_MODEL_VERSION, 5),
-                                        fill(CURRENT_V2_SERVED_MODEL_VERSION, 3)))
+        for (k, label) in enumerate(vcat(fill(PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION, 5),
+                                        fill(CURRENT_OPERATIONAL_SERVED_MODEL_VERSION, 3)))
             frame = live_cycle_fixture(now0 - Hour(30 + k);
                                        served_model=label, observations=-25.0 - k)
             rows = isempty(rows) ? frame : vcat(rows, frame)
         end
         current = live_cycle_fixture(now(UTC) - Minute(20);
-                                    served_model=CURRENT_V2_SERVED_MODEL_VERSION)
+                                    served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION)
         df = vcat(rows, current; cols=:union)
         cal = calibration_summary(df)
-        @test cal.current_served_model == CURRENT_V2_SERVED_MODEL_VERSION
+        @test cal.current_served_model == CURRENT_OPERATIONAL_SERVED_MODEL_VERSION
         by_label = Dict(b.served_model_version => b for b in cal.by_served_model)
         @test length(by_label) == 2
-        @test by_label[PREVIOUS_V2_SERVED_MODEL_VERSION].n == 5 * length(LIVE_CYCLE_HORIZONS)
-        @test by_label[CURRENT_V2_SERVED_MODEL_VERSION].n == 3 * length(LIVE_CYCLE_HORIZONS)
-        @test by_label[CURRENT_V2_SERVED_MODEL_VERSION].product == "V2.4e"
+        @test by_label[PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION].n == 5 * length(LIVE_CYCLE_HORIZONS)
+        @test by_label[CURRENT_OPERATIONAL_SERVED_MODEL_VERSION].n == 3 * length(LIVE_CYCLE_HORIZONS)
+        @test by_label[CURRENT_OPERATIONAL_SERVED_MODEL_VERSION].product == "super-learner"
         @test cal.n_verified_current_served_model ==
-              by_label[CURRENT_V2_SERVED_MODEL_VERSION].n
+              by_label[CURRENT_OPERATIONAL_SERVED_MODEL_VERSION].n
         @test cal.n_verified_current_served_model < cal.n_verified
         @test sum(b.n for b in cal.by_served_model) == cal.n_verified
     end
@@ -1749,70 +1761,55 @@ const V2_1_DRIVER_TOKEN =
         now0 = floor(now(UTC), Hour)
         frames = DataFrame[]
         for k in 1:6
-            label = k == 6 ? PREVIOUS_V2_SERVED_MODEL_VERSION : CURRENT_V2_SERVED_MODEL_VERSION
+            label = k == 6 ? PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION : CURRENT_OPERATIONAL_SERVED_MODEL_VERSION
             push!(frames, live_cycle_fixture(now0 - Hour(6 - k) - Minute(47);
                                              served_model=label,
-                                             v2_2_status="ok",
-                                             v24_status=k == 6 ? "fallback:deployment_absent" : "ok"))
+                                             static_stack_status="ok",
+                                             superlearner_status=k == 6 ? "fallback:deployment_absent" : "ok"))
         end
         df = reduce(vcat, frames)
-        df[!, :v23_status] = fill("ok:e_layer_pending", nrow(df))
-        df[!, :v23_e_layer_applied] = fill(false, nrow(df))
-        df[!, :v23_shadow_model_version] = fill(V2_3_SHADOW_MODEL_VERSION, nrow(df))
         health = build_served_health(df)
         @test health.cycles_considered == 6
-        @test health.served_model_version == PREVIOUS_V2_SERVED_MODEL_VERSION
-        @test health.served_product == "V2.1"
+        @test health.served_model_version == PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION
+        @test health.served_product == "inertial-SINDy"
         @test health.served_fallback_cycles == 1
         @test health.served_fallback_rate == round(1 / 6; digits=4)
         @test health.newest_cycle_is_fallback == true
         # The chain is reported stage by stage: which fallback the window landed on is the operator's
         # first question, and a rate alone cannot answer it.
-        @test health.served_v2_1_cycles == 1
+        @test health.served_inertial_sindy_cycles == 1
         @test health.served_stack_cycles == 0
-        # The shadow center is available even while its error layer is pending.
-        @test health.shadow_available_rate == 1.0
-        @test health.shadow_e_layer_rate == 0.0
-        @test health.shadow_model_version == V2_3_SHADOW_MODEL_VERSION
         @test build_served_health(DataFrame()).cycles_considered == 0
     end
 
-    @eval @testset "health survives a trailing window that spans the shadow-schema change" begin
-        # A build carrying the shadow columns is deployed onto a log that is already being appended
-        # to, so for as long as the trailing window is, that window straddles the schema change and
-        # the earlier cycles carry no shadow columns at all. Those fields read back as `missing`, and
-        # `missing == 1` is three-valued: a predicate written that way makes `any` return `missing`,
-        # the health summary throws, and the endpoint reports no served identity at all during the
-        # first day of the deployment it is supposed to be reporting on.
+    @eval @testset "health survives a trailing window that spans the served-stage schema change" begin
+        # A build carrying the super-learner stage columns is deployed onto a log that is already
+        # being appended to, so for as long as the trailing window is, that window straddles the
+        # schema change and the earlier cycles carry no super-learner stage columns at all. Those
+        # fields read back as `missing`, and `missing == 1` is three-valued: a predicate written
+        # that way makes `any` return `missing`, the health summary throws, and the endpoint reports
+        # no served identity at all during the first day of the deployment it is supposed to be
+        # reporting on.
         now0 = floor(now(UTC), Hour)
         legacy = reduce(vcat, [live_cycle_fixture(now0 - Hour(24 - k) - Minute(47);
-                                                  served_model=PREVIOUS_V2_SERVED_MODEL_VERSION)
+                                                  served_model=PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION)
                                for k in 1:20])
         fresh = reduce(vcat, [live_cycle_fixture(now0 - Hour(4 - k) - Minute(47);
-                                                 served_model=CURRENT_V2_SERVED_MODEL_VERSION,
-                                                 v2_2_status="ok", v24_status="ok")
+                                                 served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
+                                                 static_stack_status="ok", superlearner_status="ok")
                               for k in 1:4])
-        fresh[!, :v23_status] = fill("ok", nrow(fresh))
-        fresh[!, :v23_e_layer_applied] = fill(true, nrow(fresh))
-        fresh[!, :v23_shadow_model_version] = fill(V2_3_SHADOW_MODEL_VERSION, nrow(fresh))
         df = vcat(legacy, fresh; cols=:union)
-        @test any(ismissing, df.v23_e_layer_applied)          # the schema change is in the window
         health = build_served_health(df)
-        # Cycles written before the current served stage existed carry no `v24_status`; they are
+        # Cycles written before the current served stage existed carry no `superlearner_status`; they are
         # disclosed as excluded, not counted as fallbacks, so the first day after a deployment onto
         # an existing log does not read as a 20/24 fallback rate (same rule as the readiness audit).
         @test health.cycles_considered == 4
         @test health.pre_stage_cycles_excluded == 20
-        @test health.served_model_version == CURRENT_V2_SERVED_MODEL_VERSION
-        @test health.served_product == "V2.4e"
+        @test health.served_model_version == CURRENT_OPERATIONAL_SERVED_MODEL_VERSION
+        @test health.served_product == "super-learner"
         @test health.served_fallback_cycles == 0
         @test health.served_fallback_rate == 0.0
         @test health.newest_cycle_is_fallback == false
-        @test health.shadow_cycles_considered == 4
-        @test health.shadow_available_cycles == 4
-        @test health.shadow_available_rate == 1.0
-        @test health.shadow_e_layer_cycles == 4
-        @test health.shadow_model_version == V2_3_SHADOW_MODEL_VERSION
         # Legacy-only window: nothing staged yet -> no rate, no exception.
         legacy_only = build_served_health(legacy)
         @test legacy_only.cycles_considered == 0
@@ -1839,31 +1836,31 @@ const V2_1_DRIVER_TOKEN =
         # the disclosed per-row degradation the log actually recorded. The cycle is published under its
         # weakest label, so the assumption must be the one that label was written with.
         iss = now(UTC) - Minute(20)
-        mixed = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
-                                   driver_assumption=STACK_DRIVER_TOKEN, v2_2_status="ok")
-        mixed.sub_hourly_model_version[2] = PREVIOUS_V2_SERVED_MODEL_VERSION
-        mixed.driver_assumption[2] = V2_1_DRIVER_TOKEN
-        mixed.v2_2_status[2] = "fallback_v2_1:stack_absent"
+        mixed = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
+                                   driver_assumption=STACK_DRIVER_TOKEN, static_stack_status="ok")
+        mixed.sub_hourly_model_version[2] = PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION
+        mixed.driver_assumption[2] = INERTIAL_SINDY_DRIVER_TOKEN
+        mixed.static_stack_status[2] = "fallback_inertial_sindy:stack_absent"
         st = build_status(mixed)
         @test st.available == true
-        @test st.served_model_version == PREVIOUS_V2_SERVED_MODEL_VERSION
+        @test st.served_model_version == PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION
         @test st.lead_time.driver_assumption != "unrecorded"
         @test !occursin("static regime stack", st.lead_time.driver_assumption)
         @test occursin("extreme-Dst inertia guard", st.lead_time.driver_assumption)
         @test occursin("Ballistically propagated L1 forcing", st.lead_time.driver_assumption)
 
         # The reverse mix reports the same weakest stage, whichever horizon fell back.
-        other = live_cycle_fixture(iss; served_model=PREVIOUS_V2_SERVED_MODEL_VERSION,
-                                   driver_assumption=V2_1_DRIVER_TOKEN,
-                                   v2_2_status="fallback_v2_1:stack_absent")
-        other.sub_hourly_model_version[4] = CURRENT_V2_SERVED_MODEL_VERSION
+        other = live_cycle_fixture(iss; served_model=PREVIOUS_OPERATIONAL_SERVED_MODEL_VERSION,
+                                   driver_assumption=INERTIAL_SINDY_DRIVER_TOKEN,
+                                   static_stack_status="fallback_inertial_sindy:stack_absent")
+        other.sub_hourly_model_version[4] = CURRENT_OPERATIONAL_SERVED_MODEL_VERSION
         other.driver_assumption[4] = STACK_DRIVER_TOKEN
-        other.v2_2_status[4] = "ok"
+        other.static_stack_status[4] = "ok"
         @test build_status(other).lead_time.driver_assumption ==
               st.lead_time.driver_assumption
 
         # A uniform stacked cycle still reports the stacked sentence.
-        whole = live_cycle_fixture(iss; served_model=CURRENT_V2_SERVED_MODEL_VERSION,
+        whole = live_cycle_fixture(iss; served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
                                    driver_assumption=STACK_DRIVER_TOKEN)
         @test occursin("static regime stack", build_status(whole).lead_time.driver_assumption)
     end
@@ -1872,10 +1869,10 @@ const V2_1_DRIVER_TOKEN =
         iss = now(UTC) - Minute(20)
         df = live_cycle_fixture(iss)
         fc = build_forecast(df); st = build_status(df)
-        @test fc.served_model_version == "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
-        @test fc.model_version == "v2.1"
-        @test st.served_model_version == "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
-        @test st.model_version == "v2.1"
+        @test fc.served_model_version == "inertial-sindy+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+        @test fc.model_version == "inertial_sindy"
+        @test st.served_model_version == "inertial-sindy+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+        @test st.model_version == "inertial_sindy"
         df2 = select(df, Not(:sub_hourly_model_version))
         @test !build_forecast(df2).available                         # served label is required
     end
@@ -1903,9 +1900,9 @@ const V2_1_DRIVER_TOKEN =
             target_time_utc = [string(now0 - Hour(1))],
             horizon_hours = [1.0], latest_dst_nt = [-20.0], observation_dst_nt = [-22.0],
             served_pred_dst_nt = [-21.0], served_pred_dst_ci05_nt = [-31.0], served_pred_dst_ci95_nt = [-11.0],
-            v2_pred_dst_nt = [-21.0], v2_pred_dst_ci05_nt = [-31.0], v2_pred_dst_ci95_nt = [-11.0],
-            model_version = ["v2.1"],
-            sub_hourly_model_version = [CURRENT_V2_SERVED_MODEL_VERSION],
+            inertial_sindy_pred_dst_nt = [-21.0], inertial_sindy_pred_dst_ci05_nt = [-31.0], inertial_sindy_pred_dst_ci95_nt = [-11.0],
+            model_version = ["inertial_sindy"],
+            sub_hourly_model_version = [CURRENT_OPERATIONAL_SERVED_MODEL_VERSION],
             interval_source = ["aci"],
         )
         logfile = joinpath(mktempdir(), "log.csv"); CSV.write(logfile, vdf)
@@ -2116,14 +2113,16 @@ const V2_1_DRIVER_TOKEN =
         @test occursin("readiness_deadline=\$((SECONDS + 60))", block.captures[1])
         # Run the shipped loop against a real TCP listener that never sends an HTTP
         # response. Shorten only the test's deadline; a missing curl timeout still hangs.
-        probe = replace(block.captures[1], "SECONDS + 60" => "SECONDS + 3")
+        # SRV=$$ binds the aliveness check to the probe bash itself: it is guaranteed
+        # live for the whole loop, and Git Bash's `kill -0` cannot see native Windows PIDs.
+        probe = "SRV=\$\$; " * replace(block.captures[1], "SECONDS + 60" => "SECONDS + 3")
         listener = listen(ip"127.0.0.1", 0)
         process = nothing
         try
             port = Int(last(getsockname(listener)))
             command = addenv(`bash -c $probe`,
                              "URL" => "http://127.0.0.1:$port",
-                             "SRV" => string(getpid()), "OUT" => "/dev/null")
+                             "OUT" => "/dev/null")
             output = IOBuffer()
             started = time()
             process = run(pipeline(ignorestatus(command); stdout=output, stderr=output);
@@ -2512,8 +2511,8 @@ esac
             served_pred_dst_nt=[floatmax(Float64)],
             served_pred_dst_ci05_nt=[-floatmax(Float64)],
             served_pred_dst_ci95_nt=[floatmax(Float64)],
-            model_version=[CURRENT_V2_MODEL_VERSION],
-            sub_hourly_model_version=[CURRENT_V2_SERVED_MODEL_VERSION],
+            model_version=[CURRENT_OPERATIONAL_MODEL_VERSION],
+            sub_hourly_model_version=[CURRENT_OPERATIONAL_SERVED_MODEL_VERSION],
             interval_source=["extreme_fixture"],
         )
         calibration = calibration_summary(extreme)
@@ -2532,7 +2531,7 @@ esac
             latest_dst_time_utc_dt=[future - Hour(1)], target_time_utc_dt=[future + Hour(1)],
             horizon_hours=[1.0], latest_dst_nt=[-20.0], observation_dst_nt=[missing],
             served_pred_dst_nt=[-80.0], served_pred_dst_ci05_nt=[-110.0],
-            served_pred_dst_ci95_nt=[-50.0], interval_source=["aci"], model_version=["v2.1"],
+            served_pred_dst_ci95_nt=[-50.0], interval_source=["aci"], model_version=["inertial_sindy"],
         )
         st = build_status(df)
         @test st.available == false && st.stale == true && st.invalid_future == true
@@ -3390,7 +3389,7 @@ esac
         @test occursin("severity_ci05_dst_nt", js)
         @test occursin("severity_ci05_source", js)
         @test occursin("Conservative alerting envelope across these horizons", js)
-        for token in ("the Static V2.2 predecessor safety band", "the V2.1 predecessor safety band")
+        for token in ("the Static stack predecessor safety band", "the inertial-SINDy predecessor safety band")
             @test occursin(token, js)
         end
         # An unrecognised pipeline stage falls back to the raw label for the whole pipeline instead of
@@ -3414,27 +3413,27 @@ esac
             @test block !== nothing
             probe = block.captures[1] * """
             const out = [
-              pipelineCapabilities("v2.4+sindy20x11+superlearner10floor+conformal"),
-              pipelineCapabilities("v2.4+sindy20x11+superlearner10floor+quantumtail"),
-              pipelineCapabilities("v2.4+sindy20x11+toString"),
-              pipelineCapabilities("v2.4+sindy20x11+constructor"),
-              pipelineCapabilities("v2.9+madeup"),
-              pipelineCapabilities("v2.2+sindy20x11+L1A+staticstack(sindy60_fit407598)"),
+              pipelineCapabilities("dst-superlearner+sindyfloor+conformal"),
+              pipelineCapabilities("superlearner+sindy20x11+superlearner10floor+quantumtail"),
+              pipelineCapabilities("superlearner+sindy20x11+toString"),
+              pipelineCapabilities("superlearner+sindy20x11+constructor"),
+              pipelineCapabilities("unknown.9+madeup"),
+              pipelineCapabilities("staticstack+sindy60_fit407598+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)"),
               pipelineCapabilities(""),
             ];
             console.log(JSON.stringify(out));
             """
             caps = JSON3.read(read(pipeline(ignorestatus(`$node -e $probe`)), String))
             # Every stage recognised: the capability list is served.
-            @test caps[1] == "ten-forecast fitted combination (SINDy-majority), conformal interval"
+            @test caps[1] == "ten-forecast fitted combination (SINDy-family floor), conformal interval"
             # One unrecognised stage: the raw label is served for the whole pipeline rather than a
             # partial list that would describe a future build by this build's capabilities.
-            @test caps[2] == "v2.4+sindy20x11+superlearner10floor+quantumtail"
+            @test caps[2] == "superlearner+sindy20x11+superlearner10floor+quantumtail"
             # A token that resolves through Object.prototype is not a capability.
-            @test caps[3] == "v2.4+sindy20x11+toString"
-            @test caps[4] == "v2.4+sindy20x11+constructor"
-            @test caps[5] == "v2.9+madeup"
-            @test caps[6] == "L1 look-ahead, static regime stack"
+            @test caps[3] == "superlearner+sindy20x11+toString"
+            @test caps[4] == "superlearner+sindy20x11+constructor"
+            @test caps[5] == "unknown.9+madeup"
+            @test caps[6] == "L1 look-ahead, regime-aware tail, rapid-deepening projection, one-hour inertia blend, state-conditioned inertia, extreme-Dst inertia guard, static regime stack"
             @test caps[7] == ""
 
             # The alerting line is executed too, against a synthetic payload, so the numbers an
@@ -3454,8 +3453,8 @@ esac
             """ * severity_block.captures[1] * """
             const out = [];
             renderSeverityLine([
-              { severity_dst_nt: -95.0, severity_ci05_dst_nt: -105.0, severity_ci05_source: "v2_1_served" },
-              { severity_dst_nt: -90.0, severity_ci05_dst_nt: -100.0, severity_ci05_source: "v2_2_stack" },
+              { severity_dst_nt: -95.0, severity_ci05_dst_nt: -105.0, severity_ci05_source: "inertial_sindy_served" },
+              { severity_dst_nt: -90.0, severity_ci05_dst_nt: -100.0, severity_ci05_source: "static_stack" },
             ]);
             out.push({ text: el.textContent, hidden: store.hidden === true });
             renderSeverityLine([]);
@@ -3469,8 +3468,8 @@ esac
             rendered = JSON3.read(read(pipeline(ignorestatus(`$node -e $severity_probe`)), String))
             @test occursin("centre -95 nT", rendered[1].text)
             @test occursin("90% lower edge -105 nT", rendered[1].text)
-            # The deepest edge belongs to the V2.1 operator, so that is the stage named.
-            @test occursin("set by the V2.1 predecessor safety band", rendered[1].text)
+            # The deepest edge belongs to the inertial-SINDy operator, so that is the stage named.
+            @test occursin("set by the inertial-SINDy predecessor safety band", rendered[1].text)
             @test rendered[1].hidden == false
             # No alerting values in the payload leaves the line empty and hidden rather than showing
             # an em dash where a warning number belongs.
@@ -3491,23 +3490,23 @@ esac
             )
             @test label_block !== nothing
             @test occursin("const servedRowName = servedRowLabel(product, nServedLabel, nAllVerified);", js)
-            @test occursin("[servedRowName, c.v2_matched_rmse_nt]", js)
-            @test !occursin("[`\${product} served`, c.v2_matched_rmse_nt]", js)
+            @test occursin("[servedRowName, c.operational_matched_rmse_nt]", js)
+            @test !occursin("[`\${product} served`, c.operational_matched_rmse_nt]", js)
             label_probe = label_block.captures[1] * """
             console.log(JSON.stringify([
-              servedRowLabel("V2.4e", 0, 212),
-              servedRowLabel("V2.4e", 47, 212),
-              servedRowLabel("V2.4e", 212, 212),
-              servedRowLabel("V2.4e", 250, 212),
-              servedRowLabel("V2.4e", null, 212),
+              servedRowLabel("super-learner", 0, 212),
+              servedRowLabel("super-learner", 47, 212),
+              servedRowLabel("super-learner", 212, 212),
+              servedRowLabel("super-learner", 250, 212),
+              servedRowLabel("super-learner", null, 212),
             ]));
             """
             labels = JSON3.read(read(pipeline(ignorestatus(`$node -e $label_probe`)), String))
-            @test labels[1] == "served pipelines (mixed record; 0 of 212 rows under V2.4e)"
-            @test labels[2] == "served pipelines (mixed record; 47 of 212 rows under V2.4e)"
-            @test labels[3] == "V2.4e served"
-            @test labels[4] == "V2.4e served"
-            @test labels[5] == "served pipelines (mixed record; 0 of 212 rows under V2.4e)"
+            @test labels[1] == "served pipelines (mixed record; 0 of 212 rows under super-learner)"
+            @test labels[2] == "served pipelines (mixed record; 47 of 212 rows under super-learner)"
+            @test labels[3] == "super-learner served"
+            @test labels[4] == "super-learner served"
+            @test labels[5] == "served pipelines (mixed record; 0 of 212 rows under super-learner)"
 
             # The superseded-cycle disclosure reaches all three payloads and was rendered nowhere:
             # the panel showed a forecast as current with no indication that the newest issuance had
@@ -3565,27 +3564,27 @@ esac
             @test !occursin("c.current_interval_source || \"—\"", js)
             method_probe = method_block.captures[1] * """
             console.log(JSON.stringify([
-              intervalMethodText({ current_interval_source: "v24_conformal_depth",
-                                   current_interval_sources: ["aci", "v24_conformal_depth"] }),
+              intervalMethodText({ current_interval_source: "superlearner_conformal_depth",
+                                   current_interval_sources: ["aci", "superlearner_conformal_depth"] }),
               intervalMethodText({ current_interval_source: null,
-                                   current_interval_sources: ["aci", "v24_conformal_depth"] }),
+                                   current_interval_sources: ["aci", "superlearner_conformal_depth"] }),
               intervalMethodText({ current_interval_source: null,
-                                   current_interval_sources: ["aci", "conformal", "v24_conformal_depth"] }),
+                                   current_interval_sources: ["aci", "conformal", "superlearner_conformal_depth"] }),
               intervalMethodText({ current_interval_source: "unknown", current_interval_sources: [] }),
               intervalMethodText({ current_interval_source: null, current_interval_sources: [] }),
               intervalMethodText({}),
               intervalMethodText(null),
               intervalMethodIsSet({ current_interval_source: null,
-                                    current_interval_sources: ["aci", "v24_conformal_depth"] }),
+                                    current_interval_sources: ["aci", "superlearner_conformal_depth"] }),
               intervalMethodIsSet({ current_interval_source: "aci",
                                     current_interval_sources: ["aci"] }),
               intervalMethodIsSet({}),
             ]));
             """
             methods = JSON3.read(read(pipeline(ignorestatus(`$node -e $method_probe`)), String))
-            @test methods[1] == "v24_conformal_depth"
-            @test methods[2] == "aci and v24_conformal_depth"
-            @test methods[3] == "aci, conformal and v24_conformal_depth"
+            @test methods[1] == "superlearner_conformal_depth"
+            @test methods[2] == "aci and superlearner_conformal_depth"
+            @test methods[3] == "aci, conformal and superlearner_conformal_depth"
             @test methods[4] == "unknown"
             # No published cycle and no set: an em dash, never the word "nothing" and never a method.
             for index in 5:7
@@ -3597,36 +3596,36 @@ esac
         end
         @test !occursin("? status.threat.level : 0", js)
         # The product name is derived from the served label the log recorded, so no hardcoded version
-        # string may remain in the rendering path; the frozen-tail ablation keeps its V2.1 name because
-        # that comparator really is the V2.1 frozen-tail center.
+        # string may remain in the rendering path; the frozen-tail ablation keeps its inertial-SINDy name because
+        # that comparator really is the inertial-SINDy frozen-tail center.
         for label in ("Forecast: \${productName(st)} (", "Verified issued",
                       "Product forecast: \${esc(product)}.",
                       "served RMSE nT", "verified forecasts",
                       "issued centers as a visual guide",
-                      "V2.1 frozen-tail ablation", "SINDy v1", "Persistence",
+                      "inertial-SINDy frozen-tail ablation", "SINDy core", "Persistence",
                       "Burton full", "O'Brien–McPherron", "live_skill_mature",
                       "matched point forecast (n=\${matchedN})", "no best method is highlighted",
                       "by_served_model", "n_verified_current_served_model")
             @test occursin(label, js)
         end
-        for retired_label in ("Forecast: V2 (", "name:\"Verified V2\"",
-                              "V2 90% coverage", "V2 RMSE nT", "V2 verified",
+        for retired_label in ("Forecast: Operational (", "name:\"Verified Operational\"",
+                              "Operational 90% coverage", "Operational RMSE nT", "Operational verified",
                               "headline score", "(online, distribution-free)",
                               "calibrated 90% interval",
-                              "Forecast: V2.1 (", "Product forecast: V2.1.",
-                              "V2.1 RMSE nT", "V2.1 verified forecasts")
+                              "Forecast: inertial-SINDy (", "Product forecast: inertial-SINDy.",
+                              "inertial-SINDy RMSE nT", "inertial-SINDy verified forecasts")
             @test !occursin(retired_label, js)
         end
         @test occursin("mature && v != null", js)
         @test !occursin("calibrated uncertainty", html)
-        @test occursin("Normal cycles use Operational V2.4e", readme)
+        @test occursin("Normal cycles use Operational super-learner", readme)
         @test occursin("exactly the same", readme)
         @test occursin(r"48\s+common rows", readme)
-        @test occursin("**Operational V2.4e**", readme)
-        @test !occursin("package's V2.1 forecaster", readme)
-        @test !occursin("project's **V2.1** nowcaster", readme)
-        @test !occursin("package's V2 forecaster", readme)
-        @test !occursin("V2 and every baseline", readme)
+        @test occursin("**Operational super-learner**", readme)
+        @test !occursin("package's inertial-SINDy forecaster", readme)
+        @test !occursin("project's **inertial-SINDy** nowcaster", readme)
+        @test !occursin("package's Operational forecaster", readme)
+        @test !occursin("Operational and every baseline", readme)
         for unsupported in ("GIC driver", "GIC forecast", "GIC alert thresholds",
                             "Pulkkinen tier", "GIC risk", "storm cannot be excluded",
                             "90% lower bound")
@@ -3930,13 +3929,13 @@ esac
         # endpoint has to describe, not a hypothetical one.
         now0 = floor(now(UTC), Hour)
         stack = reduce(vcat, [live_cycle_fixture(now0 - Hour(161) + Hour(k) - Minute(47);
-                                                 served_model=STACK_V2_SERVED_MODEL_VERSION,
-                                                 v2_2_status="ok",
-                                                 v24_status="fallback:deployment_absent")
+                                                 served_model=STACK_OPERATIONAL_SERVED_MODEL_VERSION,
+                                                 static_stack_status="ok",
+                                                 superlearner_status="fallback:deployment_absent")
                               for k in 0:19])
         healthy = reduce(vcat, [live_cycle_fixture(now0 - Hour(4 - k) - Minute(47);
-                                                   served_model=CURRENT_V2_SERVED_MODEL_VERSION,
-                                                   v2_2_status="ok", v24_status="ok")
+                                                   served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
+                                                   static_stack_status="ok", superlearner_status="ok")
                                 for k in 1:4])
         df = vcat(stack, healthy)
         health = build_served_health(df)
@@ -3958,8 +3957,8 @@ esac
 
         # An unbroken day: the two rates agree and the span is the cycle count.
         unbroken = reduce(vcat, [live_cycle_fixture(now0 - Hour(6 - k) - Minute(47);
-                                                     served_model=CURRENT_V2_SERVED_MODEL_VERSION,
-                                                     v2_2_status="ok", v24_status="ok")
+                                                     served_model=CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
+                                                     static_stack_status="ok", superlearner_status="ok")
                                  for k in 1:6])
         steady = build_served_health(unbroken)
         @test steady.window_span_hours == 5.0
@@ -4072,7 +4071,7 @@ esac
             escaped = "&lt;img src=x onerror=BOOM&gt;"
             issue = "2026-06-26T06:00:00Z"
             payloads = replace(RENDER_PROBE_PAYLOADS_JS, "@@MARKER@@" => marker,
-                               "@@SERVED@@" => CURRENT_V2_SERVED_MODEL_VERSION,
+                               "@@SERVED@@" => CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
                                "@@ISSUE@@" => issue)
             prelude = raw"""
             // Stub DOM: records every innerHTML and textContent assignment by element id, so the
@@ -4195,7 +4194,7 @@ esac
             forecast_names = String[String(t.name) for t in rendered.plots["forecast-plot"].traces
                                     if haskey(t, :name)]
             @test any(name -> occursin(escaped, name), forecast_names)
-            @test !any(name -> occursin("V2.1 core trajectory", name), forecast_names)
+            @test !any(name -> occursin("inertial-SINDy core trajectory", name), forecast_names)
             @test !any(t -> haskey(t, :y) &&
                             any(v -> v isa Number && Float64(v) == -999.0, t.y),
                        rendered.plots["forecast-plot"].traces)

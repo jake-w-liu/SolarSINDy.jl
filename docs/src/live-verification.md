@@ -49,14 +49,14 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --r
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --backfill-baselines
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --replay-recent
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --replay-omni
-julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --fit-v2-calibration
+julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --fit-operational-calibration
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --campaign
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --summary
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --comparison-report
 ```
 
 The comparison report scores every listed model on identical matured rows. It reports both the
-pooled cohort and each valid internal model step, including the static V2.2 predecessor when that
+pooled cohort and each valid internal model step, including the static stack predecessor when that
 field is present. Step cells with few rows are descriptive rather than model-ranking evidence.
 
 The long-running monitor writes one dated review on its first cycle of each UTC
@@ -78,12 +78,12 @@ URL when it is not at the default local address.
 Use `--poll-seconds=N`, `--timeout-hours=N`, `--horizon-hours=N`, and
 `--log=PATH` to adjust the run. Use `--replay-horizons=1,2,3,6` to emit multiple
 lead times per anchor when building a replay/calibration table, and
-`--v2-coverage-floor=N` to set the deployment coverage floor for v2.
+`--operational-coverage-floor=N` to set the deployment coverage floor for operational.
 
-Use `--campaign --campaign-horizons=1,2,3,6 --model=v2` to issue multiple
-future operational-v2 forecasts, poll the observation feed, verify the locked
+Use `--campaign --campaign-horizons=1,2,3,6 --model=operational` to issue multiple
+future operational forecasts, poll the observation feed, verify the locked
 rows, and regenerate the comparison report from one command. `--campaign`
-defaults to `--model=v2` if no model is specified.
+defaults to `--model=operational` if no model is specified.
 
 Use `--backfill-baselines` after schema changes to fill baseline forecasts and
 residuals for older rows that already contain locked SINDy predictions and live
@@ -109,11 +109,11 @@ CSV without adding that large data file to git:
 ```bash
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --replay-omni \
-  --omni=paper_v2_monitor/data/omni_extracted.csv \
+  --omni=paper_dst_superlearner/data/omni_extracted.csv \
   --omni-year-start=2024 \
   --omni-year-end=2025 \
   --replay-hours=4000 \
-  --table=/private/tmp/solar_v2_omni_replay_2024_2025.csv \
+  --table=/private/tmp/solar_operational_omni_replay_2024_2025.csv \
   --table-limit=0
 ```
 
@@ -133,20 +133,20 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
 ```
 
 The headline comparison uses the same target rows for the served center and its
-logged comparators. A normal complete cycle is Operational V2.4e: a ten-expert
-super learner over two V2.1 predecessor forms, a T1r analog, persistence, three
+logged comparators. A normal complete cycle is Operational super-learner: a ten-expert
+super learner over two inertial-SINDy predecessor forms, a T1r analog, persistence, three
 empirical ring-current forecasts, direct gradient boosting, climatological
-relaxation, and static V2.2. If the V2.4e stage cannot act, the row records the
-static V2.2 or V2.1 fallback identity instead of presenting that forecast as
-V2.4e. Frozen-tail, shadow, and selector fields are audit evidence, not
+relaxation, and static stack. If the super-learner stage cannot act, the row records the
+static stack or inertial-SINDy fallback identity instead of presenting that forecast as
+super-learner. Frozen-tail, shadow, and selector fields are audit evidence, not
 additional served products.
 
-## V2 base calibration retained in V2.4e
+## Operational base calibration retained in super-learner
 
-The default `--model=v2` option selects the V2.1 base operator; it does not name
-the final served product. The operational path subsequently constructs V2.4e and
-records the exact served identity on every issued row. Use `--model=v1`
-explicitly to reproduce the uncalibrated discovery-core path. V2.1 applies a
+The default `--model=operational` option selects the inertial-SINDy base operator; it does not name
+the final served product. The operational path subsequently constructs super-learner and
+records the exact served identity on every issued row. Use `--model=sindy_core`
+explicitly to reproduce the uncalibrated discovery-core path. inertial-SINDy applies a
 causal ridge residual correction to the current revised 20/11
 SINDy forecast and supplies an empirically evaluated 90%-target prediction interval. The correction
 uses only issue-time fields: latest Dst, solar-wind
@@ -154,13 +154,13 @@ speed, IMF components, density, dynamic pressure, and derived causal coupling
 features such as southward IMF, `V Bs`, transverse IMF magnitude, IMF clock-angle
 coupling, and square-root dynamic pressure.
 
-Current V2.1 calibration uses a leakage-free chronological split. The fit command
+Current inertial-SINDy calibration uses a leakage-free chronological split. The fit command
 sorts replay/live-log rows by issue time into train, validation, and holdout
 sets. The ridge residual correction and the component selector are fit on the
 train rows only; the feature set, ridge penalty, and component are chosen on the
 validation rows, which fit neither. The holdout is scored exactly once and is
 never used for selection or tuning. This calibration-stage score applies to the
-V2.1 frozen-tail center. It must not be reported as performance of the served
+inertial-SINDy frozen-tail center. It must not be reported as performance of the served
 stack after its center-changing tail and safeguards.
 
 The dashboard evaluates the served center and every displayed comparator on one
@@ -173,42 +173,42 @@ served-center shift and bounded online update do not inherit the frozen-center
 distribution-free guarantee.
 
 Deployment is decided by an acceptance gate evaluated on the validation rows: a
-v2 candidate is deployed only if it beats persistence and O'Brien--McPherron on
+operational candidate is deployed only if it beats persistence and O'Brien--McPherron on
 both RMSE and MAE and its 90% interval coverage is at least the coverage floor
-(`--v2-coverage-floor`, default 0.85). If no candidate passes, a v1-equivalent
+(`--operational-coverage-floor`, default 0.85). If no candidate passes, a SINDy-core-equivalent
 (zero-correction) fallback is deployed instead, so a candidate that cannot be
 shown to beat the strong baselines is never shipped. Candidate feature sets
 include instantaneous coupling terms, causal Dst and solar-wind memory terms,
 and expert-disagreement terms when baseline predictions are available. On small
 fit sets the selector is held to the corrected SINDy center to avoid choosing a
-baseline component on noise. The issued V2 output is one upgraded
-forecast; the internal `v2_selected_component` field is audit metadata, not a
+baseline component on noise. The issued Operational output is one upgraded
+forecast; the internal `inertial_sindy_selected_component` field is audit metadata, not a
 separate headline model.
 
-The logged V2.1 frozen-tail center remains available for ablation scores. The
+The logged inertial-SINDy frozen-tail center remains available for ablation scores. The
 predecessor operator adds the validation-selected operational tail: forecast steps with
 sufficient upstream coverage use ballistically propagated L1 forcing; later
 hours use regime-aware Bz/By relaxation; causal rapid-deepening projection,
 one-hour inertia, state-conditioned inertia, and an extreme-Dst guard constrain
 known failure regimes. The fitted static regime stack combines that center with
-the frozen V2.1 center, persistence, and the three physical baselines. Static
-V2.2 is then one of the ten inputs to V2.4e, which is the normal served point
+the frozen inertial-SINDy center, persistence, and the three physical baselines. Static
+static stack is then one of the ten inputs to super-learner, which is the normal served point
 forecast. The published threat level and the conservative 90% alerting edge that raises a
-watch are taken on the deepest of V2.4e, static V2.2, and the V2.1 predecessor,
+watch are taken on the deepest of super-learner, static stack, and the inertial-SINDy predecessor,
 so the super learner cannot lower a predecessor warning. This alerting-only edge is
-disclosed separately and can differ from the shaded V2.4e band. The forecast chart
-connects the latest observation to the issued V2.4e target centers as a visual
-guide. It does not display or imply sub-hour V2.4e forecasts, because V2.4e is
+disclosed separately and can differ from the shaded super-learner band. The forecast chart
+connects the latest observation to the issued super-learner target centers as a visual
+guide. It does not display or imply sub-hour super-learner forecasts, because super-learner is
 defined only at the scored target hours.
 
 The frozen package also includes a separate complete-hour served-stack holdout
-under `data/operational_validation/v2_1_served_holdout_*`. It applies the
+under `data/operational_validation/inertial_sindy_served_holdout_*`. It applies the
 complete-hour implementation of the served tail and safeguards to the locked
 2020--2022 holdout, shifts the pre-holdout static conformal offsets to the
 served center, and performs zero residual updates from holdout targets. It does
 not reconstruct the fractional subhourly upstream windows available during
 live issuance. Regenerate it with
-`validation/operational/v2_1_served_holdout.jl`. The pooled coverage floor is a
+`validation/operational/inertial_sindy_served_holdout.jl`. The pooled coverage floor is a
 promotion criterion; lead-specific and activity-specific results are reported
 as diagnostic boundaries rather than silently pooled away.
 
@@ -216,12 +216,12 @@ Fit the calibration from a prior replay or locked live log:
 
 ```bash
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
-  --fit-v2-calibration \
+  --fit-operational-calibration \
   --table=SolarSINDy.jl/validation/output/operational/live_replay_144h.csv \
-  --v2-calibration=SolarSINDy.jl/validation/output/operational/operational_v2_calibration.csv \
-  --v2-ridge-grid=0,1,10,100,1000 \
-  --v2-validation-fraction=0.15 \
-  --v2-selector-margin=0.5
+  --operational-calibration=SolarSINDy.jl/validation/output/operational/inertial_sindy_calibration.csv \
+  --operational-ridge-grid=0,1,10,100,1000 \
+  --operational-validation-fraction=0.15 \
+  --operational-selector-margin=0.5
 ```
 
 The monitor's bundled point calibration and conformal sidecar live together in
@@ -232,19 +232,19 @@ command:
 
 ```bash
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
-  --fit-v2-calibration \
-  --table=/private/tmp/solar_v2_omni_replay_2024_2025.csv \
-  --v2-calibration=/private/tmp/solar_v2_omni_calibration_2024_2025.csv \
-  --v2-ridge-grid=0,0.1,1,10,100,1000 \
-  --v2-validation-fraction=0.15 \
-  --v2-selector-margin=0.5
+  --fit-operational-calibration \
+  --table=/private/tmp/solar_operational_omni_replay_2024_2025.csv \
+  --operational-calibration=/private/tmp/solar_operational_omni_calibration_2024_2025.csv \
+  --operational-ridge-grid=0,0.1,1,10,100,1000 \
+  --operational-validation-fraction=0.15 \
+  --operational-selector-margin=0.5
 ```
 
-This also writes `operational_v2_calibration_selection.csv` (each tested
+This also writes `inertial_sindy_calibration_selection.csv` (each tested
 candidate with its validation metrics, whether it passed the acceptance gate,
 which candidate was deployed, and the once-scored holdout RMSE/MAE/coverage),
-`operational_v2_calibration_scored.csv` (the fit/validation/holdout rows scored
-by the deployed calibration), and `operational_v2_calibration_conformal.csv`
+`inertial_sindy_calibration_scored.csv` (the fit/validation/holdout rows scored
+by the deployed calibration), and `inertial_sindy_calibration_conformal.csv`
 (the conformal interval calibration; see below).
 
 Then run a calibrated replay or live issue:
@@ -252,21 +252,21 @@ Then run a calibrated replay or live issue:
 ```bash
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --replay-recent \
-  --model=v2 \
-  --v2-calibration=SolarSINDy.jl/validation/output/operational/operational_v2_calibration.csv \
+  --model=operational \
+  --operational-calibration=SolarSINDy.jl/validation/output/operational/inertial_sindy_calibration.csv \
   --replay-hours=144 \
-  --table=SolarSINDy.jl/validation/output/operational/live_replay_v2_144h.csv
+  --table=SolarSINDy.jl/validation/output/operational/live_replay_operational_144h.csv
 ```
 
-The V2.1 base calibration is not evidence of V2.4e readiness by itself. It must be
+The inertial-SINDy base calibration is not evidence of super-learner readiness by itself. It must be
 scored chronologically against held-out rows and then accumulated through locked
-live forecasts exactly like v1.
+live forecasts exactly like the SINDy core.
 
 ## Conformal Predictive Intervals
 
-`--fit-v2-calibration` also fits a split-conformal interval calibration from the
+`--fit-operational-calibration` also fits a split-conformal interval calibration from the
 fixed-driver frozen-center validation residuals (out-of-sample for the ridge
-fit) and writes it to a `*_conformal.csv` sidecar next to the V2 calibration.
+fit) and writes it to a `*_conformal.csv` sidecar next to the Operational calibration.
 The conformal half-width is stratified by forecast horizon and by activity
 regime (quiet versus disturbed, set from the issue-time Dst), with the standard
 finite-sample rank correction and a pooled fallback when a stratum is sparse.
@@ -274,23 +274,23 @@ Its marginal finite-sample guarantee requires exchangeability within the
 calibration stratum. The fit reports empirical holdout coverage under both the
 conformal interval and the legacy interval-scale band.
 
-When the sidecar is present, `--model=v2` issuance sources the logged 90%
+When the sidecar is present, `--model=operational` issuance sources the logged 90%
 interval from the conformal half-width for the row's horizon and activity
-regime, instead of the v1-ensemble-spread interval scale. Each row records the
-band actually served in `interval_source` (`v24_conformal_depth`, `aci`,
+regime, instead of the SINDy-core-ensemble-spread interval scale. Each row records the
+band actually served in `interval_source` (`superlearner_conformal_depth`, `aci`,
 `conformal`, or `interval_scale`) for audit. The point
 forecast is unchanged; only the uncertainty band changes. The static half-width
-is shifted from the frozen center to the served V2.1 center. This preserves the
+is shifted from the frozen center to the served inertial-SINDy center. This preserves the
 width but does not automatically transfer the frozen-center guarantee; the
 complete-hour served-stack holdout supplies the corresponding empirical
 coverage evidence.
 
-On a V2.4e-served row `interval_source` is the study's depth-stratified band, which
+On a super-learner-served row `interval_source` is the study's depth-stratified band, which
 overwrites whichever band the batch's fallback policy produced. The frozen-tail columns
-(`pred_dst_ci05/95_nt`, `v2_pred_dst_ci*`, `improved_pred_dst_ci*`) still carry that
+(`pred_dst_ci05/95_nt`, `inertial_sindy_pred_dst_ci*`, `improved_pred_dst_ci*`) still carry that
 policy's band, and the two policies differ by roughly a factor of four in width, so the
 policy behind them is recorded separately in `frozen_tail_interval_source`. Any coverage
-audit that pools `observed_in_90ci` or `v2_observed_in_90ci` must stratify on that column,
+audit that pools `observed_in_90ci` or `operational_observed_in_90ci` must stratify on that column,
 not on `interval_source`.
 
 The public product horizons remain 1, 2, 3, and 6 hours, but point and interval
@@ -325,12 +325,12 @@ band is used only when both the baseline-center and served-center residual strea
 streams with separate maturities, so the same log can be mature for `{1,2,3,6}` and immature
 for `{2,3,4,7}`. A restart that moves the phase can consequently flip the policy from `aci` to
 `static` — and with it the fallback-row and frozen-tail band widths — with no change to the
-model, the artifacts, or the data. This was the actual cause of the post-V2.4 `aci → static`
-flip, which was initially attributed to the V2.4 integration.
+model, the artifacts, or the data. This was the actual cause of the post-super-learner `aci → static`
+flip, which was initially attributed to the super-learner integration.
 
 The daemon records the full reason for a `static` selection: the anchor time and lag, the
 required step set, and every immature stream with its verified-residual counts per pool. The
-served V2.4e band is unaffected either way, since it comes from the study's split-conformal
+served super-learner band is unaffected either way, since it comes from the study's split-conformal
 strata rather than from the batch policy.
 
 The operational tail is part of the served-model identity. A thrown or
@@ -344,22 +344,22 @@ multiple lead times via `--replay-horizons`:
 ```bash
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl \
   --replay-omni \
-  --omni=paper_v2_monitor/data/omni_extracted.csv \
+  --omni=paper_dst_superlearner/data/omni_extracted.csv \
   --omni-year-start=2024 --omni-year-end=2025 \
   --replay-hours=4000 --replay-horizons=1,2,3,6 \
-  --table=/private/tmp/solar_v2_omni_replay_multi.csv --table-limit=0
+  --table=/private/tmp/solar_operational_omni_replay_multi.csv --table-limit=0
 ```
 
-Then fit the calibration on that multi-horizon table (`--fit-v2-calibration
+Then fit the calibration on that multi-horizon table (`--fit-operational-calibration
 --table=...`), and validate empirical coverage by horizon and regime from the
 `_scored.csv` / comparison report. This is the run that establishes whether the
 operational 90% interval actually covers at the nominal rate; it requires live
 or archived OMNI data and is the data-dependent step, not a code step.
 
-## Prospective V2.4e interval shadow
+## Prospective super-learner interval shadow
 
 The deployed A3 shadow evaluates a causal location correction without changing
-the served V2.4e point or interval. For each supported internal model step it
+the served super-learner point or interval. For each supported internal model step it
 uses the median of the trailing 24 matured, exact-identity signed residuals and
 requires 30 residuals before emitting endpoints. It scales the served lower and
 upper half-widths by 1.50 at step 1 and 1.20 at steps 2, 3, 4, 6, and 7. The
@@ -372,13 +372,13 @@ The dashboard can show collection progress, but the persisted audit is the
 source of truth for claim readiness. Regenerate it with:
 
 ```bash
-julia --project=. validation/operational/v2_4_live_claim_audit.jl
+julia --project=. validation/operational/superlearner_live_claim_audit.jl
 ```
 
-The audit writes `var/monitor/v2_4_live_claim_status.json` and
-`var/monitor/v2_4_live_claim_status.md` atomically. It accepts only rows with
-the exact V2.4e served identity and bundle manifest, the exact A3 shadow
-identity and digest, an `ok` V2.4e stage, unchanged V2.4e served values, causal
+The audit writes `var/monitor/superlearner_live_claim_status.json` and
+`var/monitor/superlearner_live_claim_status.md` atomically. It accepts only rows with
+the exact super-learner served identity and bundle manifest, the exact A3 shadow
+identity and digest, an `ok` super-learner stage, unchanged super-learner served values, causal
 timestamps, a supported public horizon and internal step, and endpoints that
 reproduce the frozen A3 formula. Retries are deduplicated by issue hour and
 target, retaining the latest issue attempt. Any identity, bundle, chronology,
@@ -396,7 +396,7 @@ upper confidence bound.
 Storm skill additionally requires five independent events separated by 72
 contiguous observed hours above -30 nT, 200 same-row matched storm forecasts,
 and at least 30 rows spanning all five events at every supported step. Every step must have a positive event-block lower confidence
-bound for gain over static V2.2. Loss to the strongest matched comparator may
+bound for gain over static stack. Loss to the strongest matched comparator may
 not exceed 0.5 nT, absolute bias may not exceed 10 nT, and shadow storm coverage
 must be at least 0.80. The marginal gate must also pass. Neither report flag
 changes the served product; promotion requires a new versioned bundle and a
@@ -412,7 +412,7 @@ keeping the sparse equation structure fixed. It is a verified library primitive
 used for research comparison against fixed-coefficient paths. Causal seven-storm
 replays found no promotion-grade gain from either decay-only or
 injection-adaptive overlays, so assimilation is intentionally absent from the
-live issuance path. See [EKF extension decision](ekf-v3-decision.md).
+live issuance path. See [EKF extension decision](ekf-overlay-decision.md).
 
 ## Operational Deployment
 
@@ -486,8 +486,8 @@ size, and a per-segment hash. A short or corrupted append aborts the trim, so th
 rows stay in the hot log rather than being lost.
 
 Because the archive is appended positionally, rows may only enter a file whose
-header matches them exactly. Row-schema growth is routine here — the `v2_2_*`,
-`v23_*` and `v24_*` column families were each added within weeks — so when the hot
+header matches them exactly. Row-schema growth is routine here — the `static_stack_*`,
+`analog_*` and `superlearner_*` column families were each added within weeks — so when the hot
 log's columns match no existing header, retention rolls forward to a numbered
 segment (`live_forecast_log_archive.<n>.csv` with its own manifest) rather than
 refusing. Earlier segments are left byte-identical, and the complete record is the

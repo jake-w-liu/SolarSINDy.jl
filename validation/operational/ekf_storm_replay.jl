@@ -1,18 +1,18 @@
-# ekf_storm_replay.jl — storm-time replay: constrained EKF vs the V2.1 frozen-tail ablation.
+# ekf_storm_replay.jl — storm-time replay: constrained EKF vs the inertial-SINDy frozen-tail ablation.
 #
 # Purpose: build the storm-time promotion evidence for the constrained-EKF shadow (the v3 candidate). The
 # locked-live record is quiet-only, and the EKF only differs during storms, so we score the EKF's
-# 1 h forecast against the V2.1 frozen-tail ablation (and persistence) on the SAME named storms as
+# 1 h forecast against the inertial-SINDy frozen-tail ablation (and persistence) on the SAME named storms as
 # storm_replay.jl. The
 # evaluation is fully CAUSAL: the EKF is bootstrapped on PRE-storm OMNI only (years < the storm year), then
 # walked over the storm's hourly anchors (assimilate anchor -> adapt decay -> issue 1 h forecast). It reuses
 # the retired `_shadow_forecast` / constrained `_new_filter` with a decay cap
-# derived from the current V2.1 core and the current replay feature rows.
+# derived from the current inertial-SINDy core and the current replay feature rows.
 #
-# Promotion criterion (1 h): EKF is v3-promotable iff the pooled paired improvement |e_v2|-|e_ekf| has a
+# Promotion criterion (1 h): EKF is v3-promotable iff the pooled paired improvement |e_operational|-|e_ekf| has a
 # bootstrap 95% CI strictly above 0 (consistent 1 h gain) AND the adapted decay stays in the stable band
 # [decay_cap-2, decay_cap]. This is an exploratory extension audit, not part of
-# the served V2.1 method or its paper evidence.
+# the served inertial-SINDy method or its paper evidence.
 #
 # Run from the package root: julia --project=. validation/operational/ekf_storm_replay.jl
 
@@ -25,7 +25,7 @@ const OMNI    = OPERATIONAL_OMNI
 const OUT_CSV = joinpath(OPERATIONAL_OUTPUT_DIR, "ekf_storm_replay_scored.csv")
 const OUT_MD  = joinpath(OPERATIONAL_OUTPUT_DIR, "ekf_storm_replay_report.md")
 
-# Seven real G4/G5 storms spanning 2023–2025 (peak Dst from paper_v2_monitor/data/omni_extracted.csv): widening the
+# Seven real G4/G5 storms spanning 2023–2025 (peak Dst from paper_dst_superlearner/data/omni_extracted.csv): widening the
 # set lifts the main-phase sample and tests cross-storm sign-consistency, both required by the v3 bar.
 const STORMS = [
     (name = "May 2024 (Gannon, G5)", t0 = DateTime(2024, 5, 9, 12),  t1 = DateTime(2024, 5, 13, 0)),  # -339 nT
@@ -76,7 +76,7 @@ _ekf_boot_year_end(storm) = year(storm.t0 - Hour(6)) - 1
 (issue, lead). The filter assimilates each anchor ONCE per issue hour (advancing the adapted decay), then
 issues a forecast at every lead in LEADS by free-running the discovered ODE forward h hours. `ekf_fixed`
 repeats the rollout with the FIXED discovered decay; ekf_fixed≈frozen_tail at every lead is the fairness
-oracle that the multi-step rollout matches the V2.1 frozen-tail engine, so any EKF gap is purely the decay
+oracle that the multi-step rollout matches the inertial-SINDy frozen-tail engine, so any EKF gap is purely the decay
 adaptation. `rate`
 is the hourly dDst/dt of the anchor (for the main-phase/recovery split)."""
 function replay_ekf_storm(storm, lib, ξ0, i_decay, cal, f)
@@ -89,7 +89,7 @@ function replay_ekf_storm(storm, lib, ξ0, i_decay, cal, f)
     (nrow(plasma) > 0 && !isempty(dst_times)) || error("No finite OMNI drivers/Dst inside replay window")
     rh = Int(ceil(Dates.value(win_hi - win_lo) / 3_600_000))
     df = replay_recent_table(plasma, mag, dst_times, dst_vals;
-                             replay_hours = rh, horizons = LEADS, model = :v2, calibration = cal)
+                             replay_hours = rh, horizons = LEADS, model = :inertial_sindy, calibration = cal)
     df[!, :issue_dt] = DateTime.(df.issue_time_utc)
     df = df[(df.issue_dt .>= storm.t0) .& (df.issue_dt .<= storm.t1), :]
     sort!(df, [:issue_dt, :model_step_hours])
@@ -111,15 +111,15 @@ function replay_ekf_storm(storm, lib, ξ0, i_decay, cal, f)
         prev1 = get(dst_map, it - Hour(1), NaN)                              # true 1 h delta (NaN if prior hour absent)
         rate = isfinite(prev1) ? latest - prev1 : NaN                        # dDst/dt of the anchor [nT/h]
         for r in eachrow(g)
-            (ismissing(r.observation_dst_nt) || ismissing(r.v2_pred_dst_nt)) && continue
-            isfinite(Float64(r.observation_dst_nt)) && isfinite(Float64(r.v2_pred_dst_nt)) || continue
+            (ismissing(r.observation_dst_nt) || ismissing(r.inertial_sindy_pred_dst_nt)) && continue
+            isfinite(Float64(r.observation_dst_nt)) && isfinite(Float64(r.inertial_sindy_pred_dst_nt)) || continue
             h = Int(r.model_step_hours)
             _, ekf_a = _shadow_forecast(lib, ξ0, i_decay, decay,
                 anchor_star, drv, latest, cal; nsteps=h, calibration_features=r)
             _, ekf_f = _shadow_forecast(lib, ξ0, i_decay, ξ0[i_decay],
                 anchor_star, drv, latest, cal; nsteps=h, calibration_features=r)
             isfinite(ekf_a) && isfinite(ekf_f) || continue
-            push!(out, (storm.name, it, h, Float64(r.observation_dst_nt), Float64(r.v2_pred_dst_nt),
+            push!(out, (storm.name, it, h, Float64(r.observation_dst_nt), Float64(r.inertial_sindy_pred_dst_nt),
                         ekf_a, ekf_f, latest, decay, rate))
         end
     end
@@ -180,11 +180,11 @@ function _per_storm_signs(rows)
 end
 
 function main_ekf_storm_replay()
-    println("EKF storm replay: constrained EKF vs V2.1 frozen-tail ablation + persistence, leads ", LEADS,
+    println("EKF storm replay: constrained EKF vs inertial-SINDy frozen-tail ablation + persistence, leads ", LEADS,
             " (causal, pre-storm bootstrap)\n", "="^80)
     lib, ξ0, i_decay = _shadow_library()
     decay_cap = _shadow_decay_cap(ξ0, i_decay)
-    cal = _load_calibration_for_model(LiveVerifyConfig(model = :v2))
+    cal = _load_calibration_for_model(LiveVerifyConfig(model = :inertial_sindy))
     boot = Dict{Int,Any}()
     all_rows = DataFrame()
     for s in STORMS
@@ -199,14 +199,14 @@ function main_ekf_storm_replay()
     # lead × regime grid: a cell is a v3 candidate iff EKF beats the STRONGER baseline with CI>0.
     candidates = NamedTuple[]
     open(OUT_MD, "w") do io
-        println(io, "# EKF storm replay — constrained EKF vs V2.1 frozen-tail ablation and persistence\n")
+        println(io, "# EKF storm replay — constrained EKF vs inertial-SINDy frozen-tail ablation and persistence\n")
         println(io, "Causal head-to-head on ", length(STORMS), " G4/G5 storms (2023–2025). The constrained EKF ",
                     "is bootstrapped on OMNI before each storm year (no leakage), walked over the storm's hourly ",
                     "anchors (assimilate once per hour), then issues a forecast at each lead by free-running the ",
                     "current 20/11 SINDy ODE forward. `improve` is paired RMSE(stronger baseline) − RMSE(EKF) ",
-                    "(positive = EKF beats the stronger of {V2.1 frozen-tail, persistence}); the v3 bar needs ",
+                    "(positive = EKF beats the stronger of {inertial-SINDy frozen-tail, persistence}); the v3 bar needs ",
                     "its storm-cluster 95% CI strictly above zero. `fair` = max|ekf_fixed − frozen_tail|: with ",
-                    "the discovered decay held fixed the EKF rollout must reproduce the V2.1 frozen-tail engine.\n")
+                    "the discovered decay held fixed the EKF rollout must reproduce the inertial-SINDy frozen-tail engine.\n")
         println(io, "| lead [h] | regime | n | RMSE frozen-tail | RMSE EKF | RMSE pers | stronger | improve vs stronger [nT] (95% CI) | fair |")
         println(io, "|---|---|---|---|---|---|---|---|---|")
         println("\n  lead regime    n frozen  EKF   pers  strong       improve[CI]            fair")
@@ -245,7 +245,7 @@ function main_ekf_storm_replay()
         verdict = !stable ? "NOT PROMOTABLE: adapted decay left the stable band [$(decay_cap-2), $(decay_cap)]" :
                   max_fair > 2.0 ? "INCONCLUSIVE at multi-step: fairness gap max|ekf_fixed−frozen_tail|=$(round(max_fair;digits=2)) nT; trust only fair≈0 leads" :
                   promotable ? "PROMOTABLE: $detail" :
-                  "NOT PROMOTABLE: at no lead or regime does the EKF beat the stronger of {V2.1 frozen-tail, persistence} with a 95% CI above 0; the constrained-EKF overlay should remain in shadow"
+                  "NOT PROMOTABLE: at no lead or regime does the EKF beat the stronger of {inertial-SINDy frozen-tail, persistence} with a 95% CI above 0; the constrained-EKF overlay should remain in shadow"
         println(io, "\nDecay band over all storms: [", round(decay_lo; digits=3), ", ", round(decay_hi; digits=3),
                     "] (cap ", decay_cap, "). Max fairness gap (all leads): ", round(max_fair; digits=2), " nT.\n")
         println(io, "**v3 promotion verdict:** ", verdict)
@@ -263,7 +263,7 @@ function _selftest()
     end
     lib, ξ0, i_decay = _shadow_library()
     decay_cap = _shadow_decay_cap(ξ0, i_decay)
-    cal = _load_calibration_for_model(LiveVerifyConfig(model = :v2))
+    cal = _load_calibration_for_model(LiveVerifyConfig(model = :inertial_sindy))
     f = causal_bootstrap(lib, ξ0, i_decay, 2022)
     # Oracle 1: the constraint binds — the adapted decay never exceeds the cap.
     @assert current_coeffs(f)[1] <= decay_cap + 1e-9 "decay above cap after bootstrap"
@@ -280,7 +280,7 @@ function _selftest()
         qdrv, 2.0, cal)
     @assert(
         isfinite(ekf_q) && abs(ekf_q - fixed_q) <= 5.0,
-        "quiet EKF differs from fixed V2.1 core by more than 5 nT: $(ekf_q-fixed_q)",
+        "quiet EKF differs from fixed inertial-SINDy core by more than 5 nT: $(ekf_q-fixed_q)",
     )
     # Oracle 4: nsteps default is byte-identical to an explicit single step (live 1 h path must be unchanged).
     qdrv = (V=450.0, Bz=-5.0, By=0.0, n=5.0, Pdyn=1.5)
@@ -289,7 +289,7 @@ function _selftest()
             _shadow_forecast(lib, ξ0, i_decay, -0.1, -50.0, qdrv, -48.0,
                 cal; nsteps=1) "nsteps default != 1-step"
     # Oracle 5: multi-step monotone recovery — with no southward driving (Bz=0) and a negative restoring
-    # decay, the v1 rollout must move a negative Dst* TOWARD zero with more steps. This is the very
+    # decay, the SINDy core rollout must move a negative Dst* TOWARD zero with more steps. This is the very
     # mechanism that makes the EKF over-recover at onset; the oracle pins its sign.
     rdrv = (V=400.0, Bz=0.0, By=0.0, n=5.0, Pdyn=1.5)
     v1_1 = _shadow_forecast(lib, ξ0, i_decay, -0.1, -100.0, rdrv, -100.0,

@@ -19,14 +19,14 @@
 #   SOLARSINDY_WATCHDOG_DASH_URL  dashboard health URL (default http://127.0.0.1:8723/api/health)
 #   SWM_WEBHOOK_URL               webhook (empty = no push, sentinel still written)
 #   SOLARSINDY_WATCHDOG_STREAM_MAX_BYTES  rotate launchd .out/.err over this size (default 2097152)
-#   SOLARSINDY_V22_RECEIPT_LOG_DIR  V2.2 receipt-collector console-capture dir, rotated the same way
-#                                   (default: <clone>/var/v2_2_l1_logs)
+#   SOLARSINDY_L1_RECEIPT_LOG_DIR  L1 receipt-collector console-capture dir, rotated the same way
+#                                   (default: <clone>/var/l1_logs)
 set -uo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_MONITOR_DIR="$(cd "$SELF_DIR/.." && pwd)/var/monitor"
 MONITOR_DIR="${SOLARSINDY_MONITOR_DIR:-$DEFAULT_MONITOR_DIR}"
-RECEIPT_LOG_DIR="${SOLARSINDY_V22_RECEIPT_LOG_DIR:-$(cd "$SELF_DIR/.." && pwd)/var/v2_2_l1_logs}"
+RECEIPT_LOG_DIR="${SOLARSINDY_L1_RECEIPT_LOG_DIR:-$(cd "$SELF_DIR/.." && pwd)/var/l1_logs}"
 LOG="$MONITOR_DIR/live_forecast_log.csv"
 SENTINEL="$MONITOR_DIR/OUTAGE.md"
 LOGS_DIR="$MONITOR_DIR/logs"
@@ -80,7 +80,7 @@ for numeric_setting in STALE_SEC STREAM_MAX_BYTES; do
   esac
 done
 
-# Size-bound the launchd console-capture files (monitor + dashboard, and the V2.2 receipt collector,
+# Size-bound the launchd console-capture files (monitor + dashboard, and the L1 receipt collector,
 # whose streams live in their own dir) so no stream grows without limit between restarts. O_APPEND
 # makes in-place truncation safe (next append lands at offset 0).
 for f in "$LOGS_DIR"/*.out "$LOGS_DIR"/*.err "$RECEIPT_LOG_DIR"/*.out "$RECEIPT_LOG_DIR"/*.err; do

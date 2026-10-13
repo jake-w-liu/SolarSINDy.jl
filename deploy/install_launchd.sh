@@ -6,13 +6,13 @@
 #   deploy/install_launchd.sh [CLONE_DIR] [service ...]
 #     CLONE_DIR   package clone root (default: the parent of this script's directory)
 #     service     one or more of: monitor dashboard watchdog collector
-#                 (default: the three V2.1 services; collector is explicit only)
+#                 (default: the three inertial-SINDy services; collector is explicit only)
 #
 # Env:
 #   SOLARSINDY_ORG        reverse-DNS org segment for the installed Label (default: empire)
 #   SOLARSINDY_MONITOR_DIR  monitor state dir (default: CLONE_DIR/var/monitor)
-#   SOLARSINDY_V22_RECEIPT_DIR  V2.2 immutable receipt root
-#   SOLARSINDY_V22_RECEIPT_LOG_DIR  separate collector log directory
+#   SOLARSINDY_L1_RECEIPT_DIR  L1 immutable receipt root
+#   SOLARSINDY_L1_RECEIPT_LOG_DIR  separate collector log directory
 #   SOLARSINDY_JULIA      julia launcher (default: ~/.juliaup/bin/julia if present, else `which julia`)
 #   SOLARSINDY_LOAD=0     render + install the plists but do not bootstrap them
 #                        collector-containing invocations default to 0; set 1 explicitly to start
@@ -48,8 +48,8 @@ SERVICES=("$@")
 
 ORG="${SOLARSINDY_ORG:-empire}"
 MONITOR_DIR="${SOLARSINDY_MONITOR_DIR:-$CLONE_DIR/var/monitor}"
-RECEIPT_DIR="${SOLARSINDY_V22_RECEIPT_DIR:-$CLONE_DIR/var/v2_2_l1_receipts}"
-RECEIPT_LOG_DIR="${SOLARSINDY_V22_RECEIPT_LOG_DIR:-$CLONE_DIR/var/v2_2_l1_logs}"
+RECEIPT_DIR="${SOLARSINDY_L1_RECEIPT_DIR:-$CLONE_DIR/var/l1_receipts}"
+RECEIPT_LOG_DIR="${SOLARSINDY_L1_RECEIPT_LOG_DIR:-$CLONE_DIR/var/l1_logs}"
 APP_DIR="$CLONE_DIR/app"
 LA_DIR="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u)"
@@ -101,7 +101,7 @@ service_env_keys() {
   case "$1" in
     monitor)
       printf '%s\n' \
-        SOLARSINDY_V2_CALIBRATION \
+        SOLARSINDY_OPERATIONAL_CALIBRATION \
         LIVE_MONITOR_INTERVAL_SEC \
         LIVE_MONITOR_PHASE_SAMPLING \
         LIVE_MONITOR_DEADMAN_CYCLES \
@@ -110,10 +110,9 @@ service_env_keys() {
         LIVE_MONITOR_LOG_MAX_FILES \
         LIVE_FUTURE_CLOCK_TOLERANCE_MIN \
         LIVE_MAX_FUTURE_CLOCK_SKEW_MIN \
-        SOLARSINDY_V2_4_DEPLOY_DIR \
-        SOLARSINDY_V2_3_SHADOW_DIR \
-        SOLARSINDY_V2_2_STACK \
-        SOLARSINDY_V2_2_STACK_SHA256 \
+        SOLARSINDY_SUPERLEARNER_DEPLOY_DIR \
+        SOLARSINDY_STATIC_STACK \
+        SOLARSINDY_STATIC_STACK_SHA256 \
         SOLARSINDY_ALLOW_UNPINNED_STACK
       ;;
     dashboard)
@@ -134,14 +133,14 @@ service_env_keys() {
 # Keys the CLI documents in solarsindy.env. Anything here that is set but reaches no selected
 # service is named at install time (some are CLI-only by design).
 KNOWN_CONFIG_KEYS="SWM_HOST SWM_PORT SWM_WEBHOOK_URL SOLARSINDY_MONITOR_DIR
-SOLARSINDY_V2_CALIBRATION LIVE_MONITOR_INTERVAL_SEC LIVE_MONITOR_PHASE_SAMPLING
+SOLARSINDY_OPERATIONAL_CALIBRATION LIVE_MONITOR_INTERVAL_SEC LIVE_MONITOR_PHASE_SAMPLING
 LIVE_MONITOR_DEADMAN_CYCLES
 LIVE_MONITOR_MAX_LOG_ROWS LIVE_MONITOR_LOG_MAX_BYTES LIVE_MONITOR_LOG_MAX_FILES
 LIVE_FUTURE_CLOCK_TOLERANCE_MIN LIVE_MAX_FUTURE_CLOCK_SKEW_MIN
-SOLARSINDY_V2_2_STACK SOLARSINDY_V2_2_STACK_SHA256 SOLARSINDY_ALLOW_UNPINNED_STACK
-SOLARSINDY_V2_4_DEPLOY_DIR SOLARSINDY_V2_3_SHADOW_DIR SOLARSINDY_WATCHDOG_STALE_SEC
+SOLARSINDY_STATIC_STACK SOLARSINDY_STATIC_STACK_SHA256 SOLARSINDY_ALLOW_UNPINNED_STACK
+SOLARSINDY_SUPERLEARNER_DEPLOY_DIR SOLARSINDY_WATCHDOG_STALE_SEC
 SOLARSINDY_WATCHDOG_DASH_URL SOLARSINDY_WATCHDOG_DATA_URL SOLARSINDY_WATCHDOG_DATA_TIMEOUT
-SOLARSINDY_WATCHDOG_STREAM_MAX_BYTES SOLARSINDY_V22_RECEIPT_DIR SOLARSINDY_V22_RECEIPT_LOG_DIR
+SOLARSINDY_WATCHDOG_STREAM_MAX_BYTES SOLARSINDY_L1_RECEIPT_DIR SOLARSINDY_L1_RECEIPT_LOG_DIR
 JULIA SOLARSINDY_JULIA_THREADS SOLARSINDY_NO_OPEN SOLARSINDY_IGNORE_SERVICE"
 
 service_suffix() {
@@ -149,7 +148,7 @@ service_suffix() {
     monitor)   printf '%s' "live-monitor" ;;
     dashboard) printf '%s' "dashboard" ;;
     watchdog)  printf '%s' "watchdog" ;;
-    collector) printf '%s' "v22-receipt-collector" ;;
+    collector) printf '%s' "l1-receipt-collector" ;;
     *) return 1 ;;
   esac
 }
@@ -265,7 +264,7 @@ UNAPPLIED_KEYS=""
 for known_key in $KNOWN_CONFIG_KEYS; do
   [ -n "${!known_key+x}" ] || continue
   case "$known_key" in
-    SOLARSINDY_MONITOR_DIR|SOLARSINDY_V22_RECEIPT_DIR|SOLARSINDY_V22_RECEIPT_LOG_DIR) continue ;;
+    SOLARSINDY_MONITOR_DIR|SOLARSINDY_L1_RECEIPT_DIR|SOLARSINDY_L1_RECEIPT_LOG_DIR) continue ;;
   esac
   key_applied=0
   for svc in "${SERVICES[@]}"; do
@@ -456,8 +455,8 @@ load_service() {
 echo "clone=$CLONE_DIR"
 echo "julia=$JULIA_BIN"
 echo "monitor_dir=$MONITOR_DIR"
-echo "v22_receipt_dir=$RECEIPT_DIR"
-echo "v22_receipt_log_dir=$RECEIPT_LOG_DIR"
+echo "l1_receipt_dir=$RECEIPT_DIR"
+echo "l1_receipt_log_dir=$RECEIPT_LOG_DIR"
 echo "dashboard_bind=$SWM_HOST_VALUE:$SWM_PORT_VALUE"
 echo "watchdog_health_url=$WATCHDOG_DASH_URL_VALUE"
 echo "org=$ORG  services=${SERVICES[*]}  load=$LOAD_SERVICES"

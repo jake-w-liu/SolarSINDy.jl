@@ -2,7 +2,7 @@
 # Long-run offline verification: does conformal calibration deliver ~90% interval
 # coverage where the legacy interval-scale band undercovered (0.667 locked-live)?
 #
-# Fully offline: replays archived NASA OMNI data, fits the leakage-free v2 +
+# Fully offline: replays archived NASA OMNI data, fits the leakage-free operational +
 # conformal calibration, and measures HOLDOUT coverage (interval-scale vs
 # conformal) overall and stratified by horizon and activity regime. No network.
 #
@@ -18,7 +18,7 @@ isdefined(@__MODULE__, :LiveVerifyConfig) || include(joinpath(OPERATIONAL_PACKAG
 const OMNI = OPERATIONAL_OMNI
 const OUTDIR = OPERATIONAL_OUTPUT_DIR
 const TABLE = joinpath(OUTDIR, "omni_conformal_replay.csv")
-const CALIB = joinpath(OUTDIR, "omni_conformal_v2_calibration.csv")
+const CALIB = joinpath(OUTDIR, "omni_conformal_inertial_sindy_calibration.csv")
 const REPORT = joinpath(OUTDIR, "conformal_coverage_report.md")
 const REPLAY_HOURS = 2000
 const HORIZONS = [1, 2, 3, 6]
@@ -34,23 +34,23 @@ function main()
             "$REPLAY_HOURS anchor hours, horizons=$(HORIZONS))...")
     plasma, mag, dst_times, dst_vals = _omni_replay_inputs(OMNI, YEAR_START, YEAR_END)
     df = replay_recent_table(plasma, mag, dst_times, dst_vals;
-                             replay_hours=REPLAY_HOURS, horizons=HORIZONS, model=:v1)
+                             replay_hours=REPLAY_HOURS, horizons=HORIZONS, model=:sindy_core)
     CSV.write(TABLE, df)
     println("    replay rows: $(nrow(df)); wrote $TABLE")
 
-    println("[2/3] Fitting leakage-free v2 + conformal calibration...")
-    cfg = LiveVerifyConfig(; mode=:fit_v2_calibration, table_path=TABLE,
-                           v2_calibration_path=CALIB,
-                           v2_train_fraction=0.6, v2_validation_fraction=0.2,
-                           v2_ridge_grid=Float64[0.0, 1.0, 10.0, 100.0, 1000.0],
-                           v2_interval_coverage=COVERAGE, v2_coverage_floor=0.85)
-    fit_v2_calibration!(cfg)
+    println("[2/3] Fitting leakage-free operational + conformal calibration...")
+    cfg = LiveVerifyConfig(; mode=:fit_inertial_sindy_calibration, table_path=TABLE,
+                           inertial_sindy_calibration_path=CALIB,
+                           operational_train_fraction=0.6, operational_validation_fraction=0.2,
+                           operational_ridge_grid=Float64[0.0, 1.0, 10.0, 100.0, 1000.0],
+                           inertial_sindy_interval_coverage=COVERAGE, operational_coverage_floor=0.85)
+    fit_inertial_sindy_calibration!(cfg)
 
     println("[3/3] Measuring holdout coverage (interval-scale vs static conformal vs ACI)...")
     scored = CSV.read(replace(CALIB, r"\.csv$" => "_scored.csv"), DataFrame)
     cc = read_conformal_calibration(_conformal_path(CALIB))
 
-    # Online ACI is run over the full chronologically-ordered v2-prediction stream
+    # Online ACI is run over the full chronologically-ordered operational-prediction stream
     # (per horizon) with MATURITY-DELAYED residual feedback: the interval served for
     # the forecast issued at t is scored against its eventual observation, but that
     # residual updates the ACI state only once its target time (t + h) has passed,
@@ -76,7 +76,7 @@ function main()
                 _, pp, po = pend[qi]; qi += 1
                 adaptive_conformal_step!(ac, pp, po)
             end
-            point = Float64(scored.v2_pred_dst_nt[i])
+            point = Float64(scored.inertial_sindy_pred_dst_nt[i])
             observed = Float64(scored.observation_dst_nt[i])
             s = adaptive_conformal_step!(ac, point, NaN)   # gap step: serve, no mutation
             aci_covered[i] = min(s.lo, s.hi) <= observed <= max(s.lo, s.hi)
@@ -84,14 +84,14 @@ function main()
         end
     end
 
-    hold_mask = scored.v2_split .== "holdout"
+    hold_mask = scored.operational_split .== "holdout"
     holdout = scored[hold_mask, :]
     hor = _scored_horizons(holdout)
     obs = Float64.(holdout.observation_dst_nt)
-    pred = Float64.(holdout.v2_pred_dst_nt)
+    pred = Float64.(holdout.inertial_sindy_pred_dst_nt)
     latest = Float64.(holdout.latest_dst_nt)
-    is_lo = Float64.(holdout.v2_pred_dst_ci05_nt)
-    is_hi = Float64.(holdout.v2_pred_dst_ci95_nt)
+    is_lo = Float64.(holdout.inertial_sindy_pred_dst_ci05_nt)
+    is_hi = Float64.(holdout.inertial_sindy_pred_dst_ci95_nt)
     aci_hit = aci_covered[hold_mask]
 
     conf = [conformal_interval(cc, pred[i], hor[i], latest[i]) for i in eachindex(pred)]

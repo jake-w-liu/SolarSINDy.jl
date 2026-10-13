@@ -5,8 +5,8 @@ storm_monitor.log
 
 data/omni_hourly_raw.dat
 data/omni_extracted.csv
-# Operational point forecasts use the joint ensemble draws. The current V2.1
-# draws and the labeled V2.0 provenance copy are versioned with the package.
+# Operational point forecasts use the joint ensemble draws. The current inertial-SINDy
+# draws and the labeled SINDy core provenance copy are versioned with the package.
 # generated figures (regenerable from validation scripts)
 figs/
 

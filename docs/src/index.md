@@ -10,7 +10,7 @@ It is designed for research workflows around:
 - comparison against classical empirical Dst baselines
 - OMNI2 ingestion and storm extraction
 - rolling forecast utilities and storm alarms
-- an Operational V2.4e live product that retains the revised 20-candidate,
+- an Operational super-learner live product that retains the revised 20-candidate,
   11-active-term SINDy equation within a ten-expert super learner
 
 ## Package Scope
@@ -25,7 +25,7 @@ Core capabilities:
 - compare against `Burton`, `BurtonFull`, and `OBrienMcP`
 - prepare cleaned storm windows from OMNI2 data
 - run rolling Dst forecast utilities from saved coefficients
-- serve V2.4e forecasts with causal ten-expert weighting, depth-stratified
+- serve super-learner forecasts with causal ten-expert weighting, depth-stratified
   conformal intervals, ballistically propagated L1 forcing, and explicit
   predecessor fallbacks
 
@@ -64,7 +64,7 @@ The realtime forecasting example is not hidden in the validation pipeline. It is
 The forecasting paths:
 
 - fetch live solar wind data from NOAA SWPC
-- load the versioned V2.1 20/11 discovery artifacts used by V2.4e's sparse experts
+- load the versioned inertial-SINDy 20/11 discovery artifacts used by super-learner's sparse experts
 - advance rolling forecasts with uncertainty bands
 - emit configurable storm alarms
 
@@ -82,10 +82,10 @@ The package currently has deterministic automated tests for:
 - OMNI parsing, fill-value replacement, cleaning, and storm catalog extraction
 - realtime hourly aggregation and forecast initialization
 
-The operational `v2` alias selects the V2.1 base operator from which the current
-serving path constructs Operational V2.4e. A complete cycle is labelled
-`v2.4+sindy20x11+superlearner10floor+conformal`; static V2.2 and V2.1 are explicit
-fallback stages, not the normal served product. Historical V2.0 artifacts are
+The `operational` alias selects the inertial-SINDy base operator from which the current
+serving path constructs Operational super-learner. A complete cycle is labelled
+`dst-superlearner+sindyfloor+conformal`; static stack and inertial-SINDy are explicit
+fallback stages, not the normal served product. Historical SINDy core artifacts are
 available only through an explicit version request. Run the complete package
 suite and readiness audit before relying on regenerated results or deploying the
 monitor.

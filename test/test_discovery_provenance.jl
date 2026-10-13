@@ -1,4 +1,4 @@
-# Provenance and numerical freeze for the current V2.1 discovery core.
+# Provenance and numerical freeze for the current inertial-SINDy discovery core.
 
 @testset "Current discovery coefficients: revised 20/11 provenance" begin
     current = operational_core_artifacts()

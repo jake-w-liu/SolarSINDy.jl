@@ -1,9 +1,9 @@
 # Validate the ballistic sub-hourly-A DRIVER COMPONENT (matching live_forecast_verify.jl's
-# _subhourly_driver) against the V2.1 frozen-tail ablation and persistence. The served product also applies
+# _subhourly_driver) against the inertial-SINDy frozen-tail ablation and persistence. The served product also applies
 # regime-aware relaxation, projection, and inertia guards, so this is component evidence rather than an exact
 # served-product replay. The live system cannot
 # use OMNI HRO's MEASURED propagation timeshift; it only has a ballistic transit estimate (L1_DIST / V). So the
-# HRO-timeshift validation (v2_subhourly_A_replay) does NOT transfer directly — this backtests the ballistic
+# HRO-timeshift validation (operational_subhourly_A_replay) does NOT transfer directly — this backtests the ballistic
 # variant available to the live engine, rather than the more-informed measured-timeshift proxy.
 #
 # Ballistic variant: for Earth-arrival step [it+(k-1)h, it+k h), include only HRO minutes whose L1 measurement
@@ -12,11 +12,11 @@
 #
 # Run from the package root: julia --project=. validation/operational/validate_ballistic_subhourly.jl
 
-include(joinpath(@__DIR__, "v2_subhourly_A_replay.jl"))   # infra: HRO, STORMS, library, _blend, L1_DIST_KM, replay_recent_table, _cell_subA, LEADS, MAIN_RATE
+include(joinpath(@__DIR__, "operational_subhourly_A_replay.jl"))   # infra: HRO, STORMS, library, _blend, L1_DIST_KM, replay_recent_table, _cell_subA, LEADS, MAIN_RATE
 
 """Ballistic sub-hourly-A: identical to _subA_forecast but the L1 horizon is the ballistic L1/V transit (a
 single lag from the issue speed), not the HRO per-parcel measured timeshift — i.e. exactly what the live engine
-can compute. Leakage-safe: only minutes with ltime <= issue enter. `force_frozen` reproduces the V2.1
+can compute. Leakage-safe: only minutes with ltime <= issue enter. `force_frozen` reproduces the inertial-SINDy
 frozen-tail ablation."""
 function _subA_ballistic_forecast(lib, ξ0, anchor_dst_star, issue_drv, hro,
                                   it::DateTime, latest_dst, cal, h::Int;
@@ -45,11 +45,11 @@ function _subA_ballistic_forecast(lib, ξ0, anchor_dst_star, issue_drv, hro,
     end
     pred_dst_star = current_dst(fc)
     pred_dst = dst_star_to_dst(pred_dst_star, final_drv.Pdyn)
-    feats = _v2_calibration_features(
-        cal, latest_dst, issue_drv; v1_pred_dst=pred_dst, model_steps=h,
+    feats = _inertial_sindy_calibration_features(
+        cal, latest_dst, issue_drv; sindy_core_pred_dst=pred_dst, model_steps=h,
         feature_source=calibration_features, context="ballistic-subhourly-A",
     )
-    corr = SolarSINDy.operational_v2_correction(cal, feats)
+    corr = SolarSINDy.operational_inertial_sindy_correction(cal, feats)
     return clamp(pred_dst + corr, -2000.0, 50.0)
 end
 
@@ -63,11 +63,11 @@ function replay_ballistic_storm(storm, lib, ξ0, cal)
     )
     rh = Int(ceil(Dates.value(win_hi - win_lo) / 3_600_000))
     df = replay_recent_table(plasma, mag, dst_times, dst_vals;
-                             replay_hours=rh, horizons=LEADS, model=:v2, calibration=cal)
+                             replay_hours=rh, horizons=LEADS, model=:inertial_sindy, calibration=cal)
     df[!, :issue_dt] = DateTime.(df.issue_time_utc)
     df = df[(df.issue_dt .>= storm.t0) .& (df.issue_dt .<= storm.t1), :]
     sort!(df, [:issue_dt, :model_step_hours])
-    out = DataFrame(storm=String[], issue_utc=DateTime[], lead=Int[], obs=Float64[], v2=Float64[],
+    out = DataFrame(storm=String[], issue_utc=DateTime[], lead=Int[], obs=Float64[], operational=Float64[],
                     subA=Float64[], subA_frozen=Float64[], persistence=Float64[], rate=Float64[])
     dst_map = Dict{DateTime,Float64}(zip(dst_times, Float64.(dst_vals)))  # true hourly Dst series
     for it in sort!(unique(df.issue_dt))
@@ -81,8 +81,8 @@ function replay_ballistic_storm(storm, lib, ξ0, cal)
         prev1 = get(dst_map, it - Hour(1), NaN)
         rate = isfinite(prev1) ? latest - prev1 : NaN
         for r in eachrow(g)
-            (ismissing(r.observation_dst_nt) || ismissing(r.v2_pred_dst_nt)) && continue
-            isfinite(Float64(r.observation_dst_nt)) && isfinite(Float64(r.v2_pred_dst_nt)) || continue
+            (ismissing(r.observation_dst_nt) || ismissing(r.inertial_sindy_pred_dst_nt)) && continue
+            isfinite(Float64(r.observation_dst_nt)) && isfinite(Float64(r.inertial_sindy_pred_dst_nt)) || continue
             h = Int(r.model_step_hours)
             sa = _subA_ballistic_forecast(
                 lib, ξ0, anchor_star, issue_drv, hro, it, latest, cal, h;
@@ -93,7 +93,7 @@ function replay_ballistic_storm(storm, lib, ξ0, cal)
                 force_frozen=true, calibration_features=r,
             )
             isfinite(sa) && isfinite(saf) || continue
-            push!(out, (storm.name, it, h, Float64(r.observation_dst_nt), Float64(r.v2_pred_dst_nt), sa, saf, latest, rate))
+            push!(out, (storm.name, it, h, Float64(r.observation_dst_nt), Float64(r.inertial_sindy_pred_dst_nt), sa, saf, latest, rate))
         end
     end
     return out
@@ -101,13 +101,13 @@ end
 
 function main_ballistic()
     lib, ξ0, _ = _shadow_library()
-    cal = _load_calibration_for_model(LiveVerifyConfig(model=:v2))
+    cal = _load_calibration_for_model(LiveVerifyConfig(model=:inertial_sindy))
     all_rows = DataFrame()
     for s in STORMS
         append!(all_rows, replay_ballistic_storm(s, lib, ξ0, cal))
     end
-    fairmax = isempty(all_rows) ? NaN : maximum(abs.(all_rows.subA_frozen .- all_rows.v2))
-    println("\n=== Ballistic sub-hourly driver component vs V2.1 frozen-tail + persistence ===")
+    fairmax = isempty(all_rows) ? NaN : maximum(abs.(all_rows.subA_frozen .- all_rows.operational))
+    println("\n=== Ballistic sub-hourly driver component vs inertial-SINDy frozen-tail + persistence ===")
     println("continuity max|ballistic_frozen - frozen_tail| = ", round(fairmax; digits=4), " nT")
     println("lead regime    n   RMSE_frozen RMSE_subA RMSE_pers stronger  improve[95% CI]")
     for h in LEADS
@@ -115,10 +115,10 @@ function main_ballistic()
         for (label, sub) in (("pooled", sub_h), ("main", sub_h[isfinite.(sub_h.rate) .& (sub_h.rate .< MAIN_RATE), :]))
             c = _cell_subA(sub); c === nothing && continue
             @printf("  %3d  %-6s %4d  %6.2f  %7.2f  %7.2f  %-4s  %+5.2f [%+5.2f,%+5.2f]\n",
-                    h, label, c.n, c.rmse_v2, c.rmse_s, c.rmse_pers, c.stronger, c.improve, c.ci_lo, c.ci_hi)
+                    h, label, c.n, c.rmse_operational, c.rmse_s, c.rmse_pers, c.stronger, c.improve, c.ci_lo, c.ci_hi)
         end
     end
-    println("Component-only result: served V2.1 combines this driver logic with its regime-aware and guarded tail.")
+    println("Component-only result: served inertial-SINDy combines this driver logic with its regime-aware and guarded tail.")
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__

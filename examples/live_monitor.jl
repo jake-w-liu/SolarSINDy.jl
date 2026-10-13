@@ -2,7 +2,7 @@
 # Package-native long-running locked-live Dst forecast monitor.
 #
 # Each cycle, against the canonical locked-live log:
-#   1. issue immutable V2 forecasts at horizons [1,2,3,6] h
+#   1. issue immutable Operational forecasts at horizons [1,2,3,6] h
 #      (locked before their target observations exist; duplicate pending targets
 #      are reused by the live verification layer),
 #   2. refresh observations from the shared Dst snapshot (this also verifies
@@ -21,7 +21,7 @@
 #
 # Env:
 #   SOLARSINDY_MONITOR_DIR     output/state directory (default <package>/var/monitor)
-#   SOLARSINDY_V2_CALIBRATION  V2 calibration CSV (default <dir>/operational_v2_calibration.csv;
+#   SOLARSINDY_OPERATIONAL_CALIBRATION  Operational calibration CSV (default <dir>/inertial_sindy_calibration.csv;
 #                              falls back to the package-bundled calibration when absent)
 #   SOLARSINDY_MONITOR_ONCE=1  run exactly one cycle, then exit (also --once)
 #   LIVE_MONITOR_INTERVAL_SEC  seconds between cycles (default 3600)
@@ -35,7 +35,7 @@ include(joinpath(@__DIR__, "live_forecast_verify.jl"))
 include(joinpath(@__DIR__, "..", "app", "src", "forecast_api.jl"))
 include(joinpath(@__DIR__, "external_dst_snapshot_collector.jl"))
 include(joinpath(@__DIR__, "..", "validation", "operational",
-                 "v2_4_live_claim_audit.jl"))
+                 "superlearner_live_claim_audit.jl"))
 include(joinpath(@__DIR__, "daily_review.jl"))
 
 using CSV
@@ -61,6 +61,10 @@ const OUTAGE_SENTINEL = joinpath(MONITOR_DIR, "OUTAGE.md")
 # is retained but bounded.
 const LOG_DIR = joinpath(MONITOR_DIR, "logs")
 const DIAG_LOG = joinpath(LOG_DIR, "monitor.log")
+
+# Buffer the bytes before parsing: a memory-mapped read pins the source file, which blocks the
+# atomic retention rewrite on filesystems that lock mapped files.
+_csv_read(path::AbstractString, sink; kwargs...) = CSV.read(IOBuffer(read(path)), sink; kwargs...)
 const DIAG_LOG_MAX_BYTES = parse(Int, get(ENV, "LIVE_MONITOR_LOG_MAX_BYTES", string(5 * 1024 * 1024)))
 const DIAG_LOG_MAX_FILES = parse(Int, get(ENV, "LIVE_MONITOR_LOG_MAX_FILES", "5"))
 const LAUNCHD_OUT = joinpath(LOG_DIR, "launchd.out")
@@ -122,21 +126,21 @@ const FORECAST_ARCHIVE_MANIFEST = string(FORECAST_ARCHIVE, ".manifest.json")
 
 # Package-bundled locked calibration + conformal sidecar (small model metadata), used as the
 # graceful fallback when the output directory has no operational calibration (fresh clone).
-const BUNDLED_V2_CALIB = normpath(joinpath(@__DIR__, "..", "deploy", "operational_v2_calibration.csv"))
+const BUNDLED_OPERATIONAL_CALIB = normpath(joinpath(@__DIR__, "..", "deploy", "inertial_sindy_calibration.csv"))
 
-# Resolve the V2 calibration. Prefer the directory-local locked calibration (the deployed live
+# Resolve the Operational calibration. Prefer the directory-local locked calibration (the deployed live
 # location), then the package-bundled copy. The conformal interval sidecar is derived from this
 # path by the engine (_conformal_path), so both live and bundled cases stay consistent.
-function _resolve_v2_calibration()
-    explicit = get(ENV, "SOLARSINDY_V2_CALIBRATION", joinpath(MONITOR_DIR, "operational_v2_calibration.csv"))
+function _resolve_inertial_sindy_calibration()
+    explicit = get(ENV, "SOLARSINDY_OPERATIONAL_CALIBRATION", joinpath(MONITOR_DIR, "inertial_sindy_calibration.csv"))
     isfile(explicit) && return explicit
-    if isfile(BUNDLED_V2_CALIB)
-        @warn "V2 calibration not found in monitor directory; using bundled package calibration" requested=explicit bundled=BUNDLED_V2_CALIB
-        return BUNDLED_V2_CALIB
+    if isfile(BUNDLED_OPERATIONAL_CALIB)
+        @warn "Operational calibration not found in monitor directory; using bundled package calibration" requested=explicit bundled=BUNDLED_OPERATIONAL_CALIB
+        return BUNDLED_OPERATIONAL_CALIB
     end
-    return explicit   # let the engine raise its own clear "run --fit-v2-calibration first" error
+    return explicit   # let the engine raise its own clear "run --fit-operational-calibration first" error
 end
-const V2_CALIB = _resolve_v2_calibration()
+const OPERATIONAL_CALIB = _resolve_inertial_sindy_calibration()
 
 const INTERVAL = parse(Int, get(ENV, "LIVE_MONITOR_INTERVAL_SEC", "3600"))
 const PHASE_SAMPLING_SETTING = get(ENV, "LIVE_MONITOR_PHASE_SAMPLING", "0")
@@ -207,8 +211,8 @@ end
 # cost of the invariant is one extra segment file after a schema revert; the alternative is an
 # archive whose ordering contract cannot be stated.
 #
-# Before the rollover a single column addition — routine in this package, where the `v2_2_*`, `v23_*`
-# and `v24_*` column families were each added within weeks — made every subsequent
+# Before the rollover a single column addition — routine in this package, where the `static_stack_*`, `analog_*`
+# and `superlearner_*` column families were each added within weeks — made every subsequent
 # `_retain_live_forecast_log!` throw "cold archive header mismatch". Rows were then never pruned
 # again and the hot log grew past LIVE_MONITOR_MAX_LOG_ROWS without bound, which in turn makes every
 # failed dashboard log parse a multi-second serialised stall.
@@ -228,7 +232,7 @@ function _resolve_archive_segment(archive_path::AbstractString, manifest_path::A
 
     path, manifest = _archive_segment_paths(archive_path, manifest_path, last_index)
     header = try
-        names(CSV.read(path, DataFrame; limit=0))
+        names(_csv_read(path, DataFrame; limit=0))
     catch e
         e isa InterruptException && rethrow()
         error("cold archive header unreadable at $path: $(sprint(showerror, e))")
@@ -355,7 +359,9 @@ end
 function newest_issuance_age_hours()
     isfile(LOG) || return nothing
     rows = try
-        CSV.Rows(LOG; select=[:issue_time_utc], reusebuffer=true)
+        # Buffer the bytes first: a memory-mapped read pins the hot log, which blocks the atomic
+        # retention rewrite on filesystems that lock mapped files.
+        CSV.Rows(IOBuffer(read(LOG)); select=[:issue_time_utc], reusebuffer=true)
     catch e
         e isa InterruptException && rethrow()
         return nothing
@@ -412,16 +418,16 @@ function _complete_issuance_cycle(log_path::AbstractString, issue_time::DateTime
     isempty(issues) && return false
     floor(maximum(issues), Hour) == floor(issue_time, Hour) || return false
     source = _common_cycle_field(cycle, :interval_source)
-    # A V2.4e-served row publishes the study's split-conformal band under `V2_4_INTERVAL_SOURCE`
+    # A super-learner-served row publishes the study's split-conformal band under `SUPERLEARNER_INTERVAL_SOURCE`
     # whatever the batch's fallback interval policy is (the aci/static policy governs the shifted
     # frozen-tail and adaptive bands of the fallback stages only). That source is therefore valid
-    # under either policy, but only on rows the V2.4 stage actually served: a cycle carrying the
-    # conformal source on rows whose V2.4 status is not `ok` is incoherent and stays incomplete.
-    # Without this clause every V2.4e cycle failed the aci-policy check, the issuance dead-man
+    # under either policy, but only on rows the super-learner stage actually served: a cycle carrying the
+    # conformal source on rows whose super-learner status is not `ok` is incoherent and stays incomplete.
+    # Without this clause every super-learner cycle failed the aci-policy check, the issuance dead-man
     # tripped after six cycles and the supervisor restarted the daemon (2026-08-17/18).
-    if source == V2_4_INTERVAL_SOURCE
-        hasproperty(cycle, :v24_status) || return false
-        return all(status -> _v2_4_served_acted(status), cycle.v24_status)
+    if source == SUPERLEARNER_INTERVAL_SOURCE
+        hasproperty(cycle, :superlearner_status) || return false
+        return all(status -> _superlearner_served_acted(status), cycle.superlearner_status)
     end
     interval_policy == :aci && return source == "aci"
     interval_policy == :static && return source != "aci"
@@ -543,7 +549,7 @@ function _monitor_interval_policy(inputs;
         target = _next_hourly_target(issue_time, horizon, latest_dst_time)
         model_steps = Int((target - latest_dst_time) / Hour(1))
         push!(required_steps, model_steps)
-        for pred_col in (:v2_pred_dst_nt, :served_pred_dst_nt)
+        for pred_col in (:inertial_sindy_pred_dst_nt, :served_pred_dst_nt)
             readiness_fn(log_path, model_steps, latest_dst, pred_col) ||
                 push!(not_ready, (model_steps, pred_col))
         end
@@ -582,7 +588,7 @@ function _retain_live_forecast_log!(log_path::AbstractString, max_rows::Int)
         _live_require_regular_target(path)
         state = _valid_live_state(path)
         state !== nothing && Int(state["row_count"]) <= max_rows && return recovered
-        df = CSV.read(path, DataFrame)
+        df = _csv_read(path, DataFrame)
         n = nrow(df)
         n <= max_rows && return recovered
         retained = df[(n - max_rows + 1):n, :]
@@ -625,7 +631,7 @@ end
 function _issue_horizon_cycle!(inputs;
                                issue_fn::Function=issue_forecast,
                                log_path::AbstractString=LOG,
-                               calibration_path::AbstractString=V2_CALIB,
+                               calibration_path::AbstractString=OPERATIONAL_CALIB,
                                complete_fn::Function=_complete_issuance_cycle,
                                interval_policy::Symbol)
     interval_policy = _checked_interval_policy(interval_policy)
@@ -636,9 +642,9 @@ function _issue_horizon_cycle!(inputs;
     trajectory_horizon = maximum(HORIZONS)
     for h in HORIZONS
         issued_ok += guarded("issue h=$h", () -> begin
-            issue_fn(LiveVerifyConfig(; mode=:issue, model=:v2, horizon_hours=h,
+            issue_fn(LiveVerifyConfig(; mode=:issue, model=:inertial_sindy, horizon_hours=h,
                                       log_path=String(log_path),
-                                      v2_calibration_path=String(calibration_path));
+                                      inertial_sindy_calibration_path=String(calibration_path));
                      inputs=inputs, write_trajectory=h == trajectory_horizon,
                      verbose=false, interval_policy=interval_policy)
             nothing
@@ -660,7 +666,7 @@ end
 #   * Kyoto verification (`refresh_observations!` / `verify_pending!`) closes out targets whose
 #     hour has already been published,
 #   * hot-log retention keeps the row cap and the cold archive current,
-#   * the prospective V2.4e claim audit refreshes its fail-closed persisted status,
+#   * the prospective super-learner claim audit refreshes its fail-closed persisted status,
 #   * the prospective external Dst snapshot is an independent hourly scientific record — the
 #     hour it misses is lost, it cannot be backfilled,
 #   * the comparison report is the operator-facing summary.
@@ -679,17 +685,17 @@ function cycle!(; prepare_fn::Function=cfg -> prepare_issue_inputs(cfg;
                   verify_fn::Function=verify_pending!,
                   retention_fn::Function=_retain_live_forecast_log!,
                   snapshot_fn::Function=capture_and_score_external_dst_snapshot!,
-                  claim_audit_fn::Function=V24LiveClaimAudit.run_claim_audit,
+                  claim_audit_fn::Function=SuperlearnerLiveClaimAudit.run_claim_audit,
                   report_fn::Function=write_live_comparison_report,
                   daily_review_fn::Function=DailyOperationalReview.write_daily_review,
                   log_path::AbstractString=LOG,
                   report_path::AbstractString=REPORT,
-                  calibration_path::AbstractString=V2_CALIB,
+                  calibration_path::AbstractString=OPERATIONAL_CALIB,
                   external_cfg=EXTERNAL_DST_CFG,
                   max_log_rows::Integer=MAX_LOG_ROWS)
-    base_cfg = LiveVerifyConfig(; mode=:issue, model=:v2, horizon_hours=first(HORIZONS),
+    base_cfg = LiveVerifyConfig(; mode=:issue, model=:inertial_sindy, horizon_hours=first(HORIZONS),
                                 log_path=String(log_path),
-                                v2_calibration_path=String(calibration_path))
+                                inertial_sindy_calibration_path=String(calibration_path))
     inputs = nothing
     try
         inputs = prepare_fn(base_cfg)
@@ -741,10 +747,10 @@ function cycle!(; prepare_fn::Function=cfg -> prepare_issue_inputs(cfg;
     )
     guarded("forecast_log_retention",
             () -> retention_fn(String(log_path), Int(max_log_rows)))
-    guarded("v2_4_live_claim_audit", () -> claim_audit_fn(
+    guarded("superlearner_live_claim_audit", () -> claim_audit_fn(
         String(log_path),
-        joinpath(dirname(abspath(log_path)), "v2_4_live_claim_status.json"),
-        joinpath(dirname(abspath(log_path)), "v2_4_live_claim_status.md"),
+        joinpath(dirname(abspath(log_path)), "superlearner_live_claim_status.json"),
+        joinpath(dirname(abspath(log_path)), "superlearner_live_claim_status.md"),
     ))
     observations = dst === nothing ? nothing : DataFrame(
         observed_time_utc=DateTime.(dst_times),
@@ -755,12 +761,12 @@ function cycle!(; prepare_fn::Function=cfg -> prepare_issue_inputs(cfg;
         () -> snapshot_fn(external_cfg; observations=observations),
     )
     guarded("comparison_report_and_summary", () -> begin
-        df = CSV.read(cfg.log_path, DataFrame)
+        df = _csv_read(cfg.log_path, DataFrame)
         report_fn(
             cfg.log_path,
             cfg.report_path;
             df=df,
-            empty_identity=:v2_1,
+            empty_identity=:inertial_sindy,
         )
         pend = count(ismissing, df.observation_dst_nt)
         logln("log rows=", nrow(df), " pending=", pend)
@@ -779,7 +785,7 @@ function main_live_monitor()
     schedule_description = PHASE_SAMPLING ?
         "phase-balanced UTC minutes 05(even hour)/55(odd hour)" :
         "fixed interval $(INTERVAL)s"
-    logln("start: dir=", MONITOR_DIR, " calibration=", V2_CALIB,
+    logln("start: dir=", MONITOR_DIR, " calibration=", OPERATIONAL_CALIB,
           " interval=", INTERVAL, "s schedule=", schedule_description,
           " horizons=", HORIZONS,
           " max_cycles=", MAX_CYCLES, " deadman_cycles=", ISSUE_DEADMAN_THRESHOLD,

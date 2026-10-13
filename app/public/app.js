@@ -116,12 +116,12 @@ function setError(msg) {
 }
 
 // ---- renderers -------------------------------------------------------------------------
-// Human-readable capability list for a served-pipeline label (e.g. "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia").
+// Human-readable capability list for a served-pipeline label (e.g. "inertial-sindy+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia").
 // Unknown tokens fall back to showing the raw label so a reduced/future pipeline is never
 // silently described with capabilities it does not have.
 // ---- pipeline-capability block (extracted verbatim and executed by the app test suite) ----
 const PIPELINE_CAPS = {
-  superlearner10floor: "ten-forecast fitted combination (SINDy-majority)",
+  sindyfloor: "ten-forecast fitted combination (SINDy-family floor)",
   conformal: "conformal interval",
   L1A: "L1 look-ahead",
   Bregime: "regime-aware tail",
@@ -180,16 +180,19 @@ function productName(payload) {
   const label = (payload && (payload.served_model_version || payload.model_version)) || "";
   const token = String(label).split("+")[0];
   if (!token) return "the forecast";
-  return token.startsWith("v") ? token.toUpperCase() : token;
+  const pretty = { staticstack: "static stack", inertial_sindy: "inertial-SINDy",
+                   "inertial-sindy": "inertial-SINDy", sindy_core: "SINDy core",
+                   analog: "analog ensemble", "dst-superlearner": "super-learner" };
+  return Object.prototype.hasOwnProperty.call(pretty, token) ? pretty[token] : token;
 }
 
 // Version tokens carry no capability of their own; the product name is derived separately.
-const PIPELINE_VERSION_TOKENS = new Set(["v1", "v2", "v2.1", "v2.2", "v2.3", "v2.3-shadow", "v2.4"]);
+const PIPELINE_VERSION_TOKENS = new Set(["sindy_core", "inertial_sindy", "inertial-sindy", "static_stack", "staticstack", "analog", "dst-superlearner"]);
 
 function pipelineCapabilities(label) {
   if (!label) return "";
   const stages = String(label).split("+")
-    .filter(p => p && !PIPELINE_VERSION_TOKENS.has(p) && !p.startsWith("sindy"));
+    .filter(p => p && !PIPELINE_VERSION_TOKENS.has(p) && !/^sindy\d/.test(p));
   const named = [];
   for (const p of stages) {
     // hasOwnProperty, not a truthiness test on the lookup: a token such as `constructor` or
@@ -309,8 +312,8 @@ function forecastTrack(history, cutoffMs) {
 // Reader-facing name of the stage whose own band edge the watch is assessed on.
 const SEVERITY_EDGE_SOURCES = {
   served: "the served forecast band",
-  v2_2_stack: "the Static V2.2 predecessor safety band",
-  v2_1_served: "the V2.1 predecessor safety band",
+  static_stack: "the Static stack predecessor safety band",
+  inertial_sindy_served: "the inertial-SINDy predecessor safety band",
   legacy_center_shift: "the legacy shifted safety band",
 };
 
@@ -384,7 +387,7 @@ async function renderForecast(forecast, history, status) {
   const product = productName(forecast) || productName(status);
   const anchorT = forecast.anchor_dst_time_utc, anchorY = forecast.anchor_dst_nt;
   const fx = H.map(h => h.target_utc);
-  const v2 = H.map(h => h.pred_dst_nt);
+  const operational = H.map(h => h.pred_dst_nt);
   const lo = H.map(h => h.ci05_dst_nt);
   const hi = H.map(h => h.ci95_dst_nt);
 
@@ -405,9 +408,9 @@ async function renderForecast(forecast, history, status) {
 
   // lines connect from the anchor observation
   const px = (anchorT ? [anchorT] : []).concat(fx);
-  const v2y = (anchorT ? [anchorY] : []).concat(v2);
+  const opY = (anchorT ? [anchorY] : []).concat(operational);
 
-  const ally = [...oy, ...lo, ...hi, ...v2y, ...track.y]
+  const ally = [...oy, ...lo, ...hi, ...opY, ...track.y]
     .filter(v => v != null && !Number.isNaN(v));
   const ymin = ally.length ? Math.min(...ally) : -50, ymax = ally.length ? Math.max(...ally) : 20;
   const { shapes, anns } = thresholdShapes(ymin, ymax);
@@ -434,9 +437,9 @@ async function renderForecast(forecast, history, status) {
   if (ox.length) traces.push({ x: ox, y: oy, mode:"lines+markers", name:"Observed Dst",
     line:{color:WONG.obs, width:2}, marker:{size:5} });
   // The served product is issued only at the scored target hours. Connect those centers to the anchor as
-  // a guide to the eye; do not substitute the legacy V2.1 15-minute diagnostic trajectory.
+  // a guide to the eye; do not substitute the legacy inertial-SINDy 15-minute diagnostic trajectory.
   const fcx = px;
-  const fcy = v2y;
+  const fcy = opY;
   // The product name is read from the served label the log recorded, and legend names and hover
   // templates are parsed for the plotting library's markup subset, so it is escaped for that sink
   // exactly as it is for the caption below.
@@ -446,7 +449,7 @@ async function renderForecast(forecast, history, status) {
     line:{color:WONG.fcst, width:2.2},
     hovertemplate:`${lineName} %{y:.1f} nT<extra></extra>` });
   // markers at the issued hourly horizons (the scored targets): darker + larger to flag the scored points.
-  traces.push({ x: px, y: v2y, mode:"markers", name:`issued horizons (${plotProduct})`,
+  traces.push({ x: px, y: opY, mode:"markers", name:`issued horizons (${plotProduct})`,
     marker:{size:7, color:"#004e7a", line:{color:"#cfe3f5", width:1}},
     hovertemplate:"issued %{y:.1f} nT<extra></extra>" });
 
@@ -461,8 +464,8 @@ async function renderForecast(forecast, history, status) {
 
   const src = forecast.interval_source || "—";
   const shadowCollecting = H.length > 0 && H.every(h =>
-    h.v24_cal_shadow_status === "ok" || String(h.v24_cal_shadow_status || "").startsWith("warmup:"));
-  const shadowReady = shadowCollecting && H.every(h => h.v24_cal_shadow_status === "ok");
+    h.superlearner_cal_shadow_status === "ok" || String(h.superlearner_cal_shadow_status || "").startsWith("warmup:"));
+  const shadowReady = shadowCollecting && H.every(h => h.superlearner_cal_shadow_status === "ok");
   const shadowNote = shadowCollecting
     ? ` A separately identified calibration shadow is being logged prospectively${shadowReady ? "" : "; some internal steps are still warming up"}; it is not drawn, served, or used for alerts.`
     : "";
@@ -517,9 +520,9 @@ function renderCalib(status) {
   if (!status) { el.innerHTML = `<p class="caption">Live verification status unavailable; retrying automatically.</p>`; return; }
   if (!c || c.n_verified == null || c.n_verified === 0) { el.innerHTML = `<p class="caption">Empirical coverage and matched skill accrue once forecasts are verified.</p>`; return; }
   const bse = (v) => v == null ? "—" : `${fmt(v,2)}`;
-  const v2Rmse = c.v2_rmse_nt != null ? c.v2_rmse_nt : c.rmse_nt;
-  const v2Cov = c.v2_coverage_90 != null ? c.v2_coverage_90 : c.coverage_90;
-  const v2N = c.v2_n_verified != null && c.v2_n_verified > 0 ? c.v2_n_verified : c.n_verified;
+  const opRmse = c.operational_rmse_nt != null ? c.operational_rmse_nt : c.rmse_nt;
+  const opCov = c.operational_coverage_90 != null ? c.operational_coverage_90 : c.coverage_90;
+  const opN = c.operational_n_verified != null && c.operational_n_verified > 0 ? c.operational_n_verified : c.n_verified;
   const matchedN = c.comparison_n_verified != null ? c.comparison_n_verified : 0;
   const minN = c.live_skill_min_verified != null ? c.live_skill_min_verified : 48;
   const mature = c.live_skill_mature === true && matchedN >= minN;
@@ -529,13 +532,13 @@ function renderCalib(status) {
   // current served label, the pooled served RMSE is a mixed-pipeline record and must not be
   // presented under the current product's name alone.
   const nServedLabel = c.n_verified_current_served_model != null ? c.n_verified_current_served_model : 0;
-  const nAllVerified = c.v2_n_verified != null && c.v2_n_verified > 0 ? c.v2_n_verified : c.n_verified;
+  const nAllVerified = c.operational_n_verified != null && c.operational_n_verified > 0 ? c.operational_n_verified : c.n_verified;
   const servedRowName = servedRowLabel(product, nServedLabel, nAllVerified);
   // ---- end served-row label block ----
   const rows = [
-    [servedRowName, c.v2_matched_rmse_nt],
-    ["V2.1 frozen-tail ablation", c.frozen_tail_ablation_matched_rmse_nt],
-    ["SINDy v1", c.sindy_v1_matched_rmse_nt],
+    [servedRowName, c.operational_matched_rmse_nt],
+    ["inertial-SINDy frozen-tail ablation", c.frozen_tail_ablation_matched_rmse_nt],
+    ["SINDy core", c.sindy_core_matched_rmse_nt],
     ["Persistence", c.persistence_matched_rmse_nt],
     ["Burton", c.burton_matched_rmse_nt],
     ["Burton full", c.burton_full_matched_rmse_nt],
@@ -547,9 +550,9 @@ function renderCalib(status) {
   const best = mature && vals.length ? Math.min(...vals) : null;
 
   let html = `<div class="big">
-      <div class="stat"><div class="v">${fmt(v2Cov,3)}</div><div class="k">empirical coverage (90% target)</div></div>
-      <div class="stat"><div class="v">${bse(v2Rmse)}</div><div class="k">served RMSE nT</div></div>
-      <div class="stat"><div class="v">${v2N}</div><div class="k">verified forecasts</div></div>
+      <div class="stat"><div class="v">${fmt(opCov,3)}</div><div class="k">empirical coverage (90% target)</div></div>
+      <div class="stat"><div class="v">${bse(opRmse)}</div><div class="k">served RMSE nT</div></div>
+      <div class="stat"><div class="v">${opN}</div><div class="k">verified forecasts</div></div>
     </div>
     <table><thead><tr><th>matched point forecast (n=${matchedN})</th><th>RMSE [nT]</th></tr></thead><tbody>`;
   for (const [name, v] of rows) {
@@ -570,7 +573,7 @@ function renderCalib(status) {
   const nServed = c.n_verified_current_served_model != null ? c.n_verified_current_served_model : 0;
   let note = `<strong>Product forecast: ${esc(product)}.</strong> The RMSE table uses only the ${matchedN} ${targetNoun} shared by every listed method. `;
   note += `Verified rows accumulate across served pipelines, so they are counted per served label: `
-    + `${nServed} ${nServed === 1 ? "row has" : "rows have"} matured under the current label out of ${v2N} in total. `;
+    + `${nServed} ${nServed === 1 ? "row has" : "rows have"} matured under the current label out of ${opN} in total. `;
   if (!mature) note += `<strong>Provisional live evidence:</strong> ${remaining} more matched ${remainingNoun} required before the ${minN}-row live-skill reporting threshold; no best method is highlighted. `;
   else note += `The ${minN}-row minimum reporting threshold is met; regime coverage still governs interpretation. `;
   note += `Live intervals use <strong>${esc(liveSrc)}</strong> and target 90% coverage. The served-center shift and bounded online update do not retain a distribution-free coverage guarantee, so coverage is empirical. `;

@@ -18,7 +18,7 @@ if !isdefined(@__MODULE__, :OPERATIONAL_PACKAGE_ROOT)
         return abspath(fallback)
     end
 
-    const _OPERATIONAL_PAPER_ROOT = joinpath(OPERATIONAL_WORKSPACE_ROOT, "paper_v2_monitor")
+    const _OPERATIONAL_PAPER_ROOT = joinpath(OPERATIONAL_WORKSPACE_ROOT, "paper_dst_superlearner")
     const _OPERATIONAL_CACHE_FALLBACK = joinpath(OPERATIONAL_OUTPUT_DIR, "source_cache")
     const _OPERATIONAL_PAPER_EVIDENCE =
         joinpath(_OPERATIONAL_PAPER_ROOT, "data", "source", "operational")
@@ -76,8 +76,8 @@ if !isdefined(@__MODULE__, :OPERATIONAL_PACKAGE_ROOT)
         joinpath(_OPERATIONAL_CACHE_FALLBACK, "omni_hro");
         directory = true,
     )
-    # `v2_replay_scored.csv` is the first core V2 replay artifact. Once regenerated, the audit
+    # `operational_replay_scored.csv` is the first core Operational replay artifact. Once regenerated, the audit
     # deliberately reads the output tree and fails on any still-missing companion evidence until
     # the complete operational workflow has run.
-    const OPERATIONAL_EVIDENCE_DIR = operational_evidence_dir("v2_replay_scored.csv")
+    const OPERATIONAL_EVIDENCE_DIR = operational_evidence_dir("operational_replay_scored.csv")
 end

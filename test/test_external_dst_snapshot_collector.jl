@@ -70,11 +70,11 @@ function _clear_retention_transaction!(path::String)
 end
 end
 
-# Synthetic V2.4e deployment bundle, so the monitor-side cycle test drives the real served stage
+# Synthetic super-learner deployment bundle, so the monitor-side cycle test drives the real served stage
 # instead of the fallback chain. That combination — a mature adaptive-conformal batch policy over a
-# V2.4e-served cycle — is the one the `1ee9ab0` incident broke and no test covered.
-include(joinpath(@__DIR__, "v2_4_serving_fixture.jl"))
-using .V24ServingFixture: build_v24_fixture_bundle
+# super-learner-served cycle — is the one the `1ee9ab0` incident broke and no test covered.
+include(joinpath(@__DIR__, "superlearner_serving_fixture.jl"))
+using .SuperlearnerServingFixture: build_superlearner_fixture_bundle
 
 # Verified-residual history deep enough for the adaptive-conformal streams to be servable at each
 # listed model step. Both the baseline-center and served-center streams read the same rows, so one
@@ -88,7 +88,7 @@ function _mature_aci_log_frame(anchor; model_steps, per_step::Int)
     targets = L.DateTime[]
     steps = Int[]
     latest = Float64[]
-    v2_pred = Float64[]
+    inertial_sindy_pred = Float64[]
     served_pred = Float64[]
     observed = Float64[]
     for slot in 1:total
@@ -99,7 +99,7 @@ function _mature_aci_log_frame(anchor; model_steps, per_step::Int)
         push!(steps, step)
         push!(latest, -35.0 - 3.0 * sinpi(2 * slot / 13))
         center = -42.0 - 4.0 * sinpi(2 * slot / 17)
-        push!(v2_pred, center)
+        push!(inertial_sindy_pred, center)
         push!(served_pred, center - 1.5)
         push!(observed, center + 2.0 + 3.0 * sinpi(2 * slot / 11) + 0.4 * step)
     end
@@ -107,10 +107,10 @@ function _mature_aci_log_frame(anchor; model_steps, per_step::Int)
         issue_time_utc=string.(issues),
         latest_dst_time_utc=string.(issues),
         target_time_utc=string.(targets),
-        model_version=fill(L.OPERATIONAL_V2_1_MODEL_VERSION, total),
+        model_version=fill(L.OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION, total),
         model_step_hours=steps,
         latest_dst_nt=latest,
-        v2_pred_dst_nt=v2_pred,
+        inertial_sindy_pred_dst_nt=inertial_sindy_pred,
         served_pred_dst_nt=served_pred,
         observation_dst_nt=observed,
     )
@@ -136,6 +136,22 @@ function _two_point_swpc_fixture(target::AbstractString, dst::Real)
       {"time_tag":"2026-07-01T04:59:00","dst":0.0},
       {"time_tag":"$target","dst":$dst}
     ]"""
+end
+
+# Windows requires Administrator/Developer Mode to create symlinks; probe once so the
+# symlink-rejection and path-aliasing assertions can be skipped when the OS denies creation.
+const CAN_SYMLINK = let
+    mktempdir() do dir
+        target = joinpath(dir, "target")
+        write(target, "probe")
+        try
+            symlink(target, joinpath(dir, "link"))
+            true
+        catch e
+            e isa Base.IOError || rethrow()
+            false
+        end
+    end
 end
 
 @testset "Prospective external Dst snapshot collector" begin
@@ -360,16 +376,20 @@ end
             @test read(log_path) == old_log
             @test read(report_path) == old_report
 
-            rm(report_path)
-            symlink(joinpath(dir, "elsewhere.md"), report_path)
-            @test_throws ArgumentError C._external_transactional_log_report!(
-                log_path, report_path, C._external_empty_log(),
-            )
-            @test read(log_path) == old_log
+            if CAN_SYMLINK
+                rm(report_path)
+                symlink(joinpath(dir, "elsewhere.md"), report_path)
+                @test_throws ArgumentError C._external_transactional_log_report!(
+                    log_path, report_path, C._external_empty_log(),
+                )
+                @test read(log_path) == old_log
+            else
+                @warn "symlink creation denied by the OS; skipping symlink evidence checks"
+            end
         end
 
 
-        mktempdir() do dir
+        CAN_SYMLINK && mktempdir() do dir
             real_parent = joinpath(dir, "real")
             alias_parent = joinpath(dir, "alias")
             mkpath(real_parent)
@@ -460,19 +480,23 @@ end
             C.capture_fixture(
                 cfg; fetched_utc=C.DateTime(2026, 7, 1, 5), http_get=fake_get,
             )
-            alias_root = joinpath(dir, "root-alias")
-            symlink(dir, alias_root)
-            alias_cfg = C.ExternalDstCollectorConfig(;
-                log_path=joinpath(alias_root, "owner.csv"),
-                report_path=joinpath(alias_root, "owner.md"),
-                raw_dir=joinpath(alias_root, "raw"), repo_root=alias_root,
-                sources=[source], obs_url="obs", max_log_rows=10,
-                max_raw_snapshots=10,
-            )
-            alias_result = C.capture_fixture(
-                alias_cfg; fetched_utc=C.DateTime(2026, 7, 1, 5), http_get=fake_get,
-            )
-            @test alias_result.rows_total == 1
+            if CAN_SYMLINK
+                alias_root = joinpath(dir, "root-alias")
+                symlink(dir, alias_root)
+                alias_cfg = C.ExternalDstCollectorConfig(;
+                    log_path=joinpath(alias_root, "owner.csv"),
+                    report_path=joinpath(alias_root, "owner.md"),
+                    raw_dir=joinpath(alias_root, "raw"), repo_root=alias_root,
+                    sources=[source], obs_url="obs", max_log_rows=10,
+                    max_raw_snapshots=10,
+                )
+                alias_result = C.capture_fixture(
+                    alias_cfg; fetched_utc=C.DateTime(2026, 7, 1, 5), http_get=fake_get,
+                )
+                @test alias_result.rows_total == 1
+            else
+                @warn "symlink creation denied by the OS; skipping aliased-root capture check"
+            end
             marker = C._external_raw_store_owner_path(raw_dir)
             log_marker = C._external_log_raw_store_owner_path(cfg.log_path)
             @test isfile(marker)
@@ -680,6 +704,7 @@ end
             String(url) == "forecast" ? forecast_body : obs_body,
         )
         for marker_side in (:raw, :log), unsafe_kind in (:symlink, :directory)
+            unsafe_kind == :symlink && !CAN_SYMLINK && continue
             mktempdir() do dir
                 raw_dir = joinpath(dir, "raw")
                 cfg = C.ExternalDstCollectorConfig(;
@@ -1123,13 +1148,13 @@ end
         served_pred_dst_nt=fill(-25.0, length(L.HORIZONS)),
         served_pred_dst_ci05_nt=fill(-35.0, length(L.HORIZONS)),
         served_pred_dst_ci95_nt=fill(-15.0, length(L.HORIZONS)),
-        v2_pred_dst_nt=fill(-25.0, length(L.HORIZONS)),
-        v2_pred_dst_ci05_nt=fill(-35.0, length(L.HORIZONS)),
-        v2_pred_dst_ci95_nt=fill(-15.0, length(L.HORIZONS)),
+        inertial_sindy_pred_dst_nt=fill(-25.0, length(L.HORIZONS)),
+        inertial_sindy_pred_dst_ci05_nt=fill(-35.0, length(L.HORIZONS)),
+        inertial_sindy_pred_dst_ci95_nt=fill(-15.0, length(L.HORIZONS)),
         interval_source=fill("aci", length(L.HORIZONS)),
-        model_version=fill(L.CURRENT_V2_MODEL_VERSION, length(L.HORIZONS)),
+        model_version=fill(L.CURRENT_OPERATIONAL_MODEL_VERSION, length(L.HORIZONS)),
         sub_hourly_model_version=fill(
-            L.CURRENT_V2_SERVED_MODEL_VERSION,
+            L.CURRENT_OPERATIONAL_SERVED_MODEL_VERSION,
             length(L.HORIZONS),
         ),
     )
@@ -1147,24 +1172,24 @@ end
         @test !L._complete_issuance_cycle(log_path, issue, :aci)
         L.CSV.write(log_path, cycle_rows[1:3, :])
         @test !L._complete_issuance_cycle(log_path, issue)
-        # A V2.4e-served cycle carries the study's conformal band whatever the batch's fallback
-        # interval policy is; it is complete under both policies, but only when every row's V2.4
-        # status is `ok`. Regression: every V2.4e cycle failed the aci-policy check, tripping the
+        # A super-learner-served cycle carries the study's conformal band whatever the batch's fallback
+        # interval policy is; it is complete under both policies, but only when every row's super-learner
+        # status is `ok`. Regression: every super-learner cycle failed the aci-policy check, tripping the
         # issuance dead-man after six cycles and restarting the daemon.
-        v24_rows = copy(cycle_rows)
-        v24_rows.interval_source .= L.V2_4_INTERVAL_SOURCE
-        v24_rows.v24_status = fill(L.V2_4_STATUS_OK, length(L.HORIZONS))
-        L.CSV.write(log_path, v24_rows)
+        superlearner_rows = copy(cycle_rows)
+        superlearner_rows.interval_source .= L.SUPERLEARNER_INTERVAL_SOURCE
+        superlearner_rows.superlearner_status = fill(L.SUPERLEARNER_STATUS_OK, length(L.HORIZONS))
+        L.CSV.write(log_path, superlearner_rows)
         @test L._complete_issuance_cycle(log_path, issue, :aci)
         @test L._complete_issuance_cycle(log_path, issue, :static)
         @test L._complete_issuance_cycle(log_path, issue)
-        mixed_rows = copy(v24_rows)
-        mixed_rows.v24_status[end] = "fallback:deployment_absent"
+        mixed_rows = copy(superlearner_rows)
+        mixed_rows.superlearner_status[end] = "fallback:deployment_absent"
         L.CSV.write(log_path, mixed_rows)
         @test !L._complete_issuance_cycle(log_path, issue, :aci)
         @test !L._complete_issuance_cycle(log_path, issue, :static)
         no_status_rows = copy(cycle_rows)
-        no_status_rows.interval_source .= L.V2_4_INTERVAL_SOURCE
+        no_status_rows.interval_source .= L.SUPERLEARNER_INTERVAL_SOURCE
         L.CSV.write(log_path, no_status_rows)
         @test !L._complete_issuance_cycle(log_path, issue, :aci)
         @test !L._complete_issuance_cycle(log_path, issue, :static)
@@ -1182,7 +1207,7 @@ end
     end
     issued = L._issue_horizon_cycle!(
         inputs; issue_fn=fake_issue,
-        log_path="unused.csv", calibration_path=L.V2_CALIB,
+        log_path="unused.csv", calibration_path=L.OPERATIONAL_CALIB,
         complete_fn=(path, timestamp, policy) -> true,
         interval_policy=:static,
     )
@@ -1191,7 +1216,7 @@ end
     @test policies == fill(:static, length(L.HORIZONS))
     @test_throws ArgumentError L._issue_horizon_cycle!(
         inputs; issue_fn=fake_issue,
-        log_path="unused.csv", calibration_path=L.V2_CALIB,
+        log_path="unused.csv", calibration_path=L.OPERATIONAL_CALIB,
         complete_fn=(path, timestamp, policy) -> true,
         interval_policy=:auto,
     )
@@ -1210,7 +1235,7 @@ end
     ) == :aci
     @test Set(readiness_calls) == Set(
         (steps, pred_col) for steps in L.HORIZONS
-        for pred_col in (:v2_pred_dst_nt, :served_pred_dst_nt)
+        for pred_col in (:inertial_sindy_pred_dst_nt, :served_pred_dst_nt)
     )
     partial_served = (path, model_steps, latest_dst, pred_col) ->
         !(model_steps == maximum(L.HORIZONS) && pred_col == :served_pred_dst_nt)
@@ -1240,7 +1265,7 @@ end
             issue_time_utc=string.([base + L.Hour(i) for i in 0:5]),
             latest_dst_time_utc=string.([base + L.Hour(i) for i in 0:5]),
             target_time_utc=string.([base + L.Hour(i + 1) for i in 0:5]),
-            model_version=fill("v2", 6),
+            model_version=fill("inertial_sindy", 6),
             observation_dst_nt=fill(missing, 6),
             marker=collect(1:6),
         )
@@ -1266,14 +1291,14 @@ end
             latest_dst_time_utc=string.([base + L.Hour(i) for i in 0:5]),
             target_time_utc=string.([base + L.Hour(i + 1) for i in 0:5]),
             observation_dst_nt=fill(-20.0, 6),
-            v24_cal_shadow_model_version=fill("wrong-identity", 6),
+            superlearner_cal_shadow_model_version=fill("wrong-identity", 6),
         )
         L.CSV.write(path, rows)
-        before = L.V24LiveClaimAudit.prospective_status(path; bootstrap_reps=100)
+        before = L.SuperlearnerLiveClaimAudit.prospective_status(path; bootstrap_reps=100)
         @test !before.integrity.gate_pass
         @test before.integrity.deployment_rows == 6
         @test L._retain_live_forecast_log!(path, 4) == 2
-        after = L.V24LiveClaimAudit.prospective_status(path; bootstrap_reps=100)
+        after = L.SuperlearnerLiveClaimAudit.prospective_status(path; bootstrap_reps=100)
         @test after.integrity == before.integrity
         @test !after.marginal.claim_ready
         @test !after.storm.claim_ready
@@ -1287,7 +1312,7 @@ end
         issue_time_utc=string.([base + L.Hour(i) for i in 0:5]),
         latest_dst_time_utc=string.([base + L.Hour(i) for i in 0:5]),
         target_time_utc=string.([base + L.Hour(i + 1) for i in 0:5]),
-        model_version=fill("v2", 6), observation_dst_nt=fill(missing, 6),
+        model_version=fill("inertial_sindy", 6), observation_dst_nt=fill(missing, 6),
         pred_dst_nt=fill(-10.0, 6), pred_dst_ci05_nt=fill(-30.0, 6),
         pred_dst_ci95_nt=fill(10.0, 6), marker=collect(1:6),
     )
@@ -1538,7 +1563,7 @@ end
             issue_time_utc=string.([base + L.Hour(i) for i in 0:5]),
             latest_dst_time_utc=string.([base + L.Hour(i) for i in 0:5]),
             target_time_utc=string.([base + L.Hour(i + 1) for i in 0:5]),
-            model_version=fill("v2", 6),
+            model_version=fill("inertial_sindy", 6),
             observation_dst_nt=fill(missing, 6),
             marker=collect(1:6),
         )
@@ -1547,7 +1572,7 @@ end
         return rows
     end
 
-    # A pre-existing archive whose header does not match the hot-log schema (the v2.0->v2.1
+    # A pre-existing archive whose header does not match the hot-log schema (the sindy-core->inertial-sindy
     # column-addition drift class) must never receive misaligned rows. It is left byte-identical and
     # retention rolls to a new numbered segment instead of refusing: the old behaviour threw on every
     # cycle from the first schema upgrade onwards, so rows were never pruned again and the hot log
@@ -1598,10 +1623,10 @@ end
                 issue_time_utc=string.([base + L.Hour(i) for i in markers]),
                 latest_dst_time_utc=string.([base + L.Hour(i) for i in markers]),
                 target_time_utc=string.([base + L.Hour(i + 1) for i in markers]),
-                model_version=fill("v2", length(markers)),
+                model_version=fill("inertial_sindy", length(markers)),
                 observation_dst_nt=fill(missing, length(markers)),
                 marker=collect(markers),
-                v24_status=fill("ok", length(markers)),   # the routine column-addition drift
+                superlearner_status=fill("ok", length(markers)),   # the routine column-addition drift
             )
             L.CSV.write(log_path, rows)
             rm(L._live_state_path(log_path); force=true)
@@ -1620,7 +1645,7 @@ end
         @test read(archive_path) == base_archive_bytes
         segment_rows = L.CSV.read(segment_path, L.DataFrame)
         @test segment_rows.marker == vcat(collect(10:13), collect(20:23))
-        @test "v24_status" in names(segment_rows)
+        @test "superlearner_status" in names(segment_rows)
         manifest = L.JSON3.read(read(string(segment_path, ".manifest.json"), String))
         @test Int(manifest.archived_rows) == 8
         @test Int(manifest.archive_bytes) == filesize(segment_path)
@@ -1725,7 +1750,7 @@ end
             issue_time_utc=string.([base + L.Hour(i) for i in 0:5]),
             latest_dst_time_utc=string.([base + L.Hour(i) for i in 0:5]),
             target_time_utc=string.([base + L.Hour(i + 1) for i in 0:5]),
-            model_version=fill("v2", 6),
+            model_version=fill("inertial_sindy", 6),
             observation_dst_nt=fill(missing, 6),
             marker=collect(1:6),
         )
@@ -1813,7 +1838,7 @@ end
             issue_time_utc=["2026-07-01T00:00:00", "2026-07-01T01:00:00"],
             latest_dst_time_utc=["2026-07-01T00:00:00", "2026-07-01T01:00:00"],
             target_time_utc=["2026-07-01T01:00:00", "2026-07-01T02:00:00"],
-            model_version=fill(L.OPERATIONAL_V2_1_MODEL_VERSION, 2),
+            model_version=fill(L.OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION, 2),
             observation_dst_nt=[-20.0, missing],
         ))
         return log_path
@@ -1853,7 +1878,7 @@ end
                 daily_review_fn=record("daily_review"),
                 log_path=log_path,
                 report_path=string(log_path, ".md"),
-                calibration_path=L.V2_CALIB,
+                calibration_path=L.OPERATIONAL_CALIB,
                 max_log_rows=length(L.HORIZONS),
             )
         end
@@ -1918,7 +1943,7 @@ end
                 daily_review_fn=record("daily_review"),
                 log_path=make_log(joinpath(dir, "fallback.csv")),
                 report_path=joinpath(dir, "fallback.md"),
-                calibration_path=L.V2_CALIB,
+                calibration_path=L.OPERATIONAL_CALIB,
                 max_log_rows=length(L.HORIZONS),
             )
         end
@@ -1944,12 +1969,12 @@ end
             L._monitor_interval_policy(inputs; log_path=log_path, immature=immature)
         end
         @test outcome.value == :static
-        @test Set(immature) == Set([(1, :v2_pred_dst_nt), (1, :served_pred_dst_nt),
-                                    (6, :v2_pred_dst_nt), (6, :served_pred_dst_nt)])
+        @test Set(immature) == Set([(1, :inertial_sindy_pred_dst_nt), (1, :served_pred_dst_nt),
+                                    (6, :inertial_sindy_pred_dst_nt), (6, :served_pred_dst_nt)])
         @test occursin("interval policy :static", outcome.diag)
         @test occursin("lags issue hour", outcome.diag)
         @test occursin("model steps 1/2/3/6", outcome.diag)
-        @test occursin("v2_pred_dst_nt@ms=1 n=0(all)", outcome.diag)
+        @test occursin("inertial_sindy_pred_dst_nt@ms=1 n=0(all)", outcome.diag)
         @test occursin("served_pred_dst_nt@ms=6 n=0(all)", outcome.diag)
         @test occursin(string(L._ACI_WARMUP + L._ACI_POOL_MARGIN, " verified rows"), outcome.diag)
         @test !occursin("@ms=2", outcome.diag)
@@ -1971,10 +1996,10 @@ end
     end
 end
 
-@testset "Live monitor completes a V2.4e cycle under a mature ACI policy" begin
+@testset "Live monitor completes a super-learner cycle under a mature ACI policy" begin
     L = LiveMonitorRetentionTestHarness
     mktempdir() do root
-        bundle = build_v24_fixture_bundle(joinpath(root, "bundle"))
+        bundle = build_superlearner_fixture_bundle(joinpath(root, "bundle"))
         log_path = joinpath(root, "live.csv")
         issue_time = L.DateTime(2026, 7, 15, 12, 30)
         anchor = L.floor(issue_time, L.Hour) - L.Hour(1)     # anchor lag 1 -> steps {2,3,4,7}
@@ -1996,12 +2021,11 @@ end
         dst_times = collect((anchor - L.Hour(24)):L.Hour(1):anchor)
         dst_values = collect(range(-30.0, -78.0; length=length(dst_times)))
 
-        cfg = L.LiveVerifyConfig(; mode=:issue, model=:v2, horizon_hours=first(L.HORIZONS),
-                                 log_path=log_path, v2_calibration_path=L.V2_CALIB)
-        withenv("SOLARSINDY_V2_4_DEPLOY_DIR" => bundle.dir,
-                "SOLARSINDY_V2_2_STACK" => L.V2_2_DEFAULT_STACK_PATH,
-                "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(root, "no_shadow")) do
-            L.reset_v2_2_stack!(); L.reset_v2_3_shadow!(); L.reset_v2_4_serving!()
+        cfg = L.LiveVerifyConfig(; mode=:issue, model=:inertial_sindy, horizon_hours=first(L.HORIZONS),
+                                 log_path=log_path, inertial_sindy_calibration_path=L.OPERATIONAL_CALIB)
+        withenv("SOLARSINDY_SUPERLEARNER_DEPLOY_DIR" => bundle.dir,
+                "SOLARSINDY_STATIC_STACK" => L.STATIC_STACK_DEFAULT_STACK_PATH) do
+            L.reset_static_stack!(); L.reset_superlearner_serving!()
             inputs = L.prepare_issue_inputs(
                 cfg; issue_time=issue_time,
                 plasma_fn=() -> plasma, mag_fn=() -> mag,
@@ -2014,26 +2038,26 @@ end
             issuance = redirect_stdout(devnull) do
                 redirect_stderr(devnull) do
                     L._issue_horizon_cycle!(
-                        inputs; log_path=log_path, calibration_path=L.V2_CALIB,
+                        inputs; log_path=log_path, calibration_path=L.OPERATIONAL_CALIB,
                         interval_policy=policy,
                     )
                 end
             end
             @test issuance.succeeded == length(L.HORIZONS)
-            # The incident: a V2.4e cycle under an aci batch policy was reported incomplete, the
+            # The incident: a super-learner cycle under an aci batch policy was reported incomplete, the
             # dead-man tripped after six cycles and the supervisor restarted the daemon.
             @test issuance.complete
             @test L._complete_issuance_cycle(log_path, issue_time, :aci)
             @test L._complete_issuance_cycle(log_path, issue_time, :static)
-            L.reset_v2_2_stack!(); L.reset_v2_3_shadow!(); L.reset_v2_4_serving!()
+            L.reset_static_stack!(); L.reset_superlearner_serving!()
         end
 
         df = L.CSV.read(log_path, L.DataFrame)
         cycle = df[(L.nrow(df) - length(L.HORIZONS) + 1):L.nrow(df), :]
         @test L.floor.(L._parse_dt.(cycle.issue_time_utc), L.Hour) ==
               fill(L.floor(issue_time, L.Hour), length(L.HORIZONS))
-        @test all(==(L.V2_4_STATUS_OK), cycle.v24_status)
-        @test all(==(L.V2_4_INTERVAL_SOURCE), cycle.interval_source)
+        @test all(==(L.SUPERLEARNER_STATUS_OK), cycle.superlearner_status)
+        @test all(==(L.SUPERLEARNER_INTERVAL_SOURCE), cycle.interval_source)
         @test sort(Int.(cycle.model_step_hours)) == [2, 3, 4, 7]
         # T-21: the served band is the study's depth band on every row, while the frozen-tail band
         # columns came from the batch's adaptive policy. Only the new column records that.
@@ -2042,8 +2066,8 @@ end
         @test all(isfinite, Float64.(cycle.pred_dst_ci05_nt))
         @test all(isfinite, Float64.(cycle.served_pred_dst_ci05_nt))
 
-        # Flipping one row's V2.4 status must make the cycle incomplete under both policies:
-        # a cycle carrying the conformal-depth source on a row the V2.4 stage did not serve is
+        # Flipping one row's super-learner status must make the cycle incomplete under both policies:
+        # a cycle carrying the conformal-depth source on a row the super-learner stage did not serve is
         # incoherent, whatever the batch policy was.
         flipped_path = joinpath(root, "flipped.csv")
         flipped = copy(df)
@@ -2051,11 +2075,11 @@ end
         # inline string type that cannot hold a longer fallback reason.
         statuses = Vector{Union{Missing,String}}(undef, L.nrow(df))
         for idx in 1:L.nrow(df)
-            value = df[idx, :v24_status]
+            value = df[idx, :superlearner_status]
             statuses[idx] = ismissing(value) ? missing : String(value)
         end
         statuses[end] = "fallback:deployment_absent"
-        flipped.v24_status = statuses
+        flipped.superlearner_status = statuses
         L.CSV.write(flipped_path, flipped)
         @test !L._complete_issuance_cycle(flipped_path, issue_time, :aci)
         @test !L._complete_issuance_cycle(flipped_path, issue_time, :static)

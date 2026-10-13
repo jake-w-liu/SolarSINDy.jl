@@ -24,10 +24,10 @@
     __WATCHDOG_DASH_URL__ dashboard health URL used by the daily review
     EXTRA_ENV marker  the commented marker line inside EnvironmentVariables. The install
                       script replaces that line with the allow-listed solarsindy.env keys this
-                      service reads (SOLARSINDY_V2_CALIBRATION, LIVE_MONITOR_*,
+                      service reads (SOLARSINDY_OPERATIONAL_CALIBRATION, LIVE_MONITOR_*,
                       LIVE_FUTURE_CLOCK_TOLERANCE_MIN, LIVE_MAX_FUTURE_CLOCK_SKEW_MIN,
-                      SOLARSINDY_V2_4_DEPLOY_DIR, SOLARSINDY_V2_3_SHADOW_DIR,
-                      SOLARSINDY_V2_2_STACK*). A manual install replaces the line with its own
+                      SOLARSINDY_SUPERLEARNER_DEPLOY_DIR,
+                      SOLARSINDY_STATIC_STACK*). A manual install replaces the line with its own
                       <key>/<string> pairs, or deletes it to run with no extra keys.
 
   Console streams go to bounded, self-rotating files under __MONITOR_DIR__/logs (launchd does not

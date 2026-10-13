@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Explicit-only launchd template for prospective static stack L1 receipt capture.
+  It is not part of the default install set. Selecting collector without an
+  explicit SOLARSINDY_LOAD value renders without starting it:
+
+    deploy/install_launchd.sh collector
+
+  Starting capture requires SOLARSINDY_LOAD=1 explicitly. This job archives
+  inputs only; it never issues forecasts.
+
+  Manual install: replace EVERY placeholder in the dict below with a literal
+  value, create __RECEIPT_LOG_DIR__, copy to ~/Library/LaunchAgents/, then
+  bootstrap with:
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.solarsindy.l1-receipt-collector.plist
+
+  Complete placeholder list for this template — every one must be replaced:
+
+    __JULIA_BIN__        stable juliaup shim (~/.juliaup/bin/julia), not a
+                         version-pinned juliaup directory
+    __CLONE_DIR__        absolute path to the SolarSINDy.jl clone
+    __RECEIPT_DIR__      immutable receipt root (default __CLONE_DIR__/var/l1_receipts)
+    __RECEIPT_LOG_DIR__  console-capture directory (default __CLONE_DIR__/var/l1_logs)
+    EXTRA_ENV marker     the commented marker line inside EnvironmentVariables.
+                         This service reads no allow-listed solarsindy.env key,
+                         so the install script removes the line; a manual
+                         install deletes it too.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.example.solarsindy.l1-receipt-collector</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>__JULIA_BIN__</string>
+    <string>--startup-file=no</string>
+    <string>--project=__CLONE_DIR__</string>
+    <string>__CLONE_DIR__/examples/l1_receipt_collector.jl</string>
+    <string>--root=__RECEIPT_DIR__</string>
+    <string>--interval-sec=60</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>__CLONE_DIR__</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>JULIA_NUM_THREADS</key>
+    <string>1</string>
+    <!-- __EXTRA_ENV__ -->
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+
+  <key>StandardOutPath</key>
+  <string>__RECEIPT_LOG_DIR__/launchd.out</string>
+
+  <key>StandardErrorPath</key>
+  <string>__RECEIPT_LOG_DIR__/launchd.err</string>
+</dict>
+</plist>

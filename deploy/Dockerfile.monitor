@@ -22,7 +22,7 @@ COPY examples ./examples
 COPY deploy ./deploy
 COPY app/src ./app/src
 COPY data ./data
-COPY validation/operational/v2_4_live_claim_audit.jl ./validation/operational/
+COPY validation/operational/superlearner_live_claim_audit.jl ./validation/operational/
 
 RUN mkdir -p /data && chown -R swm:swm /pkg /data /opt/julia-depot
 VOLUME ["/data"]

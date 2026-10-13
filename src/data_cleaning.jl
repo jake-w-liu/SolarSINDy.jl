@@ -228,11 +228,11 @@ function _interp_short_gaps!(x::AbstractVector{Float64}, max_gap::Int)
             # Interpolate only if gap is short and bounded by valid values
             if gap_len <= max_gap && gap_start > 1 && gap_end < n &&
                !isnan(x[gap_start - 1]) && !isnan(x[gap_end + 1])
-                v0 = x[gap_start - 1]
-                v1 = x[gap_end + 1]
+                v_before = x[gap_start - 1]
+                v_after = x[gap_end + 1]
                 for j in gap_start:gap_end
                     frac = (j - gap_start + 1) / (gap_len + 1)
-                    x[j] = v0 + frac * (v1 - v0)
+                    x[j] = v_before + frac * (v_after - v_before)
                 end
             end
         else
@@ -616,7 +616,7 @@ end
 Load storm catalog from CSV.
 """
 function load_storm_catalog(filepath::String)
-    df = CSV.read(filepath, DataFrame)
+    df = CSV.read(filepath, DataFrame; buffer_in_memory = true)
     min_col = :min_dst_star in propertynames(df) ? :min_dst_star :
               :min_dst in propertynames(df) ? :min_dst : nothing
     min_time_col = :min_dst_star_time in propertynames(df) ? :min_dst_star_time :

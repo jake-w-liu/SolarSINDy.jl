@@ -67,28 +67,28 @@ ForecastState(t_current::DateTime, dst_current::Real, lib::CandidateLibrary,
                   Matrix{Float64}(ξ_ensemble), Float64(dt), history)
 
 """
-    OperationalV2Calibration
+    InertialSindyCalibration
 
-Small causal post-processing layer for a V2 forecast.
+Small causal post-processing layer for a Operational forecast.
 
 The correction is fit from prior replay/live rows only:
 
 ```
-Dst_v2 = Dst_v1 + β₀ + Σ βⱼ zⱼ
+Dst_operational = Dst_v1 + β₀ + Σ βⱼ zⱼ
 ```
 
 where `zⱼ` are standardized issue-time features, including derived causal
 coupling features in the default configuration. The interval scale inflates the
-v1 ensemble interval from calibration residuals. This type deliberately does
-not alter `ForecastState` or v1 SINDy coefficients.
+SINDy core ensemble interval from calibration residuals. This type deliberately does
+not alter `ForecastState` or SINDy core coefficients.
 
-When mandatory baseline columns are present during calibration, v2 also stores
+When mandatory baseline columns are present during calibration, operational also stores
 guarded component metrics and optional convex ensemble weights over corrected
-SINDy, uncorrected SINDy v1, persistence, Burton, BurtonFull, and
+SINDy, uncorrected SINDy core, persistence, Burton, BurtonFull, and
 O'Brien--McPherron. A fallback component or ensemble is deployed only after
 chronological validation in the operational workflow.
 """
-struct OperationalV2Calibration
+struct InertialSindyCalibration
     feature_names::Vector{Symbol}
     feature_mean::Vector{Float64}
     feature_scale::Vector{Float64}
@@ -105,18 +105,18 @@ struct OperationalV2Calibration
     supported_model_steps::Vector{Int}
 
 
-    function OperationalV2Calibration(feature_names::Vector{Symbol},
+    function InertialSindyCalibration(feature_names::Vector{Symbol},
                                       feature_mean::Vector{Float64},
                                       feature_scale::Vector{Float64},
                                       coefficients::Vector{Float64},
                                       interval_scale::Float64,
                                       label::AbstractString;
-                                      selector_names::Vector{Symbol}=Symbol[:v2],
+                                      selector_names::Vector{Symbol}=Symbol[:inertial_sindy],
                                       selector_rmse::Vector{Float64}=Float64[NaN],
                                       selector_mae::Vector{Float64}=Float64[NaN],
                                       selector_half_width::Vector{Float64}=Float64[0.0],
                                       selector_weights::Union{Nothing,Vector{Float64}}=nothing,
-                                      selected_component::Symbol=:v2,
+                                      selected_component::Symbol=:inertial_sindy,
                                       guard_margin_nt::Real=0.0,
                                       supported_model_steps::Vector{Int}=Int[])
         n = length(feature_names)
@@ -193,13 +193,13 @@ struct OperationalV2Calibration
         # ensemble member with positive weight on one would raise ArgumentError on
         # every live cycle; reject it at construction so a hand-built or legacy
         # calibration file cannot silently reach serving. Non-baseline symbols
-        # (:v2, :sindy_v1, abstract test components) are unaffected.
-        selected_component in OPERATIONAL_V2_NONSERVABLE_BASELINES && throw(ArgumentError(
+        # (:inertial_sindy, :sindy_core, abstract test components) are unaffected.
+        selected_component in INERTIAL_SINDY_NONSERVABLE_BASELINES && throw(ArgumentError(
             "selected_component $selected_component is not servable by the live issuance path",
         ))
         if selected_component == :ensemble
             for (nm, w) in zip(selector_names, weights)
-                (w > 0 && nm in OPERATIONAL_V2_NONSERVABLE_BASELINES) && throw(ArgumentError(
+                (w > 0 && nm in INERTIAL_SINDY_NONSERVABLE_BASELINES) && throw(ArgumentError(
                     "ensemble member $nm has positive weight but is not servable by the live issuance path",
                 ))
             end
@@ -219,7 +219,7 @@ struct OperationalV2Calibration
     end
 end
 
-const DEFAULT_OPERATIONAL_V2_FEATURES = [
+const DEFAULT_INERTIAL_SINDY_FEATURES = [
     :latest_dst_nt,
     :V_kms,
     :Bz_nt,
@@ -234,14 +234,14 @@ const DEFAULT_OPERATIONAL_V2_FEATURES = [
 ]
 
 # The memory, expert and storm-phase feature groups have no canonical constant.
-# `add_operational_v2_features!` is the single producer, and the deployed
+# `add_inertial_sindy_features!` is the single producer, and the deployed
 # calibration's own `feature` column is the authoritative list of what is served;
 # a standing constant duplicated that list and drifted from it (it advertised
 # nine memory features where the served calibration uses six), so a reader could
-# mistake it for a servable set. Test `V2-FEATURES-PARITY` pins the calibration
+# mistake it for a servable set. Test `Operational-FEATURES-PARITY` pins the calibration
 # against the producer instead.
 
-const OPERATIONAL_V2_BASELINE_COLUMNS = Pair{Symbol,Symbol}[
+const INERTIAL_SINDY_BASELINE_COLUMNS = Pair{Symbol,Symbol}[
     :persistence => :persistence_dst_nt,
     :burton => :burton_dst_nt,
     :burton_full => :burton_full_dst_nt,
@@ -251,40 +251,40 @@ const OPERATIONAL_V2_BASELINE_COLUMNS = Pair{Symbol,Symbol}[
 
 # Baseline components the live issuance path can actually serve. The live issuer
 # builds the issue-time `baselines` NamedTuple from these four Dst baselines, and
-# :v2/:sindy_v1 are always reconstructable from the point forecast. `:storm_guard`
+# :inertial_sindy/:sindy_core are always reconstructable from the point forecast. `:storm_guard`
 # is deliberately excluded: its floor `latest - horizon·coupling·√Pdyn` depends on
 # the forecast horizon and the horizon-coupling pressure, and the generic
-# issue-time serving API (`operational_v2_predict`, which receives only the point
+# issue-time serving API (`operational_inertial_sindy_predict`, which receives only the point
 # forecast and the calibration feature tuple) does not carry the horizon, so it
 # cannot be reconstructed at live issuance. `storm_guard_dst_nt` therefore exists
 # only as a replay/scoring diagnostic column and must never be selected or
 # ensemble-weighted as a served component, or every live cycle would raise
-# `ArgumentError("missing v2 selector baseline: storm_guard")`.
-const OPERATIONAL_V2_LIVE_SERVABLE_BASELINES =
+# `ArgumentError("missing operational selector baseline: storm_guard")`.
+const INERTIAL_SINDY_LIVE_SERVABLE_BASELINES =
     Set{Symbol}([:persistence, :burton, :burton_full, :obrien])
 
 # Baseline component keys that are NOT servable by the live issuance path.
-const OPERATIONAL_V2_NONSERVABLE_BASELINES = Set{Symbol}(
-    first(spec) for spec in OPERATIONAL_V2_BASELINE_COLUMNS
-    if !(first(spec) in OPERATIONAL_V2_LIVE_SERVABLE_BASELINES)
+const INERTIAL_SINDY_NONSERVABLE_BASELINES = Set{Symbol}(
+    first(spec) for spec in INERTIAL_SINDY_BASELINE_COLUMNS
+    if !(first(spec) in INERTIAL_SINDY_LIVE_SERVABLE_BASELINES)
 )
 
 """
-    default_operational_v2_calibration(; feature_names, interval_scale, label)
+    default_inertial_sindy_calibration(; feature_names, interval_scale, label)
 
-Construct an untrained [`OperationalV2Calibration`](@ref) with zero residual
+Construct an untrained [`InertialSindyCalibration`](@ref) with zero residual
 correction, unit feature scales, and the requested interval scale. By default,
-the calibration uses `DEFAULT_OPERATIONAL_V2_FEATURES` and leaves V1 point
+the calibration uses `DEFAULT_INERTIAL_SINDY_FEATURES` and leaves V1 point
 forecasts unchanged.
 """
-function default_operational_v2_calibration(;
-        feature_names::Vector{Symbol}=copy(DEFAULT_OPERATIONAL_V2_FEATURES),
+function default_inertial_sindy_calibration(;
+        feature_names::Vector{Symbol}=copy(DEFAULT_INERTIAL_SINDY_FEATURES),
         interval_scale::Real=1.0,
-        label::AbstractString="uncalibrated_v2",
+        label::AbstractString="uncalibrated_operational",
         supported_model_steps::Vector{Int}=Int[],
     )
     n = length(feature_names)
-    return OperationalV2Calibration(
+    return InertialSindyCalibration(
         feature_names,
         zeros(n),
         ones(n),
@@ -296,13 +296,13 @@ function default_operational_v2_calibration(;
 end
 
 """
-    operational_v2_feature_tuple(latest_dst, V, Bz, By, n, Pdyn)
+    inertial_sindy_feature_tuple(latest_dst, V, Bz, By, n, Pdyn)
 
-Return the causal issue-time feature tuple used by the default operational-v2
+Return the causal issue-time feature tuple used by the default operational
 calibration. The derived features are computed only from quantities available at
 issue time.
 """
-function operational_v2_feature_tuple(latest_dst::Real, V::Real, Bz::Real,
+function inertial_sindy_feature_tuple(latest_dst::Real, V::Real, Bz::Real,
                                       By::Real, n::Real, Pdyn::Real)
     latest = Float64(latest_dst)
     speed = Float64(V)
@@ -438,7 +438,7 @@ end
 # Memory features (Dst/Bz/VBsouth deltas and VBsouth/Bsouth rolling means)
 # computed by TIMESTAMP, so tied multi-horizon issue times and gap-skipped anchors
 # resolve to the true hourly differences and every horizon row of one anchor gets
-# identical values. Mirrors _live_v2_memory_features: memory is neutral (0) unless
+# identical values. Mirrors _live_operational_memory_features: memory is neutral (0) unless
 # the Dst history at t-1h and t-3h is present. Falls back to the row-offset (neutral
 # for a lone row) computation when the frame has no usable time axis.
 function _add_memory_features!(df::DataFrame, latest::Vector{Float64}, bz::Vector{Float64})
@@ -466,7 +466,7 @@ function _add_memory_features!(df::DataFrame, latest::Vector{Float64}, bz::Vecto
     n = nrow(df)
     dst_d1 = zeros(n); dst_d3 = zeros(n); dst_d6 = zeros(n)
     bz_d1 = zeros(n); vb_d1 = zeros(n)
-    vb_m3 = zeros(n); vb_m6 = zeros(n); bs_m3 = zeros(n); bs_m6 = zeros(n)
+    vb_error = zeros(n); vb_m6 = zeros(n); bs_error = zeros(n); bs_m6 = zeros(n)
     for i in 1:n
         t = anchor_times[i]
         l1 = at(latest, t - Hour(1))
@@ -480,9 +480,9 @@ function _add_memory_features!(df::DataFrame, latest::Vector{Float64}, bz::Vecto
         bz_d1[i] = (isfinite(bz[i]) && isfinite(bz1)) ? bz[i] - bz1 : 0.0
         vbp = at(vbsouth, t - Hour(1))
         vb_d1[i] = (isfinite(vbsouth[i]) && isfinite(vbp)) ? vbsouth[i] - vbp : 0.0
-        vb_m3[i] = _window_time_mean(vbsouth, idx_at, t, 3, vbsouth[i])
+        vb_error[i] = _window_time_mean(vbsouth, idx_at, t, 3, vbsouth[i])
         vb_m6[i] = _window_time_mean(vbsouth, idx_at, t, 6, vbsouth[i])
-        bs_m3[i] = _window_time_mean(bsouth, idx_at, t, 3, bsouth[i])
+        bs_error[i] = _window_time_mean(bsouth, idx_at, t, 3, bsouth[i])
         bs_m6[i] = _window_time_mean(bsouth, idx_at, t, 6, bsouth[i])
     end
     _maybe_add_column!(df, :dst_delta_1h_nt, dst_d1)
@@ -490,9 +490,9 @@ function _add_memory_features!(df::DataFrame, latest::Vector{Float64}, bz::Vecto
     _maybe_add_column!(df, :dst_delta_6h_nt, dst_d6)
     _maybe_add_column!(df, :Bz_delta_1h_nt, bz_d1)
     _maybe_add_column!(df, :VBsouth_delta_1h_mvm, vb_d1)
-    _maybe_add_column!(df, :VBsouth_mean_3h_mvm, vb_m3)
+    _maybe_add_column!(df, :VBsouth_mean_3h_mvm, vb_error)
     _maybe_add_column!(df, :VBsouth_mean_6h_mvm, vb_m6)
-    _maybe_add_column!(df, :Bsouth_mean_3h_nt, bs_m3)
+    _maybe_add_column!(df, :Bsouth_mean_3h_nt, bs_error)
     _maybe_add_column!(df, :Bsouth_mean_6h_nt, bs_m6)
     return df
 end
@@ -522,7 +522,7 @@ function _maybe_add_column!(df::DataFrame, col::Symbol, values::Vector{Float64})
     return df
 end
 
-function add_operational_v2_features!(df::DataFrame)
+function add_inertial_sindy_features!(df::DataFrame)
     base = [:latest_dst_nt, :V_kms, :Bz_nt, :By_nt, :n_cm3, :Pdyn_npa]
     all(String(c) in names(df) for c in base) || return df
 
@@ -534,7 +534,7 @@ function add_operational_v2_features!(df::DataFrame)
     pdyn = _column_float_or_nan(df, :Pdyn_npa)
 
     features = [
-        operational_v2_feature_tuple(latest[i], speed[i], bz[i], by[i], density[i], pdyn[i])
+        inertial_sindy_feature_tuple(latest[i], speed[i], bz[i], by[i], density[i], pdyn[i])
         for i in eachindex(latest)
     ]
     df[!, :Bsouth_nt] = [f.Bsouth_nt for f in features]
@@ -545,9 +545,9 @@ function add_operational_v2_features!(df::DataFrame)
 
     _add_memory_features!(df, latest, bz)
     if all(String(c) in names(df) for c in (:pred_dst_nt, :persistence_dst_nt))
-        v1 = _column_float_or_nan(df, :pred_dst_nt)
+        sindy_core = _column_float_or_nan(df, :pred_dst_nt)
         persistence = _column_float_or_nan(df, :persistence_dst_nt)
-        _maybe_add_column!(df, :v1_minus_persistence_nt, v1 .- persistence)
+        _maybe_add_column!(df, :v1_minus_persistence_nt, sindy_core .- persistence)
         expert_cols = Symbol[:pred_dst_nt, :persistence_dst_nt]
         String(:obrien_dst_nt) in names(df) && push!(expert_cols, :obrien_dst_nt)
         String(:burton_dst_nt) in names(df) && push!(expert_cols, :burton_dst_nt)
@@ -674,19 +674,19 @@ function _quantile_sorted(v::Vector{Float64}, q::Real)
     return sorted[idx]
 end
 
-function _component_index(cal::OperationalV2Calibration, component::Symbol)
+function _component_index(cal::InertialSindyCalibration, component::Symbol)
     idx = findfirst(==(component), cal.selector_names)
-    idx === nothing && throw(ArgumentError("unknown v2 selector component: $component"))
+    idx === nothing && throw(ArgumentError("unknown operational selector component: $component"))
     return idx
 end
 
 function _selector_metric_columns(df::DataFrame)
     out = Pair{Symbol,Symbol}[]
-    for spec in OPERATIONAL_V2_BASELINE_COLUMNS
+    for spec in INERTIAL_SINDY_BASELINE_COLUMNS
         # Only offer baseline components the live issuance path can serve as
         # selector candidates, so a fit can never deploy a component that would
-        # crash every live cycle (see OPERATIONAL_V2_LIVE_SERVABLE_BASELINES).
-        first(spec) in OPERATIONAL_V2_LIVE_SERVABLE_BASELINES || continue
+        # crash every live cycle (see INERTIAL_SINDY_LIVE_SERVABLE_BASELINES).
+        first(spec) in INERTIAL_SINDY_LIVE_SERVABLE_BASELINES || continue
         String(last(spec)) in names(df) && push!(out, spec)
     end
     return out
@@ -697,11 +697,11 @@ function _candidate_selector_stats(clean::DataFrame, corrected::Vector{Float64},
                                    guard_margin_nt::Real)
     obs = Float64.(clean.observation_dst_nt)
     # `corrected` is the in-sample ridge fit (pred + X·β on the same rows β was fit
-    # from), so the :v2 rmse/mae below are optimistically biased relative to the
-    # parameter-free baselines. This is intentional (see fit_operational_v2_calibration
+    # from), so the :inertial_sindy rmse/mae below are optimistically biased relative to the
+    # parameter-free baselines. This is intentional (see fit_inertial_sindy_calibration
     # docstring): the operational path re-validates the deployed component out of
-    # sample, and the guard-margin rule prefers :v2 unless a baseline clearly wins.
-    names_out = Symbol[:v2, :sindy_v1]
+    # sample, and the guard-margin rule prefers :inertial_sindy unless a baseline clearly wins.
+    names_out = Symbol[:inertial_sindy, :sindy_core]
     preds = [corrected, Float64.(clean.pred_dst_nt)]
 
     for (component, col) in _selector_metric_columns(clean)
@@ -746,48 +746,48 @@ end
 
 function _component_value(baselines, component::Symbol)
     baselines === nothing && throw(ArgumentError(
-        "v2 selector component $component requires baseline predictions"
+        "operational selector component $component requires baseline predictions"
     ))
     value = if baselines isa NamedTuple
         haskey(baselines, component) || throw(ArgumentError(
-            "missing v2 selector baseline: $component"
+            "missing operational selector baseline: $component"
         ))
         getfield(baselines, component)
     else
         haskey(baselines, component) || throw(ArgumentError(
-            "missing v2 selector baseline: $component"
+            "missing operational selector baseline: $component"
         ))
         baselines[component]
     end
-    ismissing(value) && throw(ArgumentError("v2 selector baseline $component is missing"))
+    ismissing(value) && throw(ArgumentError("operational selector baseline $component is missing"))
     return Float64(value)
 end
 
 function _selected_component_prediction(component::Symbol, corrected_center::Float64,
                                         original_center::Float64,
-                                        cal::OperationalV2Calibration,
+                                        cal::InertialSindyCalibration,
                                         baselines)
-    component == :v2 && return corrected_center
-    component == :sindy_v1 && return original_center
+    component == :inertial_sindy && return corrected_center
+    component == :sindy_core && return original_center
     if component == :ensemble
         prediction = 0.0
         for (name, weight) in zip(cal.selector_names, cal.selector_weights)
             iszero(weight) && continue
-            value = if name == :v2
+            value = if name == :inertial_sindy
                 corrected_center
-            elseif name == :sindy_v1
+            elseif name == :sindy_core
                 original_center
             else
                 _component_value(baselines, name)
             end
             isfinite(value) ||
-                throw(ArgumentError("positive-weight v2 selector component $name is not finite"))
+                throw(ArgumentError("positive-weight operational selector component $name is not finite"))
             prediction += weight * value
         end
         return prediction
     end
     value = _component_value(baselines, component)
-    isfinite(value) || throw(ArgumentError("v2 selector baseline $component is not finite"))
+    isfinite(value) || throw(ArgumentError("operational selector baseline $component is not finite"))
     return value
 end
 
@@ -813,30 +813,30 @@ function _split_floats(s)
 end
 
 """
-    fit_operational_v2_calibration(df; kwargs...)
+    fit_inertial_sindy_calibration(df; kwargs...)
 
 Fit a causal residual-correction and interval-inflation layer from prior replay
 or locked-live rows. Required columns are `pred_dst_nt`,
 `observation_dst_nt`, `pred_dst_ci05_nt`, `pred_dst_ci95_nt`, and the selected
 issue-time features.
 
-Selector-metric caveat: the stored `selector_rmse`/`selector_mae` for `:v2` are
+Selector-metric caveat: the stored `selector_rmse`/`selector_mae` for `:inertial_sindy` are
 **in-sample** — the ridge coefficients are fit on the same rows the metric scores,
 whereas the baseline components (`:persistence`, `:burton`, `:obrien`, …) are
 parameter-free and thus already out-of-sample on those rows. The metrics are not
 directly comparable one-to-one, and the guard-margin rule (a baseline must beat the
-in-sample `:v2` MAE by more than `guard_margin_nt` to be selected) is deliberately
-biased toward retaining `:v2`. This matches the operational design: the deployed
+in-sample `:inertial_sindy` MAE by more than `guard_margin_nt` to be selected) is deliberately
+biased toward retaining `:inertial_sindy`. This matches the operational design: the deployed
 component is chosen by out-of-sample validation on a held-out chronological split,
-and `:v2` is preferred on small samples for robustness. Callers that consume the
+and `:inertial_sindy` is preferred on small samples for robustness. Callers that consume the
 returned selector metadata without a separate out-of-sample check must treat the
-`:v2` figures as an optimistic (training-set) bound, not a deployable estimate.
+`:inertial_sindy` figures as an optimistic (training-set) bound, not a deployable estimate.
 """
-function fit_operational_v2_calibration(df::DataFrame;
-        feature_names::Vector{Symbol}=copy(DEFAULT_OPERATIONAL_V2_FEATURES),
+function fit_inertial_sindy_calibration(df::DataFrame;
+        feature_names::Vector{Symbol}=copy(DEFAULT_INERTIAL_SINDY_FEATURES),
         ridge::Real=100.0,
         interval_coverage::Real=0.90,
-        label::AbstractString="operational_v2",
+        label::AbstractString="inertial_sindy",
         guard_margin_nt::Real=0.5,
     )
     ridge >= 0 || throw(ArgumentError("ridge must be nonnegative"))
@@ -850,11 +850,11 @@ function fit_operational_v2_calibration(df::DataFrame;
         [:pred_dst_nt, :observation_dst_nt, :pred_dst_ci05_nt, :pred_dst_ci95_nt],
         feature_names,
     )
-    prepared = add_operational_v2_features!(copy(df))
+    prepared = add_inertial_sindy_features!(copy(df))
     _require_columns(prepared, required)
     clean = _finite_rows(prepared, required)
     nrow(clean) > length(feature_names) + 1 ||
-        throw(ArgumentError("not enough finite rows to fit V2 calibration"))
+        throw(ArgumentError("not enough finite rows to fit Operational calibration"))
 
     μ = Float64[mean(Float64.(clean[!, c])) for c in feature_names]
     σ = Float64[std(Float64.(clean[!, c])) for c in feature_names]
@@ -891,7 +891,7 @@ function fit_operational_v2_calibration(df::DataFrame;
         Int[]
     end
 
-    return OperationalV2Calibration(
+    return InertialSindyCalibration(
         feature_names,
         μ,
         σ,
@@ -908,42 +908,42 @@ function fit_operational_v2_calibration(df::DataFrame;
     )
 end
 
-function operational_v2_correction(cal::OperationalV2Calibration,
+function operational_inertial_sindy_correction(cal::InertialSindyCalibration,
                                    features::NamedTuple)
     correction = cal.coefficients[1]
     for (j, name) in enumerate(cal.feature_names)
         haskey(features, name) ||
-            throw(ArgumentError("missing v2 feature: $(String(name))"))
+            throw(ArgumentError("missing operational feature: $(String(name))"))
         value = Float64(getfield(features, name))
         isfinite(value) || throw(ArgumentError(
-            "v2 feature $(String(name)) must be finite and representable as Float64",
+            "operational feature $(String(name)) must be finite and representable as Float64",
         ))
         centered = value - cal.feature_mean[j]
         isfinite(centered) || throw(ArgumentError(
-            "v2 feature $(String(name)) centered value exceeds Float64 range",
+            "operational feature $(String(name)) centered value exceeds Float64 range",
         ))
         contribution = cal.coefficients[j + 1] *
                        (centered / cal.feature_scale[j])
         isfinite(contribution) || throw(ArgumentError(
-            "v2 feature $(String(name)) contribution became non-finite",
+            "operational feature $(String(name)) contribution became non-finite",
         ))
         correction += contribution
         isfinite(correction) || throw(ArgumentError(
-            "v2 correction became non-finite",
+            "operational correction became non-finite",
         ))
     end
     return correction
 end
 
 """
-    operational_v2_predict(cal, pred_dst, ci05, ci95, features)
+    operational_inertial_sindy_predict(cal, pred_dst, ci05, ci95, features)
 
-Apply a fitted v2 residual correction and interval inflation to a v1 Dst
+Apply a fitted operational residual correction and interval inflation to a SINDy core Dst
 forecast. `features` must contain the calibration feature names. If the
 calibration selected a baseline component, pass `baselines` with matching
 component names such as `obrien` or `burton_full`.
 """
-function operational_v2_predict(cal::OperationalV2Calibration,
+function operational_inertial_sindy_predict(cal::InertialSindyCalibration,
                                 pred_dst::Real,
                                 ci05::Real,
                                 ci95::Real,
@@ -953,17 +953,17 @@ function operational_v2_predict(cal::OperationalV2Calibration,
     lower64 = Float64(ci05)
     upper64 = Float64(ci95)
     all(isfinite, (pred64, lower64, upper64)) || throw(ArgumentError(
-        "v2 point and interval inputs must be finite and representable as Float64",
+        "operational point and interval inputs must be finite and representable as Float64",
     ))
-    correction = operational_v2_correction(cal, features)
+    correction = operational_inertial_sindy_correction(cal, features)
     # Clamp the corrected center to the physical Dst range used by every other
-    # forecast path (v1 single/multi-step, baselines, storm guard). On valid
+    # forecast path (SINDy core single/multi-step, baselines, storm guard). On valid
     # operational data the corrected center stays well inside [-2000, 50] (max
     # observed prediction ~46 nT), so this is a no-op there; it only guards the
-    # selector :v2 path against a pathological positive correction.
+    # selector :inertial_sindy path against a pathological positive correction.
     unbounded_center = pred64 + correction
     isfinite(unbounded_center) || throw(ArgumentError(
-        "v2 corrected center exceeds the supported Float64 range",
+        "operational corrected center exceeds the supported Float64 range",
     ))
     corrected_center = clamp(unbounded_center, -2000.0, 50.0)
     original_center = pred64
@@ -977,13 +977,13 @@ function operational_v2_predict(cal::OperationalV2Calibration,
         baselines,
     )
     isfinite(selected_center) || throw(ArgumentError(
-        "v2 selected center became non-finite",
+        "operational selected center became non-finite",
     ))
     center = clamp(selected_center, -2000.0, 50.0)
     span = upper64 - lower64
     half_width = isfinite(span) ? abs(span) / 2 : abs(upper64 / 2 - lower64 / 2)
     isfinite(half_width) || throw(ArgumentError(
-        "v2 interval half-width exceeds the supported Float64 range",
+        "operational interval half-width exceeds the supported Float64 range",
     ))
     selector_half_width = if cal.selected_component == :ensemble
         sum(cal.selector_weights .* cal.selector_half_width)
@@ -992,12 +992,12 @@ function operational_v2_predict(cal::OperationalV2Calibration,
     end
     inflated = max(cal.interval_scale * half_width, selector_half_width)
     isfinite(inflated) || throw(ArgumentError(
-        "v2 inflated interval half-width exceeds the supported Float64 range",
+        "operational inflated interval half-width exceeds the supported Float64 range",
     ))
     ci05_out = center - inflated
     ci95_out = center + inflated
     all(isfinite, (ci05_out, ci95_out)) || throw(ArgumentError(
-        "v2 interval endpoints exceed the supported Float64 range",
+        "operational interval endpoints exceed the supported Float64 range",
     ))
     return (
         pred_dst=center,
@@ -1015,7 +1015,7 @@ end
 
 function _row_baselines(df::DataFrame, row_idx::Int)
     baselines = Dict{Symbol,Float64}()
-    for (component, col) in OPERATIONAL_V2_BASELINE_COLUMNS
+    for (component, col) in INERTIAL_SINDY_BASELINE_COLUMNS
         String(col) in names(df) || continue
         value = df[row_idx, col]
         if !ismissing(value)
@@ -1026,14 +1026,14 @@ function _row_baselines(df::DataFrame, row_idx::Int)
 end
 
 """
-    score_operational_v2(df, cal)
+    score_inertial_sindy(df, cal)
 
-Apply `cal` row by row to a copy of `df` and return the copy with derived V2
+Apply `cal` row by row to a copy of `df` and return the copy with derived Operational
 features, predictions, intervals, residuals, coverage indicators, and selected
 component metadata. Required forecast, observation, and calibration-feature
 columns must be present.
 
-`v2_observed_in_90ci` is `Union{Missing,Bool}`: a row whose `observation_dst_nt`
+`operational_observed_in_90ci` is `Union{Missing,Bool}`: a row whose `observation_dst_nt`
 is absent or non-finite has not been verified yet, so it is neither a coverage
 hit nor a coverage miss and is recorded as `missing`. Averaging the column with
 `skipmissing` therefore reports coverage over the rows that were actually
@@ -1041,33 +1041,33 @@ observable; treating an unobservable row as `false` would count a forecast that
 nothing has scored as a failure and depress every coverage figure by the
 unverified fraction of the frame.
 """
-function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
-    out = add_operational_v2_features!(copy(df))
+function score_inertial_sindy(df::DataFrame, cal::InertialSindyCalibration)
+    out = add_inertial_sindy_features!(copy(df))
     _require_columns(out, vcat(
         [:pred_dst_nt, :pred_dst_ci05_nt, :pred_dst_ci95_nt, :observation_dst_nt],
         cal.feature_names,
     ))
-    v2_pred = Vector{Float64}(undef, nrow(out))
-    v2_ci05 = Vector{Float64}(undef, nrow(out))
-    v2_ci95 = Vector{Float64}(undef, nrow(out))
-    v2_corr = Vector{Float64}(undef, nrow(out))
-    v2_corrected = Vector{Float64}(undef, nrow(out))
-    v2_residual = Vector{Float64}(undef, nrow(out))
-    v2_in_ci = Vector{Union{Missing,Bool}}(undef, nrow(out))
-    v2_component = Vector{String}(undef, nrow(out))
-    v2_component_pred = Vector{Float64}(undef, nrow(out))
+    inertial_sindy_pred = Vector{Float64}(undef, nrow(out))
+    operational_ci05 = Vector{Float64}(undef, nrow(out))
+    operational_ci95 = Vector{Float64}(undef, nrow(out))
+    operational_corr = Vector{Float64}(undef, nrow(out))
+    operational_corrected = Vector{Float64}(undef, nrow(out))
+    operational_residual = Vector{Float64}(undef, nrow(out))
+    operational_in_ci = Vector{Union{Missing,Bool}}(undef, nrow(out))
+    operational_component = Vector{String}(undef, nrow(out))
+    operational_component_pred = Vector{Float64}(undef, nrow(out))
     needs_baselines = if cal.selected_component == :ensemble
-        any(name != :v2 && name != :sindy_v1 && !iszero(weight)
+        any(name != :inertial_sindy && name != :sindy_core && !iszero(weight)
             for (name, weight) in zip(cal.selector_names, cal.selector_weights))
     else
-        cal.selected_component != :v2 && cal.selected_component != :sindy_v1
+        cal.selected_component != :inertial_sindy && cal.selected_component != :sindy_core
     end
 
     for i in 1:nrow(out)
         features = NamedTuple{Tuple(cal.feature_names)}(
             Tuple(_cell_float_or_nan(out[i, c]) for c in cal.feature_names)
         )
-        pred = operational_v2_predict(
+        pred = operational_inertial_sindy_predict(
             cal,
             _cell_float_or_nan(out[i, :pred_dst_nt]),
             _cell_float_or_nan(out[i, :pred_dst_ci05_nt]),
@@ -1076,42 +1076,42 @@ function score_operational_v2(df::DataFrame, cal::OperationalV2Calibration)
             baselines=needs_baselines ? _row_baselines(out, i) : nothing,
         )
         obs = _cell_float_or_nan(out[i, :observation_dst_nt])
-        v2_pred[i] = pred.pred_dst
-        v2_ci05[i] = pred.ci05_dst
-        v2_ci95[i] = pred.ci95_dst
-        v2_corr[i] = pred.correction
-        v2_corrected[i] = pred.corrected_sindy_pred
-        v2_residual[i] = obs - pred.pred_dst
+        inertial_sindy_pred[i] = pred.pred_dst
+        operational_ci05[i] = pred.ci05_dst
+        operational_ci95[i] = pred.ci95_dst
+        operational_corr[i] = pred.correction
+        operational_corrected[i] = pred.corrected_sindy_pred
+        operational_residual[i] = obs - pred.pred_dst
         # An unobservable row is not a coverage miss. `min(...) <= NaN <= max(...)` is `false`, which
         # is indistinguishable from an interval that genuinely excluded the observation, so a frame
         # carrying not-yet-verified rows silently reported them as failures.
-        v2_in_ci[i] = isfinite(obs) ? (min(pred.ci05_dst, pred.ci95_dst) <= obs <=
+        operational_in_ci[i] = isfinite(obs) ? (min(pred.ci05_dst, pred.ci95_dst) <= obs <=
                                        max(pred.ci05_dst, pred.ci95_dst)) : missing
-        v2_component[i] = pred.selected_component
-        v2_component_pred[i] = pred.selected_component_pred
+        operational_component[i] = pred.selected_component
+        operational_component_pred[i] = pred.selected_component_pred
     end
 
-    out[!, :v2_pred_dst_nt] = v2_pred
-    out[!, :v2_pred_dst_ci05_nt] = v2_ci05
-    out[!, :v2_pred_dst_ci95_nt] = v2_ci95
-    out[!, :v2_correction_dst_nt] = v2_corr
-    out[!, :v2_corrected_sindy_pred_nt] = v2_corrected
-    out[!, :v2_residual_dst_nt] = v2_residual
-    out[!, :v2_observed_in_90ci] = v2_in_ci
-    out[!, :v2_calibration_label] = fill(cal.label, nrow(out))
-    out[!, :v2_selected_component] = v2_component
-    out[!, :v2_selected_component_pred_nt] = v2_component_pred
+    out[!, :inertial_sindy_pred_dst_nt] = inertial_sindy_pred
+    out[!, :inertial_sindy_pred_dst_ci05_nt] = operational_ci05
+    out[!, :inertial_sindy_pred_dst_ci95_nt] = operational_ci95
+    out[!, :inertial_sindy_correction_dst_nt] = operational_corr
+    out[!, :operational_corrected_sindy_pred_nt] = operational_corrected
+    out[!, :operational_residual_dst_nt] = operational_residual
+    out[!, :operational_observed_in_90ci] = operational_in_ci
+    out[!, :inertial_sindy_calibration_label] = fill(cal.label, nrow(out))
+    out[!, :inertial_sindy_selected_component] = operational_component
+    out[!, :inertial_sindy_selected_component_pred_nt] = operational_component_pred
     return out
 end
 
 """
-    write_operational_v2_calibration(path, cal)
+    write_inertial_sindy_calibration(path, cal)
 
 Write `cal` to the package's versioned CSV calibration schema, creating the
 parent directory when needed. Return `path` after the atomic write completes.
 """
-function write_operational_v2_calibration(path::String,
-                                          cal::OperationalV2Calibration)
+function write_inertial_sindy_calibration(path::String,
+                                          cal::InertialSindyCalibration)
     dir = dirname(path)
     !isempty(dir) && mkpath(dir)
     rows = NamedTuple[]
@@ -1160,32 +1160,33 @@ function write_operational_v2_calibration(path::String,
 end
 
 """
-    read_operational_v2_calibration(path)
+    read_inertial_sindy_calibration(path)
 
-Read and validate an [`OperationalV2Calibration`](@ref) from the package's CSV
-calibration schema. Older files without selector fields use the documented V2
+Read and validate an [`InertialSindyCalibration`](@ref) from the package's CSV
+calibration schema. Older files without selector fields use the documented Operational
 selector defaults.
 """
-function read_operational_v2_calibration(path::String)
+function read_inertial_sindy_calibration(path::String)
     # `supported_model_steps` is ";"-joined text; a single step ("1") would otherwise parse as
     # an integer column. `validate = false` keeps older files without the column readable.
     df = CSV.read(path, DataFrame;
-                  types = Dict(:supported_model_steps => String), validate = false)
+                  types = Dict(:supported_model_steps => String), validate = false,
+                  buffer_in_memory = true)
     _require_columns(df, [:feature, :feature_mean, :feature_scale,
                           :coefficient, :interval_scale, :label])
-    nrow(df) >= 1 || throw(ArgumentError("empty V2 calibration: $path"))
+    nrow(df) >= 1 || throw(ArgumentError("empty Operational calibration: $path"))
     String(df.feature[1]) == "intercept" ||
         throw(ArgumentError("first calibration row must be feature=intercept"))
     feature_names = Symbol.(String.(df.feature[2:end]))
     length(Set(feature_names)) == length(feature_names) ||
-        throw(ArgumentError("V2 calibration contains duplicate feature names: $path"))
+        throw(ArgumentError("Operational calibration contains duplicate feature names: $path"))
     feature_mean = Float64.(df.feature_mean[2:end])
     feature_scale = Float64.(df.feature_scale[2:end])
     coefficients = Float64.(df.coefficient)
     interval_scale = Float64(df.interval_scale[1])
     label = String(df.label[1])
     selector_names = String(:selector_components) in names(df) ?
-        _split_symbols(df[1, :selector_components]) : Symbol[:v2]
+        _split_symbols(df[1, :selector_components]) : Symbol[:inertial_sindy]
     selector_rmse = String(:selector_rmse_nt) in names(df) ?
         _split_floats(df[1, :selector_rmse_nt]) : fill(NaN, length(selector_names))
     selector_mae = String(:selector_mae_nt) in names(df) ?
@@ -1195,19 +1196,19 @@ function read_operational_v2_calibration(path::String)
     selector_weights = String(:selector_weights) in names(df) ?
         _split_floats(df[1, :selector_weights]) : nothing
     selected_component = String(:selected_component) in names(df) ?
-        Symbol(String(df[1, :selected_component])) : :v2
+        Symbol(String(df[1, :selected_component])) : :inertial_sindy
     guard_margin_nt = String(:guard_margin_nt) in names(df) ?
         Float64(df[1, :guard_margin_nt]) : 0.0
     supported_model_steps = if String(:supported_model_steps) in names(df)
         values = String.(coalesce.(df.supported_model_steps, ""))
         all(==(first(values)), values) || throw(ArgumentError(
-            "V2 calibration contains inconsistent supported_model_steps metadata: $path",
+            "Operational calibration contains inconsistent supported_model_steps metadata: $path",
         ))
         isempty(first(values)) ? Int[] : parse.(Int, split(first(values), ";"))
     else
         Int[]
     end
-    return OperationalV2Calibration(
+    return InertialSindyCalibration(
         collect(feature_names),
         collect(feature_mean),
         collect(feature_scale),
@@ -1233,7 +1234,7 @@ end
 # usable active-term column (signalling the caller to fall back to marginal draws).
 function _ensemble_from_joint_draws(path::String, term_names::Vector{String},
                                     ξ_primary::Vector{Float64}, n_ensemble::Int, rng)
-    draws = CSV.read(path, DataFrame)
+    draws = CSV.read(path, DataFrame; buffer_in_memory = true)
     D = nrow(draws)
     D >= 1 || return nothing
     colnames = names(draws)
@@ -1291,7 +1292,7 @@ function init_forecast(; coefficients_csv::String,
                          dst0::Float64,
                          dt::Float64=1.0)
     # Load primary coefficients
-    coef_df = CSV.read(coefficients_csv, DataFrame)
+    coef_df = CSV.read(coefficients_csv, DataFrame; buffer_in_memory = true)
     all(c -> String(c) in names(coef_df), (:term, :coefficient)) ||
         throw(ArgumentError("coefficient CSV must contain term and coefficient columns"))
     # Legacy deployed artifacts contain the now-removed exact pressure proxy
@@ -1303,7 +1304,7 @@ function init_forecast(; coefficients_csv::String,
     # numeric and textual cells, instead of requiring an existing String value.
     coefficient_terms = string.(coef_df.term)
     lib = build_solar_wind_library(
-        include_redundant_n_v2=("n*V^2" in coefficient_terms),
+        include_redundant_n_operational=("n*V^2" in coefficient_terms),
     )
     term_names = get_term_names(lib)
 
@@ -1348,7 +1349,7 @@ function init_forecast(; coefficients_csv::String,
         # (±z·σ, z=1.96 → σ = width/(2z)). Only active terms are perturbed.
         isfile(ensemble_csv) ||
             throw(ArgumentError("ensemble coefficient artifact not found: $ensemble_csv"))
-        ens_df = CSV.read(ensemble_csv, DataFrame)
+        ens_df = CSV.read(ensemble_csv, DataFrame; buffer_in_memory = true)
         available = Set(names(ens_df))
         "term" in available || throw(ArgumentError(
             "ensemble CSV must contain a term column",
@@ -1475,7 +1476,7 @@ function _evaluate_point_vector_unchecked!(θ::Vector{Float64},
             θ[j] = Pdyn
         elseif code == TERM_DST_STAR
             θ[j] = dst_star
-        elseif code == TERM_V2
+        elseif code == TERM_OPERATIONAL
             θ[j] = V^2
         elseif code == TERM_BS2
             θ[j] = Bs^2
@@ -1491,7 +1492,7 @@ function _evaluate_point_vector_unchecked!(θ::Vector{Float64},
             θ[j] = Pdyn * Bs
         elseif code == TERM_N_V_BS
             θ[j] = n_density * V * Bs
-        elseif code == TERM_N_V2
+        elseif code == TERM_N_OPERATIONAL
             θ[j] = n_density * V^2
         elseif code == TERM_SIN_HALF
             θ[j] = sin_half

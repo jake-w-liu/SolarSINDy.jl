@@ -13,12 +13,12 @@
 # to locate storm centres (min_dst_time) and to confirm the split is "test".
 #
 # Historical development question: does adapting a small physically-motivated coefficient subset of the
-# current V2.1 20/11 core online (decay rate and/or the
+# current inertial-SINDy 20/11 core online (decay rate and/or the
 # dominant coupling scale) improve the ONE-STEP-AHEAD Dst* forecast on held-out storms, versus holding all
 # coefficients fixed at the deployed values? We score the prediction made BEFORE each observation. To give
 # adaptation its best fair chance, we sweep the coefficient process noise q_coeff and report the BEST adapted
 # result against fixed (so a negative result is conservative). This is a
-# one-step extension diagnostic and does not reproduce the deployed V2.1 tail or
+# one-step extension diagnostic and does not reproduce the deployed inertial-SINDy tail or
 # 26-feature calibration. Its bidirectional gap filling is retrospective, so this
 # script cannot establish live deployability. The later powered and served-tail
 # replays supersede its promotion interpretation and reject EKF promotion.
@@ -27,7 +27,7 @@ using SolarSINDy, DataFrames, Statistics, LinearAlgebra, Printf, Dates
 
 const PKG  = pkgdir(SolarSINDy)
 const PROJ = normpath(joinpath(PKG, ".."))
-const EXTRACTED = joinpath(PROJ, "paper_v2_monitor", "data", "omni_extracted.csv")
+const EXTRACTED = joinpath(PROJ, "paper_dst_superlearner", "data", "omni_extracted.csv")
 const CATALOG   = joinpath(PKG, "data", "storm_catalog.csv")
 
 # forward+backward fill of NaN in a column, then median fallback if all-NaN
@@ -49,11 +49,11 @@ function main()
     sort!(cand, by = e -> e.min_dst)
     deepest = cand[1:min(6, length(cand))]
 
-    core = load_operational_core(:v2)
+    core = load_operational_core(:inertial_sindy)
     lib = core.library; term_names = get_term_names(lib); ξ0 = copy(core.coefficients)
     length(term_names) == 20 && count(!=(0.0), ξ0) == 11 &&
         !("n*V^2" in term_names) ||
-        error("fair EKF diagnostic did not load the current 20/11 V2.1 core")
+        error("fair EKF diagnostic did not load the current 20/11 inertial-SINDy core")
     i_decay = findfirst(==("Dst_star"), term_names)
     act = [i for i in eachindex(ξ0) if ξ0[i] != 0 && i != i_decay]
     i_inj = act[argmax(abs.(ξ0[act]))]
@@ -117,11 +117,11 @@ function main()
         @printf("\n→ RAW-CORE ONE-STEP SIGNAL: a shared q (%.0e) lowers mean 1-step RMSE %.2f→%.2f nT on these held-out storms\n",
                 qsweep[argmin(qmeans)], mean(tf), bestq_single)
         @printf("  with the revised 20/11 core. This is not deployable evidence: q was selected on the scored set,\n")
-        @printf("  preprocessing is retrospective, and the served V2.1 tail is absent. The later powered and exact\n")
+        @printf("  preprocessing is retrospective, and the served inertial-SINDy tail is absent. The later powered and exact\n")
         @printf("  served-tail EKF replays answer the promotion question and reject EKF deployment.\n")
     else
         @printf("\n→ Per-storm best q helps, but NO single global q robustly beats fixed: the gain needs per-storm\n")
-        @printf("  tuning. This raw-core diagnostic provides no promotion evidence; later V2.1 replays also reject EKF deployment.\n")
+        @printf("  tuning. This raw-core diagnostic provides no promotion evidence; later inertial-SINDy replays also reject EKF deployment.\n")
     end
     return nothing
 end

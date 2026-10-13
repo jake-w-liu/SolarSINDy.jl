@@ -10,8 +10,8 @@ include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
 struct _InterruptingForecastText end
 Base.String(::_InterruptingForecastText) = throw(InterruptException())
 
-include(joinpath(@__DIR__, "v2_4_serving_fixture.jl"))
-using .V24ServingFixture
+include(joinpath(@__DIR__, "superlearner_serving_fixture.jl"))
+using .SuperlearnerServingFixture
 
 @testset "Live Forecast Verification Workflow" begin
     @testset "Kyoto transport preserves TLS verification and deadlines" begin
@@ -189,7 +189,7 @@ using .V24ServingFixture
                            vcat(dst_values, [-800.0]))
 
             configs = [LiveVerifyConfig(;
-                model=:v2,
+                model=:inertial_sindy,
                 horizon_hours=1,
                 log_path=joinpath(dir, "forecast_$i.csv"),
                 report_path=joinpath(dir, "report_$i.md"),
@@ -237,7 +237,7 @@ using .V24ServingFixture
                 :anchor_dst_star_nt, :target_time_utc, :V_kms, :Bz_nt, :By_nt,
                 :n_cm3, :Pdyn_npa, :target_step_V_kms, :target_step_Bz_nt,
                 :target_step_By_nt, :target_step_n_cm3, :target_step_Pdyn_npa,
-                :v1_pred_dst_nt, :v2_pred_dst_nt, :served_pred_dst_nt,
+                :sindy_core_pred_dst_nt, :inertial_sindy_pred_dst_nt, :served_pred_dst_nt,
                 :served_pred_dst_ci05_nt, :served_pred_dst_ci95_nt,
             )
                 @test isequal(skewed_row[column], causal_row[column])
@@ -247,7 +247,7 @@ using .V24ServingFixture
             # A feed whose samples are ALL post-issue still fails closed: there is no causal
             # sample to fall back to, whatever the skew band says.
             all_future = LiveVerifyConfig(;
-                model=:v2, horizon_hours=1,
+                model=:inertial_sindy, horizon_hours=1,
                 log_path=joinpath(dir, "forecast_all_future.csv"),
                 report_path=joinpath(dir, "report_all_future.md"),
             )
@@ -273,12 +273,12 @@ using .V24ServingFixture
         unavailable = (args...; kwargs...) -> (calls[] += 1; nothing)
         @test _aci_interval_for_policy(
             :static, "unused.csv", -20.0, 3;
-            latest_dst=-30.0, pred_col=:v2_pred_dst_nt, interval_fn=unavailable,
+            latest_dst=-30.0, pred_col=:inertial_sindy_pred_dst_nt, interval_fn=unavailable,
         ) === nothing
         @test calls[] == 0
         @test _aci_interval_for_policy(
             :auto, "unused.csv", -20.0, 3;
-            latest_dst=-30.0, pred_col=:v2_pred_dst_nt, interval_fn=unavailable,
+            latest_dst=-30.0, pred_col=:inertial_sindy_pred_dst_nt, interval_fn=unavailable,
         ) === nothing
         @test calls[] == 1
         @test_throws ErrorException _aci_interval_for_policy(
@@ -292,7 +292,7 @@ using .V24ServingFixture
         ) == (-35.0, -5.0)
         @test_throws ArgumentError _aci_interval_for_policy(
             :mixed, "unused.csv", -20.0, 3;
-            latest_dst=-30.0, pred_col=:v2_pred_dst_nt, interval_fn=available,
+            latest_dst=-30.0, pred_col=:inertial_sindy_pred_dst_nt, interval_fn=available,
         )
     end
 
@@ -314,7 +314,7 @@ using .V24ServingFixture
             dst_times = collect((latest_dst_time - Hour(6)):Hour(1):latest_dst_time)
             dst_values = collect(range(-20.0, -44.0; length=length(dst_times)))
             cfg = LiveVerifyConfig(;
-                model=:v2,
+                model=:inertial_sindy,
                 horizon_hours=1,
                 log_path=joinpath(dir, "live_forecast_log.csv"),
                 report_path=joinpath(dir, "live_comparison_report.md"),
@@ -334,33 +334,33 @@ using .V24ServingFixture
         end
     end
 
-    @testset "D: argument parser accepts v2 workflow options" begin
+    @testset "D: argument parser accepts operational workflow options" begin
         cfg = _parse_args([
-            "--fit-v2-calibration",
-            "--model=v2",
+            "--fit-operational-calibration",
+            "--model=operational",
             "--table=/tmp/replay.csv",
             "--report=/tmp/live_report.md",
-            "--v2-calibration=/tmp/v2.csv",
-            "--v2-train-fraction=0.6",
-            "--v2-validation-fraction=0.2",
-            "--v2-ridge=10",
-            "--v2-coverage=0.8",
-            "--v2-selector-margin=1.25",
+            "--operational-calibration=/tmp/operational.csv",
+            "--operational-train-fraction=0.6",
+            "--operational-validation-fraction=0.2",
+            "--operational-ridge=10",
+            "--operational-coverage=0.8",
+            "--operational-selector-margin=1.25",
         ])
-        @test cfg.mode == :fit_v2_calibration
-        @test cfg.model == :v2
+        @test cfg.mode == :fit_inertial_sindy_calibration
+        @test cfg.model == :inertial_sindy
         @test cfg.table_path == "/tmp/replay.csv"
         @test cfg.report_path == "/tmp/live_report.md"
-        @test cfg.v2_calibration_path == "/tmp/v2.csv"
-        @test cfg.v2_train_fraction == 0.6
-        @test cfg.v2_validation_fraction == 0.2
-        @test cfg.v2_ridge == 10.0
-        @test cfg.v2_ridge_grid == [10.0]
-        @test cfg.v2_interval_coverage == 0.8
-        @test cfg.v2_selector_margin_nt == 1.25
+        @test cfg.inertial_sindy_calibration_path == "/tmp/operational.csv"
+        @test cfg.operational_train_fraction == 0.6
+        @test cfg.operational_validation_fraction == 0.2
+        @test cfg.operational_ridge == 10.0
+        @test cfg.operational_ridge_grid == [10.0]
+        @test cfg.inertial_sindy_interval_coverage == 0.8
+        @test cfg.operational_selector_margin_nt == 1.25
 
-        grid_cfg = _parse_args(["--fit-v2-calibration", "--v2-ridge-grid=0,10,100"])
-        @test grid_cfg.v2_ridge_grid == [0.0, 10.0, 100.0]
+        grid_cfg = _parse_args(["--fit-operational-calibration", "--operational-ridge-grid=0,10,100"])
+        @test grid_cfg.operational_ridge_grid == [0.0, 10.0, 100.0]
 
         refresh_cfg = _parse_args(["--refresh-observations", "--log=/tmp/live.csv"])
         @test refresh_cfg.mode == :refresh_observations
@@ -391,20 +391,21 @@ using .V24ServingFixture
             "--timeout-hours=0.1",
         ])
         @test campaign.mode == :campaign
-        @test campaign.model == :v2
+        @test campaign.model == :inertial_sindy
         @test campaign.campaign_horizons == [1, 3, 6]
 
         default_issue = _parse_args(String[])
         @test default_issue.mode == :issue
-        @test default_issue.model == :v2
+        @test default_issue.model == :inertial_sindy
 
-        explicit_v1 = _parse_args(["--campaign", "--model=v1"])
-        @test explicit_v1.model == :v1
+        explicit_core = _parse_args(["--campaign", "--model=sindy-core"])
+        @test explicit_core.model == :sindy_core
+        @test _parse_args(["--campaign", "--model=v1"]).model == :sindy_core
         @test_throws ArgumentError _parse_args(["--campaign-horizons=1,0"])
     end
 
-    @testset "A/D: v2 derived features are causal and deterministic" begin
-        features = _v2_features(
+    @testset "A/D: operational derived features are causal and deterministic" begin
+        features = _inertial_sindy_features(
             -20.0,
             (; V=500.0, Bz=-4.0, By=3.0, n=5.0, Pdyn=2.25),
         )
@@ -417,7 +418,7 @@ using .V24ServingFixture
         @test features.dst_delta_1h_nt == 0.0
         @test features.baseline_spread_nt == 0.0
 
-        expert = _v2_features(
+        expert = _inertial_sindy_features(
             -20.0,
             (; V=500.0, Bz=-4.0, By=3.0, n=5.0, Pdyn=2.25);
             memory=(;
@@ -429,7 +430,7 @@ using .V24ServingFixture
                 Bsouth_mean_3h_nt=3.0,
             ),
             baselines=(; persistence=-22.0, burton=-18.0, burton_full=-19.0, obrien=-21.0),
-            v1_pred_dst=-20.0,
+            sindy_core_pred_dst=-20.0,
             model_steps=3,
         )
         @test expert.dst_delta_3h_nt == -5.0
@@ -441,7 +442,7 @@ using .V24ServingFixture
         @test expert.lead_6h_indicator == 0.0
         @test expert.lead_latest_dst_interaction == -60.0
         @test expert.lead_v1_persistence_interaction == 6.0
-        @test_throws ArgumentError _v2_features(
+        @test_throws ArgumentError _inertial_sindy_features(
             -20.0,
             (; V=500.0, Bz=-4.0, By=3.0, n=5.0, Pdyn=2.25);
             model_steps=0,
@@ -455,19 +456,19 @@ using .V24ServingFixture
                   Pdyn=dynamic_pressure(5.0, 420.0))
         target_step = (; V=800.0, Bz=-20.0, By=6.0, n=18.0,
                        Pdyn=dynamic_pressure(18.0, 800.0))
-        cal = OperationalV2Calibration(
+        cal = InertialSindyCalibration(
             Symbol[:V_kms], Float64[0.0], Float64[1.0], Float64[0.0, 0.01],
             1.0, "anchor-feature-regression",
         )
-        anchor_features = _v2_features(-40.0, anchor)
-        target_features = _v2_features(-40.0, target_step)
-        @test SolarSINDy.operational_v2_correction(cal, anchor_features) ≈ 4.2
-        @test SolarSINDy.operational_v2_correction(cal, target_features) ≈ 8.0
+        anchor_features = _inertial_sindy_features(-40.0, anchor)
+        target_features = _inertial_sindy_features(-40.0, target_step)
+        @test SolarSINDy.operational_inertial_sindy_correction(cal, anchor_features) ≈ 4.2
+        @test SolarSINDy.operational_inertial_sindy_correction(cal, target_features) ≈ 8.0
         selected = _select_model_prediction(
-            :v2, cal, -40.0, anchor, -45.0, -55.0, -35.0;
+            :inertial_sindy, cal, -40.0, anchor, -45.0, -55.0, -35.0;
             features=anchor_features,
         )
-        @test selected.v2_correction ≈ 4.2
+        @test selected.inertial_sindy_correction ≈ 4.2
 
         audit = _driver_audit_fields(anchor, target_step)
         @test _ANCHOR_FEATURE_DRIVER_BASIS ==
@@ -496,7 +497,7 @@ using .V24ServingFixture
             dst_times = collect((latest_dst_time - Hour(12)):Hour(1):latest_dst_time)
             dst_values = collect(range(-20.0, -44.0; length=length(dst_times)))
             cfg = LiveVerifyConfig(;
-                model=:v2,
+                model=:inertial_sindy,
                 horizon_hours=6,
                 log_path=joinpath(dir, "live_forecast_log.csv"),
                 report_path=joinpath(dir, "live_comparison_report.md"),
@@ -516,7 +517,7 @@ using .V24ServingFixture
             # The final four target hours lie beyond measured L1 coverage. With
             # dDst/dt = -2 nT/h, the served driver uses the exact four-hour
             # relaxation rather than the frozen-tail driver.
-            relax = exp(-4 / _v2_tail_tau(-2.0))
+            relax = exp(-4 / _operational_tail_tau(-2.0))
             @test row.target_step_Bz_nt ≈ -4.0 * relax atol=1e-12
             @test row.target_step_By_nt ≈ 1.0 * relax atol=1e-12
             @test row.target_step_Bz_nt != -4.0
@@ -525,7 +526,7 @@ using .V24ServingFixture
             # The logged served-model identity promises that the operational tail ran.
             # If that computation fails, issuance must fail closed before a row exists.
             failed_cfg = LiveVerifyConfig(;
-                model=:v2,
+                model=:inertial_sindy,
                 horizon_hours=6,
                 log_path=joinpath(dir, "failed_tail_log.csv"),
                 report_path=joinpath(dir, "failed_tail_report.md"),
@@ -541,13 +542,13 @@ using .V24ServingFixture
         end
     end
 
-    @testset "Served static stack and V2.3 shadow columns" begin
-        # The served stage is the V2.4 super-learner, and these cases isolate the stages *below* it:
-        # the static stack, its fallbacks and the shadow path. Pointing the bundle at a path that does
-        # not exist makes the V2.4 stage disclose `fallback:deployment_absent`, so the served center is
-        # the stack center and each case still tests the stage it names. The V2.4 stage has its own
+    @testset "Served static stack columns" begin
+        # The served stage is the super-learner, and these cases isolate the stage *below* it: the
+        # static stack and its fallbacks. Pointing the bundle at a path that does not exist makes the
+        # super-learner stage disclose `fallback:deployment_absent`, so the served center is the stack
+        # center and each case still tests the stage it names. The super-learner stage has its own
         # testset below, where the bundle is present.
-        absent_v2_4 = joinpath(mktempdir(), "no_v2_4_bundle")
+        absent_superlearner = joinpath(mktempdir(), "no_superlearner_bundle")
         # Synthetic feed with a full day of minute-cadence L1 coverage: enough history for the twelve
         # driver lags the analog key can consume, and enough forward coverage that the served tail
         # exercises both the measured and the relaxed branch.
@@ -569,7 +570,7 @@ using .V24ServingFixture
 
         function _issue_row(dir::AbstractString, name::AbstractString)
             cfg = LiveVerifyConfig(;
-                model=:v2,
+                model=:inertial_sindy,
                 horizon_hours=6,
                 log_path=joinpath(dir, "$(name).csv"),
                 report_path=joinpath(dir, "$(name).md"),
@@ -587,308 +588,104 @@ using .V24ServingFixture
 
         @testset "stack stage serves the published identity" begin
             mktempdir() do dir
-                # The shadow deployment is deliberately pointed away so this case isolates the served
-                # stage; the shadow path is exercised separately below.
-                row = withenv("SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent"),
-                              "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
-                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
+                row = withenv("SOLARSINDY_SUPERLEARNER_DEPLOY_DIR" => absent_superlearner) do
+                    reset_static_stack!(); reset_superlearner_serving!()
                     _issue_row(dir, "served_stack")
                 end
-                reset_v2_3_shadow!()
-                @test row.model_version == "v2.1"
-                @test row.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
+                @test row.model_version == "inertial_sindy"
+                @test row.sub_hourly_model_version == STATIC_STACK_SERVED_TAIL_VERSION
                 @test row.sub_hourly_model_version ==
-                      "v2.2+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia+staticstack(sindy60_fit407598)"
-                @test row.driver_assumption == V2_2_DRIVER_ASSUMPTION
-                @test row.v2_2_regime in ("quiet", "active_deepening", "recovery")
-                @test isfinite(row.v2_1_served_pred_dst_nt)
-                @test row.v2_2_pooled_fallback == false
+                      "staticstack+sindy60_fit407598+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+                @test row.driver_assumption == STATIC_STACK_DRIVER_ASSUMPTION
+                @test row.static_stack_regime in ("quiet", "active_deepening", "recovery")
+                @test isfinite(row.inertial_sindy_served_pred_dst_nt)
+                @test row.static_stack_pooled_fallback == false
                 # Independent recomputation: the served center is the stack cell applied to the six
                 # logged components, then projected.
-                stack = load_v22_serving_stack(V2_2_DEFAULT_STACK_PATH)
-                expected = v22_serving_center(
+                stack = load_static_stack(STATIC_STACK_DEFAULT_STACK_PATH)
+                expected = static_stack_serving_center(
                     stack; model_steps=Int(row.model_step_hours),
                     latest_dst=Float64(row.latest_dst_nt),
                     dst_delta_1h_nt=Float64(row.dst_delta_1h_nt),
                     vbsouth_mvm=Float64(row.VBsouth_mvm),
-                    served_v2_1=Float64(row.v2_1_served_pred_dst_nt),
-                    frozen_v2_1=Float64(row.v2_pred_dst_nt),
+                    served_inertial_sindy=Float64(row.inertial_sindy_served_pred_dst_nt),
+                    frozen_inertial_sindy=Float64(row.inertial_sindy_pred_dst_nt),
                     persistence=Float64(row.persistence_dst_nt),
                     burton=Float64(row.burton_dst_nt),
                     burton_full=Float64(row.burton_full_dst_nt),
                     obrien=Float64(row.obrien_dst_nt),
                 )
                 @test Float64(row.served_pred_dst_nt) ≈ expected.center atol=1e-12
-                @test String(row.v2_2_regime) == String(expected.regime)
-                @test Float64(row.v2_2_coupling_active_mvm) == expected.coupling_active_mvm
+                @test String(row.static_stack_regime) == String(expected.regime)
+                @test Float64(row.static_stack_coupling_active_mvm) == expected.coupling_active_mvm
                 # The coupling gate must be the archived gate, not the raw coupling.
-                @test Float64(row.v2_2_coupling_active_mvm) == v22_serving_coupling_active(
+                @test Float64(row.static_stack_coupling_active_mvm) == static_stack_serving_coupling_active(
                     Float64(row.VBsouth_mvm), Float64(row.dst_delta_1h_nt))
                 # The served band is shifted onto the served center, so the center stays inside it.
                 @test row.served_pred_dst_ci05_nt <= row.served_pred_dst_nt <=
                       row.served_pred_dst_ci95_nt
-                # The shadow columns exist and disclose why no shadow center was produced.
-                @test row.v23_shadow_model_version == V2_3_SHADOW_TAIL_VERSION
-                @test startswith(String(row.v23_status), "unavailable:")
-                @test ismissing(row.v23_shadow_pred_dst_nt)
-                @test ismissing(row.v23_raw_dst_nt)
-                @test row.v23_e_layer_applied == false
             end
         end
 
         @testset "artifact caches retry on a bounded cool-down" begin
             # A weights file that is briefly absent during a redeploy must heal without a daemon
             # restart, so the remembered failure has to expire.
-            @test V2_2_STACK_RETRY_SECONDS > 0.0
-            @test V2_3_SHADOW_RETRY_SECONDS >= V2_2_STACK_RETRY_SECONDS
+            @test STATIC_STACK_RETRY_SECONDS > 0.0
             mktempdir() do dir
-                staged = joinpath(dir, "operational_v2_2_stack.csv")
-                withenv("SOLARSINDY_V2_2_STACK" => staged,
-                        "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
-                    reset_v2_2_stack!()
+                staged = joinpath(dir, "static_stack.csv")
+                withenv("SOLARSINDY_STATIC_STACK" => staged,
+                        "SOLARSINDY_SUPERLEARNER_DEPLOY_DIR" => absent_superlearner) do
+                    reset_static_stack!()
                     absent = redirect_stderr(devnull) do
-                        _v2_2_stack()
+                        _static_stack()
                     end
                     @test absent.stack === nothing
-                    @test absent.status == "fallback_v2_1:stack_absent"
-                    cp(V2_2_DEFAULT_STACK_PATH, staged)
+                    @test absent.status == "fallback_inertial_sindy:stack_absent"
+                    cp(STATIC_STACK_DEFAULT_STACK_PATH, staged)
                     # Inside the cool-down the remembered failure is reused, so the file is not re-read.
-                    @test _v2_2_stack().stack === nothing
+                    @test _static_stack().stack === nothing
                     # Expiring the cool-down lets the now-present file load.
-                    _V2_2_STACK_STATUS_TIME[] -= 2 * V2_2_STACK_RETRY_SECONDS
-                    healed = _v2_2_stack()
+                    _STATIC_STACK_STATUS_TIME[] -= 2 * STATIC_STACK_RETRY_SECONDS
+                    healed = _static_stack()
                     @test healed.status == "ok"
-                    @test healed.stack.label == V22_SERVED_STACK_LABEL
+                    @test healed.stack.label == STATIC_STACK_SERVED_LABEL
                 end
-                reset_v2_2_stack!()
+                reset_static_stack!()
             end
         end
 
-        @testset "absent stack weights fall back to the V2.1 center and say so" begin
+        @testset "absent stack weights fall back to the inertial-SINDy center and say so" begin
             mktempdir() do dir
-                row = withenv("SOLARSINDY_V2_2_STACK" => joinpath(dir, "no_such_stack.csv"),
-                              "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent"),
-                              "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
-                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
+                row = withenv("SOLARSINDY_STATIC_STACK" => joinpath(dir, "no_such_stack.csv"),
+                              "SOLARSINDY_SUPERLEARNER_DEPLOY_DIR" => absent_superlearner) do
+                    reset_static_stack!(); reset_superlearner_serving!()
                     _issue_row(dir, "stack_absent")
                 end
-                reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
-                @test row.sub_hourly_model_version == V2_SERVED_TAIL_VERSION
-                @test row.driver_assumption == V2_DRIVER_ASSUMPTION
-                @test Float64(row.served_pred_dst_nt) == Float64(row.v2_1_served_pred_dst_nt)
-                @test ismissing(row.v2_2_regime)
+                reset_static_stack!(); reset_superlearner_serving!()
+                @test row.sub_hourly_model_version == OPERATIONAL_SERVED_TAIL_VERSION
+                @test row.driver_assumption == OPERATIONAL_DRIVER_ASSUMPTION
+                @test Float64(row.served_pred_dst_nt) == Float64(row.inertial_sindy_served_pred_dst_nt)
+                @test ismissing(row.static_stack_regime)
             end
         end
 
         @testset "tampered stack weights fall back rather than serve unpinned weights" begin
             mktempdir() do dir
-                tampered = joinpath(dir, "operational_v2_2_stack.csv")
-                cp(V2_2_DEFAULT_STACK_PATH, tampered)
+                tampered = joinpath(dir, "static_stack.csv")
+                cp(STATIC_STACK_DEFAULT_STACK_PATH, tampered)
                 open(tampered, "a") do io
                     write(io, "\n")
                 end
-                row = withenv("SOLARSINDY_V2_2_STACK" => tampered,
-                              "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent"),
-                              "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
-                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
+                row = withenv("SOLARSINDY_STATIC_STACK" => tampered,
+                              "SOLARSINDY_SUPERLEARNER_DEPLOY_DIR" => absent_superlearner) do
+                    reset_static_stack!(); reset_superlearner_serving!()
                     redirect_stderr(devnull) do
                         _issue_row(dir, "stack_tampered")
                     end
                 end
-                reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
-                @test row.sub_hourly_model_version == V2_SERVED_TAIL_VERSION
-                @test Float64(row.served_pred_dst_nt) == Float64(row.v2_1_served_pred_dst_nt)
-            end
-        end
-
-        @testset "shadow center is logged and never served" begin
-            shadow_dir = normpath(joinpath(@__DIR__, "..", "deploy", "v2_3_shadow"))
-            if !isdir(shadow_dir)
-                @test_skip "deploy/v2_3_shadow is absent; run validation/operational/v2_3_build_deploy.jl"
-            else
-                mktempdir() do dir
-                    row = withenv("SOLARSINDY_V2_3_SHADOW_DIR" => shadow_dir,
-                                  "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
-                        reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
-                        _issue_row(dir, "shadow_ok")
-                    end
-                    # The one-hour pre-layer center is cached per anchor and reused by every horizon of
-                    # the cycle, so its key must carry every input the center depends on. The
-                    # issue-anchor drivers and the memory features are both recomputed from the L1
-                    # stream at each issuance and both enter the blend, so the key is read here before
-                    # the reset drops it.
-                    step1_key = _V2_3_STEP1_CACHE[] === nothing ? nothing : _V2_3_STEP1_CACHE[][1]
-                    reset_v2_3_shadow!()
-                    @test step1_key !== nothing
-                    @test length(step1_key) == 11
-                    @test step1_key[end - 1] isa UInt          # issue-anchor drivers
-                    @test step1_key[end] isa UInt              # memory features
-                    # The key entries are content hashes: different values, and the same values under
-                    # different names, are different keys; integer and float spellings are not.
-                    @test _v2_3_named_float_hash((V = 400.0, Bz = -5.0)) !=
-                          _v2_3_named_float_hash((V = 400.0, Bz = -5.5))
-                    @test _v2_3_named_float_hash((V = 400.0, Bz = -5.0)) !=
-                          _v2_3_named_float_hash((Bz = 400.0, V = -5.0))
-                    @test _v2_3_named_float_hash((V = 400, Bz = -5)) ==
-                          _v2_3_named_float_hash((V = 400.0, Bz = -5.0))
-                    # The step-7 layer is a fitted ridge, and a fresh log has no matured one-hour
-                    # innovation, so the row is available and says the layer is still pending.
-                    @test row.v23_status == V2_3_SHADOW_STATUS_E_LAYER_PENDING
-                    @test row.v23_analog_k == 25
-                    @test isfinite(row.v23_raw_dst_nt)
-                    @test isfinite(row.v23_center_dst_nt)
-                    @test isfinite(row.v23_shadow_pred_dst_nt)
-                    @test row.v23_shadow_model_version == V2_3_SHADOW_TAIL_VERSION
-                    # A fresh log has no matured one-step innovation, so the error layer must be the
-                    # identity and the shadow center must equal the pre-layer center.
-                    @test row.v23_e_layer_applied == false
-                    @test Float64(row.v23_shadow_pred_dst_nt) ==
-                          Float64(row.v23_center_dst_nt)
-                    # The shadow forecast must not reach the served center or the served label.
-                    @test row.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
-                    @test Float64(row.served_pred_dst_nt) != Float64(row.v23_shadow_pred_dst_nt)
-                    # The one-hour pre-layer center is recorded even though one hour is not an issued
-                    # horizon of this row: it is the quantity the error layer's history is defined on.
-                    @test isfinite(row.v23_step1_center_dst_nt)
-                    @test Float64(row.v23_step1_center_dst_nt) != Float64(row.v23_center_dst_nt)
-                    # Hourly L1 coverage the analog key drew on, and the shipped manifest digest, so a
-                    # short feed and a silent redeploy are both visible in the row.
-                    @test Int(row.v23_history_hours) == V23_SOUTH_RUN_CAP_H
-                    @test String(row.v23_manifest_sha256) ==
-                          v23_serving_file_sha256(joinpath(shadow_dir, "manifest.csv"))
-                    # A fresh log holds one anchor and no matured one-hour target, so the history is
-                    # empty and the step's fitted layer is still pending.
-                    @test isempty(_v2_3_innovation_history(joinpath(dir, "shadow_ok.csv"),
-                                                          dst_times, dst_values))
-                    @test row.v23_status == V2_3_SHADOW_STATUS_E_LAYER_PENDING
-                    @test startswith(String(row.v23_status), V2_3_SHADOW_STATUS_OK)
-                    # The one-hour centers are keyed by anchor and read back from the log.
-                    centers = _v2_3_step1_centers(joinpath(dir, "shadow_ok.csv"))
-                    @test collect(keys(centers)) == [latest_dst_time]
-                    @test centers[latest_dst_time] == Float64(row.v23_step1_center_dst_nt)
-                end
-            end
-        end
-
-        @testset "the live error layer engages once six one-hour innovations mature" begin
-            # This is the chain the deployed candidate's error layer needs. Production issues wall
-            # horizons 1/2/3/6 at an anchor lag of one hour, so its model steps are 2/3/4/7 and no
-            # logged row ever carries a one-hour step: an error layer keyed on one-hour *rows* can
-            # never engage. Eight consecutive anchors are issued here so the sixth-lag block of the
-            # last anchor is complete, and the steps that carry a fitted layer must then apply it while
-            # the steps whose selected layer is the identity must not.
-            #
-            # Maturity comes from the observed Dst series the issuance already holds, not from a
-            # verification pass, so the cycles are issue-only.
-            shadow_dir = normpath(joinpath(@__DIR__, "..", "deploy", "v2_3_shadow"))
-            if !isdir(shadow_dir)
-                @test_skip "deploy/v2_3_shadow is absent; run validation/operational/v2_3_build_deploy.jl"
-            else
-                mktempdir() do dir
-                    log_path = joinpath(dir, "chain.csv")
-                    base_issue = DateTime(2026, 7, 15, 6, 30)
-                    # Deterministic, smooth, storm-scale Dst so consecutive anchors share values at
-                    # overlapping hours and the innovations are neither constant nor degenerate.
-                    dst_at(t) = -35.0 - 25.0 * sin(2π * (Dates.value(t - DateTime(2026, 1, 1)) /
-                                                         3_600_000) / 29)
-                    feed_start = base_issue - Hour(40)
-                    feed_stop = base_issue + Hour(12)
-                    all_sw = collect(feed_start:Minute(1):feed_stop)
-                    full_plasma = DataFrame(
-                        time_tag=all_sw,
-                        speed=[470.0 + 25.0 * sin(2π * k / 613) for k in eachindex(all_sw)],
-                        density=[6.0 + 0.9 * sin(2π * k / 421) for k in eachindex(all_sw)],
-                    )
-                    full_mag = DataFrame(
-                        time_tag=all_sw,
-                        bz_gsm=[-6.0 + 3.0 * sin(2π * k / 517) for k in eachindex(all_sw)],
-                        by_gsm=[1.5 * cos(2π * k / 379) for k in eachindex(all_sw)],
-                    )
-                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
-                    anchors = DateTime[]
-                    withenv("SOLARSINDY_V2_3_SHADOW_DIR" => shadow_dir,
-                            "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
-                        for cycle in 1:8
-                            issue = base_issue + Hour(cycle - 1)
-                            anchor = _floor_hour(issue) - Hour(1)
-                            push!(anchors, anchor)
-                            # Truncating the feed per cycle keeps each issuance causal: a later cycle's
-                            # upstream wind must not be visible to an earlier one.
-                            cycle_plasma = full_plasma[full_plasma.time_tag .<= issue, :]
-                            cycle_mag = full_mag[full_mag.time_tag .<= issue, :]
-                            cycle_dst_times = collect((anchor - Hour(24)):Hour(1):anchor)
-                            cycle_dst_values = dst_at.(cycle_dst_times)
-                            # The warm-up cycles only need to record their anchor's one-hour center;
-                            # the final cycle issues the full requested horizon set.
-                            horizons = cycle == 8 ? [1, 2, 3, 6] : [6]
-                            for h in horizons
-                                cfg = LiveVerifyConfig(;
-                                    model=:v2, horizon_hours=h, log_path=log_path,
-                                    report_path=joinpath(dir, "chain.md"),
-                                )
-                                inputs = prepare_issue_inputs(
-                                    cfg; issue_time=issue,
-                                    plasma_fn=() -> cycle_plasma, mag_fn=() -> cycle_mag,
-                                    dst_fn=() -> (cycle_dst_times, cycle_dst_values),
-                                )
-                                redirect_stdout(devnull) do
-                                    issue_forecast(cfg; inputs, write_trajectory=false,
-                                                   verbose=false)
-                                end
-                            end
-                        end
-                    end
-                    reset_v2_3_shadow!()
-                    log = CSV.read(log_path, DataFrame)
-                    @test nrow(log) == 7 + 4
-
-                    # The chain the layer consumes: one center per anchor, and six matured innovations
-                    # at the final anchor.
-                    final_anchor = last(anchors)
-                    final_dst_times = collect((final_anchor - Hour(24)):Hour(1):final_anchor)
-                    centers = _v2_3_step1_centers(log_path)
-                    @test length(centers) == 8
-                    @test all(a -> haskey(centers, a), anchors)
-                    history = _v2_3_innovation_history(log_path, final_dst_times,
-                                                       dst_at.(final_dst_times))
-                    block = v23_serving_innovation_lags(final_anchor, history)
-                    @test block.ok
-                    @test length(unique(block.values)) > 1
-                    # Independent recomputation of one lag from its two logged ingredients.
-                    lag1 = final_anchor - Hour(1)
-                    @test history[lag1] ≈ dst_at(lag1 + Hour(1)) - centers[lag1] atol=0
-
-                    logged_anchor = _parse_dt.(string.(log.latest_dst_time_utc))
-                    final = log[logged_anchor .== final_anchor, :]
-                    @test nrow(final) == 4
-                    by_step = Dict(Int(r.model_step_hours) => r for r in eachrow(final))
-                    @test sort(collect(keys(by_step))) == [2, 3, 4, 7]
-                    # Steps 2 and 7 carry a fitted layer; steps 3 and 4 are the identity by selection.
-                    for step in (2, 7)
-                        @test by_step[step].v23_e_layer_applied == true
-                        @test by_step[step].v23_status == "ok"
-                        @test Float64(by_step[step].v23_shadow_pred_dst_nt) !=
-                              Float64(by_step[step].v23_center_dst_nt)
-                    end
-                    for step in (3, 4)
-                        @test by_step[step].v23_e_layer_applied == false
-                        @test by_step[step].v23_status == "ok"
-                        @test Float64(by_step[step].v23_shadow_pred_dst_nt) ==
-                              Float64(by_step[step].v23_center_dst_nt)
-                    end
-                    # Every row of the cycle shares one anchor, hence one one-hour center.
-                    @test length(unique(Float64.(final.v23_step1_center_dst_nt))) == 1
-                    # The shadow center never reaches the served center or the served label.
-                    @test all(final.sub_hourly_model_version .== V2_2_SERVED_TAIL_VERSION)
-                    @test all(Float64.(final.served_pred_dst_nt) .!=
-                              Float64.(final.v23_shadow_pred_dst_nt))
-
-                    # An earlier cycle, whose sixth lag does not exist yet, must still be pending: the
-                    # layer must not engage on a partial block.
-                    early = log[logged_anchor .== first(anchors), :]
-                    @test all(early.v23_e_layer_applied .== false)
-                    @test all(early.v23_status .== V2_3_SHADOW_STATUS_E_LAYER_PENDING)
-                end
+                reset_static_stack!(); reset_superlearner_serving!()
+                @test row.sub_hourly_model_version == OPERATIONAL_SERVED_TAIL_VERSION
+                @test Float64(row.served_pred_dst_nt) == Float64(row.inertial_sindy_served_pred_dst_nt)
             end
         end
 
@@ -898,150 +695,75 @@ using .V24ServingFixture
             # the label. The default must therefore be refusal, and an accepted unpinned load must not
             # be published under the pinned identity.
             mktempdir() do dir
-                staged = joinpath(dir, "operational_v2_2_stack.csv")
-                cp(V2_2_DEFAULT_STACK_PATH, staged)
+                staged = joinpath(dir, "static_stack.csv")
+                cp(STATIC_STACK_DEFAULT_STACK_PATH, staged)
                 chmod(staged, 0o644)
-                refused = withenv("SOLARSINDY_V2_2_STACK" => staged,
-                                  "SOLARSINDY_V2_2_STACK_SHA256" => "",
+                refused = withenv("SOLARSINDY_STATIC_STACK" => staged,
+                                  "SOLARSINDY_STATIC_STACK_SHA256" => "",
                                   "SOLARSINDY_ALLOW_UNPINNED_STACK" => nothing,
-                                  "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent"),
-                                  "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
-                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
+                                  "SOLARSINDY_SUPERLEARNER_DEPLOY_DIR" => absent_superlearner) do
+                    reset_static_stack!(); reset_superlearner_serving!()
                     redirect_stderr(devnull) do
                         _issue_row(dir, "stack_unpinned_refused")
                     end
                 end
-                @test String(refused.v2_2_status) == "fallback_v2_1:stack_unpinned"
-                @test refused.sub_hourly_model_version == V2_SERVED_TAIL_VERSION
+                @test String(refused.static_stack_status) == "fallback_inertial_sindy:stack_unpinned"
+                @test refused.sub_hourly_model_version == OPERATIONAL_SERVED_TAIL_VERSION
                 @test Float64(refused.served_pred_dst_nt) ==
-                      Float64(refused.v2_1_served_pred_dst_nt)
-                @test ismissing(refused.v2_2_regime)
+                      Float64(refused.inertial_sindy_served_pred_dst_nt)
+                @test ismissing(refused.static_stack_regime)
 
-                accepted = withenv("SOLARSINDY_V2_2_STACK" => staged,
-                                   "SOLARSINDY_V2_2_STACK_SHA256" => "",
+                accepted = withenv("SOLARSINDY_STATIC_STACK" => staged,
+                                   "SOLARSINDY_STATIC_STACK_SHA256" => "",
                                    "SOLARSINDY_ALLOW_UNPINNED_STACK" => "1",
-                                   "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent"),
-                                   "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
-                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
+                                   "SOLARSINDY_SUPERLEARNER_DEPLOY_DIR" => absent_superlearner) do
+                    reset_static_stack!(); reset_superlearner_serving!()
                     redirect_stderr(devnull) do
                         _issue_row(dir, "stack_unpinned_accepted")
                     end
                 end
-                reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
-                @test String(accepted.v2_2_status) == V2_2_STACK_OK_UNPINNED_STATUS
+                reset_static_stack!(); reset_superlearner_serving!()
+                @test String(accepted.static_stack_status) == STATIC_STACK_OK_UNPINNED_STATUS
                 # The center is a stack center, so the driver assumption is the stack assumption, but
                 # the identity must not claim the pinned product.
-                @test accepted.sub_hourly_model_version == V2_2_UNPINNED_SERVED_TAIL_VERSION
-                @test accepted.sub_hourly_model_version != V2_2_SERVED_TAIL_VERSION
-                @test accepted.driver_assumption == V2_2_DRIVER_ASSUMPTION
-                @test accepted.v2_2_regime in ("quiet", "active_deepening", "recovery")
+                @test accepted.sub_hourly_model_version == STATIC_STACK_UNPINNED_SERVED_TAIL_VERSION
+                @test accepted.sub_hourly_model_version != STATIC_STACK_SERVED_TAIL_VERSION
+                @test accepted.driver_assumption == STATIC_STACK_DRIVER_ASSUMPTION
+                @test accepted.static_stack_regime in ("quiet", "active_deepening", "recovery")
                 @test Float64(accepted.served_pred_dst_nt) !=
-                      Float64(accepted.v2_1_served_pred_dst_nt)
+                      Float64(accepted.inertial_sindy_served_pred_dst_nt)
 
-                # The static-stack center is expert ten of the V2.4 stack. Weights that carry no
+                # The static-stack center is expert ten of the super-learner stack. Weights that carry no
                 # digest pin are not the fitted stack the super-learner was trained against, so the
                 # combination cannot be formed from them: a stage that served it anyway would publish
-                # unpinned weights under the pinned V2.4 identity, which is exactly the laundering the
+                # unpinned weights under the pinned super-learner identity, which is exactly the laundering the
                 # separate unpinned label exists to prevent.
-                bundle = build_v24_fixture_bundle(joinpath(dir, "v24_unpinned_bundle"))
-                laundered = withenv("SOLARSINDY_V2_2_STACK" => staged,
-                                    "SOLARSINDY_V2_2_STACK_SHA256" => "",
+                bundle = build_superlearner_fixture_bundle(joinpath(dir, "superlearner_unpinned_bundle"))
+                laundered = withenv("SOLARSINDY_STATIC_STACK" => staged,
+                                    "SOLARSINDY_STATIC_STACK_SHA256" => "",
                                     "SOLARSINDY_ALLOW_UNPINNED_STACK" => "1",
-                                    "SOLARSINDY_V2_3_SHADOW_DIR" => joinpath(dir, "absent"),
-                                    "SOLARSINDY_V2_4_DEPLOY_DIR" => bundle.dir) do
-                    reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
+                                    "SOLARSINDY_SUPERLEARNER_DEPLOY_DIR" => bundle.dir) do
+                    reset_static_stack!(); reset_superlearner_serving!()
                     redirect_stderr(devnull) do
-                        _issue_row(dir, "stack_unpinned_with_v24")
+                        _issue_row(dir, "stack_unpinned_with_superlearner")
                     end
                 end
-                reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
-                @test String(laundered.v2_2_status) == V2_2_STACK_OK_UNPINNED_STATUS
-                @test String(laundered.v24_status) == "fallback:static_expert_unpinned"
-                @test ismissing(laundered.v24_pred_dst_nt)
-                @test laundered.sub_hourly_model_version == V2_2_UNPINNED_SERVED_TAIL_VERSION
-                @test laundered.sub_hourly_model_version != V2_4_SERVED_TAIL_VERSION
-                @test laundered.driver_assumption == V2_2_DRIVER_ASSUMPTION
+                reset_static_stack!(); reset_superlearner_serving!()
+                @test String(laundered.static_stack_status) == STATIC_STACK_OK_UNPINNED_STATUS
+                @test String(laundered.superlearner_status) == "fallback:static_expert_unpinned"
+                @test ismissing(laundered.superlearner_pred_dst_nt)
+                @test laundered.sub_hourly_model_version == STATIC_STACK_UNPINNED_SERVED_TAIL_VERSION
+                @test laundered.sub_hourly_model_version != SUPERLEARNER_SERVED_TAIL_VERSION
+                @test laundered.driver_assumption == STATIC_STACK_DRIVER_ASSUMPTION
                 @test Float64(laundered.served_pred_dst_nt) ==
-                      Float64(laundered.v2_2_stack_pred_dst_nt)
+                      Float64(laundered.static_stack_pred_dst_nt)
             end
         end
 
-        @testset "a short L1 feed fails the analog key closed and records its depth" begin
-            # The analog key needs hourly at-Earth driver means for its seven mandatory lags, which at
-            # a one-hour anchor lag reach back to the issue hour minus seven plus the ballistic transit
-            # and the hourly averaging window: roughly nine and a half hours of upstream minute data.
-            # A feed that stops short of that must fail closed with a named missing lag rather than
-            # impute a key that silently retrieves different archive analogs, and the recorded coverage
-            # depth must show how far the feed actually reached.
-            shadow_dir = normpath(joinpath(@__DIR__, "..", "deploy", "v2_3_shadow"))
-            if !isdir(shadow_dir)
-                @test_skip "deploy/v2_3_shadow is absent; run validation/operational/v2_3_build_deploy.jl"
-            else
-                function _short_feed_row(dir::AbstractString, name::AbstractString, span::Hour)
-                    issue = DateTime(2026, 7, 15, 12, 30)
-                    feed_times = collect((issue - span):Minute(1):issue)
-                    feed_plasma = DataFrame(
-                        time_tag=feed_times,
-                        speed=[470.0 + 20.0 * sin(2π * k / 613) for k in eachindex(feed_times)],
-                        density=[6.0 + 0.8 * sin(2π * k / 421) for k in eachindex(feed_times)],
-                    )
-                    feed_mag = DataFrame(
-                        time_tag=feed_times,
-                        bz_gsm=[-6.0 + 3.0 * sin(2π * k / 517) for k in eachindex(feed_times)],
-                        by_gsm=[1.5 * cos(2π * k / 379) for k in eachindex(feed_times)],
-                    )
-                    feed_anchor = _floor_hour(issue) - Hour(1)
-                    feed_dst_times = collect((feed_anchor - Hour(24)):Hour(1):feed_anchor)
-                    feed_dst_values = collect(range(-30.0, -78.0;
-                                                   length=length(feed_dst_times)))
-                    cfg = LiveVerifyConfig(;
-                        model=:v2, horizon_hours=6, log_path=joinpath(dir, "$(name).csv"),
-                        report_path=joinpath(dir, "$(name).md"),
-                    )
-                    return withenv("SOLARSINDY_V2_3_SHADOW_DIR" => shadow_dir,
-                                   "SOLARSINDY_V2_4_DEPLOY_DIR" => absent_v2_4) do
-                        reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
-                        inputs = prepare_issue_inputs(
-                            cfg; issue_time=issue,
-                            plasma_fn=() -> feed_plasma, mag_fn=() -> feed_mag,
-                            dst_fn=() -> (feed_dst_times, feed_dst_values),
-                        )
-                        redirect_stdout(devnull) do
-                            issue_forecast(cfg; inputs, write_trajectory=false, verbose=false)
-                        end
-                        CSV.read(cfg.log_path, DataFrame)[1, :]
-                    end
-                end
-
-                mktempdir() do dir
-                    short = _short_feed_row(dir, "feed_8h", Hour(8))
-                    reset_v2_3_shadow!()
-                    @test startswith(String(short.v23_status), "unavailable:missing_driver_lag")
-                    @test ismissing(short.v23_shadow_pred_dst_nt)
-                    @test ismissing(short.v23_step1_center_dst_nt)
-                    # The recorded depth is short of the mandatory lags, which is why the key failed.
-                    @test Int(short.v23_history_hours) < V23_HISTORY_LAGS_H
-                    @test Int(short.v23_history_hours) < V23_SOUTH_RUN_CAP_H
-                    # A short shadow feed must not touch the served product.
-                    @test short.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
-                    @test isfinite(short.served_pred_dst_nt)
-
-                    # Just past the boundary the key is admissible again, and the recorded depth says
-                    # the run-length window is still truncated: a ten-hour feed supplies the mandatory
-                    # lags but not all twelve.
-                    boundary = _short_feed_row(dir, "feed_10h", Hour(10))
-                    reset_v2_3_shadow!()
-                    @test startswith(String(boundary.v23_status), V2_3_SHADOW_STATUS_OK)
-                    @test Int(boundary.v23_history_hours) >= V23_HISTORY_LAGS_H
-                    @test Int(boundary.v23_history_hours) < V23_SOUTH_RUN_CAP_H
-                    @test isfinite(boundary.v23_step1_center_dst_nt)
-                end
-            end
-        end
     end
 
-    @testset "Served V2.4e super-learner stage" begin
-        # The served stage is the V2.4e super-learner over the ten experts, the static V2.2 stack among
+    @testset "Served super-learner stage" begin
+        # The served stage is the super-learner over the ten experts, the static stack among
         # them. These cases drive it on a synthetic bundle (the real bundle's numbers are the study's
         # evidence, and the offline identity oracle is what ties this code to them) and then confirm
         # that the deployed bundle serves at all.
@@ -1064,11 +786,10 @@ using .V24ServingFixture
         latest_dst_time = _floor_hour(issue_time) - Hour(1)
         dst_times = collect((latest_dst_time - Hour(24)):Hour(1):latest_dst_time)
         dst_values = collect(range(-30.0, -78.0; length=length(dst_times)))
-        shadow_absent = joinpath(mktempdir(), "no_v2_3_shadow")
 
         # One synthetic feed, shared by the end-to-end rows and by the served-stage status matrix, so
         # both exercise the same information set.
-        function _v24_feed(; span::Period=Hour(24), dst_span::Period=Hour(24))
+        function _superlearner_feed(; span::Period=Hour(24), dst_span::Period=Hour(24))
             feed_times = collect((issue_time - span):Minute(1):issue_time)
             feed_plasma = DataFrame(
                 time_tag=feed_times,
@@ -1086,10 +807,10 @@ using .V24ServingFixture
                     dst_values=feed_dst_values)
         end
 
-        function _v24_row(dir::AbstractString, name::AbstractString; bundle_dir,
-                          stack_path=V2_2_DEFAULT_STACK_PATH, span::Period=Hour(24),
-                          dst_span::Period=Hour(24), model::Symbol=:v2, horizon::Int=6)
-            feed = _v24_feed(; span=span, dst_span=dst_span)
+        function _superlearner_row(dir::AbstractString, name::AbstractString; bundle_dir,
+                          stack_path=STATIC_STACK_DEFAULT_STACK_PATH, span::Period=Hour(24),
+                          dst_span::Period=Hour(24), model::Symbol=:inertial_sindy, horizon::Int=6)
+            feed = _superlearner_feed(; span=span, dst_span=dst_span)
             feed_plasma = feed.plasma
             feed_mag = feed.mag
             feed_dst_times = feed.dst_times
@@ -1098,10 +819,9 @@ using .V24ServingFixture
                 model=model, horizon_hours=horizon, log_path=joinpath(dir, "$(name).csv"),
                 report_path=joinpath(dir, "$(name).md"),
             )
-            return withenv("SOLARSINDY_V2_4_DEPLOY_DIR" => bundle_dir,
-                           "SOLARSINDY_V2_2_STACK" => stack_path,
-                           "SOLARSINDY_V2_3_SHADOW_DIR" => shadow_absent) do
-                reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
+            return withenv("SOLARSINDY_SUPERLEARNER_DEPLOY_DIR" => bundle_dir,
+                           "SOLARSINDY_STATIC_STACK" => stack_path) do
+                reset_static_stack!(); reset_superlearner_serving!()
                 inputs = prepare_issue_inputs(
                     cfg; issue_time,
                     plasma_fn=() -> feed_plasma, mag_fn=() -> feed_mag,
@@ -1113,76 +833,76 @@ using .V24ServingFixture
                     end
                     CSV.read(cfg.log_path, DataFrame)[1, :]
                 end
-                reset_v2_2_stack!(); reset_v2_3_shadow!(); reset_v2_4_serving!()
+                reset_static_stack!(); reset_superlearner_serving!()
                 return row
             end
         end
 
         mktempdir() do root
-            fixture = build_v24_fixture_bundle(joinpath(root, "bundle"))
-            artifacts = load_v24_serving_artifacts(fixture.dir)
-            v2_1_calibration = read_operational_v2_calibration(
-                operational_calibration_artifacts(OPERATIONAL_V2_1_MODEL_VERSION).point_csv)
+            fixture = build_superlearner_fixture_bundle(joinpath(root, "bundle"))
+            artifacts = load_superlearner_serving_artifacts(fixture.dir)
+            inertial_sindy_calibration = read_inertial_sindy_calibration(
+                operational_calibration_artifacts(OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION).point_csv)
 
             @testset "the super-learner serves the published identity" begin
-                row = _v24_row(root, "v24_served"; bundle_dir=fixture.dir)
-                @test row.model_version == "v2.1"
-                @test row.sub_hourly_model_version == V2_4_SERVED_TAIL_VERSION
+                row = _superlearner_row(root, "superlearner_served"; bundle_dir=fixture.dir)
+                @test row.model_version == "inertial_sindy"
+                @test row.sub_hourly_model_version == SUPERLEARNER_SERVED_TAIL_VERSION
                 @test row.sub_hourly_model_version ==
-                      "v2.4+sindy20x11+superlearner10floor+conformal"
-                @test row.driver_assumption == V2_4_DRIVER_ASSUMPTION
-                @test row.v24_status == "ok"
-                @test row.v24_model_version == V2_4_SERVED_TAIL_VERSION
-                @test row.v24_manifest_sha256 == artifacts.manifest_sha256
+                      "dst-superlearner+sindyfloor+conformal"
+                @test row.driver_assumption == SUPERLEARNER_DRIVER_ASSUMPTION
+                @test row.superlearner_status == "ok"
+                @test row.superlearner_model_version == SUPERLEARNER_SERVED_TAIL_VERSION
+                @test row.superlearner_manifest_sha256 == artifacts.manifest_sha256
                 # Every stage of the fallback chain stays logged, which is what keeps the published
                 # severity depth-safe and the change auditable row by row.
-                @test isfinite(row.v2_1_served_pred_dst_nt)
-                @test isfinite(row.v2_2_stack_pred_dst_nt)
-                @test row.v2_2_status == "ok"
-                @test isfinite(row.v24_l1_center_dst_nt)
-                @test isfinite(row.v24_t1r_pred_dst_nt)
+                @test isfinite(row.inertial_sindy_served_pred_dst_nt)
+                @test isfinite(row.static_stack_pred_dst_nt)
+                @test row.static_stack_status == "ok"
+                @test isfinite(row.superlearner_l1_center_dst_nt)
+                @test isfinite(row.superlearner_t1r_pred_dst_nt)
                 @test isfinite(row.direct_gbm_pred_dst_nt)
                 @test isfinite(row.climatology_pred_dst_nt)
-                @test Int(row.v24_history_hours) == V24_SERVING_DRIVER_LAGS_H
-                @test row.v24_regime_cell isa AbstractString
-                @test occursin("/", String(row.v24_regime_cell))
-                # The served center is the V2.4 center, not the stack center it replaced.
-                @test Float64(row.served_pred_dst_nt) == Float64(row.v24_pred_dst_nt)
-                @test Float64(row.served_pred_dst_nt) != Float64(row.v2_2_stack_pred_dst_nt)
+                @test Int(row.superlearner_history_hours) == SUPERLEARNER_SERVING_DRIVER_LAGS_H
+                @test row.superlearner_regime_cell isa AbstractString
+                @test occursin("/", String(row.superlearner_regime_cell))
+                # The served center is the super-learner center, not the stack center it replaced.
+                @test Float64(row.served_pred_dst_nt) == Float64(row.superlearner_pred_dst_nt)
+                @test Float64(row.served_pred_dst_nt) != Float64(row.static_stack_pred_dst_nt)
                 # The served band is the study's conformal band for this center, disclosed as such.
-                @test row.interval_source == V2_4_INTERVAL_SOURCE
-                # The V2.4e override rewrites `interval_source`, so the batch policy behind the
+                @test row.interval_source == SUPERLEARNER_INTERVAL_SOURCE
+                # The super-learner override rewrites `interval_source`, so the batch policy behind the
                 # frozen-tail band columns is disclosed separately. On a cold log that policy is the
                 # static conformal fallback; the adaptive counterpart is pinned end to end by the
                 # mature-log cycle test beside the monitor.
                 @test row.frozen_tail_interval_source == "conformal"
                 @test row.frozen_tail_interval_source != row.interval_source
-                @test Float64(row.served_pred_dst_ci05_nt) == Float64(row.v24_ci05_nt)
-                @test Float64(row.served_pred_dst_ci95_nt) == Float64(row.v24_ci95_nt)
+                @test Float64(row.served_pred_dst_ci05_nt) == Float64(row.superlearner_ci05_nt)
+                @test Float64(row.served_pred_dst_ci95_nt) == Float64(row.superlearner_ci95_nt)
                 @test row.served_pred_dst_ci05_nt < row.served_pred_dst_nt <
                       row.served_pred_dst_ci95_nt
                 # The physical projection is logged, not inferred: the +50/-2000 nT clamp can act on a
                 # real anchor state, and without this column a projected center would be
                 # indistinguishable from an unprojected one.
-                @test row.v24_projection_applied == false
+                @test row.superlearner_projection_applied == false
                 # Each predecessor's own band edge is logged, because the published watch edge is the
                 # deepest of them and the served edge. Both partners carry the same half-width, which
-                # is the band the pre-V2.4 machinery would have served either center under.
-                @test isfinite(row.v2_1_served_ci05_dst_nt)
-                @test isfinite(row.v2_2_stack_ci05_dst_nt)
-                @test Float64(row.v2_1_served_pred_dst_nt) -
-                      Float64(row.v2_1_served_ci05_dst_nt) ≈
-                      Float64(row.v2_2_stack_pred_dst_nt) -
-                      Float64(row.v2_2_stack_ci05_dst_nt) atol=1e-12
-                @test Float64(row.v2_1_served_ci05_dst_nt) <
-                      Float64(row.v2_1_served_pred_dst_nt)
+                # is the band the pre-super-learner machinery would have served either center under.
+                @test isfinite(row.inertial_sindy_served_ci05_dst_nt)
+                @test isfinite(row.static_stack_ci05_dst_nt)
+                @test Float64(row.inertial_sindy_served_pred_dst_nt) -
+                      Float64(row.inertial_sindy_served_ci05_dst_nt) ≈
+                      Float64(row.static_stack_pred_dst_nt) -
+                      Float64(row.static_stack_ci05_dst_nt) atol=1e-12
+                @test Float64(row.inertial_sindy_served_ci05_dst_nt) <
+                      Float64(row.inertial_sindy_served_pred_dst_nt)
                 # The served conformal half-width is a different number from the band the predecessors
                 # served under, which is exactly why the watch edge cannot be the served edge shifted
                 # by the change in the center.
                 @test !isapprox(Float64(row.served_pred_dst_nt) -
                                 Float64(row.served_pred_dst_ci05_nt),
-                                Float64(row.v2_1_served_pred_dst_nt) -
-                                Float64(row.v2_1_served_ci05_dst_nt); atol=1e-9)
+                                Float64(row.inertial_sindy_served_pred_dst_nt) -
+                                Float64(row.inertial_sindy_served_ci05_dst_nt); atol=1e-9)
                 # Independent recomputation of the whole served stage from the logged state: the frozen
                 # expert is the held-driver rollout (recomputed here, as the engine recomputes it), the
                 # other experts are the logged panel — the static stack among them — and the cell and
@@ -1199,125 +919,122 @@ using .V24ServingFixture
                              burton=Float64(row.burton_dst_nt),
                              burton_full=Float64(row.burton_full_dst_nt),
                              obrien=Float64(row.obrien_dst_nt))
-                frozen = v23_serving_frozen_center(
-                    artifacts.analog; v2_1_calibration=v2_1_calibration, issue_drv=drivers,
+                frozen = analog_serving_frozen_center(
+                    artifacts.analog; inertial_sindy_calibration=inertial_sindy_calibration, issue_drv=drivers,
                     anchor_dst_star=Float64(row.anchor_dst_star_nt),
                     latest_dst=Float64(row.latest_dst_nt), memory=memory, baselines=baselines,
                     model_steps=Int(row.model_step_hours),
                     anchor_time=_parse_dt(row.latest_dst_time_utc),
                 )
-                experts = (served_v2_1=Float64(row.v2_1_served_pred_dst_nt),
-                           frozen_v2_1=frozen.center,
-                           t1r_analog=Float64(row.v24_t1r_pred_dst_nt),
+                experts = (served_inertial_sindy=Float64(row.inertial_sindy_served_pred_dst_nt),
+                           frozen_inertial_sindy=frozen.center,
+                           t1r_analog=Float64(row.superlearner_t1r_pred_dst_nt),
                            persistence=Float64(row.persistence_dst_nt),
                            burton=Float64(row.burton_dst_nt),
                            burton_full=Float64(row.burton_full_dst_nt),
                            obrien=Float64(row.obrien_dst_nt),
                            direct_gbm=Float64(row.direct_gbm_pred_dst_nt),
                            climatology=Float64(row.climatology_pred_dst_nt),
-                           static_v2_2=Float64(row.v2_2_stack_pred_dst_nt))
-                expected = v24_serving_center(
+                           static_stack=Float64(row.static_stack_pred_dst_nt))
+                expected = superlearner_serving_center(
                     artifacts; model_steps=Int(row.model_step_hours),
                     latest_dst=Float64(row.latest_dst_nt),
                     dst_delta_1h_nt=Float64(row.dst_delta_1h_nt),
                     vbsouth_mvm=Float64(row.VBsouth_mvm), experts=experts,
                 )
-                @test Float64(row.v24_l1_center_dst_nt) ≈ expected.l1_center atol=1e-12
-                @test Float64(row.v24_pred_dst_nt) ≈ expected.center atol=1e-12
-                @test Float64(row.v24_ci05_nt) ≈ expected.ci05_nt atol=1e-12
-                @test Float64(row.v24_ci95_nt) ≈ expected.ci95_nt atol=1e-12
-                @test row.v24_guard_applied == expected.guard_applied
-                @test row.v24_projection_applied == expected.projection_applied
+                @test Float64(row.superlearner_l1_center_dst_nt) ≈ expected.l1_center atol=1e-12
+                @test Float64(row.superlearner_pred_dst_nt) ≈ expected.center atol=1e-12
+                @test Float64(row.superlearner_ci05_nt) ≈ expected.ci05_nt atol=1e-12
+                @test Float64(row.superlearner_ci95_nt) ≈ expected.ci95_nt atol=1e-12
+                @test row.superlearner_guard_applied == expected.guard_applied
+                @test row.superlearner_projection_applied == expected.projection_applied
                 # The deployed bundle carries no point-forecast guard, so the published center is the
                 # stack center itself — unless the physical projection acted, which is a separate
                 # stage and is logged separately. The invariant is therefore conditional on the
                 # projection flag rather than assumed unconditionally.
-                @test row.v24_guard_applied == false
-                if !row.v24_projection_applied
-                    @test Float64(row.v24_pred_dst_nt) ≈
-                          Float64(row.v24_l1_center_dst_nt) atol=1e-12
+                @test row.superlearner_guard_applied == false
+                if !row.superlearner_projection_applied
+                    @test Float64(row.superlearner_pred_dst_nt) ≈
+                          Float64(row.superlearner_l1_center_dst_nt) atol=1e-12
                 end
-                @test row.v24_deepening_cell == expected.deepening_cell
-                @test String(row.v24_regime_cell) == expected.regime_cell
-                @test row.v24_pooled_fallback == expected.used_pooled_fallback
+                @test row.superlearner_deepening_cell == expected.deepening_cell
+                @test String(row.superlearner_regime_cell) == expected.regime_cell
+                @test row.superlearner_pooled_fallback == expected.used_pooled_fallback
                 # The frozen expert is the held-driver rollout, not the logged core center that admits
                 # L1-measured hours: substituting the logged column moves the stack center, which is
                 # exactly the mistake the recomputation above rules out.
-                @test frozen.center != Float64(row.v2_pred_dst_nt)
-                @test v24_serving_center(
+                @test frozen.center != Float64(row.inertial_sindy_pred_dst_nt)
+                @test superlearner_serving_center(
                     artifacts; model_steps=Int(row.model_step_hours),
                     latest_dst=Float64(row.latest_dst_nt),
                     dst_delta_1h_nt=Float64(row.dst_delta_1h_nt),
                     vbsouth_mvm=Float64(row.VBsouth_mvm),
-                    experts=merge(experts, (frozen_v2_1=Float64(row.v2_pred_dst_nt),)),
+                    experts=merge(experts, (frozen_inertial_sindy=Float64(row.inertial_sindy_pred_dst_nt),)),
                 ).l1_center != expected.l1_center
                 # The static stack is a weighted input of the served center: perturbing it alone must
                 # move the center, which is what distinguishes an expert from a discarded reference.
-                @test v24_serving_center(
+                @test superlearner_serving_center(
                     artifacts; model_steps=Int(row.model_step_hours),
                     latest_dst=Float64(row.latest_dst_nt),
                     dst_delta_1h_nt=Float64(row.dst_delta_1h_nt),
                     vbsouth_mvm=Float64(row.VBsouth_mvm),
                     experts=merge(experts,
-                                  (static_v2_2=Float64(row.v2_2_stack_pred_dst_nt) - 25.0,)),
+                                  (static_stack=Float64(row.static_stack_pred_dst_nt) - 25.0,)),
                 ).l1_center != expected.l1_center
-                # The V2.3 shadow stays a shadow: it is neither the served center nor the served label.
-                @test row.v23_shadow_model_version == V2_3_SHADOW_TAIL_VERSION
-                @test startswith(String(row.v23_status), "unavailable:")
             end
 
             @testset "an absent bundle falls back to the static stack and says so" begin
-                row = _v24_row(root, "v24_absent"; bundle_dir=joinpath(root, "no_bundle"))
-                @test row.v24_status == "fallback:deployment_absent"
-                @test row.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
-                @test row.driver_assumption == V2_2_DRIVER_ASSUMPTION
-                @test Float64(row.served_pred_dst_nt) == Float64(row.v2_2_stack_pred_dst_nt)
-                @test ismissing(row.v24_pred_dst_nt)
-                @test ismissing(row.v24_ci05_nt)
-                @test row.v24_guard_applied == false
-                @test row.v24_projection_applied == false
-                @test row.interval_source != V2_4_INTERVAL_SOURCE
+                row = _superlearner_row(root, "superlearner_absent"; bundle_dir=joinpath(root, "no_bundle"))
+                @test row.superlearner_status == "fallback:deployment_absent"
+                @test row.sub_hourly_model_version == STATIC_STACK_SERVED_TAIL_VERSION
+                @test row.driver_assumption == STATIC_STACK_DRIVER_ASSUMPTION
+                @test Float64(row.served_pred_dst_nt) == Float64(row.static_stack_pred_dst_nt)
+                @test ismissing(row.superlearner_pred_dst_nt)
+                @test ismissing(row.superlearner_ci05_nt)
+                @test row.superlearner_guard_applied == false
+                @test row.superlearner_projection_applied == false
+                @test row.interval_source != SUPERLEARNER_INTERVAL_SOURCE
                 # The stack is the stage actually serving this row, so its logged edge must be the
                 # published edge itself: the depth-safe minimum is then idempotent by construction.
-                @test Float64(row.v2_2_stack_ci05_dst_nt) ≈
+                @test Float64(row.static_stack_ci05_dst_nt) ≈
                       Float64(row.served_pred_dst_ci05_nt) atol=1e-12
             end
 
             @testset "a tampered bundle is refused rather than served" begin
-                tampered = build_v24_fixture_bundle(joinpath(root, "tampered");
+                tampered = build_superlearner_fixture_bundle(joinpath(root, "tampered");
                                                     mutate=:tampered_stack_file)
-                row = _v24_row(root, "v24_tampered"; bundle_dir=tampered.dir)
-                @test row.v24_status == "fallback:deployment_invalid"
-                @test row.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
-                @test Float64(row.served_pred_dst_nt) == Float64(row.v2_2_stack_pred_dst_nt)
+                row = _superlearner_row(root, "superlearner_tampered"; bundle_dir=tampered.dir)
+                @test row.superlearner_status == "fallback:deployment_invalid"
+                @test row.sub_hourly_model_version == STATIC_STACK_SERVED_TAIL_VERSION
+                @test Float64(row.served_pred_dst_nt) == Float64(row.static_stack_pred_dst_nt)
             end
 
             @testset "without the static-stack expert the stage cannot act" begin
                 # The static-stack center is expert ten of the served stack, so a cycle whose stack
-                # stage fell back cannot form the combination at all and must serve the V2.1 operator
+                # stage fell back cannot form the combination at all and must serve the inertial-SINDy operator
                 # rather than a center over an incomplete panel.
-                row = _v24_row(root, "v24_no_reference"; bundle_dir=fixture.dir,
+                row = _superlearner_row(root, "superlearner_no_reference"; bundle_dir=fixture.dir,
                                stack_path=joinpath(root, "no_such_stack.csv"))
-                @test row.v2_2_status == "fallback_v2_1:stack_absent"
-                @test ismissing(row.v2_2_stack_pred_dst_nt)
-                @test row.v24_status == "fallback:static_expert_unavailable"
-                @test row.sub_hourly_model_version == V2_SERVED_TAIL_VERSION
-                @test row.driver_assumption == V2_DRIVER_ASSUMPTION
-                @test Float64(row.served_pred_dst_nt) == Float64(row.v2_1_served_pred_dst_nt)
-                @test ismissing(row.v24_pred_dst_nt)
+                @test row.static_stack_status == "fallback_inertial_sindy:stack_absent"
+                @test ismissing(row.static_stack_pred_dst_nt)
+                @test row.superlearner_status == "fallback:static_expert_unavailable"
+                @test row.sub_hourly_model_version == OPERATIONAL_SERVED_TAIL_VERSION
+                @test row.driver_assumption == OPERATIONAL_DRIVER_ASSUMPTION
+                @test Float64(row.served_pred_dst_nt) == Float64(row.inertial_sindy_served_pred_dst_nt)
+                @test ismissing(row.superlearner_pred_dst_nt)
                 # A stage that could not act publishes no edge either, so its partner column is
                 # missing rather than carrying an edge nothing served.
-                @test ismissing(row.v2_2_stack_ci05_dst_nt)
-                @test Float64(row.v2_1_served_ci05_dst_nt) ≈
+                @test ismissing(row.static_stack_ci05_dst_nt)
+                @test Float64(row.inertial_sindy_served_ci05_dst_nt) ≈
                       Float64(row.served_pred_dst_ci05_nt) atol=1e-12
             end
 
             @testset "a short L1 feed fails the analog key closed" begin
-                row = _v24_row(root, "v24_short_feed"; bundle_dir=fixture.dir, span=Hour(4))
-                @test startswith(String(row.v24_status), "fallback:missing_driver_lag")
-                @test Int(row.v24_history_hours) < V23_HISTORY_LAGS_H
-                @test ismissing(row.v24_pred_dst_nt)
-                @test row.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
+                row = _superlearner_row(root, "superlearner_short_feed"; bundle_dir=fixture.dir, span=Hour(4))
+                @test startswith(String(row.superlearner_status), "fallback:missing_driver_lag")
+                @test Int(row.superlearner_history_hours) < ANALOG_HISTORY_LAGS_H
+                @test ismissing(row.superlearner_pred_dst_nt)
+                @test row.sub_hourly_model_version == STATIC_STACK_SERVED_TAIL_VERSION
                 @test isfinite(row.served_pred_dst_nt)
             end
 
@@ -1325,23 +1042,23 @@ using .V24ServingFixture
                 # The analog key needs twelve driver hours; the direct design additionally needs the Dst
                 # ladder back to `dst_lag24`. A feed that satisfies the first but not the second must
                 # name the missing lag instead of serving a stack with an imputed expert.
-                row = _v24_row(root, "v24_short_dst"; bundle_dir=fixture.dir, dst_span=Hour(12))
-                @test startswith(String(row.v24_status), "fallback:missing_dst_lag")
-                @test ismissing(row.v24_pred_dst_nt)
-                @test row.sub_hourly_model_version == V2_2_SERVED_TAIL_VERSION
+                row = _superlearner_row(root, "superlearner_short_dst"; bundle_dir=fixture.dir, dst_span=Hour(12))
+                @test startswith(String(row.superlearner_status), "fallback:missing_dst_lag")
+                @test ismissing(row.superlearner_pred_dst_nt)
+                @test row.sub_hourly_model_version == STATIC_STACK_SERVED_TAIL_VERSION
                 @test isfinite(row.served_pred_dst_nt)
             end
 
             @testset "every documented served-stage status is produced by a code path" begin
-                # `v24_status` is the only per-row account of why the published center is not the
+                # `superlearner_status` is the only per-row account of why the published center is not the
                 # super-learner's, and the readiness audit, the dashboard payload and the fallback-rate
                 # window all read it. A status no test ever produces is a branch nobody has seen
                 # execute, so each documented value is reached here rather than assumed reachable.
                 #
                 # The early refusals need no valid physics — they are decided before any expert is
                 # formed — so they are driven directly with the state a served row logged.
-                good = _v24_row(root, "v24_status_base"; bundle_dir=fixture.dir)
-                feed = _v24_feed()
+                good = _superlearner_row(root, "superlearner_status_base"; bundle_dir=fixture.dir)
+                feed = _superlearner_feed()
                 anchor_time = _parse_dt(good.latest_dst_time_utc)
                 drivers = (V=Float64(good.V_kms), Bz=Float64(good.Bz_nt), By=Float64(good.By_nt),
                            n=Float64(good.n_cm3), Pdyn=Float64(good.Pdyn_npa))
@@ -1357,17 +1074,17 @@ using .V24ServingFixture
                              obrien=Float64(good.obrien_dst_nt))
                 features = (dst_delta_1h_nt=Float64(good.dst_delta_1h_nt),
                             VBsouth_mvm=Float64(good.VBsouth_mvm))
-                calibration = read_operational_v2_calibration(
-                    operational_calibration_artifacts(OPERATIONAL_V2_1_MODEL_VERSION).point_csv)
+                calibration = read_inertial_sindy_calibration(
+                    operational_calibration_artifacts(OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION).point_csv)
                 function _stage(; bundle_dir=fixture.dir, model_steps=Int(good.model_step_hours),
-                                calibration=calibration, static_v2_2=Float64(good.v2_2_stack_pred_dst_nt),
+                                calibration=calibration, static_stack=Float64(good.static_stack_pred_dst_nt),
                                 static_pinned=true, latest_dst=Float64(good.latest_dst_nt),
                                 dst_times=feed.dst_times, dst_vals=feed.dst_values,
                                 recent=drivers)
-                    return withenv("SOLARSINDY_V2_4_DEPLOY_DIR" => bundle_dir) do
-                        reset_v2_4_serving!()
+                    return withenv("SOLARSINDY_SUPERLEARNER_DEPLOY_DIR" => bundle_dir) do
+                        reset_superlearner_serving!()
                         result = redirect_stderr(devnull) do
-                            _v2_4_served_center(
+                            _superlearner_served_center(
                                 plasma=feed.plasma, mag=feed.mag, dst_times=dst_times,
                                 dst_vals=dst_vals, latest_dst_time=anchor_time,
                                 latest_dst=latest_dst, anchor_drivers=drivers,
@@ -1375,12 +1092,12 @@ using .V24ServingFixture
                                 latest_common_sw=_parse_dt(good.latest_solar_wind_utc),
                                 model_steps=model_steps, features=features, memory=memory,
                                 baselines=baselines,
-                                served_v2_1=Float64(good.v2_1_served_pred_dst_nt),
-                                static_v2_2=static_v2_2, calibration=calibration,
+                                served_inertial_sindy=Float64(good.inertial_sindy_served_pred_dst_nt),
+                                static_stack=static_stack, calibration=calibration,
                                 static_pinned=static_pinned,
                             )
                         end
-                        reset_v2_4_serving!()
+                        reset_superlearner_serving!()
                         return result
                     end
                 end
@@ -1393,15 +1110,15 @@ using .V24ServingFixture
                       "fallback:unsupported_model_step"
                 @test record(String(_stage(; calibration=nothing).status)) ==
                       "fallback:calibration_absent"
-                @test record(String(_stage(; static_v2_2=missing).status)) ==
+                @test record(String(_stage(; static_stack=missing).status)) ==
                       "fallback:static_expert_unavailable"
-                @test record(String(_stage(; static_v2_2=NaN).status)) ==
+                @test record(String(_stage(; static_stack=NaN).status)) ==
                       "fallback:static_expert_unavailable"
                 @test record(String(_stage(; static_pinned=false).status)) ==
                       "fallback:static_expert_unpinned"
                 @test record(String(_stage(; bundle_dir=joinpath(root, "no_status_bundle")).status)) ==
                       "fallback:deployment_absent"
-                broken = build_v24_fixture_bundle(joinpath(root, "status_invalid");
+                broken = build_superlearner_fixture_bundle(joinpath(root, "status_invalid");
                                                   mutate=:tampered_stack_file)
                 @test record(String(_stage(; bundle_dir=broken.dir).status)) ==
                       "fallback:deployment_invalid"
@@ -1415,21 +1132,21 @@ using .V24ServingFixture
                 # must never interrupt an issuance.
                 @test record(String(_stage(; recent=nothing).status)) == "fallback:serving_error"
                 # A short feed names the missing driver hour, and a short Dst ladder the missing lag.
-                @test startswith(record(String(_v24_row(root, "v24_status_driver";
+                @test startswith(record(String(_superlearner_row(root, "superlearner_status_driver";
                                                         bundle_dir=fixture.dir,
-                                                        span=Hour(4)).v24_status)),
+                                                        span=Hour(4)).superlearner_status)),
                                  "fallback:missing_driver_lag")
-                @test startswith(record(String(_v24_row(root, "v24_status_dst";
+                @test startswith(record(String(_superlearner_row(root, "superlearner_status_dst";
                                                         bundle_dir=fixture.dir,
-                                                        dst_span=Hour(12)).v24_status)),
+                                                        dst_span=Hour(12)).superlearner_status)),
                                  "fallback:missing_dst_lag")
-                # A v1 issuance never runs the stage at all, which is the row-level default status. A
-                # v1 row is issued at a single step, which is the only lead a v1 band is defined at.
-                v1_row = _v24_row(root, "v24_status_v1"; bundle_dir=fixture.dir, model=:v1,
-                                  horizon=1)
-                @test v1_row.model_version != OPERATIONAL_V2_1_MODEL_VERSION
-                @test record(String(v1_row.v24_status)) == "fallback:model_not_v2_1"
-                @test ismissing(v1_row.v24_pred_dst_nt)
+                # A SINDy-core issuance never runs the stage at all, which is the row-level default
+                # status. A SINDy-core row is issued at a single step, the only lead its band is defined at.
+                core_row = _superlearner_row(root, "superlearner_status_sindy_core"; bundle_dir=fixture.dir,
+                                             model=:sindy_core, horizon=1)
+                @test core_row.model_version != OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION
+                @test record(String(core_row.superlearner_status)) == "fallback:model_not_inertial_sindy"
+                @test ismissing(core_row.superlearner_pred_dst_nt)
 
                 # `fallback:incomplete_analog_key` is the key's reason of last resort: it fires only if
                 # the feature block rejects an anchor for a reason none of the named inputs accounts
@@ -1441,13 +1158,13 @@ using .V24ServingFixture
                 usable = (V=drivers.V, Bz=drivers.Bz, By=drivers.By, n=drivers.n, Pdyn=drivers.Pdyn)
                 anchor_dst = Float64(good.latest_dst_nt)
                 key_reason(history, dst_anchor, dst_prev) =
-                    v24_serving_analog_features(artifacts, anchor_time, history, dst_anchor,
+                    superlearner_serving_analog_features(artifacts, anchor_time, history, dst_anchor,
                                                dst_prev).reason
-                complete_history = Any[usable for _ in 1:V24_SERVING_DRIVER_LAGS_H]
+                complete_history = Any[usable for _ in 1:SUPERLEARNER_SERVING_DRIVER_LAGS_H]
                 @test key_reason(complete_history, anchor_dst, anchor_dst - 1.0) == "ok"
                 @test key_reason(complete_history, NaN, anchor_dst - 1.0) == "missing_anchor_dst"
                 @test key_reason(complete_history, anchor_dst, NaN) == "missing_previous_dst"
-                for lag in (1, 4, V23_HISTORY_LAGS_H)
+                for lag in (1, 4, ANALOG_HISTORY_LAGS_H)
                     holed = copy(complete_history)
                     holed[lag] = nothing
                     @test key_reason(holed, anchor_dst, anchor_dst - 1.0) ==
@@ -1472,7 +1189,7 @@ using .V24ServingFixture
                 # block's rejection condition is the key's own defect condition), and
                 # `fallback:incomplete_direct_design` (the analog key is formed first and refuses the
                 # same driver defects at the lags the design's own block reads).
-                documented = ["ok", "fallback:model_not_v2_1", "fallback:unsupported_model_step",
+                documented = ["ok", "fallback:model_not_inertial_sindy", "fallback:unsupported_model_step",
                               "fallback:calibration_absent", "fallback:static_expert_unavailable",
                               "fallback:static_expert_unpinned", "fallback:deployment_absent",
                               "fallback:deployment_invalid", "fallback:missing_anchor_dst",
@@ -1484,70 +1201,70 @@ using .V24ServingFixture
                 @test any(s -> startswith(s, "fallback:missing_dst_lag"), produced)
                 for unreached in ("fallback:non_finite_center", "fallback:incomplete_analog_key",
                                   "fallback:incomplete_direct_design")
-                    @test !_v2_4_served_acted(unreached)
+                    @test !_superlearner_served_acted(unreached)
                 end
             end
 
             @testset "bundle load failures are remembered for a bounded cool-down" begin
-                @test V2_4_RETRY_SECONDS > 0.0
+                @test SUPERLEARNER_RETRY_SECONDS > 0.0
                 staged = joinpath(root, "staged_bundle")
-                withenv("SOLARSINDY_V2_4_DEPLOY_DIR" => staged) do
-                    reset_v2_4_serving!()
+                withenv("SOLARSINDY_SUPERLEARNER_DEPLOY_DIR" => staged) do
+                    reset_superlearner_serving!()
                     absent = redirect_stderr(devnull) do
-                        _v2_4_artifacts()
+                        _superlearner_artifacts()
                     end
                     @test absent.artifacts === nothing
                     @test absent.status == "fallback:deployment_absent"
-                    @test !_v2_4_served_acted(absent.status)
+                    @test !_superlearner_served_acted(absent.status)
                     cp(fixture.dir, staged)
                     # Inside the cool-down the remembered failure is reused, so the bundle is not re-read.
-                    @test _v2_4_artifacts().artifacts === nothing
-                    _V2_4_STATUS_TIME[] -= 2 * V2_4_RETRY_SECONDS
-                    healed = _v2_4_artifacts()
+                    @test _superlearner_artifacts().artifacts === nothing
+                    _SUPERLEARNER_STATUS_TIME[] -= 2 * SUPERLEARNER_RETRY_SECONDS
+                    healed = _superlearner_artifacts()
                     @test healed.status == "ok"
-                    @test _v2_4_served_acted(healed.status)
-                    @test healed.artifacts.identity == V24_SERVED_IDENTITY
+                    @test _superlearner_served_acted(healed.status)
+                    @test healed.artifacts.identity == SUPERLEARNER_SERVED_IDENTITY
                     @test healed.manifest_sha256 == artifacts.manifest_sha256
                 end
-                reset_v2_4_serving!()
+                reset_superlearner_serving!()
             end
         end
 
         @testset "the deployed bundle serves the published product" begin
-            deploy_dir = normpath(joinpath(@__DIR__, "..", "deploy", "v2_4"))
+            deploy_dir = normpath(joinpath(@__DIR__, "..", "deploy", "dst_superlearner"))
             if !isdir(deploy_dir)
-                @test_skip "deploy/v2_4 is absent; run validation/operational/v2_4_build_deploy.jl"
+                @test_skip "deploy/dst_superlearner is absent; run validation/operational/superlearner_build_deploy.jl"
             else
                 mktempdir() do dir
-                    row = _v24_row(dir, "v24_deployed"; bundle_dir=deploy_dir)
-                    @test row.v24_status == "ok"
-                    @test row.sub_hourly_model_version == V2_4_SERVED_TAIL_VERSION
-                    @test isfinite(row.v24_pred_dst_nt)
-                    @test isfinite(row.v24_l1_center_dst_nt)
-                    @test Float64(row.served_pred_dst_nt) == Float64(row.v24_pred_dst_nt)
-                    @test row.interval_source == V2_4_INTERVAL_SOURCE
+                    row = _superlearner_row(dir, "superlearner_deployed"; bundle_dir=deploy_dir)
+                    @test row.superlearner_status == "ok"
+                    @test row.sub_hourly_model_version == SUPERLEARNER_SERVED_TAIL_VERSION
+                    @test isfinite(row.superlearner_pred_dst_nt)
+                    @test isfinite(row.superlearner_l1_center_dst_nt)
+                    @test Float64(row.served_pred_dst_nt) == Float64(row.superlearner_pred_dst_nt)
+                    @test row.interval_source == SUPERLEARNER_INTERVAL_SOURCE
                     # The deployed bundle carries no point-forecast guard, so the published center is
                     # the stack center itself even in a deepening cell — unless the physical
                     # projection acted, which the row records separately.
-                    @test row.v24_guard_applied == false
-                    if !row.v24_projection_applied
-                        @test Float64(row.v24_pred_dst_nt) ≈
-                              Float64(row.v24_l1_center_dst_nt) atol=1e-12
+                    @test row.superlearner_guard_applied == false
+                    if !row.superlearner_projection_applied
+                        @test Float64(row.superlearner_pred_dst_nt) ≈
+                              Float64(row.superlearner_l1_center_dst_nt) atol=1e-12
                     end
                     # The published severity partners are all present, so the dashboard can take the
                     # deepest of the three without a missing column silently dropping one.
-                    for column in (:v24_pred_dst_nt, :v2_2_stack_pred_dst_nt,
-                                   :v2_1_served_pred_dst_nt)
+                    for column in (:superlearner_pred_dst_nt, :static_stack_pred_dst_nt,
+                                   :inertial_sindy_served_pred_dst_nt)
                         @test isfinite(Float64(getproperty(row, column)))
                     end
                     # Depth safety now lives at the alerting layer: whatever the combination reports,
                     # the severity center is no shallower than either stage it replaced.
-                    severity = v24_serving_depth_safe_center(
-                        Float64(row.v24_pred_dst_nt), Float64(row.v2_2_stack_pred_dst_nt),
-                        Float64(row.v2_1_served_pred_dst_nt),
+                    severity = superlearner_serving_depth_safe_center(
+                        Float64(row.superlearner_pred_dst_nt), Float64(row.static_stack_pred_dst_nt),
+                        Float64(row.inertial_sindy_served_pred_dst_nt),
                     )
-                    @test severity <= Float64(row.v2_2_stack_pred_dst_nt) + 1e-12
-                    @test severity <= Float64(row.v2_1_served_pred_dst_nt) + 1e-12
+                    @test severity <= Float64(row.static_stack_pred_dst_nt) + 1e-12
+                    @test severity <= Float64(row.inertial_sindy_served_pred_dst_nt) + 1e-12
                 end
             end
         end
@@ -1562,7 +1279,7 @@ using .V24ServingFixture
         mag = DataFrame(time_tag=[issue_time], bz_gsm=[-4.0], by_gsm=[1.0])
         dst = ([issue_time - Hour(1)], [-40.0])
         prepared = prepare_issue_inputs(
-            LiveVerifyConfig(; model=:v1);
+            LiveVerifyConfig(; model=:sindy_core);
             issue_time=issue_time,
             plasma_fn=() -> (plasma_calls[] += 1; plasma),
             mag_fn=() -> (mag_calls[] += 1; mag),
@@ -1577,7 +1294,7 @@ using .V24ServingFixture
     end
 
     @testset "Issue clock follows retrieval and exact upstream evidence survives parsing" begin
-        cfg = LiveVerifyConfig(; model=:v1)
+        cfg = LiveVerifyConfig(; model=:sindy_core)
         finished = Ref(DateTime(2000))
         prepared = prepare_issue_inputs(cfg; plasma_fn=() -> nothing, mag_fn=() -> nothing,
             dst_fn=() -> (sleep(0.02); finished[]=now(UTC); nothing))
@@ -1624,10 +1341,22 @@ using .V24ServingFixture
             @test_throws ErrorException _persist_issue_bytes(raw_path, UInt8[0x00])
             @test read(raw_path) == original
             link = joinpath(directory, "link")
-            symlink(raw_path, link)
-            @test_throws ArgumentError _persist_issue_bytes(link, original)
-            @test_throws ErrorException prepare_issue_inputs(cfg; snapshot_dir=directory,
-                plasma_fn=() -> nothing, mag_fn=() -> nothing, dst_fn=() -> nothing)
+            # Windows requires Administrator/Developer Mode to create symlinks; when the OS
+            # denies creation the symlink-rejection assertions cannot run here and are skipped.
+            can_symlink = try
+                symlink(raw_path, link)
+                true
+            catch e
+                e isa Base.IOError || rethrow()
+                false
+            end
+            if can_symlink
+                @test_throws ArgumentError _persist_issue_bytes(link, original)
+                @test_throws ErrorException prepare_issue_inputs(cfg; snapshot_dir=directory,
+                    plasma_fn=() -> nothing, mag_fn=() -> nothing, dst_fn=() -> nothing)
+            else
+                @warn "symlink creation denied by the OS; skipping symlink evidence checks"
+            end
         end
     end
 
@@ -1661,18 +1390,18 @@ using .V24ServingFixture
     @testset "Deployed conformal sidecar is paired to the point calibration bytes" begin
         mktempdir() do tmp
             point_path = joinpath(tmp, "point.csv")
-            nfeatures = length(V2_MEMORY_EXPERT_LEAD_FEATURES)
-            point_cal = OperationalV2Calibration(
-                copy(V2_MEMORY_EXPERT_LEAD_FEATURES),
+            nfeatures = length(OPERATIONAL_MEMORY_EXPERT_LEAD_FEATURES)
+            point_cal = InertialSindyCalibration(
+                copy(OPERATIONAL_MEMORY_EXPERT_LEAD_FEATURES),
                 zeros(nfeatures),
                 ones(nfeatures),
                 zeros(nfeatures + 1),
                 1.0,
-                "operational_v2_1_sidecar_test",
-                supported_model_steps=copy(OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS),
+                "operational_inertial_sindy_sidecar_test",
+                supported_model_steps=copy(OPERATIONAL_INERTIAL_SINDY_SUPPORTED_MODEL_STEPS),
             )
-            write_operational_v2_calibration(point_path, point_cal)
-            cfg = LiveVerifyConfig(; model=:v2, v2_calibration_path=point_path)
+            write_inertial_sindy_calibration(point_path, point_cal)
+            cfg = LiveVerifyConfig(; model=:inertial_sindy, inertial_sindy_calibration_path=point_path)
             @test _load_calibration_for_model(cfg).label == point_cal.label
             @test _load_conformal_for_model(cfg) === nothing
 
@@ -1689,7 +1418,7 @@ using .V24ServingFixture
             @test loaded.coverage == cal.coverage
             @test loaded.global_stratum.half_width == cal.global_stratum.half_width
 
-            changed_point = OperationalV2Calibration(
+            changed_point = InertialSindyCalibration(
                 copy(point_cal.feature_names),
                 copy(point_cal.feature_mean),
                 copy(point_cal.feature_scale),
@@ -1698,12 +1427,12 @@ using .V24ServingFixture
                 point_cal.label,
                 supported_model_steps=copy(point_cal.supported_model_steps),
             )
-            write_operational_v2_calibration(point_path, changed_point)
+            write_inertial_sindy_calibration(point_path, changed_point)
             @test_throws ArgumentError _load_conformal_for_model(cfg)
 
             # A byte-matched sidecar with a different discrete support contract
             # is still incompatible and must fail closed.
-            write_operational_v2_calibration(point_path, point_cal)
+            write_inertial_sindy_calibration(point_path, point_cal)
             point_sha = bytes2hex(sha256(read(point_path)))
             write_conformal_calibration(
                 sidecar_path, cal; point_calibration_sha256=point_sha,
@@ -1711,12 +1440,12 @@ using .V24ServingFixture
             )
             @test_throws ArgumentError _load_conformal_for_model(cfg)
 
-            # A self-consistent historical V2.0 point/sidecar pair remains valid
-            # for explicit offline replay, but the live V2.1 loader rejects it.
-            historical = operational_calibration_artifacts(:v2_0)
+            # A self-consistent historical SINDy core point/sidecar pair remains valid
+            # for explicit offline replay, but the live inertial-SINDy loader rejects it.
+            historical = operational_calibration_artifacts(:sindy_core)
             historical_cfg = LiveVerifyConfig(;
-                model=:v2,
-                v2_calibration_path=historical.point_csv,
+                model=:inertial_sindy,
+                inertial_sindy_calibration_path=historical.point_csv,
             )
             @test isfile(historical.point_csv)
             @test isfile(historical.conformal_csv)
@@ -1772,7 +1501,7 @@ using .V24ServingFixture
                 issue_time_utc=["2026-06-06T04:10:00"],
                 latest_dst_time_utc=["2026-06-06T04:00:00"],
                 target_time_utc=["2026-06-06T06:00:00"],
-                model_version=["v2"],
+                model_version=["sindy_core"],
                 pred_dst_nt=[-20.0],
                 pred_dst_ci05_nt=[-30.0],
                 pred_dst_ci95_nt=[-10.0],
@@ -1802,14 +1531,14 @@ using .V24ServingFixture
         end
     end
 
-    @testset "V2.1 append refuses an unmigrated historical hot log" begin
+    @testset "inertial-SINDy append refuses an unmigrated historical hot log" begin
         mktempdir() do tmp
             log_path = joinpath(tmp, "legacy.csv")
             legacy = DataFrame(
                 issue_time_utc=["2026-06-06T04:10:00"],
                 latest_dst_time_utc=["2026-06-06T04:00:00"],
                 target_time_utc=["2026-06-06T06:00:00"],
-                model_version=["v2"],
+                model_version=["sindy_core"],
                 pred_dst_nt=[-20.0],
                 pred_dst_ci05_nt=[-30.0],
                 pred_dst_ci95_nt=[-10.0],
@@ -1819,7 +1548,7 @@ using .V24ServingFixture
             current = copy(legacy)
             current.issue_time_utc .= "2026-06-06T05:10:00"
             current.target_time_utc .= "2026-06-06T07:00:00"
-            current.model_version .= OPERATIONAL_V2_1_MODEL_VERSION
+            current.model_version .= OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION
             before = read(log_path)
             @test_throws ArgumentError _append_forecast!(log_path, current)
             @test read(log_path) == before
@@ -1851,7 +1580,7 @@ using .V24ServingFixture
                 issue_time_utc=[string(issue)],
                 latest_dst_time_utc=["2026-06-06T04:00:00"],
                 target_time_utc=[string(target)],
-                model_version=["v2"],
+                model_version=["sindy_core"],
                 pred_dst_nt=[-20.0],
                 pred_dst_ci05_nt=[-30.0],
                 pred_dst_ci95_nt=[-10.0],
@@ -1893,6 +1622,7 @@ using .V24ServingFixture
             open(log_path, "a") do io
                 write(io, row_bytes[1:max(1, length(row_bytes) ÷ 2)])
             end
+            GC.gc()          # release mmap'd reads of the log before the recovery truncate
             recovered = _append_forecast!(log_path, second; return_status=true)
             @test recovered == (row_idx=2, appended=false)
             @test !isfile(_append_transaction_path(log_path))
@@ -1922,7 +1652,7 @@ using .V24ServingFixture
                     issue_time_utc=string.(issues),
                     latest_dst_time_utc=string.(issues),
                     target_time_utc=string.(issues .+ Hour(1)),
-                    model_version=fill("v2", n),
+                    model_version=fill("sindy_core", n),
                     pred_dst_nt=fill(-20.0, n),
                     pred_dst_ci05_nt=fill(-30.0, n),
                     pred_dst_ci95_nt=fill(-10.0, n),
@@ -1936,7 +1666,7 @@ using .V24ServingFixture
                     issue_time_utc=[string(issue)],
                     latest_dst_time_utc=[string(issue)],
                     target_time_utc=[string(issue + Hour(1))],
-                    model_version=["v2"],
+                    model_version=["sindy_core"],
                     pred_dst_nt=[-20.0], pred_dst_ci05_nt=[-30.0],
                     pred_dst_ci95_nt=[-10.0], observation_dst_nt=[missing],
                 )
@@ -1973,7 +1703,7 @@ using .V24ServingFixture
                 issue_time_utc=string.(anchors),
                 latest_dst_time_utc=string.(anchors),
                 target_time_utc=string.(targets),
-                model_version=fill("v2", n),
+                model_version=fill("sindy_core", n),
                 pred_dst_nt=fill(-20.0, n),
                 pred_dst_ci05_nt=fill(-30.0, n),
                 pred_dst_ci95_nt=fill(-10.0, n),
@@ -2002,7 +1732,7 @@ using .V24ServingFixture
             # and the authoritative pending scan.
             resolved_idx = n - 1
             resolved_key = _pending_key(log[resolved_idx, :issue_time_utc],
-                                        log[resolved_idx, :target_time_utc], "v2")
+                                        log[resolved_idx, :target_time_utc], "inertial_sindy")
             @test verify_pending!(LiveVerifyConfig(; log_path=log_path);
                                   dst_times=[targets[resolved_idx]],
                                   dst_vals=[-19.0]) == 1
@@ -2240,27 +1970,27 @@ using .V24ServingFixture
             observation_dst_nt=[-21.0, NaN, -40.0, NaN],
             Bz_nt=[0.0, 0.0, 0.0, 0.0],
         )
-        cal = OperationalV2Calibration([:Bz_nt], [0.0], [1.0], [0.0, 1.0], 1.0, "t30")
-        scored = score_operational_v2(frame, cal)
+        cal = InertialSindyCalibration([:Bz_nt], [0.0], [1.0], [0.0, 1.0], 1.0, "t30")
+        scored = score_inertial_sindy(frame, cal)
 
-        @test eltype(scored.v2_observed_in_90ci) == Union{Missing,Bool}
-        @test scored.v2_observed_in_90ci[1] === true
-        @test scored.v2_observed_in_90ci[3] === false
-        @test ismissing(scored.v2_observed_in_90ci[2])
-        @test ismissing(scored.v2_observed_in_90ci[4])
+        @test eltype(scored.operational_observed_in_90ci) == Union{Missing,Bool}
+        @test scored.operational_observed_in_90ci[1] === true
+        @test scored.operational_observed_in_90ci[3] === false
+        @test ismissing(scored.operational_observed_in_90ci[2])
+        @test ismissing(scored.operational_observed_in_90ci[4])
         # An unobservable row is not silently promoted to a hit either.
-        @test !any(x -> !ismissing(x) && x, scored.v2_observed_in_90ci[[2, 4]])
+        @test !any(x -> !ismissing(x) && x, scored.operational_observed_in_90ci[[2, 4]])
 
         # The denominator excludes it: coverage equals the observable-only average, not 1/4.
-        coverage = _observable_coverage(scored.v2_observed_in_90ci)
+        coverage = _observable_coverage(scored.operational_observed_in_90ci)
         @test coverage.n == 2
         @test coverage.fraction == 0.5
         @test coverage.fraction ==
-              mean(Bool[scored.v2_observed_in_90ci[i] for i in (1, 3)])
+              mean(Bool[scored.operational_observed_in_90ci[i] for i in (1, 3)])
 
         # A frame with nothing verified yet is reported as unknown, never as zero coverage.
-        unverified = score_operational_v2(frame[[2, 4], :], cal)
-        blank = _observable_coverage(unverified.v2_observed_in_90ci)
+        unverified = score_inertial_sindy(frame[[2, 4], :], cal)
+        blank = _observable_coverage(unverified.operational_observed_in_90ci)
         @test blank.n == 0
         @test isnan(blank.fraction)
 
@@ -2270,9 +2000,9 @@ using .V24ServingFixture
             path = joinpath(tmp, "scored.csv")
             CSV.write(path, scored)
             reread = CSV.read(path, DataFrame)
-            @test ismissing(reread.v2_observed_in_90ci[2])
-            @test reread.v2_observed_in_90ci[1] === true
-            @test reread.v2_observed_in_90ci[3] === false
+            @test ismissing(reread.operational_observed_in_90ci[2])
+            @test reread.operational_observed_in_90ci[1] === true
+            @test reread.operational_observed_in_90ci[3] === false
         end
     end
 
@@ -2355,7 +2085,7 @@ using .V24ServingFixture
             dst_times = collect((latest_dst_time - Hour(12)):Hour(1):latest_dst_time)
             dst_values = collect(range(-20.0, -44.0; length=length(dst_times)))
             cfg = LiveVerifyConfig(;
-                model=:v2,
+                model=:inertial_sindy,
                 horizon_hours=6,
                 log_path=joinpath(dir, "live_forecast_log.csv"),
                 report_path=joinpath(dir, "live_comparison_report.md"),
@@ -2391,7 +2121,7 @@ using .V24ServingFixture
                 issue_time_utc=["2026-06-06T04:00:00"],
                 latest_dst_time_utc=["2026-06-06T04:00:00"],
                 target_time_utc=[string(target)],
-                model_version=["v2"],
+                model_version=["sindy_core"],
                 pred_dst_nt=[-30.0], pred_dst_ci05_nt=[-50.0], pred_dst_ci95_nt=[-10.0],
                 observation_dst_nt=[missing],
             )
@@ -2432,16 +2162,16 @@ using .V24ServingFixture
                 issue_time_utc=["2026-06-07T15:26:39.864"],
                 latest_dst_time_utc=["2026-06-07T14:00:00"],
                 target_time_utc=[string(target)],
-                model_version=["v2"],
+                model_version=["sindy_core"],
                 pred_dst_nt=[-23.4],
                 pred_dst_ci05_nt=[-45.0],
                 pred_dst_ci95_nt=[-1.0],
                 observation_dst_nt=[-22.0],
                 residual_dst_nt=[1.4],
                 observed_in_90ci=[true],
-                v2_pred_dst_nt=[-23.4],
-                v2_pred_dst_ci05_nt=[-45.0],
-                v2_pred_dst_ci95_nt=[-1.0],
+                inertial_sindy_pred_dst_nt=[-23.4],
+                inertial_sindy_pred_dst_ci05_nt=[-45.0],
+                inertial_sindy_pred_dst_ci95_nt=[-1.0],
                 persistence_dst_nt=[-25.0],
                 burton_dst_nt=[-30.0],
                 burton_full_dst_nt=[-30.0],
@@ -2461,8 +2191,8 @@ using .V24ServingFixture
             @test df.pred_dst_nt[1] == -23.4
             @test df.observation_dst_nt[1] == -21.0
             @test df.residual_dst_nt[1] ≈ 2.4 atol=1e-12
-            @test df.v2_residual_dst_nt[1] ≈ 2.4 atol=1e-12
-            @test df.v2_observed_in_90ci[1] == true
+            @test df.operational_residual_dst_nt[1] ≈ 2.4 atol=1e-12
+            @test df.operational_observed_in_90ci[1] == true
             @test df.persistence_residual_dst_nt[1] == 4.0
         end
     end
@@ -2482,7 +2212,7 @@ using .V24ServingFixture
                     "2026-06-06T08:00:00",
                     "2026-06-06T10:00:00",
                 ],
-                model_version=["v2", "v2", "v2"],
+                model_version=["sindy_core", "sindy_core", "sindy_core"],
                 wall_clock_lead_hours=[1.89, 0.62, 0.75],
                 pred_dst_nt=[-39.38, -39.12, -35.0],
                 pred_dst_ci05_nt=[-44.94, -42.23, -40.0],
@@ -2490,9 +2220,9 @@ using .V24ServingFixture
                 observation_dst_nt=Union{Missing,Float64}[-33.0, -33.0, missing],
                 residual_dst_nt=Union{Missing,Float64}[6.38, 6.12, missing],
                 observed_in_90ci=Union{Missing,Bool}[false, false, missing],
-                v1_pred_dst_nt=[-40.63, -40.42, -36.0],
-                v2_pred_dst_nt=[-39.38, -39.12, -35.0],
-                v2_selected_component=["v2", "v2", "v2"],
+                sindy_core_pred_dst_nt=[-40.63, -40.42, -36.0],
+                inertial_sindy_pred_dst_nt=[-39.38, -39.12, -35.0],
+                inertial_sindy_selected_component=["sindy_core", "sindy_core", "sindy_core"],
                 persistence_dst_nt=[-44.0, -44.0, -34.0],
                 burton_dst_nt=[-34.30, -34.20, -33.0],
                 burton_full_dst_nt=[-34.30, -34.20, -33.0],
@@ -2509,14 +2239,14 @@ using .V24ServingFixture
             @test occursin("Pending rows: 1", text)
             @test occursin("Same-row current-identity comparison rows: 2", text)
             @test occursin("## Same-Row Model Comparison", text)
-            @test occursin("| Historical V2.0 | 2 |", text)
-            @test occursin("| SINDy v1 | 2 |", text)
+            @test occursin("| Historical SINDy core | 2 |", text)
+            @test occursin("| SINDy core | 2 |", text)
             @test occursin("## Pending Rows", text)
             @test occursin("2026-06-06T10:00:00", text)
-            @test occursin("| v2 |", text)
-            @test occursin("## Worst Historical V2.0 Misses", text)
-            @test occursin("## Operational V2.0 Audit", text)
-            @test !occursin("| Historical V2.0 | 3 |", text)
+            @test occursin("| sindy_core |", text)
+            @test occursin("## Worst Historical SINDy core Misses", text)
+            @test occursin("## Operational SINDy core Audit", text)
+            @test !occursin("| Historical SINDy core | 3 |", text)
             @test !occursin("| Selected |", text)
         end
     end
@@ -2674,15 +2404,15 @@ using .V24ServingFixture
         df = replay_recent_table(plasma, mag, times, dst_vals; replay_hours=24)
 
         @test nrow(df) == 3
-        @test all(df.model_version .== "v1")
+        @test all(df.model_version .== "sindy_core")
         @test df.issue_time_utc[1] == string(t0 + Hour(1))
         @test df.source_driver_start_utc[1] == string(t0)
         @test df.source_driver_end_utc[1] == df.issue_time_utc[1]
         @test df.target_time_utc[1] == string(t0 + Hour(2))
         @test all(df.target_time_utc .> df.issue_time_utc)
         @test all(isfinite, df.pred_dst_nt)
-        @test df.pred_dst_nt == df.v1_pred_dst_nt
-        @test all(ismissing, df.v2_pred_dst_nt)
+        @test df.pred_dst_nt == df.sindy_core_pred_dst_nt
+        @test all(ismissing, df.inertial_sindy_pred_dst_nt)
         @test all(isfinite, df.obrien_dst_nt)
         @test :dst_delta_1h_nt in propertynames(df)
         @test :baseline_spread_nt in propertynames(df)
@@ -2690,22 +2420,22 @@ using .V24ServingFixture
         @test df.residual_dst_nt[1] ≈ df.observation_dst_nt[1] - df.pred_dst_nt[1] atol=1e-12
         @test df.persistence_residual_dst_nt[1] ≈ df.observation_dst_nt[1] - df.persistence_dst_nt[1] atol=1e-12
 
-        cal = default_operational_v2_calibration()
-        df_v2 = replay_recent_table(
+        cal = default_inertial_sindy_calibration()
+        df_operational = replay_recent_table(
             plasma,
             mag,
             times,
             dst_vals;
             replay_hours=24,
-            model=:v2,
+            model=:inertial_sindy,
             calibration=cal,
         )
-        @test all(df_v2.model_version .== OPERATIONAL_V2_1_MODEL_VERSION)
-        @test df_v2.pred_dst_nt == df_v2.v2_pred_dst_nt
-        @test df_v2.pred_dst_nt == df_v2.v1_pred_dst_nt
-        @test all(df_v2.v2_correction_dst_nt .== 0.0)
-        @test all(df_v2.v2_selected_component .== "v2")
-        @test df_v2.v2_selected_component_pred_nt == df_v2.v2_pred_dst_nt
+        @test all(df_operational.model_version .== OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION)
+        @test df_operational.pred_dst_nt == df_operational.inertial_sindy_pred_dst_nt
+        @test df_operational.pred_dst_nt == df_operational.sindy_core_pred_dst_nt
+        @test all(df_operational.inertial_sindy_correction_dst_nt .== 0.0)
+        @test all(df_operational.inertial_sindy_selected_component .== "inertial_sindy")
+        @test df_operational.inertial_sindy_selected_component_pred_nt == df_operational.inertial_sindy_pred_dst_nt
 
         mktempdir() do tmp
             md_path = joinpath(tmp, "replay.md")
@@ -2774,7 +2504,7 @@ using .V24ServingFixture
     end
 
     @testset "A/D: replay gap gate is cadence-aware (hourly archival replay)" begin
-        # Regression for the archival-replay blocker (adv-paper-v2monitor MINOR): the
+        # Regression for the archival-replay blocker (adv-paper-dst-superlearner MINOR): the
         # driver-gap gate demanded >=10 finite samples per hourly window, which hourly
         # OMNI (1 sample/hour) can never meet, so replay_recent_table dropped every
         # anchor and run_conformal_coverage_test.jl could not run end-to-end. The gate is
@@ -2815,10 +2545,10 @@ using .V24ServingFixture
                                                        replay_hours=24, min_samples=0)
     end
 
-    @testset "A/D: fit_v2_calibration! writes calibration and scored replay rows" begin
+    @testset "A/D: fit_inertial_sindy_calibration! writes calibration and scored replay rows" begin
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")
-            cal_path = joinpath(tmp, "v2_calibration.csv")
+            cal_path = joinpath(tmp, "inertial_sindy_calibration.csv")
             pred = collect(-30.0:1.0:-11.0)
             bz = collect(-10.0:1.0:9.0)
             observed = pred .+ 2.0
@@ -2828,9 +2558,9 @@ using .V24ServingFixture
                 pred_dst_ci05_nt=pred .+ 17.0,
                 pred_dst_ci95_nt=pred .+ 23.0,
                 observation_dst_nt=observed,
-                v1_pred_dst_nt=pred,
-                v1_pred_dst_ci05_nt=pred .- 3.0,
-                v1_pred_dst_ci95_nt=pred .+ 3.0,
+                sindy_core_pred_dst_nt=pred,
+                sindy_core_pred_dst_ci05_nt=pred .- 3.0,
+                sindy_core_pred_dst_ci95_nt=pred .+ 3.0,
                 latest_dst_nt=pred .- 1.0,
                 V_kms=fill(420.0, length(pred)),
                 Bz_nt=bz,
@@ -2841,27 +2571,27 @@ using .V24ServingFixture
             CSV.write(table_path, replay)
 
             cfg = LiveVerifyConfig(;
-                mode=:fit_v2_calibration,
+                mode=:fit_inertial_sindy_calibration,
                 table_path=table_path,
-                v2_calibration_path=cal_path,
-                v2_train_fraction=0.8,
-                v2_ridge_grid=[0.0],
-                v2_ridge=0.0,
+                inertial_sindy_calibration_path=cal_path,
+                operational_train_fraction=0.8,
+                operational_ridge_grid=[0.0],
+                operational_ridge=0.0,
             )
-            cal = fit_v2_calibration!(cfg)
+            cal = fit_inertial_sindy_calibration!(cfg)
             @test isfile(cal_path)
             scored_path = replace(cal_path, r"\.csv$" => "_scored.csv")
             selection_path = replace(cal_path, r"\.csv$" => "_selection.csv")
             @test isfile(scored_path)
             @test isfile(selection_path)
-            # A constant +2 correction generalizes, so v2 is selected and deployed.
-            @test startswith(cal.label, "operational_v2_")
-            @test cal.selected_component == :v2
-            reread = read_operational_v2_calibration(cal_path)
+            # A constant +2 correction generalizes, so operational is selected and deployed.
+            @test startswith(cal.label, "operational_inertial_sindy_")
+            @test cal.selected_component == :inertial_sindy
+            reread = read_inertial_sindy_calibration(cal_path)
             scored = CSV.read(scored_path, DataFrame)
             selection = CSV.read(selection_path, DataFrame)
-            @test maximum(abs.(scored.v2_residual_dst_nt)) < 0.5
-            @test Set(scored.v2_split) == Set(["fit", "validation", "holdout"])
+            @test maximum(abs.(scored.operational_residual_dst_nt)) < 0.5
+            @test Set(scored.operational_split) == Set(["fit", "validation", "holdout"])
             # Leakage-free audit schema: no ensemble/holdout-shrink columns.
             @test :gate_pass in propertynames(selection)
             @test :acceptance_gate_pass in propertynames(selection)
@@ -2872,20 +2602,20 @@ using .V24ServingFixture
             @test any(selection.selected_by_validation)
             @test any(selection.deployed)          # passed the gate → deployed
             @test all(selection.acceptance_gate_pass)
-            pred_v2 = operational_v2_predict(
+            pred_operational = operational_inertial_sindy_predict(
                 reread,
                 pred[end],
                 pred[end] - 3.0,
                 pred[end] + 3.0,
-                _v2_features(pred[end] - 1.0, (; V=420.0, Bz=bz[end], By=1.0, n=5.0, Pdyn=1.5)),
+                _inertial_sindy_features(pred[end] - 1.0, (; V=420.0, Bz=bz[end], By=1.0, n=5.0, Pdyn=1.5)),
             )
-            @test pred_v2.pred_dst == observed[end]
+            @test pred_operational.pred_dst == observed[end]
 
             # N1: a conformal calibration sidecar is written and round-trips.
             conformal_path = replace(cal_path, r"\.csv$" => "_conformal.csv")
             @test isfile(conformal_path)
             cc = read_conformal_calibration(conformal_path)
-            @test cc.coverage == cfg.v2_interval_coverage
+            @test cc.coverage == cfg.inertial_sindy_interval_coverage
             @test cc.global_stratum.n >= 1
             # Half-width is a nonnegative finite interval radius.
             hw = conformal_halfwidth(cc, 1.0, pred[end] - 1.0)
@@ -2915,15 +2645,15 @@ using .V24ServingFixture
         end
     end
 
-    @testset "A/D: acceptance gate deploys v1-equivalent fallback when correction fails validation" begin
+    @testset "A/D: acceptance gate deploys SINDy-core-equivalent fallback when correction fails validation" begin
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")
-            cal_path = joinpath(tmp, "v2_calibration.csv")
+            cal_path = joinpath(tmp, "inertial_sindy_calibration.csv")
             n = 24
             pred = collect(-50.0:1.0:-27.0)
             observed = copy(pred)
             # +4 correction on the training portion only; it does NOT generalize
-            # to the later validation rows, so v2 must fail the acceptance gate.
+            # to the later validation rows, so operational must fail the acceptance gate.
             observed[1:14] .= pred[1:14] .+ 4.0
             replay = DataFrame(
                 issue_time_utc=[string(DateTime(2026, 1, 1) + Hour(i)) for i in 1:n],
@@ -2931,9 +2661,9 @@ using .V24ServingFixture
                 pred_dst_ci05_nt=pred .- 3.0,
                 pred_dst_ci95_nt=pred .+ 3.0,
                 observation_dst_nt=observed,
-                v1_pred_dst_nt=pred,
-                v1_pred_dst_ci05_nt=pred .- 3.0,
-                v1_pred_dst_ci95_nt=pred .+ 3.0,
+                sindy_core_pred_dst_nt=pred,
+                sindy_core_pred_dst_ci05_nt=pred .- 3.0,
+                sindy_core_pred_dst_ci95_nt=pred .+ 3.0,
                 latest_dst_nt=fill(-40.0, n),
                 V_kms=fill(420.0, n),
                 Bz_nt=fill(-2.0, n),
@@ -2944,32 +2674,32 @@ using .V24ServingFixture
             CSV.write(table_path, replay)
 
             cfg = LiveVerifyConfig(;
-                mode=:fit_v2_calibration,
+                mode=:fit_inertial_sindy_calibration,
                 table_path=table_path,
-                v2_calibration_path=cal_path,
-                v2_train_fraction=0.6,
-                v2_validation_fraction=0.2,
-                v2_ridge_grid=[0.0],
-                v2_ridge=0.0,
+                inertial_sindy_calibration_path=cal_path,
+                operational_train_fraction=0.6,
+                operational_validation_fraction=0.2,
+                operational_ridge_grid=[0.0],
+                operational_ridge=0.0,
             )
-            cal = fit_v2_calibration!(cfg)
+            cal = fit_inertial_sindy_calibration!(cfg)
             scored = CSV.read(replace(cal_path, r"\.csv$" => "_scored.csv"), DataFrame)
             selection = CSV.read(replace(cal_path, r"\.csv$" => "_selection.csv"), DataFrame)
-            # Gate failed → a v1-equivalent (zero-correction) fallback is deployed.
-            @test cal.label == "operational_v2_1_fallback_v1_equiv"
+            # Gate failed → a SINDy-core-equivalent (zero-correction) fallback is deployed.
+            @test cal.label == "operational_inertial_sindy_fallback_v1_equiv"
             @test all(cal.coefficients .== 0.0)            # no correction applied
             @test !any(selection.deployed)                 # nothing passed the gate
             @test all(.!selection.acceptance_gate_pass)
             @test !any(selection.gate_pass)
-            # Deployed v2 reduces exactly to v1 (the correction was rejected).
-            @test scored.v2_pred_dst_nt == scored.pred_dst_nt
+            # Deployed operational reduces exactly to the SINDy core (the correction was rejected).
+            @test scored.inertial_sindy_pred_dst_nt == scored.pred_dst_nt
         end
     end
 
-    @testset "F1+F2: V2 conformal interval undercoverage on holdout blocks deploy" begin
+    @testset "F1+F2: Operational conformal interval undercoverage on holdout blocks deploy" begin
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")
-            cal_path = joinpath(tmp, "v2_calibration.csv")
+            cal_path = joinpath(tmp, "inertial_sindy_calibration.csv")
             n = 30
             pred = collect(-60.0:1.0:-31.0)
             observed = copy(pred)
@@ -2977,8 +2707,8 @@ using .V24ServingFixture
             # validation gate passes (the interval_scale band over-covers there), yet
             # the OPERATIONALLY-SERVED conformal interval — fit on near-zero validation
             # residuals — under-covers the untouched holdout where the +4 correction
-            # breaks down. F1+F2 gates the served-interval holdout coverage, so v2 must
-            # NOT deploy; the v1-equivalent fallback ships instead.
+            # breaks down. F1+F2 gates the served-interval holdout coverage, so operational must
+            # NOT deploy; the SINDy-core-equivalent fallback ships instead.
             observed[1:21] .= pred[1:21] .+ 4.0
             replay = DataFrame(
                 issue_time_utc=[string(DateTime(2026, 1, 1) + Hour(i)) for i in 1:n],
@@ -2986,9 +2716,9 @@ using .V24ServingFixture
                 pred_dst_ci05_nt=pred .- 3.0,
                 pred_dst_ci95_nt=pred .+ 3.0,
                 observation_dst_nt=observed,
-                v1_pred_dst_nt=pred,
-                v1_pred_dst_ci05_nt=pred .- 3.0,
-                v1_pred_dst_ci95_nt=pred .+ 3.0,
+                sindy_core_pred_dst_nt=pred,
+                sindy_core_pred_dst_ci05_nt=pred .- 3.0,
+                sindy_core_pred_dst_ci95_nt=pred .+ 3.0,
                 latest_dst_nt=fill(-40.0, n),
                 V_kms=fill(420.0, n),
                 Bz_nt=fill(-2.0, n),
@@ -2999,34 +2729,34 @@ using .V24ServingFixture
             CSV.write(table_path, replay)
 
             cfg = LiveVerifyConfig(;
-                mode=:fit_v2_calibration,
+                mode=:fit_inertial_sindy_calibration,
                 table_path=table_path,
-                v2_calibration_path=cal_path,
-                v2_train_fraction=0.5,
-                v2_validation_fraction=0.2,
-                v2_ridge_grid=[0.0],
-                v2_ridge=0.0,
+                inertial_sindy_calibration_path=cal_path,
+                operational_train_fraction=0.5,
+                operational_validation_fraction=0.2,
+                operational_ridge_grid=[0.0],
+                operational_ridge=0.0,
             )
-            cal = fit_v2_calibration!(cfg)
+            cal = fit_inertial_sindy_calibration!(cfg)
             scored = CSV.read(replace(cal_path, r"\.csv$" => "_scored.csv"), DataFrame)
             selection = CSV.read(replace(cal_path, r"\.csv$" => "_selection.csv"), DataFrame)
-            holdout = scored[scored.v2_split .== "holdout", :]
+            holdout = scored[scored.operational_split .== "holdout", :]
             # Honest holdout (scored once for selection, gated once for the served
             # interval) is much worse than validation and undercovers — the served
-            # conformal interval gate fires and the v1-equivalent fallback deploys.
-            @test cal.label == "operational_v2_1_fallback_v1_equiv"
+            # conformal interval gate fires and the SINDy-core-equivalent fallback deploys.
+            @test cal.label == "operational_inertial_sindy_fallback_v1_equiv"
             @test all(cal.coefficients .== 0.0)            # no correction applied
             @test !any(selection.deployed)                 # served-interval gate blocked deploy
             @test all(.!selection.acceptance_gate_pass)
             @test selection.deploy_block_reason[1] == "conformal_holdout_undercover"
-            @test selection.conformal_holdout_coverage[1] < cfg.v2_coverage_floor
+            @test selection.conformal_holdout_coverage[1] < cfg.operational_coverage_floor
             @test !selection.conformal_gate_pass[1]
-            # The V2 conformal interval's holdout coverage drove the block: the
-            # candidate v2 (+4) under-covers the untouched holdout where the +4
+            # The Operational conformal interval's holdout coverage drove the block: the
+            # candidate operational (+4) under-covers the untouched holdout where the +4
             # correction breaks down, so the gate refused it.
             @test selection.conformal_holdout_coverage[1] == 0.0
-            # The deployed (fallback) v2 reduces exactly to v1.
-            @test scored.v2_pred_dst_nt == scored.pred_dst_nt
+            # The deployed (fallback) operational reduces exactly to the SINDy core.
+            @test scored.inertial_sindy_pred_dst_nt == scored.pred_dst_nt
         end
     end
 
@@ -3037,7 +2767,7 @@ using .V24ServingFixture
             targets = DateTime(2026, 6, 6, 10):Hour(1):DateTime(2026, 6, 6, 12)
             cfg = LiveVerifyConfig(;
                 mode=:campaign,
-                model=:v2,
+                model=:sindy_core,
                 poll_seconds=1,
                 timeout_hours=0.1,
                 campaign_horizons=[1, 2],
@@ -3053,7 +2783,7 @@ using .V24ServingFixture
                     issue_time_utc=["2026-06-06T09:00:00"],
                     latest_dst_time_utc=["2026-06-06T09:00:00"],
                     target_time_utc=[string(target)],
-                    model_version=["v2"],
+                    model_version=["sindy_core"],
                     wall_clock_lead_hours=[Float64(issue_cfg.horizon_hours)],
                     pred_dst_nt=[pred],
                     pred_dst_ci05_nt=[pred - 10.0],
@@ -3061,11 +2791,11 @@ using .V24ServingFixture
                     observation_dst_nt=[missing],
                     residual_dst_nt=[missing],
                     observed_in_90ci=[missing],
-                    v1_pred_dst_nt=[pred - 1.0],
-                    v2_pred_dst_nt=[pred],
-                    v2_pred_dst_ci05_nt=[pred - 10.0],
-                    v2_pred_dst_ci95_nt=[pred + 10.0],
-                    v2_selected_component=["v2"],
+                    sindy_core_pred_dst_nt=[pred - 1.0],
+                    inertial_sindy_pred_dst_nt=[pred],
+                    inertial_sindy_pred_dst_ci05_nt=[pred - 10.0],
+                    inertial_sindy_pred_dst_ci95_nt=[pred + 10.0],
+                    inertial_sindy_selected_component=["sindy_core"],
                     persistence_dst_nt=[-30.0],
                     burton_dst_nt=[-29.0],
                     burton_full_dst_nt=[-29.0],
@@ -3075,7 +2805,7 @@ using .V24ServingFixture
                 return (; row_idx=idx, latest_dst_time=DateTime("2026-06-06T09:00:00"),
                         target_time=target, pred_dst=pred,
                         ci05_dst=pred - 10.0, ci95_dst=pred + 10.0,
-                        model_version="v2")
+                        model_version="sindy_core")
             end
 
             function fake_verify(verify_cfg)
@@ -3102,19 +2832,19 @@ using .V24ServingFixture
             @test nrow(df) == 2
             @test all(!ismissing, df.observation_dst_nt)
             @test occursin("Same-row current-identity comparison rows: 2", text)
-            @test occursin("Historical V2.0 is the archived operational method", text)
+            @test occursin("Historical SINDy core is the archived operational method", text)
         end
     end
 
     @testset "C0-3: live report headlines the exact current served identity" begin
         mktempdir() do dir
-            log_path = joinpath(dir, "v2_log.csv")
-            report_path = joinpath(dir, "v2_report.md")
+            log_path = joinpath(dir, "operational_log.csv")
+            report_path = joinpath(dir, "operational_report.md")
             df = DataFrame(
                 issue_time_utc=["2026-06-06T09:00:00", "2026-06-06T10:00:00"],
                 latest_dst_time_utc=["2026-06-06T09:00:00", "2026-06-06T10:00:00"],
                 target_time_utc=["2026-06-06T11:00:00", "2026-06-06T12:00:00"],
-                model_version=fill(OPERATIONAL_V2_1_MODEL_VERSION, 2),
+                model_version=fill(OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION, 2),
                 model_step_hours=[1, 2],
                 wall_clock_lead_hours=[2.0, 2.0],
                 horizon_hours=[2.0, 2.0],
@@ -3124,18 +2854,18 @@ using .V24ServingFixture
                 observation_dst_nt=[-48.0, -49.0],
                 residual_dst_nt=[-8.0, -4.0],
                 observed_in_90ci=[true, true],
-                v1_pred_dst_nt=[-38.0, -43.0],
-                v2_pred_dst_nt=[-40.0, -45.0],
-                v2_pred_dst_ci05_nt=[-50.0, -55.0],
-                v2_pred_dst_ci95_nt=[-30.0, -35.0],
+                sindy_core_pred_dst_nt=[-38.0, -43.0],
+                inertial_sindy_pred_dst_nt=[-40.0, -45.0],
+                inertial_sindy_pred_dst_ci05_nt=[-50.0, -55.0],
+                inertial_sindy_pred_dst_ci95_nt=[-30.0, -35.0],
                 served_pred_dst_nt=[-47.0, -50.0],
                 served_pred_dst_ci05_nt=[-57.0, -60.0],
                 served_pred_dst_ci95_nt=[-37.0, -40.0],
                 served_residual_dst_nt=[-1.0, 1.0],
                 served_observed_in_90ci=[true, true],
-                v2_2_stack_pred_dst_nt=[-46.0, -48.0],
-                sub_hourly_model_version=fill(V2_4_SERVED_TAIL_VERSION, 2),
-                v2_selected_component=["v2", "v2"],
+                static_stack_pred_dst_nt=[-46.0, -48.0],
+                sub_hourly_model_version=fill(SUPERLEARNER_SERVED_TAIL_VERSION, 2),
+                inertial_sindy_selected_component=["inertial_sindy", "inertial_sindy"],
                 persistence_dst_nt=[-39.0, -44.0],
                 burton_dst_nt=[-41.0, -44.0],
                 burton_full_dst_nt=[-41.0, -44.0],
@@ -3144,24 +2874,24 @@ using .V24ServingFixture
             CSV.write(log_path, df)
             write_live_comparison_report(log_path, report_path)
             text = read(report_path, String)
-            @test occursin("Current served identity: V2.4e (`$(V2_4_SERVED_TAIL_VERSION)`)", text)
-            @test occursin("V2.4e 90% interval coverage", text)
-            @test occursin("| V2.4e | 2 |", text)
-            @test occursin("| Static V2.2 predecessor | 2 | 1.58 | 1.5 | -1.5 |", text)
-            @test occursin("| V2.1 frozen-tail ablation | 2 |", text)
+            @test occursin("Current served identity: super-learner (`$(SUPERLEARNER_SERVED_TAIL_VERSION)`)", text)
+            @test occursin("super-learner 90% interval coverage", text)
+            @test occursin("| super-learner | 2 |", text)
+            @test occursin("| Static stack predecessor | 2 | 1.58 | 1.5 | -1.5 |", text)
+            @test occursin("| inertial-SINDy frozen-tail ablation | 2 |", text)
             @test occursin("## Same-Row Model Comparison by Internal Step", text)
-            @test occursin("| 1 | V2.4e | 1 | 1.0 | 1.0 | -1.0 |", text)
-            @test occursin("| 1 | Static V2.2 predecessor | 1 | 2.0 | 2.0 | -2.0 |", text)
-            @test occursin("| 2 | V2.4e | 1 | 1.0 | 1.0 | 1.0 |", text)
-            @test occursin("V2.1 frozen-tail pred", text)
-            @test !occursin("V2.1 is the dashboard forecast", text)
+            @test occursin("| 1 | super-learner | 1 | 1.0 | 1.0 | -1.0 |", text)
+            @test occursin("| 1 | Static stack predecessor | 1 | 2.0 | 2.0 | -2.0 |", text)
+            @test occursin("| 2 | super-learner | 1 | 1.0 | 1.0 | 1.0 |", text)
+            @test occursin("inertial-SINDy frozen-tail pred", text)
+            @test !occursin("inertial-SINDy is the dashboard forecast", text)
 
             # Earlier served identities stay separate from the current headline cohort.
             mixed_history = vcat(first(df, 1), df)
             mixed_history.issue_time_utc[1] = "2026-06-06T08:00:00"
             mixed_history.latest_dst_time_utc[1] = "2026-06-06T08:00:00"
             mixed_history.target_time_utc[1] = "2026-06-06T10:00:00"
-            mixed_history.sub_hourly_model_version[1] = V2_SERVED_TAIL_VERSION
+            mixed_history.sub_hourly_model_version[1] = OPERATIONAL_SERVED_TAIL_VERSION
             mixed_history_path = joinpath(dir, "mixed_served_history.csv")
             mixed_history_report = joinpath(dir, "mixed_served_history.md")
             CSV.write(mixed_history_path, mixed_history)
@@ -3170,23 +2900,23 @@ using .V24ServingFixture
             @test occursin("Verified rows used across all served identities: 3", mixed_text)
             @test occursin("Verified rows under the current served identity set: 2", mixed_text)
             @test occursin("Same-row current-identity comparison rows: 2", mixed_text)
-            @test occursin("| V2.1 | `$(V2_SERVED_TAIL_VERSION)` | 1 |", mixed_text)
-            @test occursin("| V2.4e | `$(V2_4_SERVED_TAIL_VERSION)` | 2 |", mixed_text)
+            @test occursin("| inertial-SINDy | `$(OPERATIONAL_SERVED_TAIL_VERSION)` | 1 |", mixed_text)
+            @test occursin("| super-learner | `$(SUPERLEARNER_SERVED_TAIL_VERSION)` | 2 |", mixed_text)
 
             # Expanded legacy rows can contain populated served_* columns. The
             # persisted model identity, not column presence, controls labeling.
             historical = copy(df)
-            historical.model_version .= "v2"
+            historical.model_version .= "sindy_core"
             select!(historical, Not(:sub_hourly_model_version))
             historical_path = joinpath(dir, "historical_with_served.csv")
             historical_report = joinpath(dir, "historical_with_served.md")
             CSV.write(historical_path, historical)
             write_live_comparison_report(historical_path, historical_report)
             historical_text = read(historical_report, String)
-            @test occursin("Historical V2.0 is the archived operational method", historical_text)
-            @test occursin("| Historical V2.0 | 2 |", historical_text)
-            @test occursin("| Historical V2.0 frozen-tail ablation | 2 |", historical_text)
-            @test !occursin("V2.1 is the dashboard forecast", historical_text)
+            @test occursin("Historical SINDy core is the archived operational method", historical_text)
+            @test occursin("| Historical SINDy core | 2 |", historical_text)
+            @test occursin("| Historical SINDy core frozen-tail ablation | 2 |", historical_text)
+            @test !occursin("inertial-SINDy is the dashboard forecast", historical_text)
 
             empty_current_path = joinpath(dir, "empty_current.csv")
             empty_current_report = joinpath(dir, "empty_current.md")
@@ -3194,14 +2924,14 @@ using .V24ServingFixture
             write_live_comparison_report(
                 empty_current_path,
                 empty_current_report;
-                empty_identity=:v2_1,
+                empty_identity=:inertial_sindy,
             )
             empty_current_text = read(empty_current_report, String)
             @test occursin("Newest issued forecast: none", empty_current_text)
-            @test occursin("V2.1 is the recorded base method", empty_current_text)
+            @test occursin("inertial-SINDy is the recorded base method", empty_current_text)
             @test occursin("Verified rows used across all served identities: 0", empty_current_text)
             @test !occursin(
-                "Historical V2.0 is the archived operational method",
+                "Historical SINDy core is the archived operational method",
                 empty_current_text,
             )
             @test_throws ArgumentError write_live_comparison_report(
@@ -3211,7 +2941,7 @@ using .V24ServingFixture
             )
 
             mixed = copy(df)
-            mixed.model_version[2] = "v2"
+            mixed.model_version[2] = "sindy_core"
             @test_throws ArgumentError write_live_comparison_report(
                 log_path,
                 report_path;
@@ -3220,7 +2950,7 @@ using .V24ServingFixture
         end
     end
 
-    @testset "G09-03: V2.1-fallback cohort is compared without the absent static-V2.2 center" begin
+    @testset "G09-03: inertial-SINDy-fallback cohort is compared without the absent static-static stack center" begin
         mktempdir() do dir
             n = 4
             issue = [DateTime(2026, 7, 1, 10, 5) + Hour(i) for i in 1:n]
@@ -3228,24 +2958,24 @@ using .V24ServingFixture
                 issue_time_utc=string.(issue),
                 latest_dst_time_utc=string.(_floor_hour.(issue)),
                 target_time_utc=string.(_floor_hour.(issue) .+ Hour(1)),
-                model_version=fill(OPERATIONAL_V2_1_MODEL_VERSION, n),
+                model_version=fill(OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION, n),
                 model_step_hours=fill(1, n), wall_clock_lead_hours=fill(0.9, n),
-                sub_hourly_model_version=fill(V2_SERVED_TAIL_VERSION, n),
+                sub_hourly_model_version=fill(OPERATIONAL_SERVED_TAIL_VERSION, n),
                 observation_dst_nt=[-20.0, -22, -25, -30],
                 pred_dst_nt=[-19.0, -21, -24, -28],
                 pred_dst_ci05_nt=fill(-40.0, n), pred_dst_ci95_nt=fill(0.0, n),
                 observed_in_90ci=fill(true, n),
-                v2_pred_dst_nt=[-19.0, -21, -24, -28],
-                v2_pred_dst_ci05_nt=fill(-40.0, n), v2_pred_dst_ci95_nt=fill(0.0, n),
-                v1_pred_dst_nt=[-18.0, -20, -23, -27],
+                inertial_sindy_pred_dst_nt=[-19.0, -21, -24, -28],
+                inertial_sindy_pred_dst_ci05_nt=fill(-40.0, n), inertial_sindy_pred_dst_ci95_nt=fill(0.0, n),
+                sindy_core_pred_dst_nt=[-18.0, -20, -23, -27],
                 persistence_dst_nt=[-19.0, -20, -22, -25],
                 burton_dst_nt=[-19.0, -20, -22, -25],
                 burton_full_dst_nt=[-19.0, -20, -22, -25],
                 obrien_dst_nt=[-19.0, -20, -22, -25],
                 served_pred_dst_nt=[-20.0, -22, -25, -29],
                 served_pred_dst_ci05_nt=fill(-40.0, n), served_pred_dst_ci95_nt=fill(0.0, n),
-                v2_2_status=fill("fallback_v2_1:stack_absent", n),
-                v2_2_stack_pred_dst_nt=Vector{Union{Missing,Float64}}(missing, n),
+                static_stack_status=fill("fallback_inertial_sindy:stack_absent", n),
+                static_stack_pred_dst_nt=Vector{Union{Missing,Float64}}(missing, n),
             )
             log_path = joinpath(dir, "fallback_log.csv")
             report_path = joinpath(dir, "fallback_report.md")
@@ -3253,9 +2983,9 @@ using .V24ServingFixture
             write_live_comparison_report(log_path, report_path)
             text = read(report_path, String)
             @test occursin("Same-row current-identity comparison rows: 4", text)
-            @test occursin("| V2.1 | 4 |", text)
+            @test occursin("| inertial-SINDy | 4 |", text)
             @test occursin("| Persistence | 4 |", text)
-            @test !occursin("| Static V2.2 predecessor |", text)
+            @test !occursin("| Static stack predecessor |", text)
 
             summary_text = open(joinpath(dir, "fallback_summary.txt"), "w+") do io
                 redirect_stdout(io) do
@@ -3264,28 +2994,28 @@ using .V24ServingFixture
                 seekstart(io)
                 read(io, String)
             end
-            @test occursin(r"V2\.1\s+n=4 RMSE=", summary_text)
+            @test occursin(r"inertial-SINDy\s+n=4 RMSE=", summary_text)
             @test occursin(r"Persistence\s+n=4 RMSE=", summary_text)
             @test !occursin("no verified rows", summary_text)
         end
     end
 
-    @testset "Historical archive report preserves served/frozen V2.0 roles" begin
+    @testset "Historical archive report preserves served/frozen SINDy core roles" begin
         mktempdir() do dir
             historical_log = joinpath(
-                get_data_dir(), "historical", "v2_0", "live_forecast_log.csv",
+                get_data_dir(), "historical", "sindy_core", "live_forecast_log.csv",
             )
             report_path = joinpath(dir, "historical_report.md")
             write_live_comparison_report(historical_log, report_path)
             text = read(report_path, String)
             @test occursin("Same-row current-identity comparison rows: 1533", text)
-            @test occursin("Historical V2.0 90% interval coverage: 0.88", text)
-            @test occursin("| Historical V2.0 | 1533 | 9.54 |", text)
+            @test occursin("Historical SINDy core 90% interval coverage: 0.88", text)
+            @test occursin("| Historical SINDy core | 1533 | 9.54 |", text)
             @test occursin(
-                "| Historical V2.0 frozen-tail ablation | 1533 | 9.85 |",
+                "| Historical SINDy core frozen-tail ablation | 1533 | 9.85 |",
                 text,
             )
-            @test !occursin("V2.1 is the dashboard forecast", text)
+            @test !occursin("inertial-SINDy is the dashboard forecast", text)
 
             summary_text = open(joinpath(dir, "historical_summary.txt"), "w+") do io
                 redirect_stdout(io) do
@@ -3294,12 +3024,12 @@ using .V24ServingFixture
                 seekstart(io)
                 read(io, String)
             end
-            @test occursin(r"Historical V2\.0\s+n=1533 RMSE=9\.54", summary_text)
+            @test occursin(r"Historical SINDy core\s+n=1533 RMSE=9\.54", summary_text)
             @test occursin(
-                r"Historical V2\.0 frozen-tail ablation\s+n=1533 RMSE=9\.85",
+                r"Historical SINDy core frozen-tail ablation\s+n=1533 RMSE=9\.85",
                 summary_text,
             )
-            @test occursin("Historical V2.0 90% coverage n=1533 coverage=0.88", summary_text)
+            @test occursin("Historical SINDy core 90% coverage n=1533 coverage=0.88", summary_text)
         end
     end
 
@@ -3412,20 +3142,20 @@ using .V24ServingFixture
     end
 
     @testset "P1-3/C4-PKG-03: issuance remains within the calibrated product support" begin
-        # Multi-step v1 loops step_forecast!, whose band is ~5× too narrow vs the
+        # Multi-step SINDy core loops step_forecast!, whose band is ~5× too narrow vs the
         # forecast_ahead propagation, so it must be refused at issuance.
-        @test_throws ArgumentError _assert_issuable_model(:v1, 2)
-        @test_throws ArgumentError _assert_issuable_model(:v1, 6)
-        @test _assert_issuable_model(:v1, 1) === nothing    # single-step v1 is fine
-        @test _assert_issuable_model(:v2, 6) === nothing    # v2 serves a conformal band
-        @test _assert_issuable_model(:v2, 1) === nothing
-        @test_throws ArgumentError _assert_issuable_model(:v2, 4)
-        @test_throws ArgumentError _assert_issuable_model(:v2, 99)
+        @test_throws ArgumentError _assert_issuable_model(:sindy_core, 2)
+        @test_throws ArgumentError _assert_issuable_model(:sindy_core, 6)
+        @test _assert_issuable_model(:sindy_core, 1) === nothing    # single-step SINDy-core issuance is fine
+        @test _assert_issuable_model(:inertial_sindy, 6) === nothing    # operational serves a conformal band
+        @test _assert_issuable_model(:inertial_sindy, 1) === nothing
+        @test_throws ArgumentError _assert_issuable_model(:inertial_sindy, 4)
+        @test_throws ArgumentError _assert_issuable_model(:inertial_sindy, 99)
 
-        supported = default_operational_v2_calibration(
-            supported_model_steps=copy(OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS),
+        supported = default_inertial_sindy_calibration(
+            supported_model_steps=copy(OPERATIONAL_INERTIAL_SINDY_SUPPORTED_MODEL_STEPS),
         )
-        for step in OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS
+        for step in OPERATIONAL_INERTIAL_SINDY_SUPPORTED_MODEL_STEPS
             @test _assert_supported_model_step(supported, step) === nothing
         end
         @test_throws ArgumentError _assert_supported_model_step(supported, 0)
@@ -3433,7 +3163,7 @@ using .V24ServingFixture
         @test_throws ArgumentError _assert_supported_model_step(supported, 8)
         @test _supported_horizon_edges([1, 2, 3, 6]) ==
               [0.0, 1.5, 2.5, 4.5, Inf]
-        @test _supported_horizon_edges(OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS) ==
+        @test _supported_horizon_edges(OPERATIONAL_INERTIAL_SINDY_SUPPORTED_MODEL_STEPS) ==
               [0.0, 1.5, 2.5, 3.5, 5.0, 6.5, Inf]
         @test_throws ArgumentError _supported_horizon_edges(Int[])
         @test_throws ArgumentError _supported_horizon_edges([0, 1])
@@ -3441,30 +3171,30 @@ using .V24ServingFixture
         issue = DateTime(2026, 8, 10, 12)
         actual_steps = Int[]
         for anchor_lag in 0:LIVE_MAX_DST_ANCHOR_LAG_STEPS,
-            product_horizon in V2_PRODUCT_HORIZONS
+            product_horizon in OPERATIONAL_PRODUCT_HORIZONS
             anchor = issue - Hour(anchor_lag)
             target = _next_hourly_target(issue, product_horizon, anchor)
             step = Int((target - anchor) / Hour(1))
-            @test step in OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS
+            @test step in OPERATIONAL_INERTIAL_SINDY_SUPPORTED_MODEL_STEPS
             push!(actual_steps, step)
         end
-        @test sort(unique(actual_steps)) == OPERATIONAL_V2_1_SUPPORTED_MODEL_STEPS
+        @test sort(unique(actual_steps)) == OPERATIONAL_INERTIAL_SINDY_SUPPORTED_MODEL_STEPS
     end
 
-    @testset "V2 tail: regime-aware relaxation and finite interval shift" begin
+    @testset "Operational tail: regime-aware relaxation and finite interval shift" begin
         driver = (V=420.0, Bz=-12.0, By=4.0, n=6.0, Pdyn=2.5)
-        tau_recovery = _v2_tail_tau(5.0)
-        tau_deepening = _v2_tail_tau(-30.0)
+        tau_recovery = _operational_tail_tau(5.0)
+        tau_deepening = _operational_tail_tau(-30.0)
         @test tau_deepening > tau_recovery
-        @test tau_deepening <= V2_TAIL_TAU_MAX_H
-        @test V2_SERVED_TAIL_VERSION == "v2.1+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
+        @test tau_deepening <= OPERATIONAL_TAIL_TAU_MAX_H
+        @test OPERATIONAL_SERVED_TAIL_VERSION == "inertial-sindy+sindy20x11+L1A+Bregime+Rprojection+H1inertia+Sinertia+Pinertia"
 
         # Closed-form tau law (all exactly representable, so == is safe): recovery => no scaling,
         # deepening => tau0*(1+|rate|/r0), saturation => cap. Pins the formula SHAPE and constants so
         # a sqrt-shape or an r0/tau0 rescale (which preserve the orderings above) is caught.
-        @test _v2_tail_tau(5.0) == 3.0                       # V2_TAIL_TAU0_H
-        @test _v2_tail_tau(-30.0) == 15.0                    # 3*(1 + 30/7.5)
-        @test _v2_tail_tau(-10_000.0) == V2_TAIL_TAU_MAX_H   # cap saturation
+        @test _operational_tail_tau(5.0) == 3.0                       # OPERATIONAL_TAIL_TAU0_H
+        @test _operational_tail_tau(-30.0) == 15.0                    # 3*(1 + 30/7.5)
+        @test _operational_tail_tau(-10_000.0) == OPERATIONAL_TAIL_TAU_MAX_H   # cap saturation
 
         relaxed_recovery = _relaxed_tail_driver(driver, 1, 5.0)
         relaxed_deepening = _relaxed_tail_driver(driver, 1, -30.0)
@@ -3495,9 +3225,10 @@ using .V24ServingFixture
         @test_throws ArgumentError _served_interval_with_source(
             -110.0, -70.0, "conformal", (-60.0, -120.0),
         )
-        @test _served_driver_assumption(OPERATIONAL_V2_1_MODEL_VERSION) ==
-              V2_DRIVER_ASSUMPTION
-        @test _served_driver_assumption("v1") == V1_DRIVER_ASSUMPTION
+        @test _served_driver_assumption(OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION) ==
+              OPERATIONAL_DRIVER_ASSUMPTION
+        @test _served_driver_assumption("sindy_core") == SINDY_CORE_DRIVER_ASSUMPTION
+        @test _served_driver_assumption("v1") == SINDY_CORE_DRIVER_ASSUMPTION
         @test_throws ArgumentError _served_driver_assumption("v0")
         @test _near_term_extreme_inertia_guard(-250.0, 1)
         @test _near_term_extreme_inertia_guard(-250.0, 2)
@@ -3513,8 +3244,8 @@ using .V24ServingFixture
         # Order-sensitive oracle: Eq. (13) projects raw 100 nT to 50 nT
         # before the rapid-rate and one-hour inertia maps, yielding -65 nT.
         # Applying the safeguards to raw 100 first would incorrectly give -27.5.
-        @test _apply_v2_1_safeguards(100.0, -50.0, 1, -60.0) == -65.0
-        @test _apply_v2_1_safeguards(
+        @test _apply_inertial_sindy_safeguards(100.0, -50.0, 1, -60.0) == -65.0
+        @test _apply_inertial_sindy_safeguards(
             100.0, -50.0, 1, -60.0; apply_rate_guard=false,
         ) == 25.0
 
@@ -3526,7 +3257,7 @@ using .V24ServingFixture
         @test s.driver == driver
     end
 
-    @testset "V2 tail: L1 look-ahead measured branch blends the ballistic source window" begin
+    @testset "Operational tail: L1 look-ahead measured branch blends the ballistic source window" begin
         # recent.V = 500 km/s gives an exact ballistic lag of 50 min (L1_DIST_KM/V/3600 = 0.8333 h).
         recent = (V=500.0, Bz=-2.0, By=1.0, n=5.0, Pdyn=1.6726e-6 * 5.0 * 500.0^2)
         step_time = DateTime(2026, 6, 6, 3)
@@ -3573,7 +3304,7 @@ using .V24ServingFixture
         @test s_full.driver.Bz ≈ -14.0 atol = 1e-9
     end
 
-    @testset "V2 tail: subhour L1 branch rejects sparse, NaN, and partial windows" begin
+    @testset "Operational tail: subhour L1 branch rejects sparse, NaN, and partial windows" begin
         recent = (V=500.0, Bz=-2.0, By=1.0, n=5.0,
                   Pdyn=dynamic_pressure(5.0, 500.0))
         step_time = DateTime(2026, 6, 6, 3)
@@ -3615,7 +3346,7 @@ using .V24ServingFixture
         @test partial.driver == recent
     end
 
-    @testset "V2 tail: ballistic arrival is identical across completed and look-ahead steps" begin
+    @testset "Operational tail: ballistic arrival is identical across completed and look-ahead steps" begin
         recent = (V=500.0, Bz=-1.0, By=0.0, n=5.0,
                   Pdyn=dynamic_pressure(5.0, 500.0))
         # At 500 km/s, L1 transit is 50 min. A shock measured at 01:15 belongs
@@ -3656,13 +3387,13 @@ using .V24ServingFixture
         mag = DataFrame(time_tag=[t - Minute(30)], bz_gsm=[-8.0], by_gsm=[2.0])
 
         # Signs/values pinned against the training-side _lagged_difference convention (v[t]-v[t-lag]).
-        m = _live_v2_memory_features(plasma, mag, dst_times, dst_vals, t, drv, t)
+        m = _live_operational_memory_features(plasma, mag, dst_times, dst_vals, t, drv, t)
         @test m.dst_delta_1h_nt == -30.0                         # -70 - (-40)
         @test m.dst_delta_3h_nt == -50.0                         # -70 - (-20)
         @test m.dst_delta_3h_nt != m.dst_delta_1h_nt
 
         # Driver memory follows consecutive anchor-aligned, ballistically
-        # propagated source hours, matching `add_operational_v2_features!`.
+        # propagated source hours, matching `add_inertial_sindy_features!`.
         # With V=500 km/s the source windows end 50 min before each Earth-hour
         # anchor.  Distinct values in three consecutive windows make an
         # accidental target-step-minus-anchor difference immediately visible.
@@ -3689,7 +3420,7 @@ using .V24ServingFixture
         mem_mag = DataFrame(time_tag=mem_times, bz_gsm=mem_bz, by_gsm=mem_by)
         anchor_drv = (V=500.0, Bz=-8.0, By=0.0, n=5.0,
                       Pdyn=dynamic_pressure(5.0, 500.0))
-        aligned = _live_v2_memory_features(
+        aligned = _live_operational_memory_features(
             mem_plasma, mem_mag, dst_times, dst_vals, t, anchor_drv, t,
         )
         @test aligned.Bz_delta_1h_nt == -6.0
@@ -3701,15 +3432,15 @@ using .V24ServingFixture
         # silently forced equal to the 1h delta by a cascading fallback (the documented regression).
         gap3_t = [t - Hour(2), t - Hour(1), t]
         gap3_v = [-25.0, -40.0, -70.0]
-        z = _live_v2_memory_features(plasma, mag, gap3_t, gap3_v, t, drv, t)
-        @test z == _zero_v2_memory_features()
+        z = _live_operational_memory_features(plasma, mag, gap3_t, gap3_v, t, drv, t)
+        @test z == _zero_operational_memory_features()
         @test z.dst_delta_1h_nt == 0.0 && z.dst_delta_3h_nt == 0.0
 
         # The tail relaxation rate is DECOUPLED from that zeroing: the freshest contiguous pair
         # (t, t-1h) still yields the true -30 nT/h even when t-3h is missing, so tau stays long
         # (> tau0) for a deepening storm instead of collapsing to the quiet default.
         @test _freshest_dst_rate(gap3_t, gap3_v, t) == -30.0
-        @test _v2_tail_tau(_freshest_dst_rate(gap3_t, gap3_v, t)) > V2_TAIL_TAU0_H
+        @test _operational_tail_tau(_freshest_dst_rate(gap3_t, gap3_v, t)) > OPERATIONAL_TAIL_TAU0_H
         @test _dst_memory_fallback(gap3_t, gap3_v, t)            # interior gap is flagged (logged/warned)
         @test !_dst_memory_fallback(dst_times, dst_vals, t)      # complete history is not flagged
 
@@ -3778,13 +3509,13 @@ using .V24ServingFixture
                floor(Int, 0.35 * length(anchors))) * length(horizons)
     end
 
-    @testset "F5: a thin validation split deploys the fallback, not a v2 gate on one row" begin
+    @testset "F5: a thin validation split deploys the fallback, not a operational gate on one row" begin
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")
-            cal_path = joinpath(tmp, "v2_calibration.csv")
+            cal_path = joinpath(tmp, "inertial_sindy_calibration.csv")
             # Tiny table whose 0.15 validation fraction yields a single validation
             # row — a degenerate 0/1 coverage check. The gate must not be trusted;
-            # the v1-equivalent fallback must deploy regardless of that one row.
+            # the SINDy-core-equivalent fallback must deploy regardless of that one row.
             n = 8
             pred = collect(-30.0:1.0:-23.0)
             observed = pred .+ 2.0                            # a correction that would "pass"
@@ -3794,9 +3525,9 @@ using .V24ServingFixture
                 pred_dst_ci05_nt=pred .- 3.0,
                 pred_dst_ci95_nt=pred .+ 3.0,
                 observation_dst_nt=observed,
-                v1_pred_dst_nt=pred,
-                v1_pred_dst_ci05_nt=pred .- 3.0,
-                v1_pred_dst_ci95_nt=pred .+ 3.0,
+                sindy_core_pred_dst_nt=pred,
+                sindy_core_pred_dst_ci05_nt=pred .- 3.0,
+                sindy_core_pred_dst_ci95_nt=pred .+ 3.0,
                 latest_dst_nt=fill(-40.0, n),
                 V_kms=fill(420.0, n),
                 Bz_nt=fill(-2.0, n),
@@ -3807,22 +3538,22 @@ using .V24ServingFixture
             CSV.write(table_path, replay)
 
             cfg = LiveVerifyConfig(;
-                mode=:fit_v2_calibration,
+                mode=:fit_inertial_sindy_calibration,
                 table_path=table_path,
-                v2_calibration_path=cal_path,
-                v2_train_fraction=0.7,
-                v2_validation_fraction=0.15,           # floor(0.15*8)=1 validation row
-                v2_ridge_grid=[0.0],
-                v2_ridge=0.0,
+                inertial_sindy_calibration_path=cal_path,
+                operational_train_fraction=0.7,
+                operational_validation_fraction=0.15,           # floor(0.15*8)=1 validation row
+                operational_ridge_grid=[0.0],
+                operational_ridge=0.0,
             )
             _, validation, _ = _chronological_train_validation_test(
-                SolarSINDy.add_operational_v2_features!(_v2_base_prediction_table(copy(replay))),
-                cfg.v2_train_fraction, cfg.v2_validation_fraction,
+                SolarSINDy.add_inertial_sindy_features!(_operational_base_prediction_table(copy(replay))),
+                cfg.operational_train_fraction, cfg.operational_validation_fraction,
             )
-            @test nrow(validation) < V2_MIN_VALIDATION_ROWS    # degenerate gate input
-            cal = fit_v2_calibration!(cfg)
+            @test nrow(validation) < OPERATIONAL_MIN_VALIDATION_ROWS    # degenerate gate input
+            cal = fit_inertial_sindy_calibration!(cfg)
             selection = CSV.read(replace(cal_path, r"\.csv$" => "_selection.csv"), DataFrame)
-            @test cal.label == "operational_v2_1_fallback_v1_equiv"
+            @test cal.label == "operational_inertial_sindy_fallback_v1_equiv"
             @test !any(selection.deployed)
             @test selection.deploy_block_reason[1] == "validation_split_too_thin"
             @test !selection.validation_trusted[1]
@@ -3832,7 +3563,7 @@ using .V24ServingFixture
     @testset "G09-02: embargo-emptied validation purges holdout vs train and fails closed by name" begin
         mktempdir() do tmp
             table_path = joinpath(tmp, "replay.csv")
-            cal_path = joinpath(tmp, "v2_calibration.csv")
+            cal_path = joinpath(tmp, "inertial_sindy_calibration.csv")
             # 30 hourly anchors x horizons {1,6}: the 6 h purge after train deletes every
             # validation anchor (0.15 * 30 = 4 anchors < 6 h).
             rows = NamedTuple[]
@@ -3842,21 +3573,21 @@ using .V24ServingFixture
                 push!(rows, (issue_time_utc=string(issue), target_time_utc=string(issue + Hour(h)),
                     latest_dst_time_utc=string(issue), model_step_hours=h,
                     pred_dst_nt=pred, pred_dst_ci05_nt=pred - 3, pred_dst_ci95_nt=pred + 3,
-                    observation_dst_nt=pred + 2 + 0.3 * sin(i), v1_pred_dst_nt=pred,
-                    v1_pred_dst_ci05_nt=pred - 3, v1_pred_dst_ci95_nt=pred + 3,
+                    observation_dst_nt=pred + 2 + 0.3 * sin(i), sindy_core_pred_dst_nt=pred,
+                    sindy_core_pred_dst_ci05_nt=pred - 3, sindy_core_pred_dst_ci95_nt=pred + 3,
                     latest_dst_nt=pred - 1, V_kms=420.0, Bz_nt=-2.0 + 0.1i,
                     By_nt=1.0, n_cm3=5.0, Pdyn_npa=1.5))
             end
             replay = DataFrame(rows)
             CSV.write(table_path, replay)
             cfg = LiveVerifyConfig(;
-                mode=:fit_v2_calibration, table_path=table_path, v2_calibration_path=cal_path,
-                v2_train_fraction=0.7, v2_validation_fraction=0.15,
-                v2_ridge_grid=[0.0], v2_ridge=0.0,
+                mode=:fit_inertial_sindy_calibration, table_path=table_path, inertial_sindy_calibration_path=cal_path,
+                operational_train_fraction=0.7, operational_validation_fraction=0.15,
+                operational_ridge_grid=[0.0], operational_ridge=0.0,
             )
             train, validation, holdout = _chronological_train_validation_test(
-                SolarSINDy.add_operational_v2_features!(_v2_base_prediction_table(copy(replay))),
-                cfg.v2_train_fraction, cfg.v2_validation_fraction,
+                SolarSINDy.add_inertial_sindy_features!(_operational_base_prediction_table(copy(replay))),
+                cfg.operational_train_fraction, cfg.operational_validation_fraction,
             )
             @test nrow(validation) == 0
             @test nrow(holdout) > 0
@@ -3864,7 +3595,7 @@ using .V24ServingFixture
             @test maximum(_parse_dt.(train.target_time_utc)) <
                   minimum(_parse_dt.(holdout.issue_time_utc))
             err = try
-                fit_v2_calibration!(cfg)
+                fit_inertial_sindy_calibration!(cfg)
                 nothing
             catch e
                 e
@@ -3878,29 +3609,29 @@ using .V24ServingFixture
 
     @testset "F6: gate metrics share one finite-row mask across baselines" begin
         # A scored validation frame with one `missing` and one `NaN` baseline row.
-        # Per-column finite filters would give v2 more rows than the baseline
+        # Per-column finite filters would give operational more rows than the baseline
         # comparators (unpaired); the common-mask metrics must report equal n.
         scored = DataFrame(
             observation_dst_nt=[-30.0, -31.0, -32.0, -33.0],
-            v2_pred_dst_nt=[-29.0, -30.0, -31.0, -32.0],
+            inertial_sindy_pred_dst_nt=[-29.0, -30.0, -31.0, -32.0],
             pred_dst_nt=[-29.5, -30.5, -31.5, -32.5],
             latest_dst_nt=Union{Missing,Float64}[-28.0, missing, -33.0, -34.0],
             obrien_dst_nt=[-27.0, -29.0, NaN, -35.0],
         )
         metrics = _paired_gate_metrics(
-            scored, Symbol[:v2_pred_dst_nt, :pred_dst_nt, :latest_dst_nt, :obrien_dst_nt],
+            scored, Symbol[:inertial_sindy_pred_dst_nt, :pred_dst_nt, :latest_dst_nt, :obrien_dst_nt],
         )
         # Rows 2 (missing persistence) and 3 (NaN O'Brien) drop from ALL metrics.
-        @test metrics[:v2_pred_dst_nt].n == 2
-        @test metrics[:v2_pred_dst_nt].n == metrics[:pred_dst_nt].n ==
+        @test metrics[:inertial_sindy_pred_dst_nt].n == 2
+        @test metrics[:inertial_sindy_pred_dst_nt].n == metrics[:pred_dst_nt].n ==
               metrics[:latest_dst_nt].n ==
               metrics[:obrien_dst_nt].n
         # The surviving rows are exactly the fully finite ones (rows 1 and 4).
-        @test metrics[:v2_pred_dst_nt].rmse ≈ 1.0 atol = 1e-12
+        @test metrics[:inertial_sindy_pred_dst_nt].rmse ≈ 1.0 atol = 1e-12
     end
 
     @testset "F7: promotion gate requires strict uncorrected-center improvement" begin
-        @test !_v2_gate_pass((rmse=1.0, mae=1.0), (rmse=1.0, mae=1.0))
+        @test !_operational_gate_pass((rmse=1.0, mae=1.0), (rmse=1.0, mae=1.0))
 
         n = 20
         pred = collect(-50.0:1.0:-31.0)
@@ -3910,9 +3641,9 @@ using .V24ServingFixture
             pred_dst_ci05_nt=pred .- 3.0,
             pred_dst_ci95_nt=pred .+ 3.0,
             observation_dst_nt=vcat(pred[1:14] .+ 2.0, pred[15:end]),
-            v1_pred_dst_nt=pred,
-            v1_pred_dst_ci05_nt=pred .- 3.0,
-            v1_pred_dst_ci95_nt=pred .+ 3.0,
+            sindy_core_pred_dst_nt=pred,
+            sindy_core_pred_dst_ci05_nt=pred .- 3.0,
+            sindy_core_pred_dst_ci95_nt=pred .+ 3.0,
             latest_dst_nt=pred .+ 10.0,
             V_kms=fill(420.0, n),
             Bz_nt=collect(-10.0:1.0:9.0),
@@ -3920,11 +3651,11 @@ using .V24ServingFixture
             n_cm3=fill(5.0, n),
             Pdyn_npa=fill(1.5, n),
         )
-        df = SolarSINDy.add_operational_v2_features!(_v2_base_prediction_table(replay))
-        selection = _select_validated_v2_calibration(
+        df = SolarSINDy.add_inertial_sindy_features!(_operational_base_prediction_table(replay))
+        selection = _select_validated_inertial_sindy_calibration(
             df[1:14, :],
             df[15:20, :],
-            LiveVerifyConfig(; v2_ridge_grid=[0.0], v2_ridge=0.0),
+            LiveVerifyConfig(; operational_ridge_grid=[0.0], operational_ridge=0.0),
         )
         @test :beats_preupgrade in propertynames(selection.candidates)
         @test !selection.row.beats_preupgrade
@@ -3952,9 +3683,9 @@ using .V24ServingFixture
             end
             for i in 1:2n; push!(iss, "2026-01-01T" * lpad(string(i ÷ 60), 2, '0') * ":" * lpad(string(i % 60), 2, '0') * ":00"); end
             aci_rows = DataFrame(model_step_hours=ms, horizon_hours=hh,
-                                     v2_pred_dst_nt=pred, observation_dst_nt=obs,
+                                     inertial_sindy_pred_dst_nt=pred, observation_dst_nt=obs,
                                      latest_dst_nt=ld, issue_time_utc=iss,
-                                     model_version=fill(OPERATIONAL_V2_1_MODEL_VERSION, 2n))
+                                     model_version=fill(OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION, 2n))
             CSV.write(log, aci_rows)
             # Quiet query: pools only the ±5 rows -> narrow band (NOT the old ~nothing/fallback).
             q = _aci_interval_from_log(log, 0.0, 7; latest_dst=5.0)
@@ -3972,50 +3703,51 @@ using .V24ServingFixture
 
             legacy_log = joinpath(dir, "legacy.csv")
             legacy_rows = copy(aci_rows)
-            legacy_rows.model_version .= "v2"
+            legacy_rows.model_version .= "sindy_core"
             CSV.write(legacy_log, legacy_rows)
             @test _aci_interval_from_log(legacy_log, 0.0, 7; latest_dst=5.0) === nothing
         end
     end
 
-    @testset "ACI interval: residual pool is keyed on the issued model (v1 vs v2)" begin
-        # A v1 issuance must be banded from v1 residuals, not the v2-calibrated pool. Build a log
-        # whose v1 and v2 residual magnitudes differ sharply and confirm the band tracks the queried
-        # column.
+    @testset "ACI interval: residual pool is keyed on the issued model (SINDy core vs operational)" begin
+        # A SINDy core issuance must be banded from SINDy core residuals, not the
+        # operational-calibrated pool. Build a log whose SINDy core and operational residual
+        # magnitudes differ sharply and confirm the band tracks the queried column.
         mktempdir() do dir
             log = joinpath(dir, "log.csv")
             n = 45                                            # > warmup+5 = 35
             obs = zeros(n)
-            v2_pred = [isodd(k) ? -3.0 : 3.0 for k in 1:n]    # |v2 residual| = 3
-            v1_pred = [isodd(k) ? -15.0 : 15.0 for k in 1:n]  # |v1 residual| = 15
+            inertial_sindy_pred = [isodd(k) ? -3.0 : 3.0 for k in 1:n]    # |operational residual| = 3
+            sindy_core_pred = [isodd(k) ? -15.0 : 15.0 for k in 1:n]  # |SINDy core residual| = 15
             iss = ["2026-01-01T" * lpad(string(i ÷ 60), 2, '0') * ":" * lpad(string(i % 60), 2, '0') * ":00" for i in 1:n]
             CSV.write(log, DataFrame(model_step_hours=fill(1.0, n),
-                                     v1_pred_dst_nt=v1_pred, v2_pred_dst_nt=v2_pred,
+                                     sindy_core_pred_dst_nt=sindy_core_pred, inertial_sindy_pred_dst_nt=inertial_sindy_pred,
                                      observation_dst_nt=obs, latest_dst_nt=fill(-10.0, n),
                                      issue_time_utc=iss,
-                                     model_version=fill(OPERATIONAL_V2_1_MODEL_VERSION, n)))
-            b_v2 = _aci_interval_from_log(log, 0.0, 1; latest_dst=-10.0, pred_col=:v2_pred_dst_nt)
-            b_v1 = _aci_interval_from_log(log, 0.0, 1; latest_dst=-10.0, pred_col=:v1_pred_dst_nt)
-            @test b_v2 !== nothing && b_v1 !== nothing
-            hw_v2 = (b_v2[2] - b_v2[1]) / 2
-            hw_v1 = (b_v1[2] - b_v1[1]) / 2
-            @test hw_v1 > 2 * hw_v2                           # v1 band tracks the larger v1 residuals
+                                     model_version=fill(OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION, n)))
+            b_operational = _aci_interval_from_log(log, 0.0, 1; latest_dst=-10.0, pred_col=:inertial_sindy_pred_dst_nt)
+            b_core = _aci_interval_from_log(log, 0.0, 1; latest_dst=-10.0, pred_col=:sindy_core_pred_dst_nt)
+            @test b_operational !== nothing && b_core !== nothing
+            hw_operational = (b_operational[2] - b_operational[1]) / 2
+            hw_core = (b_core[2] - b_core[1]) / 2
+            @test hw_core > 2 * hw_operational                        # core band tracks the larger core residuals
             # A log lacking the requested column returns nothing (no cross-model borrowing).
-            CSV.write(log, DataFrame(model_step_hours=fill(1.0, n), v2_pred_dst_nt=v2_pred,
+            GC.gc()          # release the mmap'd log before rewriting it (Windows keeps it locked)
+            CSV.write(log, DataFrame(model_step_hours=fill(1.0, n), inertial_sindy_pred_dst_nt=inertial_sindy_pred,
                                      observation_dst_nt=obs, latest_dst_nt=fill(-10.0, n),
                                      issue_time_utc=iss))
-            @test _aci_interval_from_log(log, 0.0, 1; latest_dst=-10.0, pred_col=:v1_pred_dst_nt) === nothing
+            @test _aci_interval_from_log(log, 0.0, 1; latest_dst=-10.0, pred_col=:sindy_core_pred_dst_nt) === nothing
         end
     end
 
-    @testset "V2.4e A3 calibration shadow is exact-identity and availability causal" begin
-        @test _v2_4_calibration_shadow_width_scale(1) == 1.50
-        @test _v2_4_calibration_shadow_width_scale(2) == 1.20
-        @test _v2_4_calibration_shadow_width_scale(3) == 1.20
-        @test _v2_4_calibration_shadow_width_scale(4) == 1.20
-        @test _v2_4_calibration_shadow_width_scale(6) == 1.20
-        @test _v2_4_calibration_shadow_width_scale(7) == 1.20
-        @test_throws ArgumentError _v2_4_calibration_shadow_width_scale(5)
+    @testset "super-learner A3 calibration shadow is exact-identity and availability causal" begin
+        @test _superlearner_calibration_shadow_width_scale(1) == 1.50
+        @test _superlearner_calibration_shadow_width_scale(2) == 1.20
+        @test _superlearner_calibration_shadow_width_scale(3) == 1.20
+        @test _superlearner_calibration_shadow_width_scale(4) == 1.20
+        @test _superlearner_calibration_shadow_width_scale(6) == 1.20
+        @test _superlearner_calibration_shadow_width_scale(7) == 1.20
+        @test_throws ArgumentError _superlearner_calibration_shadow_width_scale(5)
         mktempdir() do dir
             log = joinpath(dir, "log.csv")
             base = DateTime(2026, 1, 1)
@@ -4031,16 +3763,16 @@ using .V24ServingFixture
                 model_step_hours=fill(1.0, n),
                 observation_dst_nt=point .+ residuals,
                 served_pred_dst_nt=point,
-                sub_hourly_model_version=fill(V2_4_SERVED_TAIL_VERSION, n),
-                v24_status=fill("ok", n),
-                v24_manifest_sha256=fill(
-                    V2_4_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256, n,
+                sub_hourly_model_version=fill(SUPERLEARNER_SERVED_TAIL_VERSION, n),
+                superlearner_status=fill("ok", n),
+                superlearner_manifest_sha256=fill(
+                    SUPERLEARNER_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256, n,
                 ),
             )
             CSV.write(log, rows)
             cutoff = targets[end]
             issue = cutoff + Hour(1)
-            shadow = _v2_4_calibration_shadow_from_log(
+            shadow = _superlearner_calibration_shadow_from_log(
                 log, -10.0, -12.0, -7.0, 1, cutoff, issue,
             )
             @test shadow.status == "ok"
@@ -4052,7 +3784,7 @@ using .V24ServingFixture
             wide = copy(rows)
             wide[!, :unrelated_payload] = fill("unused,\"quoted\"", n)
             CSV.write(log, wide)
-            @test _v2_4_calibration_shadow_from_log(
+            @test _superlearner_calibration_shadow_from_log(
                 log, -10.0, -12.0, -7.0, 1, cutoff, issue,
             ) == shadow
 
@@ -4066,7 +3798,7 @@ using .V24ServingFixture
                     malformed.issue_time_utc[1] = malformed.target_time_utc[1]
                 end
                 CSV.write(log, malformed)
-                checked = _v2_4_calibration_shadow_from_log(
+                checked = _superlearner_calibration_shadow_from_log(
                     log, -10.0, -12.0, -7.0, 1, cutoff, issue,
                 )
                 @test checked.status == "ok"
@@ -4081,7 +3813,7 @@ using .V24ServingFixture
             stale.observation_dst_nt[end-10:end] .= -1_000.0
             stale.observation_dst_nt[end] = missing
             CSV.write(log, stale)
-            current = _v2_4_calibration_shadow_from_log(
+            current = _superlearner_calibration_shadow_from_log(
                 log, -10.0, -12.0, -7.0, 1, cutoff, issue;
                 dst_times=targets, dst_vals=point .+ residuals,
             )
@@ -4090,28 +3822,28 @@ using .V24ServingFixture
             # A wrong-identity row and an exact-identity outcome beyond the issue-time cutoff cannot
             # enter the current history, even though both observations are present in the snapshot.
             contaminated = vcat(rows, rows[1:1, :], rows[2:2, :])
-            contaminated.sub_hourly_model_version[end-1] = V2_SERVED_TAIL_VERSION
+            contaminated.sub_hourly_model_version[end-1] = OPERATIONAL_SERVED_TAIL_VERSION
             contaminated.observation_dst_nt[end-1] = 10_000.0
             contaminated.issue_time_utc[end] = string(issue - Minute(10))
             contaminated.latest_dst_time_utc[end] = string(issue - Hour(1))
             contaminated.target_time_utc[end] = string(issue + Hour(6))
             contaminated.observation_dst_nt[end] = 20_000.0
             CSV.write(log, contaminated)
-            unchanged = _v2_4_calibration_shadow_from_log(
+            unchanged = _superlearner_calibration_shadow_from_log(
                 log, -10.0, -12.0, -7.0, 1, cutoff, issue,
             )
             @test unchanged == shadow
 
             wrong_manifest = copy(rows)
-            wrong_manifest.v24_manifest_sha256 .= "0"^64
+            wrong_manifest.superlearner_manifest_sha256 .= "0"^64
             CSV.write(log, wrong_manifest)
-            manifest_blocked = _v2_4_calibration_shadow_from_log(
+            manifest_blocked = _superlearner_calibration_shadow_from_log(
                 log, -10.0, -12.0, -7.0, 1, cutoff, issue,
             )
             @test manifest_blocked.status == "warmup:0/30"
 
             CSV.write(log, first(rows, 29))
-            warmup = _v2_4_calibration_shadow_from_log(
+            warmup = _superlearner_calibration_shadow_from_log(
                 log, -10.0, -12.0, -7.0, 1, targets[29], issue,
             )
             @test warmup.status == "warmup:29/30"
@@ -4121,11 +3853,11 @@ using .V24ServingFixture
                 pred_dst_nt=[-10.0], pred_dst_ci05_nt=[-12.0], pred_dst_ci95_nt=[-8.0],
                 served_pred_dst_nt=[-10.0], served_pred_dst_ci05_nt=[-12.0],
                 served_pred_dst_ci95_nt=[-8.0],
-                v24_cal_shadow_status=["ok"], v24_cal_shadow_ci05_nt=[-13.0],
-                v24_cal_shadow_ci95_nt=[-7.0],
+                superlearner_cal_shadow_status=["ok"], superlearner_cal_shadow_ci05_nt=[-13.0],
+                superlearner_cal_shadow_ci95_nt=[-7.0],
             )
             _score_row!(scored, 1, -12.5)
-            @test scored.v24_cal_shadow_observed_in_90ci[1]
+            @test scored.superlearner_cal_shadow_observed_in_90ci[1]
             @test !scored.served_observed_in_90ci[1]
         end
     end
@@ -4143,13 +3875,13 @@ using .V24ServingFixture
                 issue_time_utc=string.(issues),
                 latest_dst_time_utc=string.(issues),
                 target_time_utc=string.(issues .+ Hour(1)),
-                model_version=fill(OPERATIONAL_V2_1_MODEL_VERSION, n),
+                model_version=fill(OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION, n),
                 model_step_hours=fill(1.0, n),
                 latest_dst_nt=fill(-10.0, n),
                 pred_dst_nt=pred,
                 pred_dst_ci05_nt=fill(-40.0, n),
                 pred_dst_ci95_nt=fill(0.0, n),
-                v2_pred_dst_nt=pred,
+                inertial_sindy_pred_dst_nt=pred,
                 observation_dst_nt=obs,
             ))
 
@@ -4167,10 +3899,10 @@ using .V24ServingFixture
                 issue_time_utc=[string(issue)],
                 latest_dst_time_utc=[string(issue)],
                 target_time_utc=[string(target)],
-                model_version=[OPERATIONAL_V2_1_MODEL_VERSION], model_step_hours=[1.0],
+                model_version=[OPERATIONAL_INERTIAL_SINDY_MODEL_VERSION], model_step_hours=[1.0],
                 latest_dst_nt=[-10.0], pred_dst_nt=[-20.0],
                 pred_dst_ci05_nt=[-40.0], pred_dst_ci95_nt=[0.0],
-                v2_pred_dst_nt=[-20.0], observation_dst_nt=[missing],
+                inertial_sindy_pred_dst_nt=[-20.0], observation_dst_nt=[missing],
             )
             @test _append_forecast!(log, pending) == n + 1
             @test verify_pending!(LiveVerifyConfig(; log_path=log);

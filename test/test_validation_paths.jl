@@ -56,11 +56,11 @@ end
     end
 
     package_root = normpath(joinpath(@__DIR__, ".."))
-    paper_evidence = normpath(joinpath(package_root, "..", "paper_v2_monitor",
+    paper_evidence = normpath(joinpath(package_root, "..", "paper_dst_superlearner",
                                        "data", "source", "operational"))
     package_evidence = joinpath(package_root, "data", "operational_validation")
     output_evidence = joinpath(package_root, "validation", "output", "operational")
-    required = "v2_replay_scored.csv"
+    required = "operational_replay_scored.csv"
     expected = isfile(joinpath(output_evidence, required)) ? abspath(output_evidence) :
                isfile(joinpath(paper_evidence, required)) ? abspath(paper_evidence) :
                isfile(joinpath(package_evidence, required)) ? abspath(package_evidence) :

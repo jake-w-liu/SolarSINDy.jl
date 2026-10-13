@@ -242,12 +242,12 @@ using Statistics
         @test getfield.(half_ahead, :t) == [t0 + Hour(1), t0 + Minute(90)]
     end
 
-    @testset "A/D: V2 calibration" begin
-        cal0 = default_operational_v2_calibration(;
+    @testset "A/D: Operational calibration" begin
+        cal0 = default_inertial_sindy_calibration(;
             feature_names=[:latest_dst_nt],
             interval_scale=2.0,
         )
-        pred0 = operational_v2_predict(
+        pred0 = operational_inertial_sindy_predict(
             cal0,
             -10.0,
             -12.0,
@@ -272,27 +272,27 @@ using Statistics
             observation_dst_nt=observed,
             Bz_nt=bz,
         )
-        cal = fit_operational_v2_calibration(
+        cal = fit_inertial_sindy_calibration(
             df;
             feature_names=[:Bz_nt],
             ridge=0.0,
             interval_coverage=0.90,
-            label="unit_test_v2",
+            label="unit_test_operational",
         )
-        pred = operational_v2_predict(cal, -8.0, -13.0, -3.0, (; Bz_nt=4.0))
+        pred = operational_inertial_sindy_predict(cal, -8.0, -13.0, -3.0, (; Bz_nt=4.0))
         @test isapprox(pred.pred_dst, -8.0 + 3.0 + 8.0, atol=1e-10)
         @test pred.interval_scale >= 1.0
 
-        scored = score_operational_v2(df, cal)
-        @test :v2_pred_dst_nt in propertynames(scored)
-        @test maximum(abs.(scored.v2_residual_dst_nt)) < 1e-10
-        @test all(scored.v2_observed_in_90ci)
-        @test all(scored.v2_selected_component .== "v2")
+        scored = score_inertial_sindy(df, cal)
+        @test :inertial_sindy_pred_dst_nt in propertynames(scored)
+        @test maximum(abs.(scored.operational_residual_dst_nt)) < 1e-10
+        @test all(scored.operational_observed_in_90ci)
+        @test all(scored.inertial_sindy_selected_component .== "inertial_sindy")
 
         mktempdir() do tmp
-            path = joinpath(tmp, "v2_calibration.csv")
-            write_operational_v2_calibration(path, cal)
-            reread = read_operational_v2_calibration(path)
+            path = joinpath(tmp, "inertial_sindy_calibration.csv")
+            write_inertial_sindy_calibration(path, cal)
+            reread = read_inertial_sindy_calibration(path)
             @test reread.feature_names == cal.feature_names
             @test reread.feature_mean ≈ cal.feature_mean
             @test reread.feature_scale ≈ cal.feature_scale
@@ -309,12 +309,12 @@ using Statistics
         end
     end
 
-    @testset "D: V2 center clamped to physical Dst range" begin
-        # Mutation-sensitive guard for the operational-v2 center clamp. A
+    @testset "D: Operational center clamped to physical Dst range" begin
+        # Mutation-sensitive guard for the operational center clamp. A
         # pathological positive residual correction must not push the issued
         # Dst* above the physical ceiling (+50 nT) used by every other forecast
         # path. Build a calibration whose residual is a constant +140 nT so the
-        # fitted intercept is ~+140 and the :v2 component is selected (zero
+        # fitted intercept is ~+140 and the :inertial_sindy component is selected (zero
         # residual), then issue a forecast from a moderately negative prediction
         # whose uncorrected center (-10 + 140 = +130 nT) is unphysical.
         bz = collect(-2.0:1.0:3.0)
@@ -327,15 +327,15 @@ using Statistics
             observation_dst_nt=observed,
             Bz_nt=bz,
         )
-        cal_hot = fit_operational_v2_calibration(
+        cal_hot = fit_inertial_sindy_calibration(
             df_hot;
             feature_names=[:Bz_nt],
             ridge=0.0,
             interval_coverage=0.90,
             label="clamp_unit_test",
         )
-        @test cal_hot.selected_component == :v2  # perfect-fit v2 wins selector
-        pred_hot = operational_v2_predict(cal_hot, -10.0, -15.0, -5.0, (; Bz_nt=0.0))
+        @test cal_hot.selected_component == :inertial_sindy  # perfect-fit operational wins selector
+        pred_hot = operational_inertial_sindy_predict(cal_hot, -10.0, -15.0, -5.0, (; Bz_nt=0.0))
         # Without the clamp this would be ~ -10 + 140 = +130 nT (unphysical).
         @test pred_hot.pred_dst <= 50.0
         @test pred_hot.pred_dst >= -2000.0
@@ -345,15 +345,15 @@ using Statistics
         @test (pred_hot.ci05_dst + pred_hot.ci95_dst) / 2 ≈ pred_hot.pred_dst atol=1e-9
     end
 
-    @testset "A/D: V2 guarded baseline selector" begin
+    @testset "A/D: Operational guarded baseline selector" begin
         n = 16
-        v1_pred = fill(-40.0, n)
+        sindy_core_pred = fill(-40.0, n)
         observed = collect(-48.0:-1.0:-63.0)
         obrien = observed .+ 0.2
         df = DataFrame(
-            pred_dst_nt=v1_pred,
-            pred_dst_ci05_nt=v1_pred .- 3.0,
-            pred_dst_ci95_nt=v1_pred .+ 3.0,
+            pred_dst_nt=sindy_core_pred,
+            pred_dst_ci05_nt=sindy_core_pred .- 3.0,
+            pred_dst_ci95_nt=sindy_core_pred .+ 3.0,
             observation_dst_nt=observed,
             latest_dst_nt=fill(-42.0, n),
             V_kms=fill(420.0, n),
@@ -366,7 +366,7 @@ using Statistics
             burton_full_dst_nt=fill(-44.0, n),
             obrien_dst_nt=obrien,
         )
-        cal = fit_operational_v2_calibration(
+        cal = fit_inertial_sindy_calibration(
             df;
             ridge=1_000.0,
             guard_margin_nt=0.5,
@@ -377,30 +377,30 @@ using Statistics
         @test :obrien in cal.selector_names
         @test cal.selector_mae[findfirst(==(:obrien), cal.selector_names)] < cal.selector_mae[1]
 
-        pred = operational_v2_predict(
+        pred = operational_inertial_sindy_predict(
             cal,
             -40.0,
             -43.0,
             -37.0,
-            operational_v2_feature_tuple(-42.0, 420.0, -1.0, 1.0, 5.0, 1.5);
+            inertial_sindy_feature_tuple(-42.0, 420.0, -1.0, 1.0, 5.0, 1.5);
             baselines=(; persistence=-42.0, burton=-43.0, burton_full=-44.0, obrien=-52.5),
         )
         @test pred.pred_dst == -52.5
         @test pred.selected_component == "obrien"
         @test pred.ci05_dst < pred.pred_dst < pred.ci95_dst
 
-        @test_throws ArgumentError operational_v2_predict(
+        @test_throws ArgumentError operational_inertial_sindy_predict(
             cal,
             -40.0,
             -43.0,
             -37.0,
-            operational_v2_feature_tuple(-42.0, 420.0, -1.0, 1.0, 5.0, 1.5),
+            inertial_sindy_feature_tuple(-42.0, 420.0, -1.0, 1.0, 5.0, 1.5),
         )
 
-        scored = score_operational_v2(df, cal)
-        @test all(scored.v2_selected_component .== "obrien")
-        @test scored.v2_pred_dst_nt == obrien
-        @test maximum(abs.(scored.v2_residual_dst_nt)) ≈ 0.2 atol=1e-12
+        scored = score_inertial_sindy(df, cal)
+        @test all(scored.inertial_sindy_selected_component .== "obrien")
+        @test scored.inertial_sindy_pred_dst_nt == obrien
+        @test maximum(abs.(scored.operational_residual_dst_nt)) ≈ 0.2 atol=1e-12
     end
 
 end

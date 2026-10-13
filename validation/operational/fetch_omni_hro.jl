@@ -8,7 +8,7 @@ using Dates
 using Downloads
 using SHA
 
-include(joinpath(@__DIR__, "v2_subhourly_A_replay.jl"))
+include(joinpath(@__DIR__, "operational_subhourly_A_replay.jl"))
 
 function _requested_hro_months(args)
     if isempty(args)

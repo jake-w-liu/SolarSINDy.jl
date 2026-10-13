@@ -1,15 +1,15 @@
 # Operational API — the served path
 
 The stages that stand behind the published forecast: the versioned operational cores and their
-calibration artifacts, the static V2.2 regime stack, and the V2.3 analog serving layer. The stage
+calibration artifacts, the static stack regime stack, and the analog ensemble serving layer. The stage
 that serves the current center is documented in the
-[V2.4e super-learner](operational-v24-api.md).
+[super-learner](superlearner-api.md).
 
 Discovery, data, baseline, metric and utility functions are documented in the
 [core API](api.md), forecast issuance and alarms in
-[forecasting and alarms](forecast-api.md). The offline research chain behind the V2.2 stack is
-documented in the [V2.2 research chain](operational-v22-research-api.md), and the V2.3 study
-machinery in the [V2.3 study API](operational-v23-api.md).
+[forecasting and alarms](forecast-api.md). The offline research chain behind the static stack is
+documented in the [static stack research chain](static-stack-research-api.md), and the analog ensemble study
+machinery in the [analog ensemble study API](analog-api.md).
 
 ## Versioned Cores And Calibration Artifacts
 
@@ -19,18 +19,18 @@ Pages = ["operational_artifacts.jl"]
 Private = false
 ```
 
-## Static V2.2 Stack Serving
+## Static Stack Serving
 
 ```@autodocs
 Modules = [SolarSINDy]
-Pages = ["operational_v22_serving.jl"]
+Pages = ["static_stack_serving.jl"]
 Private = false
 ```
 
-## V2.3 Analog Serving
+## Analog Serving
 
 ```@autodocs
 Modules = [SolarSINDy]
-Pages = ["operational_v23_serving.jl"]
+Pages = ["analog_serving.jl"]
 Private = false
 ```

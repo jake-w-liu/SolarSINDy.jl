@@ -18,7 +18,7 @@ const R = DailyOperationalReview
         HTTP.Response(200,JSON3.write(data))
     end
     mktempdir() do root
-        claim = joinpath(root,"v2_4_live_claim_status.json")
+        claim = joinpath(root,"superlearner_live_claim_status.json")
         write(claim,JSON3.write((;generated_utc=R.utc(reference),integrity=(;violations=["historical finding"]),
             marginal=(;n_rows=10,coverage_90=.8,claim_ready=false),storm=(;claim_ready=false))))
         write(joinpath(root,"live_comparison_report.md"),"Same-row model comparison\n")

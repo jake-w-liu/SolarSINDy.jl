@@ -347,7 +347,7 @@ constructs DateTime column from year/doy/hour.
 """
 function parse_omni2_csv(filepath::String; year_start::Int=1963, year_end::Int=2025)
     println("  Reading extracted CSV with CSV.jl...")
-    raw = CSV.read(filepath, DataFrame)
+    raw = CSV.read(filepath, DataFrame; buffer_in_memory = true)
     println("  Read $(nrow(raw)) rows")
 
     # Filter year range
@@ -406,7 +406,7 @@ end
 Load a previously saved cleaned OMNI2 CSV file.
 """
 function load_omni2_csv(filepath::String)
-    df = CSV.read(filepath, DataFrame)
+    df = CSV.read(filepath, DataFrame; buffer_in_memory = true)
     if eltype(df.datetime) <: AbstractString
         df.datetime = DateTime.(df.datetime)
     end

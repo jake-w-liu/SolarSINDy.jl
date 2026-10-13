@@ -1,16 +1,16 @@
 #!/usr/bin/env julia
-# storm_replay.jl — Direction 3 (strengthen live evidence): score the Operational-v2 Dst forecaster against
+# storm_replay.jl — Direction 3 (strengthen live evidence): score the operational Dst forecaster against
 # the physical baselines (persistence, Burton, Burton-full, O'Brien-McPherron) over real SUPERSTORM windows.
 #
 # Why: the locked-live record is quiet-only (no obs < -50 nT scored yet), so on quiet data persistence and
-# O'Brien narrowly edge v2; v2's measured advantage shows up only in disturbed windows. This harness supplies
+# O'Brien narrowly edge operational; operational's measured advantage shows up only in disturbed windows. This harness supplies
 # the missing storm-time evidence by replaying the strongest storms of 2023-2026 through the SAME verified
 # causal replay engine (replay_recent_table) used by the live verifier — no model re-implementation, no package
-# change. The locked live record is never touched; this only reads the OMNI archive and the v2 calibration.
+# change. The locked live record is never touched; this only reads the OMNI archive and the operational calibration.
 #
 # The replay engine anchors at the data tail and walks back replay_hours, so we slice OMNI to each storm window
 # (tail = storm recovery) and replay across it. Every prediction is causal: drivers come from the previous
-# complete hour, the target Dst from the next hour. Scored 1 h ahead (the horizon where v2 carries its value).
+# complete hour, the target Dst from the next hour. Scored 1 h ahead (the horizon where operational carries its value).
 #
 # Run from the package root: julia --project=. validation/operational/storm_replay.jl
 
@@ -28,9 +28,9 @@ const STORMS = [
     (name="Oct 2024 (G4)",         t0=DateTime(2024,10,9,0),  t1=DateTime(2024,10,12,0)),
     (name="Mar 2023 (G4)",         t0=DateTime(2023,3,23,0),  t1=DateTime(2023,3,25,12)),
 ]
-const BASELINES = ["v2_pred_dst_nt", "v1_pred_dst_nt", "persistence_dst_nt",
+const BASELINES = ["inertial_sindy_pred_dst_nt", "sindy_core_pred_dst_nt", "persistence_dst_nt",
                    "burton_dst_nt", "burton_full_dst_nt", "obrien_dst_nt"]
-const PRETTY = Dict("v2_pred_dst_nt"=>"V2", "v1_pred_dst_nt"=>"SINDy v1",
+const PRETTY = Dict("inertial_sindy_pred_dst_nt"=>"Operational", "sindy_core_pred_dst_nt"=>"SINDy core",
                     "persistence_dst_nt"=>"persistence", "burton_dst_nt"=>"Burton",
                     "burton_full_dst_nt"=>"Burton-full", "obrien_dst_nt"=>"O'Brien-McPherron")
 
@@ -49,7 +49,7 @@ function replay_storm(storm, calibration)
     # pad 6 h back (driver lookback) and 7 h forward (so the late anchors' +6 h targets exist)
     ps, ms, ts, vs = slice_window(plasma, mag, dst_times, dst_vals, storm.t0 - Hour(6), storm.t1 + Hour(7))
     rh = Int(ceil(Dates.value((storm.t1 + Hour(7)) - (storm.t0 - Hour(6))) / 3_600_000))
-    df = replay_recent_table(ps, ms, ts, vs; replay_hours=rh, horizons=HORIZONS, model=:v2, calibration=calibration)
+    df = replay_recent_table(ps, ms, ts, vs; replay_hours=rh, horizons=HORIZONS, model=:inertial_sindy, calibration=calibration)
     df[!, :issue_dt] = DateTime.(df.issue_time_utc)
     df = df[(df.issue_dt .>= storm.t0) .& (df.issue_dt .<= storm.t1), :]   # exact storm window by issue time
     df[!, :storm] = fill(storm.name, nrow(df))
@@ -76,14 +76,14 @@ function report_block(io, title, df)
     for h in HORIZONS
         mt = metrics_table(df, h); isempty(mt) && continue
         sort!(mt, :rmse)
-        # `v2_observed_in_90ci` is `missing` where the row could not be verified; such a row is
+        # `operational_observed_in_90ci` is `missing` where the row could not be verified; such a row is
         # neither a coverage hit nor a coverage miss, so it leaves both the numerator and the
-        # denominator (see score_operational_v2).
-        cov = _observable_coverage(df[df.model_step_hours .== h, :v2_observed_in_90ci]).fraction
-        v2rank = findfirst(==("V2"), mt.model)
-        @printf("  h=%d h:  best=%-16s  v2 rank %d/%d (RMSE %.2f)  v2 90%%CI cov=%.2f\n",
-                h, mt.model[1], v2rank, nrow(mt), mt[mt.model.=="V2", :rmse][1], cov)
-        @printf(io, "**Horizon %d h** (v2 90%% CI coverage %.2f):\n\n", h, cov)
+        # denominator (see score_inertial_sindy).
+        cov = _observable_coverage(df[df.model_step_hours .== h, :operational_observed_in_90ci]).fraction
+        oprank = findfirst(==("Operational"), mt.model)
+        @printf("  h=%d h:  best=%-16s  operational rank %d/%d (RMSE %.2f)  operational 90%%CI cov=%.2f\n",
+                h, mt.model[1], oprank, nrow(mt), mt[mt.model.=="Operational", :rmse][1], cov)
+        @printf(io, "**Horizon %d h** (operational 90%% CI coverage %.2f):\n\n", h, cov)
         println(io, "| model | RMSE [nT] | MAE [nT] | n |"); println(io, "|---|---|---|---|")
         for r in eachrow(mt); @printf(io, "| %s | %.2f | %.2f | %d |\n", r.model, r.rmse, r.mae, r.n); end
         println(io)
@@ -102,24 +102,24 @@ function mainphase_block(io, df)
     for h in HORIZONS
         mt = metrics_table(mp, h); isempty(mt) && continue
         sort!(mt, :rmse)
-        v2 = mt[mt.model .== "V2", :]; pers = mt[mt.model .== "persistence", :]
-        (isempty(v2) || isempty(pers)) && continue
+        operational = mt[mt.model .== "Operational", :]; pers = mt[mt.model .== "persistence", :]
+        (isempty(operational) || isempty(pers)) && continue
         ob = mt[mt.model .== "O'Brien-McPherron", :]
-        @printf("  h=%d h (n=%d):  v2 %.2f  vs persistence %.2f  vs O'Brien %.2f   best=%s\n",
-                h, v2.n[1], v2.rmse[1], pers.rmse[1], isempty(ob) ? NaN : ob.rmse[1], mt.model[1])
-        @printf(io, "**Horizon %d h** (n=%d): ", h, v2.n[1])
+        @printf("  h=%d h (n=%d):  operational %.2f  vs persistence %.2f  vs O'Brien %.2f   best=%s\n",
+                h, operational.n[1], operational.rmse[1], pers.rmse[1], isempty(ob) ? NaN : ob.rmse[1], mt.model[1])
+        @printf(io, "**Horizon %d h** (n=%d): ", h, operational.n[1])
         for r in eachrow(mt); @printf(io, "%s %.1f · ", r.model, r.rmse); end
-        println(io, "  → v2 vs persistence: ", v2.rmse[1] < pers.rmse[1] ? "v2 better" : "persistence better")
+        println(io, "  → operational vs persistence: ", operational.rmse[1] < pers.rmse[1] ? "operational better" : "persistence better")
     end
 end
 
 function main()
-    println("Storm-time replay: V2 vs physical baselines (horizons ", HORIZONS, ")\n", "="^72)
-    cfg = LiveVerifyConfig(model=:v2)            # uses the package's deployed operational calibration
+    println("Storm-time replay: Operational vs physical baselines (horizons ", HORIZONS, ")\n", "="^72)
+    cfg = LiveVerifyConfig(model=:inertial_sindy)            # uses the package's deployed operational calibration
     cal = _load_calibration_for_model(cfg)
     all_scored = DataFrame()
     open(OUT_MD, "w") do io
-        println(io, "# Storm-time replay — V2 vs baselines (1/2/3/6 h ahead)\n")
+        println(io, "# Storm-time replay — Operational vs baselines (1/2/3/6 h ahead)\n")
         println(io, "Causal replay of the strongest 2023–2024 storms through the locked `replay_recent_table` ",
                     "engine, scored against persistence / Burton / Burton-full / O'Brien-McPherron. Built from the ",
                     "OMNI archive; the locked live record is untouched. Rows filtered to each storm's issue-time window.\n")
@@ -145,7 +145,7 @@ function _selftest()
     chk("mae oracle", mae([-2.0, 4.0]) ≈ 3.0)
     # windowing oracle: the Gannon replay must recover a superstorm-depth observed Dst (<= -300 nT),
     # proving the OMNI slice lands on the real storm and the engine scores it.
-    cfg = LiveVerifyConfig(model=:v2); cal = _load_calibration_for_model(cfg)
+    cfg = LiveVerifyConfig(model=:inertial_sindy); cal = _load_calibration_for_model(cfg)
     df = replay_storm(STORMS[1], cal)
     chk("Gannon window scores rows", nrow(df) > 20)
     chk("Gannon observed min Dst <= -300 nT (correct window)", minimum(Float64.(df.observation_dst_nt)) <= -300)

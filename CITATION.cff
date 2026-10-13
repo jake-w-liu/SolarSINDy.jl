@@ -11,4 +11,4 @@ date-released: "2026-08-08"
 abstract: >-
   Julia package for sparse equation discovery and calibrated operational Dst
   forecasting using SINDy, classical baselines, OMNI storm extraction,
-  conformal uncertainty intervals, and a guarded V2.1 live forecast path.
+  conformal uncertainty intervals, and a guarded inertial-SINDy live forecast path.

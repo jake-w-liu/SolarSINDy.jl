@@ -108,7 +108,7 @@ function write_daily_review(monitor_dir; reference=now(UTC), http_get=HTTP.get,
     return _with_forecast_log_lock(joinpath(root,"daily-review")) do
         islink(path) && error("daily review path is a symlink: $path")
         ispath(path) && return verify_review(path)
-        claim = capture_file(joinpath(monitor_dir,"v2_4_live_claim_status.json");reference,check_age=true)
+        claim = capture_file(joinpath(monitor_dir,"superlearner_live_claim_status.json");reference,check_age=true)
         comparison = capture_file(joinpath(monitor_dir,"live_comparison_report.md");reference)
         dashboard = capture_endpoint(dashboard_health_url;http_get,clock)
         base = chop(dashboard_health_url;tail=length("/api/health"))
