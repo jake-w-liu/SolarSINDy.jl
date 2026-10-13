@@ -817,6 +817,7 @@ using DataFrames
     end
 
     include("test_compat.jl")
+    include("test_parameter_narrowing.jl")
     include("test_assimilation_covariance.jl")
     include("test_finite_interpolation.jl")
     include("test_conformal_precision.jl")

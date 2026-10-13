@@ -32,6 +32,10 @@ function _validate_baseline_parameters(name::AbstractString, dt::Real, α::Real,
     converted = Float64.((dt, α, τ))
     all(isfinite, converted) ||
         throw(ArgumentError("$name parameters exceed the supported Float64 range"))
+    any(iszero(narrow) && !iszero(wide) for (narrow, wide) in
+        zip(converted, (dt, α, τ))) && throw(ArgumentError(
+            "$name parameters underflow the supported Float64 range",
+        ))
     return converted
 end
 
@@ -271,6 +275,10 @@ function simulate_obrien(V::AbstractVector, Bs::AbstractVector, dt::Real;
     all(isfinite, (dt64, α64, threshold, dst0)) || throw(ArgumentError(
         "simulate_obrien parameters exceed the supported Float64 range",
     ))
+    any(iszero(narrow) && !iszero(wide) for (narrow, wide) in
+        zip((dt64, α64, threshold), (dt, α, Ec_crit))) && throw(ArgumentError(
+            "simulate_obrien parameters underflow the supported Float64 range",
+        ))
     Dst_star = zeros(n)
     Dst_star[1] = dst0
     for k in 1:n-1
