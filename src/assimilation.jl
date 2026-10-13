@@ -107,6 +107,9 @@ function init_assimilation(lib::CandidateLibrary, xi_full::AbstractVector{<:Real
     variance_values = Float64.((dst_var0, coeff_var0, q_dst, q_coeff, R, dt))
     all(isfinite, variance_values) ||
         throw(ArgumentError("assimilation parameters exceed the supported Float64 range"))
+    any(iszero(narrow) && !iszero(wide) for (narrow, wide) in
+        zip(variance_values, (dst_var0, coeff_var0, q_dst, q_coeff, R, dt))) &&
+        throw(ArgumentError("assimilation parameters underflow the supported Float64 range"))
     dst_var, coeff_var, dst_noise, coeff_noise, observation_var, step = variance_values
     mean = vcat(dst_initial, Float64[xi_base[i] for i in idx])
     for j in 1:m                                  # respect the box at initialisation too
@@ -150,6 +153,24 @@ current_coeffs(f::AssimilationFilter) = f.mean[2:end]
 Return the current Dst* marginal variance from an [`AssimilationFilter`](@ref).
 """
 dst_variance(f::AssimilationFilter) = f.cov[1, 1]
+
+# A restored covariance must represent nonnegative uncertainty. Checking only
+# finite entries permits negative Kalman gains and increasing negative variance.
+# Scale the PSD check to avoid overflow and allow only eigensolver roundoff at
+# machine precision; diagonal noise matrices take the allocation-free path.
+function _validate_assimilation_covariance(P::Matrix{Float64}, label::AbstractString)
+    issymmetric(P) || throw(ArgumentError("$label must be symmetric"))
+    all(i -> P[i, i] >= 0, axes(P, 1)) || throw(ArgumentError(
+        "$label diagonal variances must be nonnegative",
+    ))
+    isdiag(P) && return nothing
+    scale = maximum(abs, P)
+    tolerance = 16 * eps(Float64) * size(P, 1)
+    eigmin(Symmetric(P ./ scale)) >= -tolerance || throw(ArgumentError(
+        "$label must be positive semidefinite",
+    ))
+    return nothing
+end
 
 # `AssimilationFilter` is intentionally mutable so long-running experiments can
 # checkpoint and restore its numerical state.  That also means callers can
@@ -197,6 +218,8 @@ function _validate_assimilation_filter(f::AssimilationFilter)
     all(isfinite, f.Q) || throw(ArgumentError(
         "assimilation process noise must be finite",
     ))
+    _validate_assimilation_covariance(f.cov, "assimilation covariance")
+    _validate_assimilation_covariance(f.Q, "assimilation process noise")
     isfinite(f.R) && f.R > 0 || throw(ArgumentError(
         "assimilation observation variance must be finite and positive",
     ))
