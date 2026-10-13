@@ -143,6 +143,34 @@ end
     @test_throws ArgumentError analog_knn(X, tq, broken_archive, ta, 2)
 end
 
+@testset "analog retrieval resolves cancellation and rejects invalid time axes" begin
+    # Independently subtract in BigFloat: all three squared distances collapse
+    # to the same expanded BLAS score before the cancellation fix.
+    for shift in (3.0, 1e8), block in (1, 7)
+        query = fill(shift, 1, 18)
+        archive = fill(shift, 3, 18)
+        archive[:, 1] .+= [3e-8, 1e-8, 2e-8]
+        distances = [sum(abs2, BigFloat.(query[1, :]) .-
+                              BigFloat.(archive[j, :])) for j in 1:3]
+        expected = sortperm(distances)
+        @test expected == [2, 3, 1]
+        @test vec(analog_knn(query, [0.0], archive, [1000., 2000., 3000.], 3;
+                            block)) == expected
+        @test analog_knn(query, [0.0], archive, [1000., 2000., 3000.], 1;
+                         block) == reshape([2], 1, 1)
+    end
+    for times in ([NaN], [Inf], [-Inf])
+        @test_throws ArgumentError analog_knn(zeros(1,18), times,
+                                              zeros(2,18), [1000.,2000.], 1)
+        @test_throws ArgumentError analog_knn(zeros(1,18), [0.0],
+                                              zeros(1,18), times, 1)
+    end
+    @test_throws ArgumentError analog_knn(fill(1e200,1,18), [0.0],
+                                          fill(1e200,1,18), [1000.], 1)
+    @test_throws ArgumentError analog_knn(zeros(1,18), [0.0],
+        zeros(2,18), [1000.,2000.], 1; weights=fill(big"1e400",18))
+end
+
 @testset "analog ensemble driver continuation" begin
     s = DateTime(2020, 3, 1, 10)
     lookup = _synthetic_lookup([

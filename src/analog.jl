@@ -108,8 +108,11 @@ function analog_knn(Xq::AbstractMatrix{<:Real}, tq, Xa::AbstractMatrix{<:Real}, 
     length(archive_hours) == na || throw(DimensionMismatch(
         "archive times have $(length(archive_hours)) entries but archive features have $(na) rows",
     ))
+    all(isfinite, query_hours) && all(isfinite, archive_hours) ||
+        throw(ArgumentError("query and archive times must be finite"))
 
     scale = sqrt.(Float64.(weights))
+    all(isfinite, scale) || throw(ArgumentError("distance weights must be representable as Float64"))
     # Scaling both matrices by sqrt(w) turns the weighted Euclidean distance into a plain one, so a
     # single BLAS product supplies every inner product in the block. The block is laid out with the
     # archive along the leading dimension, so each query's distance vector is contiguous in memory:
@@ -118,12 +121,19 @@ function analog_knn(Xq::AbstractMatrix{<:Real}, tq, Xa::AbstractMatrix{<:Real}, 
     A = Float64.(Xa) .* transpose(scale)                 # na × p
     Qt = permutedims(Float64.(Xq) .* transpose(scale))   # p × nq, contiguous
     archive_norms = vec(sum(abs2, A; dims = 2))
+    query_norms = vec(sum(abs2, Qt; dims = 1))
+    all(isfinite, archive_norms) && all(isfinite, query_norms) ||
+        throw(ArgumentError("scaled features must have finite Float64 squared norms"))
+    max_archive_norm = maximum(archive_norms)
     exclusion = Float64(exclusion_hours)
+    isfinite(exclusion) || throw(ArgumentError("exclusion_hours must be representable as Float64"))
     sorted_archive = issorted(archive_hours)
 
     neighbours = Matrix{Int}(undef, nq, K)
     distances = Matrix{Float64}(undef, na, min(block, nq))
     order = Vector{Int}(undef, na)
+    candidates = Int[]
+    sizehint!(candidates, K)
     for lo in 1:block:nq
         hi = min(lo + block - 1, nq)
         columns = hi - lo + 1
@@ -139,8 +149,31 @@ function analog_knn(Xq::AbstractMatrix{<:Real}, tq, Xa::AbstractMatrix{<:Real}, 
                 "±$(exclusion) h exclusion window but K = $K neighbours were requested",
             ))
             selected = partialsortperm!(order, row, 1:K)
+            # Expanded distances lose small separations through cancellation, even
+            # for ordinary standardized features near 3. Retain BLAS for the broad
+            # search, then recompute every possible contender using differences.
+            # The conservative dot-product error bound covers both sides of the
+            # cutoff; ordinary well-separated searches refine only K origins.
+            error_margin = (64 * p * eps(Float64)) *
+                           max(max_archive_norm, query_norms[q])
+            cutoff = row[selected[K]] + error_margin
+            empty!(candidates)
+            @inbounds for j in 1:na
+                if isfinite(row[j]) && row[j] <= cutoff
+                    push!(candidates, j)
+                    distance = 0.0
+                    for c in 1:p
+                        distance += abs2(A[j, c] - Qt[c, q])
+                    end
+                    isfinite(distance) || throw(ArgumentError(
+                        "weighted distance is not representable as Float64",
+                    ))
+                    row[j] = distance
+                end
+            end
+            partialsort!(candidates, 1:K; by=j -> (row[j], j))
             @inbounds for j in 1:K
-                neighbours[q, j] = selected[j]
+                neighbours[q, j] = candidates[j]
             end
         end
     end
