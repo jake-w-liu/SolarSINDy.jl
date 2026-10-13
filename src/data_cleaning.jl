@@ -232,7 +232,11 @@ function _interp_short_gaps!(x::AbstractVector{Float64}, max_gap::Int)
                 v_after = x[gap_end + 1]
                 for j in gap_start:gap_end
                     frac = (j - gap_start + 1) / (gap_len + 1)
-                    x[j] = v_before + frac * (v_after - v_before)
+                    difference = v_after - v_before
+                    # The convex interpolant is finite for finite endpoints,
+                    # even when their opposite-sign difference overflows.
+                    x[j] = isfinite(difference) ? v_before + frac * difference :
+                           (1 - frac) * v_before + frac * v_after
                 end
             end
         else
