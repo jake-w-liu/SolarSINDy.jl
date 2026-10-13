@@ -113,6 +113,8 @@ function analog_knn(Xq::AbstractMatrix{<:Real}, tq, Xa::AbstractMatrix{<:Real}, 
 
     scale = sqrt.(Float64.(weights))
     all(isfinite, scale) || throw(ArgumentError("distance weights must be representable as Float64"))
+    any(iszero(scale[c]) && !iszero(weights[c]) for c in eachindex(weights)) &&
+        throw(ArgumentError("positive distance weights must remain positive after Float64 conversion"))
     # Scaling both matrices by sqrt(w) turns the weighted Euclidean distance into a plain one, so a
     # single BLAS product supplies every inner product in the block. The block is laid out with the
     # archive along the leading dimension, so each query's distance vector is contiguous in memory:
@@ -163,7 +165,10 @@ function analog_knn(Xq::AbstractMatrix{<:Real}, tq, Xa::AbstractMatrix{<:Real}, 
                     push!(candidates, j)
                     distance = 0.0
                     for c in 1:p
-                        distance += abs2(A[j, c] - Qt[c, q])
+                        # Subtract before sqrt-weight scaling, whose rounding
+                        # can otherwise merge distinct near-ties as well.
+                        difference = Float64(Xa[j, c]) - Float64(Xq[q, c])
+                        distance += Float64(weights[c]) * abs2(difference)
                     end
                     isfinite(distance) || throw(ArgumentError(
                         "weighted distance is not representable as Float64",

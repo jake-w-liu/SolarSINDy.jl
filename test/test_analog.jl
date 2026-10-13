@@ -144,6 +144,18 @@ end
 end
 
 @testset "analog retrieval resolves cancellation and rejects invalid time axes" begin
+    query = zeros(1,18)
+    archive = zeros(2,18)
+    archive[1,2] = sqrt(2.)
+    archive[2,1] = 1.
+    weights = ones(18); weights[1] = 2.
+    # The first distance is strictly greater than two in exact arithmetic;
+    # pre-scaling by sqrt(2) rounds both transformed distances to the same value.
+    exact_distances = [sum(BigFloat(weights[c]) *
+        (BigFloat(archive[j,c]) - BigFloat(query[1,c]))^2 for c in 1:18) for j in 1:2]
+    @test sortperm(exact_distances) == [2,1]
+    @test vec(analog_knn(query,[0.],archive,[1000.,2000.],2;weights)) == [2,1]
+    @test analog_knn(query,[0.],archive,[1000.,2000.],1;weights) == reshape([2],1,1)
     # Independently subtract in BigFloat: all three squared distances collapse
     # to the same expanded BLAS score before the cancellation fix.
     for shift in (3.0, 1e8), block in (1, 7)
@@ -169,6 +181,8 @@ end
                                           fill(1e200,1,18), [1000.], 1)
     @test_throws ArgumentError analog_knn(zeros(1,18), [0.0],
         zeros(2,18), [1000.,2000.], 1; weights=fill(big"1e400",18))
+    @test_throws ArgumentError analog_knn(zeros(1,18), [0.0],
+        zeros(2,18), [1000.,2000.], 1; weights=fill(big"1e-400",18))
 end
 
 @testset "analog ensemble driver continuation" begin
