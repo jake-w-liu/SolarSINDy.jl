@@ -430,6 +430,36 @@ function static_stack_regime(stack::StaticStack,
 end
 
 # Exact Euclidean projection onto {x >= 0, sum(x) = mass}.
+function _static_stack_wide_simplex(values::Vector{Float64}, mass::Float64)
+    # Simplex projection is invariant under a common additive offset. Center
+    # before accumulating in wide arithmetic so even an overflowing Float64
+    # spread or a mass far below the input ULP has a well-defined active set.
+    return setprecision(BigFloat, max(precision(BigFloat), 256)) do
+        centered = BigFloat.(values)
+        centered .-= maximum(centered)
+        sorted = sort(centered; rev=true)
+        cumulative = zero(BigFloat)
+        active_sum = zero(BigFloat)
+        rho = 0
+        wide_mass = BigFloat(mass)
+        for j in eachindex(sorted)
+            cumulative += sorted[j]
+            if sorted[j] - (cumulative - wide_mass) / j > 0
+                rho = j
+                active_sum = cumulative
+            end
+        end
+        rho > 0 || throw(ErrorException("wide simplex projection has no active set"))
+        theta = (active_sum - wide_mass) / rho
+        projected = Float64.(max.(centered .- theta, 0))
+        idx = argmax(projected)
+        projected[idx] += mass - sum(projected)
+        all(value -> isfinite(value) && value >= 0, projected) ||
+            throw(ErrorException("wide simplex projection produced invalid weights"))
+        return projected
+    end
+end
+
 function _static_stack_project_simplex(values::AbstractVector{<:Real}, mass::Real)
     m = Float64(mass)
     isfinite(m) && m >= 0.0 || throw(ArgumentError(
@@ -451,9 +481,10 @@ function _static_stack_project_simplex(values::AbstractVector{<:Real}, mass::Rea
             cumulative_at_rho = cumulative
         end
     end
-    rho > 0 || throw(ErrorException("simplex projection failed to identify an active set"))
+    rho > 0 || return _static_stack_wide_simplex(v, m)
     theta = (cumulative_at_rho - m) / rho
     projected = max.(v .- theta, 0.0)
+    all(isfinite, projected) || return _static_stack_wide_simplex(v, m)
     # Remove the final floating summation residual without changing the active set.
     idx = argmax(projected)
     projected[idx] += m - sum(projected)
