@@ -817,6 +817,8 @@ using DataFrames
     end
 
     include("test_compat.jl")
+    include("test_forecast_decay_oracle.jl")
+    include("test_point_kernel_oracle.jl")
     include("test_parameter_narrowing.jl")
     include("test_assimilation_covariance.jl")
     include("test_finite_interpolation.jl")

@@ -15,9 +15,11 @@ struct CandidateLibrary
     # mutable for compatibility.  Preserve their construction-time semantics
     # in immutable tuples so coordinated vector mutation cannot silently make
     # batch and point evaluation implement different equations.
-    _contract_names::Tuple
+    # Keep homogeneous tuple element types visible to inference. A plain Tuple
+    # forces dynamic dispatch for every code comparison in point evaluation.
+    _contract_names::Tuple{Vararg{String}}
     _contract_funcs::Tuple
-    _contract_term_codes::Tuple
+    _contract_term_codes::Tuple{Vararg{UInt8}}
     function CandidateLibrary(names::Vector{String}, funcs::Vector{Function},
                               term_codes::Vector{UInt8}, ::Val{:trusted_codes})
         length(names) == length(funcs) == length(term_codes) ||

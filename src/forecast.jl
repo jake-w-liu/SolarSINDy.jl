@@ -1549,6 +1549,11 @@ function _clamped_finite_derivative(value::Real, label::AbstractString)
     return clamp(Float64(value), -200.0, 200.0)
 end
 
+function _clamped_finite_derivative(value::Real, label::AbstractString, member::Int)
+    isfinite(value) || throw(ArgumentError("$label $member derivative is non-finite"))
+    return clamp(Float64(value), -200.0, 200.0)
+end
+
 function _validate_forecast_step_time(state::ForecastState, t::DateTime)
     elapsed = t - state.t_current
     elapsed > Millisecond(0) ||
@@ -1617,7 +1622,7 @@ function step_forecast!(state::ForecastState,
     dst_ens = Vector{Float64}(undef, n_ens)
     for i in 1:n_ens
         dDst_i = _clamped_finite_derivative(
-            _dot_ensemble_row(θ_k, state.ξ_ensemble, i), "ensemble member $i")
+            _dot_ensemble_row(θ_k, state.ξ_ensemble, i), "ensemble member", i)
         dst_ens[i] = clamp(state.dst_current + state.dt * dDst_i, -2000.0, 50.0)
     end
     sort!(dst_ens)
@@ -1691,7 +1696,7 @@ function forecast_ahead(state::ForecastState,
                 θ_k, state.lib, dst_ens_curr[i], V, Bz, By, n_density, Pdyn,
             )
             dDst_i = _clamped_finite_derivative(
-                _dot_ensemble_row(θ_k, state.ξ_ensemble, i), "ensemble member $i")
+                _dot_ensemble_row(θ_k, state.ξ_ensemble, i), "ensemble member", i)
             dst_ens_curr[i] = clamp(dst_ens_curr[i] + state.dt * dDst_i, -2000.0, 50.0)
         end
         sorted_ens = sort(dst_ens_curr)
