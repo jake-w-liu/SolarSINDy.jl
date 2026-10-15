@@ -926,6 +926,7 @@ include("test_superlearner_live_claim_audit.jl")
         end
     end
 
+    include("test_live_receipt_maturity.jl")
     include("test_live_observation_evidence.jl")
     include("test_live_observation_evidence_integration.jl")
     include("test_live_forecast_verify.jl")

@@ -190,4 +190,6 @@ function serve_deployed_superlearner_row()
     return true
 end
 
+include(joinpath(@__DIR__, "receipt_maturity_synthetic.jl"))
 main()
+run_receipt_maturity_synthetic()
