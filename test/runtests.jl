@@ -893,6 +893,7 @@ using DataFrames
     include("test_analog_gbm.jl")
     include("test_analog_base_table.jl")
     include("test_analog_features.jl")
+    include("test_archive_dst_timing.jl")
     include("test_analog.jl")
     include("test_analog_kernel.jl")
     include("test_analog_stats.jl")

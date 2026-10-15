@@ -44,7 +44,7 @@ Private = false
 
 ```@autodocs
 Modules = [SolarSINDy]
-Pages = ["data.jl", "data_pipeline.jl", "data_cleaning.jl"]
+Pages = ["data.jl", "data_pipeline.jl", "data_cleaning.jl", "archive_dst_timing.jl"]
 Private = false
 ```
 
@@ -54,6 +54,14 @@ it is listed explicitly rather than through the section above.
 ```@docs
 parse_omni2
 ```
+
+OMNI hourly Dst tags denote means over the following hour. The archive timing
+helpers retain raw tags and predictions while making completion, reconstructed
+issuance and receipt assumptions explicit. A legacy raw origin `t` admits the
+conditional zero-additional-delay issue `t+1`; this does not measure historical
+publication latency or convert a live provider's timestamps. The separate
+`validation/operational/export_archive_dst_provenance.jl` command annotates an
+explicitly declared legacy archive CSV and writes its input/output digests.
 
 ## Storm Selection
 

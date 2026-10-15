@@ -1,6 +1,6 @@
 # Boosted-model primitives for the Operational analog ensemble driver-continuation study.
 #
-# Three responsibilities, all issue-time causal:
+# Three responsibilities, subject to the caller's explicit availability contract:
 #   * a fully pinned EvoTrees wrapper (fit / predict / save / load) shared by the
 #     GDC driver models (plan section 4, T2), the direct-GBM comparator (plan
 #     section 5) and the E2 residual layer (plan section 4);
@@ -10,12 +10,15 @@
 #     increments relative to record t-1.
 #
 # Hourly-record conventions (OMNI record tagged tau covers [tau, tau+1)):
-#   * issue t: the latest known Dst is the record tagged t, while the latest
-#     known driver record is t-1;
+#   * API state/origin label t: Dst is read at t and drivers end at t-1;
+#     actual-issue use requires an available Dst state. For unchanged raw OMNI
+#     means the conditional earliest issue is t+1, with the old wind stale;
 #   * ADC feature lag j (j = 0..6) is driver record t-1-j, so VBs lag L is
 #     record t-1-L;
 #   * Dst lag j is the record tagged t-j;
 #   * future(k) is record t+k-1, which is what the GDC models regress on.
+# Raw target tags, completed target hours and actual issuance leads are distinct;
+# use `archive_dst_provenance` for an explicitly declared legacy archive export.
 
 import EvoTrees
 

@@ -7,7 +7,8 @@
 # search, and does not touch the SINDy core.
 #
 # Time convention (hourly OMNI; the record tagged τ covers the at-Earth interval [τ, τ+1)):
-#   * issue time t is on the hour and the issue-time Dst is Dst(t) (anchor lag a = 0);
+#   * t is the API's state/origin label; Dst at that label must be an available state
+#     if t is interpreted as actual issue (anchor lag a = 0);
 #   * the freshest driver record available at issue t is the record tagged t−1, so driver feature
 #     lag j (j = 0 … 6) is the record tagged t−1−j;
 #   * six-hour means and standard deviations therefore span records t−1 … t−6, the three-hour VBs
@@ -16,6 +17,10 @@
 # forward-filled hourly frame with finite, physically admissible driver values and Dst(t), Dst(t−1)
 # are both finite. Incomplete windows return NaN features and `ok = false`; they are never imputed,
 # because an imputed analog key would silently change which archive origins are retrieved.
+# For an unchanged raw OMNI archive frame, Dst(t) completes at t+1: query t can
+# instead be interpreted at the hypothetical earliest issue t+1, with wind t-1
+# available but stale. `archive_dst_provenance` records that conditional clock;
+# neither this indexing routine nor that reconstruction measures source receipt.
 
 """
     ANALOG_FEATURE_NAMES
@@ -159,9 +164,11 @@ complete causal history, meaning records `t−1 … t−7` are present with fini
 driver values and `Dst(t)`, `Dst(t−1)` are finite. Rows with `ok[i] = false` are filled with `NaN`
 so that a downstream consumer cannot silently treat an incomplete window as data.
 
-All features are strictly causal: every driver value comes from a record tagged at or before
-`t−1`, and the only issue-hour information used is the issue-time Dst, which is known at `t` by the
-inertial-SINDy anchor convention.
+Every driver value comes from a record tagged at or before `t−1`. Interpreting
+`t` as actual issue additionally requires that the caller's Dst state at `t`
+was available then. A raw hourly archive mean at tag `t` completes at `t+1`;
+its unchanged feature vector instead admits the explicitly conditional clock
+recorded by [`archive_dst_provenance`](@ref), with stale wind and unmeasured receipts.
 """
 function analog_feature_matrix(frame, issue_times)
     f = _analog_frame_columns(frame)
