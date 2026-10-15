@@ -219,6 +219,7 @@ function renderThreat(st) {
     $("threat-level").textContent = "—";
     $("threat-label").textContent = st && st.message ? st.message : "awaiting forecast data";
     $("cur-dst").textContent = "—";
+    $("cur-dst-time").textContent = "";
     $("worst-dst").textContent = "—";
     $("horizon").textContent = "—";
     const wf = $("watch-flag");
@@ -232,6 +233,8 @@ function renderThreat(st) {
   $("threat-level").textContent = th.label.toUpperCase();
   $("threat-label").textContent = th.basis;
   $("cur-dst").textContent = fmt(st.latest_observation ? st.latest_observation.dst_nt : null, 0);
+  const anchorTime = st.latest_observation && st.latest_observation.time_utc;
+  $("cur-dst-time").textContent = anchorTime ? `hour tag ${anchorTime}` : "hour tag unavailable";
   const lowerEdge = intervalLowerEdge(th);
   $("worst-dst").textContent = fmt(lowerEdge, 0);
   const lt = st.lead_time || {};

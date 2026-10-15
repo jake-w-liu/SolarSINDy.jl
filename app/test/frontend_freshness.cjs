@@ -264,3 +264,32 @@ test("notification escalation is deduplicated and permission-bound", () => {
   context.browserNotify({available:true,threat:{level:4,label:"Extreme storm"}});
   assert.equal(notices.length,1);
 });
+
+
+test("Dst banner identifies its issuance anchor and clears its hour tag on outage", () => {
+  const { context, element } = dashboard();
+  const status = {
+    available: true,
+    latest_observation: {dst_nt: -16, time_utc: "2026-10-15T14:00:00Z"},
+    threat: {level: 0, label: "Quiet", basis: "issued forecast", watch: false,
+      interval_lower_edge_min_dst_nt: -28.233337},
+    lead_time: {forecast_horizon_hours: 6},
+  };
+  context.renderThreat(status);
+  assert.equal(element("cur-dst").textContent, "-16");
+  assert.equal(element("cur-dst-time").textContent, "hour tag 2026-10-15T14:00:00Z");
+  assert.equal(element("worst-dst").textContent, "-28");
+  assert.equal(element("horizon").textContent, "6.0 h");
+  assert.equal(element("threat-level").textContent, "QUIET");
+  status.latest_observation = {dst_nt: -16};
+  context.renderThreat(status);
+  assert.equal(element("cur-dst-time").textContent, "hour tag unavailable");
+  status.latest_observation = null;
+  context.renderThreat(status);
+  assert.equal(element("cur-dst-time").textContent, "hour tag unavailable");
+  context.renderThreat({available: false, message: "outage"});
+  assert.equal(element("cur-dst-time").textContent, "");
+  const html = fs.readFileSync(require("node:path").join(__dirname, "../public/index.html"), "utf8");
+  assert.match(html, /Dst used at issue \(nT\)/);
+  assert.doesNotMatch(html, /current Dst \(nT\)/);
+});
