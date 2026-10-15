@@ -5045,7 +5045,13 @@ function refresh_observations!(cfg::LiveVerifyConfig; dst_times=nothing, dst_val
             if dst_receipt !== nothing
                 binding = LiveObservationEvidence.forecast_binding(df[row_idx, :])
                 prior = LiveObservationEvidence.latest_forecast_evidence(evidence_state, binding)
-                if changed || prior === nothing || prior.observation != observed
+                # An unchanged partial-hour quicklook needs one actual post-end
+                # receipt before it can supply mature calibration evidence.
+                newly_mature = prior !== nothing &&
+                    prior.observation_binding.receipt_precedes_nominal_end &&
+                    _parse_dt(LiveObservationEvidence.load_receipt(evidence_root, dst_receipt).receipt_completed_utc) >=
+                    _parse_dt(prior.observation_binding.target_nominal_end_utc)
+                if changed || prior === nothing || prior.observation != observed || newly_mature
                     push!(evidence_entries, (;binding, previous_observation=old_observed, observation=observed))
                 end
             end

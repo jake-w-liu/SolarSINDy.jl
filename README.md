@@ -91,6 +91,11 @@ the Dst anchor lags by one hour), scores them after the observation matures,
 captures an external SWPC Dst snapshot as an independent comparator, and rewrites
 the comparison report. State lives under `var/monitor/` by default.
 
+Observation evidence retains the actual receipt time and raw response. If an
+unchanged quicklook value was first received during its hour, the first
+post-hour receipt adds mature evidence without rewriting the scored CSV row.
+Later identical mature receipts do not add duplicate evidence.
+
 Key environment variables (full list: `bin/solarsindy help`, template
 [`deploy/solarsindy.env.example`](deploy/solarsindy.env.example)):
 

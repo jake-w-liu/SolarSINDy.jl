@@ -174,4 +174,68 @@ end
     end
 end
 
+@testset "Unchanged observations gain one mature post-end receipt" begin
+    for mode in (:partial_first, :mature_first, :partial_revision)
+        mktempdir() do tmp
+            log=joinpath(tmp,"live.csv");fixture_log(log)
+            cfg=LiveVerifyConfig(;model=:sindy_core,log_path=log);root=E.evidence_root(log)
+            function captured(raw,offset,ns)
+                E.capture_response!(root,HTTP.Response(200,raw);
+                    request_started_utc=TAG+offset-Second(1),receipt_completed_utc=TAG+offset,
+                    monotonic_started_ns=ns,monotonic_completed_ns=ns+1)
+            end
+            first_offset=mode==:mature_first ? Hour(1) : Minute(30)
+            initial=captured(RAW,first_offset,100)
+            @test quiet(()->refresh_observations!(cfg;dst_times=[TAG],dst_vals=[-11.],dst_receipt=initial))==1
+            state=E.verify_observation_evidence(root;require_complete=true)
+            @test state.sequence==1 && length(state.events)==1
+            @test only(state.events).observation_binding.receipt_precedes_nominal_end==(mode!=:mature_first)
+            baseline=read(log)
+            if mode!=:mature_first
+                before_end=captured(RAW,Hour(1)-Millisecond(1),200)
+                @test quiet(()->refresh_observations!(cfg;dst_times=[TAG],dst_vals=[-11.],dst_receipt=before_end))==0
+                @test E.verify_observation_evidence(root).sequence==1
+                @test read(log)==baseline
+            end
+            value=-11.;raw=RAW;expected=mode==:mature_first ? 1 : 2
+            if mode==:partial_revision
+                # This receipt remains partial; its value revision cannot stand in for maturity.
+                revised=captured(REVISION,Hour(1)-Millisecond(1),300)
+                @test quiet(()->refresh_observations!(cfg;dst_times=[TAG],dst_vals=[-12.],dst_receipt=revised))==1
+                state=E.verify_observation_evidence(root;require_complete=true)
+                @test state.sequence==2 && last(state.events).observation_binding.receipt_precedes_nominal_end
+                @test last(state.events).kind=="revised_observation"
+                value=-12.;raw=REVISION;expected=3;baseline=read(log)
+            end
+            mature=captured(raw,Hour(1),400)
+            @test quiet(()->refresh_observations!(cfg;dst_times=[TAG],dst_vals=[value],dst_receipt=mature))==0
+            state=E.verify_observation_evidence(root;require_complete=true)
+            @test state.sequence==expected && length(state.events)==expected
+            @test read(log)==baseline
+            @test !last(state.events).observation_binding.receipt_precedes_nominal_end
+            @test last(state.events).observation==value
+            @test count(e->!e.observation_binding.receipt_precedes_nominal_end,state.events)==1
+            if mode!=:mature_first
+                @test last(state.events).kind=="reconfirmed_observation"
+                @test last(state.events).receipt.sha256==mature.sha256
+                @test first(state.events).receipt.sha256==initial.sha256
+            end
+            # Identical and newer already-mature receipts never add duplicate evidence.
+            later=captured(raw,Hour(1)+Millisecond(1),500)
+            for receipt in (mature,later)
+                @test quiet(()->refresh_observations!(cfg;dst_times=[TAG],dst_vals=[value],dst_receipt=receipt))==0
+                @test E.verify_observation_evidence(root;require_complete=true).sequence==expected
+                @test read(log)==baseline
+            end
+            # An older partial snapshot cannot overwrite a later mature label.
+            old=captured(replace(RAW,"-11"=>string(value-1)),Minute(59),600)
+            @test_throws ArgumentError quiet(()->refresh_observations!(cfg;
+                dst_times=[TAG],dst_vals=[value-1],dst_receipt=old))
+            @test read(log)==baseline
+            @test E.verify_observation_evidence(root;require_complete=true).sequence==expected
+            @test !ispath(log*".lock") && !ispath(joinpath(root,"journal.lock"))
+        end
+    end
+end
+
 end
