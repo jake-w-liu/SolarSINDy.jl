@@ -20,6 +20,16 @@ operational monitor and web dashboard. It has two layers:
 
 - Julia **≥ 1.12.6** (`[compat].julia` in [Project.toml](Project.toml))
 - Network access to NOAA SWPC for the live path only
+- Bash and POSIX utilities for shell launchers and the full validation/test
+  toolchain, including `awk` for OMNI extraction and `cp`/`touch` in regression
+  fixtures. On Windows, install Git for Windows and put its `bin` and `usr/bin`
+  directories on `PATH` before the WindowsApps `bash.exe` shim. Run the full
+  test suite from that environment.
+
+Git attributes preserve the committed source and fixture bytes independently
+of `core.autocrlf`. Keep POSIX launchers in LF form; the explicitly declared
+CRLF test entry point retains its existing representation. Checksum-pinned
+artifacts must retain their exact original bytes.
 
 ## Quick start — the live system
 

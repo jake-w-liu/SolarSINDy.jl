@@ -1,3 +1,5 @@
+# Preserve complete qualified source/fixture bytes across checkout and archive.
+* -text
 # Preserve source bytes bound by observation receipts.
 .gitattributes text eol=lf
 docs/src/live-verification.md -text
