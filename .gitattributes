@@ -1,0 +1,10 @@
+# Preserve source bytes bound by observation receipts.
+.gitattributes text eol=lf
+docs/src/live-verification.md -text
+examples/live_observation_evidence.jl -text
+examples/live_forecast_verify.jl -text
+examples/live_monitor.jl -text
+test/runtests.jl text eol=crlf
+test/test_live_forecast_verify.jl -text
+test/test_live_observation_evidence.jl -text
+test/test_live_observation_evidence_integration.jl -text

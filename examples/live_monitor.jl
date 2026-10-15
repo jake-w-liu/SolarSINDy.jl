@@ -680,7 +680,7 @@ function cycle!(; prepare_fn::Function=cfg -> prepare_issue_inputs(cfg;
                       snapshot_dir=joinpath(dirname(cfg.log_path), "source_cache", "issue_inputs")),
                   policy_fn::Function=_monitor_interval_policy,
                   issue_cycle_fn::Function=_issue_horizon_cycle!,
-                  dst_fn::Function=_fetch_dst,
+                  dst_fn::Union{Nothing,Function}=nothing,
                   refresh_fn::Function=refresh_observations!,
                   verify_fn::Function=verify_pending!,
                   retention_fn::Function=_retain_live_forecast_log!,
@@ -727,9 +727,18 @@ function cycle!(; prepare_fn::Function=cfg -> prepare_issue_inputs(cfg;
     # otherwise fetch Kyoto Dst once for all three consumers. If that fetch also fails, pass
     # `nothing` and let each step use its own built-in fetch fallback rather than skipping.
     dst = inputs === nothing ? nothing : inputs.dst
+    dst_receipt = inputs !== nothing && hasproperty(inputs, :dst_receipt) ? inputs.dst_receipt : nothing
     if dst === nothing
         guarded("observation_dst_fetch", () -> begin
-            dst = dst_fn()
+            if dst_fn === nothing
+                receipt = Ref{Any}(nothing)
+                dst = _fetch_dst(;
+                    evidence_root=LiveObservationEvidence.evidence_root(String(log_path)),
+                    receipt_ref=receipt)
+                dst_receipt = receipt[]
+            else
+                dst = dst_fn()
+            end
             nothing
         end)
     end
@@ -739,11 +748,13 @@ function cycle!(; prepare_fn::Function=cfg -> prepare_issue_inputs(cfg;
     cfg = LiveVerifyConfig(; log_path=String(log_path), report_path=String(report_path))
     refreshed = guarded(
         "refresh_observations",
-        () -> refresh_fn(cfg; dst_times=dst_times, dst_vals=dst_vals),
+        () -> dst_receipt === nothing ? refresh_fn(cfg; dst_times=dst_times, dst_vals=dst_vals) :
+            refresh_fn(cfg; dst_times=dst_times, dst_vals=dst_vals, dst_receipt=dst_receipt),
     )
     refreshed || guarded(
         "verify_pending_fallback",
-        () -> verify_fn(cfg; dst_times=dst_times, dst_vals=dst_vals),
+        () -> dst_receipt === nothing ? verify_fn(cfg; dst_times=dst_times, dst_vals=dst_vals) :
+            verify_fn(cfg; dst_times=dst_times, dst_vals=dst_vals, dst_receipt=dst_receipt),
     )
     guarded("forecast_log_retention",
             () -> retention_fn(String(log_path), Int(max_log_rows)))

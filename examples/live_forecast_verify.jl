@@ -18,6 +18,10 @@ using SHA
 using Statistics
 using FileWatching: Pidfile
 
+isdefined(@__MODULE__, :LiveObservationEvidence) ||
+    include(joinpath(@__DIR__, "live_observation_evidence.jl"))
+const LIVE_VERIFY_SOURCE_SHA256 = bytes2hex(sha256(read(@__FILE__)))
+
 const KYOTO_DST_JSON_URL = "https://services.swpc.noaa.gov/products/kyoto-dst.json"
 const SOLARSINDY_PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
 const DEFAULT_MONITOR_DIR = joinpath(SOLARSINDY_PACKAGE_ROOT, "var", "monitor")
@@ -352,13 +356,35 @@ end
 # JSON alike; the finite/sentinel filter (|Dst| < 9000, drop null) is kept so a feed outage cannot
 # anchor the monitor at a nonphysical value.
 function _fetch_dst(; max_retries::Int=3, retry_delay_sec::Real=1.0,
-                    fetch_fn=HTTP.get)
+                    fetch_fn=HTTP.get,
+                    evidence_root::Union{Nothing,AbstractString}=nothing,
+                    receipt_ref=nothing,
+                    utc_clock::Function=()->now(UTC),
+                    monotonic_clock::Function=time_ns)
     max_retries >= 1 || throw(ArgumentError("max_retries must be >= 1"))
+    receipt_ref === nothing || (receipt_ref[] = nothing)
     last_error = nothing
     for attempt in 1:max_retries
+        started = utc_clock()
+        started_ns = monotonic_clock()
+        response_received = false
         try
             resp = fetch_fn(KYOTO_DST_JSON_URL; socket_type_tls=MbedTLS.SSLContext,
-                           connect_timeout=15, readtimeout=30, retries=0)
+                           connect_timeout=15, readtimeout=30, retries=0,
+                           status_exception=false)
+            completed = utc_clock()
+            completed_ns = monotonic_clock()
+            response_received = true
+            if evidence_root !== nothing
+                receipt = LiveObservationEvidence.capture_response!(evidence_root, resp;
+                    request_started_utc=started, receipt_completed_utc=completed,
+                    monotonic_started_ns=started_ns, monotonic_completed_ns=completed_ns,
+                    consumer_source_sha256=LIVE_VERIFY_SOURCE_SHA256)
+                receipt_ref === nothing || (receipt_ref[] = receipt)
+                record = LiveObservationEvidence.load_receipt(evidence_root, receipt)
+                LiveObservationEvidence.receipt_clock_eligible(record) ||
+                    throw(ArgumentError("Kyoto Dst response retained with ineligible actual clocks"))
+            end
             resp.status == 200 || error("Kyoto Dst HTTP status $(resp.status)")
             rows = JSON3.read(String(resp.body))
             times = DateTime[]; dst = Float64[]
@@ -374,6 +400,25 @@ function _fetch_dst(; max_retries::Int=3, retry_delay_sec::Real=1.0,
             return times, dst
         catch e
             e isa InterruptException && rethrow()
+            if evidence_root !== nothing && !response_received
+                completed = utc_clock()
+                completed_ns = monotonic_clock()
+                # A thrown status error may still contain actual response bytes.
+                # A transport error has no received body and is recorded as such.
+                response = hasproperty(e, :response) ? getproperty(e, :response) : nothing
+                receipt = if response !== nothing && hasproperty(response, :body) && hasproperty(response, :status)
+                    LiveObservationEvidence.capture_response!(evidence_root, response;
+                        request_started_utc=started, receipt_completed_utc=completed,
+                        monotonic_started_ns=started_ns, monotonic_completed_ns=completed_ns,
+                        consumer_source_sha256=LIVE_VERIFY_SOURCE_SHA256)
+                else
+                    LiveObservationEvidence.capture_transport_failure!(evidence_root, e;
+                        request_started_utc=started, receipt_completed_utc=completed,
+                        monotonic_started_ns=started_ns, monotonic_completed_ns=completed_ns,
+                        consumer_source_sha256=LIVE_VERIFY_SOURCE_SHA256)
+                end
+                receipt_ref === nothing || (receipt_ref[] = receipt)
+            end
             last_error = e
             attempt == max_retries && rethrow(e)
             sleep(retry_delay_sec)
@@ -4136,7 +4181,10 @@ function prepare_issue_inputs(cfg::LiveVerifyConfig;
     end
     plasma = plasma_fn === nothing ? fetch_swpc_plasma(; http_get=capture_get) : plasma_fn()
     mag = mag_fn === nothing ? fetch_swpc_mag(; http_get=capture_get) : mag_fn()
-    dst = dst_fn === nothing ? _fetch_dst(; fetch_fn=capture_get) : dst_fn()
+    dst_receipt = Ref{Any}(nothing)
+    dst = dst_fn === nothing ? _fetch_dst(; fetch_fn=capture_get,
+        evidence_root=LiveObservationEvidence.evidence_root(cfg.log_path),
+        receipt_ref=dst_receipt) : dst_fn()
     # The normal decision clock must follow receipt of every input. An explicitly supplied
     # timestamp remains available for deterministic, causally filtered historical replay.
     prepared = (
@@ -4144,6 +4192,7 @@ function prepare_issue_inputs(cfg::LiveVerifyConfig;
         plasma=plasma,
         mag=mag,
         dst=dst,
+        dst_receipt=dst_receipt[],
         calibration=calibration,
         conformal=conformal,
         model=cfg.model,
@@ -4891,21 +4940,49 @@ function issue_forecast(cfg::LiveVerifyConfig;
             pred_dst, ci05_dst, ci95_dst, model_version=selected.model_version)
 end
 
-function verify_pending!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=nothing)
+function _persist_observation_table!(cfg::LiveVerifyConfig, df, previous_state, changed_rows,
+                                     intent; revised::Bool=false)
+    try
+        _atomic_csv(cfg.log_path, df)
+        _persist_live_state_after_table_write!(cfg.log_path, previous_state, df, changed_rows; revised)
+    catch failure
+        if intent !== nothing
+            try
+                LiveObservationEvidence.record_verification_failure!(
+                    LiveObservationEvidence.evidence_root(cfg.log_path), intent, failure;
+                    log_path=cfg.log_path, failed_at_utc=now(UTC))
+            catch evidence_failure
+                throw(CompositeException([failure, evidence_failure]))
+            end
+        end
+        rethrow()
+    end
+    return nothing
+end
+
+function verify_pending!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=nothing,
+                         dst_receipt=nothing, dst_fetch_fn=HTTP.get)
     isfile(cfg.log_path) || error("No forecast log exists at $(cfg.log_path)")
     # Fetch the observation feed BEFORE taking the lock so network latency does not sit inside the
     # 30 s lock window. Then hold the same directory lock the appends take, re-read under the lock,
     # mutate, and atomically write — so a concurrent locked append (e.g. the live monitor issuing a
     # forecast) cannot be clobbered by this read-modify-write.
     if dst_times === nothing || dst_vals === nothing
-        dst_times, dst_vals = _fetch_dst()
+        receipt = Ref{Any}(nothing)
+        dst_times, dst_vals = _fetch_dst(; fetch_fn=dst_fetch_fn,
+            evidence_root=LiveObservationEvidence.evidence_root(cfg.log_path),
+            receipt_ref=receipt)
+        dst_receipt = receipt[]
     end
     verified = _with_forecast_log_lock(cfg.log_path) do
         _recover_append_transaction!(cfg.log_path)
         previous_state = _valid_live_state(cfg.log_path)
+        evidence_root = LiveObservationEvidence.evidence_root(cfg.log_path)
+        dst_receipt === nothing || LiveObservationEvidence.recover_observation_head!(evidence_root)
         df = _csv_read(cfg.log_path, DataFrame)
         n = 0
         changed_rows = Int[]
+        evidence_entries = NamedTuple[]
         for row_idx in 1:nrow(df)
             if String(:observation_dst_nt) in names(df) && !ismissing(df[row_idx, :observation_dst_nt])
                 continue
@@ -4913,14 +4990,22 @@ function verify_pending!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=noth
             target = _parse_dt(df[row_idx, :target_time_utc])
             idx = findfirst(==(target), dst_times)
             idx === nothing && continue
-            _score_row!(df, row_idx, Float64(dst_vals[idx]))
+            observed = Float64(dst_vals[idx])
+            if dst_receipt !== nothing
+                push!(evidence_entries, (;binding=LiveObservationEvidence.forecast_binding(df[row_idx, :]),
+                    previous_observation=missing, observation=observed))
+            end
+            _score_row!(df, row_idx, observed)
             n += 1
             push!(changed_rows, row_idx)
         end
         if n > 0
-            _atomic_csv(cfg.log_path, df)
-            _persist_live_state_after_table_write!(cfg.log_path, previous_state, df,
-                                                   changed_rows)
+            intent = dst_receipt === nothing ? nothing :
+                LiveObservationEvidence.prepare_verification!(evidence_root, dst_receipt, evidence_entries;
+                    log_path=cfg.log_path, verification_started_utc=now(UTC))
+            _persist_observation_table!(cfg, df, previous_state, changed_rows, intent)
+            intent === nothing || LiveObservationEvidence.commit_verification!(evidence_root, intent;
+                log_path=cfg.log_path, verification_completed_utc=now(UTC))
         end
         n
     end
@@ -4928,37 +5013,57 @@ function verify_pending!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=noth
     return verified
 end
 
-function refresh_observations!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=nothing)
+function refresh_observations!(cfg::LiveVerifyConfig; dst_times=nothing, dst_vals=nothing,
+                               dst_receipt=nothing, dst_fetch_fn=HTTP.get)
     isfile(cfg.log_path) || error("No forecast log exists at $(cfg.log_path)")
     # Fetch outside the lock, then read-modify-write under the shared log lock (see verify_pending!).
     if dst_times === nothing || dst_vals === nothing
-        dst_times, dst_vals = _fetch_dst()
+        receipt = Ref{Any}(nothing)
+        dst_times, dst_vals = _fetch_dst(; fetch_fn=dst_fetch_fn,
+            evidence_root=LiveObservationEvidence.evidence_root(cfg.log_path),
+            receipt_ref=receipt)
+        dst_receipt = receipt[]
     end
     dst_map = _dst_lookup(dst_times, dst_vals)
     updated, changed = _with_forecast_log_lock(cfg.log_path) do
         _recover_append_transaction!(cfg.log_path)
         previous_state = _valid_live_state(cfg.log_path)
+        evidence_root = LiveObservationEvidence.evidence_root(cfg.log_path)
+        evidence_state = dst_receipt === nothing ? nothing :
+            LiveObservationEvidence.recover_observation_head!(evidence_root)
         df = _csv_read(cfg.log_path, DataFrame)
         u = 0; c = 0
         changed_rows = Int[]
+        evidence_entries = NamedTuple[]
         for row_idx in 1:nrow(df)
             String(:target_time_utc) in names(df) || continue
             target = _parse_dt(df[row_idx, :target_time_utc])
             haskey(dst_map, target) || continue
             observed = Float64(dst_map[target])
             old_observed = _optional_float(df, row_idx, :observation_dst_nt)
-            if ismissing(old_observed) || Float64(old_observed) != observed
+            changed = ismissing(old_observed) || Float64(old_observed) != observed
+            if dst_receipt !== nothing
+                binding = LiveObservationEvidence.forecast_binding(df[row_idx, :])
+                prior = LiveObservationEvidence.latest_forecast_evidence(evidence_state, binding)
+                if changed || prior === nothing || prior.observation != observed
+                    push!(evidence_entries, (;binding, previous_observation=old_observed, observation=observed))
+                end
+            end
+            if changed
                 !ismissing(old_observed) && (c += 1)
                 _score_row!(df, row_idx, observed)
                 u += 1
                 push!(changed_rows, row_idx)
             end
         end
+        intent = isempty(evidence_entries) ? nothing :
+            LiveObservationEvidence.prepare_verification!(evidence_root, dst_receipt, evidence_entries;
+                log_path=cfg.log_path, verification_started_utc=now(UTC))
         if u > 0
-            _atomic_csv(cfg.log_path, df)
-            _persist_live_state_after_table_write!(cfg.log_path, previous_state, df,
-                                                   changed_rows; revised=c > 0)
+            _persist_observation_table!(cfg, df, previous_state, changed_rows, intent; revised=c > 0)
         end
+        intent === nothing || LiveObservationEvidence.commit_verification!(evidence_root, intent;
+            log_path=cfg.log_path, verification_completed_utc=now(UTC))
         (u, c)
     end
     println(
@@ -5024,12 +5129,14 @@ function backfill_baselines!(log_path::String)
     return updated
 end
 
-function wait_for_observation(cfg::LiveVerifyConfig, forecast)
+function wait_for_observation(cfg::LiveVerifyConfig, forecast; fetch_fn=HTTP.get)
     deadline = now(UTC) + Millisecond(round(Int, cfg.timeout_hours * 3600 * 1000))
     target = forecast.target_time
 
     while true
-        times, dst = _fetch_dst()
+        receipt = Ref{Any}(nothing)
+        evidence_root = LiveObservationEvidence.evidence_root(cfg.log_path)
+        times, dst = _fetch_dst(; fetch_fn, evidence_root, receipt_ref=receipt)
         idx = findfirst(==(target), times)
         latest = times[argmax(times)]
 
@@ -5041,6 +5148,7 @@ function wait_for_observation(cfg::LiveVerifyConfig, forecast)
             scored = _with_forecast_log_lock(cfg.log_path) do
                 _recover_append_transaction!(cfg.log_path)
                 previous_state = _valid_live_state(cfg.log_path)
+                LiveObservationEvidence.recover_observation_head!(evidence_root)
                 df = _csv_read(cfg.log_path, DataFrame)
                 ridx = _locate_forecast_row(df, forecast.issue_time, target,
                                             forecast.model_version)
@@ -5050,11 +5158,15 @@ function wait_for_observation(cfg::LiveVerifyConfig, forecast)
                     "model=$(forecast.model_version)) " *
                     "in $(cfg.log_path)"
                 )
+                entry = (;binding=LiveObservationEvidence.forecast_binding(df[ridx, :]),
+                    previous_observation=_optional_float(df, ridx, :observation_dst_nt), observation=observed)
+                intent = LiveObservationEvidence.prepare_verification!(evidence_root, receipt[], [entry];
+                    log_path=cfg.log_path, verification_started_utc=now(UTC))
                 r = _score_row!(df, ridx, observed)
                 in_ci = df[ridx, :observed_in_90ci]
-                _atomic_csv(cfg.log_path, df)
-                _persist_live_state_after_table_write!(cfg.log_path, previous_state,
-                                                       df, [ridx])
+                _persist_observation_table!(cfg, df, previous_state, [ridx], intent)
+                LiveObservationEvidence.commit_verification!(evidence_root, intent;
+                    log_path=cfg.log_path, verification_completed_utc=now(UTC))
                 (; observed_dst=r.observed_dst, residual=r.residual, in_ci)
             end
             println("Observed target Dst arrived: $target = $(scored.observed_dst) nT")

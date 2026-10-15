@@ -55,7 +55,7 @@ julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --s
 julia --project=SolarSINDy.jl SolarSINDy.jl/examples/live_forecast_verify.jl --comparison-report
 ```
 
-The comparison report scores every listed model on identical matured rows. It reports both the
+The comparison report scores every listed model on identical provider-published rows. It reports both the
 pooled cohort and each valid internal model step, including the static stack predecessor when that
 field is present. Step cells with few rows are descriptive rather than model-ranking evidence.
 
@@ -94,6 +94,67 @@ observations with the current Dst feed. The live Dst product can revise recent
 hours after first publication. Refreshing updates only observation, residual,
 and interval-hit fields; locked predictions, drivers, target times, and model
 metadata are not recomputed.
+
+Normal issue preparation, monitor verification, `--verify-pending`,
+`--refresh-observations` and `--wait` retain new Dst observation evidence beside
+the configured log, in `live_forecast_log.csv.observation_evidence/` by default.
+Exact raw response bodies, HTTP status/headers, request and completion clocks,
+source-code hashes and Julia runtime metadata are retained before parsing.
+Non-200 and malformed responses remain available; a transport failure records
+no invented response body.
+Responses received during a UTC or monotonic clock regression remain archived
+with their actual clocks and an ineligible status. They cannot become issue
+inputs or verified observations. Capture sessions use independent OS entropy;
+monotonic counters are compared across receipts only within the same session.
+
+The verification journal binds the exact issue, Dst origin tag, target tag,
+model step, served name, bundle manifest, point and interval. An intent precedes
+the existing atomic table write; a committed record carries its actual
+verification completion time and the resulting log hash. Revised observations
+append a new record referencing prior evidence. An explicit failed-attempt
+record never counts as a verified observation. Unresolved intents and checksum
+or identity mismatches are reported by the audit.
+An older or incomparable fetched snapshot cannot replace a newer verified
+label. Equal UTC clocks require strict same-session monotonic ordering before
+conflicting snapshots can replace one another. Decisions and commits are
+checked against the journal before a table update and again at commit;
+verification completion cannot regress along the journal.
+A caught write failure also retains an anomalous actual failure clock with an
+invalid-clock indicator. A resolved failed attempt counts as no verification;
+`require_complete=true` checks unresolved intents, rather than certifying that
+all attempts succeeded.
+
+These records do not reconstruct historical receipt times. A later confirmation
+of a previously scored row is labeled as a legacy reconfirmation. Programmatic
+injected arrays without a source receipt keep their legacy behavior and have no
+measured observation evidence. Existing predictions and CSV columns retain
+their meanings.
+
+The live provider may publish a preliminary value before its nominal hour ends.
+The evidence records the raw tag, nominal interval end and whether receipt
+preceded that end separately. Existing verification means that a provider value
+was available; it does not certify a final or completed-hour index. A study
+requiring a completed target hour must apply its declared maturity/revision
+policy to the recorded clocks.
+
+To inspect a stopped or stable collection from Julia:
+
+```julia
+include("examples/live_observation_evidence.jl")
+using .LiveObservationEvidence
+evidence = verify_observation_evidence(evidence_root("var/monitor/live_forecast_log.csv");
+                                      require_complete=true)
+```
+
+The result separates committed events, recorded failed attempts and pending
+intents. Immutable files and a checked hash chain preserve earlier evidence;
+an interrupted head installation can be recovered with
+`recover_observation_head!` without inventing a new original verification time.
+Unchanged refreshes retain their new fetch receipt without adding repeated
+verification events. Each audit checks the complete retained journal and its
+referenced bytes; response parsing is shared only within that operation.
+The next operation reads and validates the evidence again. Audit work grows
+with the retained history, so collection needs both disk and cycle-time monitoring.
 
 Use `--replay-recent --replay-hours=N` to build a longer predicted-versus-
 observed comparison table from the recent live feeds. The replay is causal: each

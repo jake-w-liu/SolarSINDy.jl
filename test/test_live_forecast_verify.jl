@@ -1316,7 +1316,8 @@ using .SuperlearnerServingFixture
             HTTP.Response(200, body)
         end
         mktempdir() do directory
-            result = prepare_issue_inputs(cfg; snapshot_dir=directory, http_get=response)
+            isolated_cfg = _copy_config(cfg; log_path=joinpath(directory, "live.csv"))
+            result = prepare_issue_inputs(isolated_cfg; snapshot_dir=directory, http_get=response)
             @test result.plasma.speed == [400.0, 401.0]
             @test result.mag.bz_gsm == [-3.0, -3.0]
             @test result.dst == ([fixed], [-10.0])
