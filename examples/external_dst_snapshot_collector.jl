@@ -830,6 +830,10 @@ function score_external_dst_rows!(df::DataFrame, obs::DataFrame;
         idx, gap = _nearest_observation(obs, target; not_after=scored_utc)
         idx === nothing && continue
         gap <= max_obs_gap_min || continue
+        # Kyoto observations are nominal hourly means. Keep the original nearest
+        # match pending until its hour ends; do not substitute a farther older bin.
+        # This guard does not certify an actual observation receipt or finality.
+        DateTime(obs.observed_time_utc[idx]) + Hour(1) <= scored_utc || continue
         obs_val = Float64(obs.observed_dst_nt[idx])
         df.observed_dst_nt[i] = obs_val
         df.observed_time_utc[i] = _fmt_utc(DateTime(obs.observed_time_utc[idx]))
@@ -899,7 +903,7 @@ function _validate_external_dst_log(
                 "external Dst row $i has invalid scored_utc",
             )
             target <= scored_time && observed_time <= scored_time || error(
-                "external Dst row $i was scored before its target or observation matured",
+                "external Dst row $i was scored before its target or observation timestamp",
             )
             isfinite(Float64(df.observed_dst_nt[i])) ||
                 error("external Dst row $i has invalid observed_dst_nt")
@@ -1212,7 +1216,9 @@ function _selftest_external_dst_collector()
         @assert result2.rows_total == 4 "dedupe should not append duplicate source issue/target/hash rows"
         @assert isequal(_csv_read(cfg.log_path, DataFrame), df)
         @assert score_external_dst_rows!(df, _parse_observed_dst_json(obs);
-            scored_utc=DateTime(2026, 6, 27, 6)) == 3
+            scored_utc=DateTime(2026, 6, 27, 6)) == 1
+        @assert score_external_dst_rows!(df, _parse_observed_dst_json(obs);
+            scored_utc=DateTime(2026, 6, 27, 7)) == 2
         @assert _validate_external_dst_log(df)
     end
     println("  ✓ external Dst snapshot collector self-test: future rows, raw hashes, scoring CRC")

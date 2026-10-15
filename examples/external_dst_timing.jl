@@ -86,6 +86,7 @@ end
 
 function write_external_dst_metrics(io::IO, summary::DataFrame)
     println(io, "Scores require recorded response completion strictly before target, with fetch-start and source issue at/before completion. Legacy rows without completion evidence and late rows are excluded; historical error fields are retained. Maximum receipt lead is target minus completion.\n")
+    println(io, "These descriptive scores do not certify completed target labels: historical labels may be preliminary and actual observation-body receipts are not retained here. New scoring waits until the matched observation hour nominally ends; this is not a finality guarantee. Existing score fields remain unchanged.\n")
     println(io, "| Source | Archived rows | Receipt-future | Scored | Max receipt lead [h] | RMSE [nT] | MAE [nT] |")
     println(io, "|---|---:|---:|---:|---:|---:|---:|")
     for row in eachrow(summary)

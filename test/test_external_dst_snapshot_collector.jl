@@ -337,7 +337,13 @@ end
         @test ismissing(log.observed_dst_nt[1])
         @test C.score_external_dst_rows!(
             log, observations; scored_utc=C.DateTime(2026, 7, 1, 6),
-        ) == 1
+        ) == 0
+        @test ismissing(log.observed_dst_nt[1])
+        @test C.score_external_dst_rows!(log, observations;
+            scored_utc=C.DateTime(2026, 7, 1, 7)-C.Millisecond(1)) == 0
+        @test ismissing(log.observed_dst_nt[1])
+        @test C.score_external_dst_rows!(log, observations;
+            scored_utc=C.DateTime(2026, 7, 1, 7)) == 1
         @test log.observed_dst_nt[1] == -31.0
         @test C._validate_external_dst_log(log)
     end
@@ -2102,4 +2108,56 @@ end
         @test !L._complete_issuance_cycle(flipped_path, issue_time, :aci)
         @test !L._complete_issuance_cycle(flipped_path, issue_time, :static)
     end
+end
+
+
+@testset "External nominal completion preserves nearest match and old scores" begin
+    C = ExternalDstCollectorTestHarness
+    function nominal_row(target="2026-07-01T06:00:00Z")
+        rows = C._external_empty_log()
+        push!(rows, ("mock", "2026-07-01T04:00:00Z", "2026-07-01T04:01:00Z",
+            target, C.Dates.value(C.DateTime(replace(target,"Z"=>""))-C.DateTime(2026,7,1,4))/3_600_000,
+            -100.0, 60.0, "fetch_time", "forecast", repeat("a",64), "raw/mock.raw",
+            missing, missing, target, "future_forecast", missing, missing, missing,
+            missing, missing, "2026-07-01T04:01:01Z"))
+        rows
+    end
+    for (clock, expected) in ((C.DateTime(2026,7,1,6),0),
+                              (C.DateTime(2026,7,1,7)-C.Millisecond(1),0),
+                              (C.DateTime(2026,7,1,7),1),
+                              (C.DateTime(2026,7,1,7)+C.Millisecond(1),1))
+        rows = nominal_row()
+        obs = C.DataFrame(observed_time_utc=[C.DateTime(2026,7,1,6)], observed_dst_nt=[-60.0])
+        @test C.score_external_dst_rows!(rows,obs;scored_utc=clock) == expected
+        @test ismissing(rows.observed_dst_nt[1]) == (expected == 0)
+    end
+    rows = nominal_row("2026-07-01T05:40:00Z")
+    obs = C.DataFrame(observed_time_utc=[C.DateTime(2026,7,1,5),C.DateTime(2026,7,1,6)],
+                      observed_dst_nt=[-10.0,-60.0])
+    @test C.score_external_dst_rows!(rows,obs;max_obs_gap_min=60,
+        scored_utc=C.DateTime(2026,7,1,6,30)) == 0
+    @test ismissing(rows.observed_dst_nt[1])
+    @test C.score_external_dst_rows!(rows,obs;max_obs_gap_min=60,
+        scored_utc=C.DateTime(2026,7,1,7)) == 1
+    @test rows.observed_time_utc[1] == "2026-07-01T06:00:00Z"
+    @test rows.observed_dst_nt[1] == -60.0
+    @test rows.abs_error_nt[1] == 40.0
+    first = deepcopy(rows)
+    obs.observed_dst_nt[2] = -70.0
+    @test C.score_external_dst_rows!(rows,obs;max_obs_gap_min=60,
+        scored_utc=C.DateTime(2026,7,1,8)) == 0
+    @test isequal(rows,first)
+    # Existing preliminary historical fields remain exactly as they were stored.
+    rows.observed_dst_nt[1] = -10.0
+    rows.observed_time_utc[1] = "2026-07-01T06:00:00Z"
+    rows.observed_gap_min[1] = 20.0
+    rows.abs_error_nt[1] = 90.0
+    rows.scored_utc[1] = "2026-07-01T06:15:00Z"
+    legacy = deepcopy(rows)
+    @test C._validate_external_dst_log(rows)
+    @test C.score_external_dst_rows!(rows,obs;scored_utc=C.DateTime(2026,7,1,8)) == 0
+    @test isequal(rows,legacy)
+    report = IOBuffer()
+    C.write_external_dst_metrics(report,C.external_dst_summary(rows))
+    @test occursin("historical labels may be preliminary",String(take!(report)))
 end
