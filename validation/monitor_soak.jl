@@ -16,7 +16,8 @@
 # nondecreasing and to grow by both 25% and 64 MiB (Julia live heap) or 128 MiB
 # (RSS). These deliberately conservative thresholds avoid treating allocator
 # retention as a leak while still detecting sustained, operationally material
-# growth. File descriptors may not grow at all after warm-up, and the fixed
+# growth. File descriptors (File-object handles on Windows) may not grow at all after warm-up,
+# while total Windows kernel handles are separate telemetry. The fixed
 # input snapshot may create at most one pending row per requested horizon.
 
 isdefined(@__MODULE__, :LiveVerifyConfig) || include(joinpath(@__DIR__, "..", "examples", "live_forecast_verify.jl"))
@@ -131,15 +132,11 @@ function _rss_bytes()
     end
 end
 
+isdefined(@__MODULE__, :_kernel_handle_count) || include(joinpath(@__DIR__, "monitor_windows_resources.jl"))
+
 function _fd_count()
     @static if Sys.iswindows()
-        # Windows kernel handles cover files and other owned OS resources.
-        # Keep the existing no-growth gate, using this platform's counter.
-        count = Ref{UInt32}(0)
-        ok = ccall((:GetProcessHandleCount, "kernel32"), Cint,
-                   (Ptr{Cvoid}, Ref{UInt32}), _current_process_handle(), count)
-        ok != 0 || error("GetProcessHandleCount failed during resource audit")
-        return Int(count[])
+        return _windows_file_handle_count()
     end
     path = isdir("/proc/$(getpid())/fd") ? "/proc/$(getpid())/fd" : "/dev/fd"
     return length(readdir(path))
@@ -152,6 +149,7 @@ function _resource_sample(batch, log_path, elapsed, allocated, n_batches)
         live_heap_bytes=_live_heap_bytes(),
         rss_bytes=_rss_bytes(),
         fd_count=_fd_count(),
+        kernel_handle_count=_kernel_handle_count(),
         log_rows=_log_rows(log_path),
         mean_batch_seconds=n_batches == 0 ? 0.0 : elapsed / n_batches,
         mean_batch_alloc_bytes=n_batches == 0 ? 0.0 : allocated / n_batches,
@@ -249,7 +247,7 @@ function monitor_soak_main()
                 if batch % sample_every == 0 || batch == batches
                     sample = _resource_sample(batch, log_path, elapsed, allocated, measured)
                     sample.fd_count <= baseline_fd || error(
-                        "owned OS resources grew from $baseline_fd to $(sample.fd_count) at batch $batch",
+                        "file descriptors or File-object handles grew from $baseline_fd to $(sample.fd_count) at batch $batch",
                     )
                     sample.log_rows <= expected_rows || error(
                         "fixed input snapshot grew the log from $expected_rows to $(sample.log_rows) rows",
@@ -277,12 +275,13 @@ function monitor_soak_main()
 
         println("monitor soak: PASS input=$(setup.source) batches=$batches warmup=$warmup sample_every=$sample_every")
         setup.fallback === nothing || println("real-input fallback: $(setup.fallback)")
-        resource_label = Sys.iswindows() ? "handles" : "fd"
-        println("batch  heap_MiB  rss_MiB  $resource_label  rows  seconds/batch  alloc_MiB/batch")
+        resource_label = Sys.iswindows() ? "file_handles" : "fd"
+        println("batch  heap_MiB  rss_MiB  $resource_label  kernel_handles  rows  seconds/batch  alloc_MiB/batch")
         for sample in samples
-            @printf("%5d  %8s  %7s  %2d  %4d  %13.4f  %15.2f\n",
+            @printf("%5d  %8s  %7s  %2d  %14s  %4d  %13.4f  %15.2f\n",
                     sample.batch, _fmt_mib(sample.live_heap_bytes),
-                    _fmt_mib(sample.rss_bytes), sample.fd_count, sample.log_rows,
+                    _fmt_mib(sample.rss_bytes), sample.fd_count,
+                    ismissing(sample.kernel_handle_count) ? "NA" : string(sample.kernel_handle_count), sample.log_rows,
                     sample.mean_batch_seconds,
                     sample.mean_batch_alloc_bytes / MIB)
         end
