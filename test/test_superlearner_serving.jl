@@ -22,6 +22,7 @@ using CSV
 using DataFrames
 using Dates
 using JSON3
+using SHA
 using SolarSINDy
 
 include(joinpath(@__DIR__, "superlearner_serving_fixture.jl"))
@@ -31,6 +32,37 @@ using .SuperlearnerServingFixture
 _experts(values) = NamedTuple{SUPERLEARNER_SERVING_EXPERTS}(Tuple(Float64.(values)))
 
 @testset "Operational super-learner serving" begin
+    @testset "bundled artifacts retain their manifest bytes" begin
+        # Exercise the shipped bundle as well as the synthetic loader fixtures.
+        # Git archive/checkout newline conversion must not invalidate its hashes.
+        directory = normpath(joinpath(@__DIR__, "..", "deploy", "dst_superlearner"))
+        manifest = superlearner_serving_verify_manifest(directory)
+        @test manifest isa DataFrame
+        hashed = manifest[manifest.entry_type .== "sha256", :]
+        required = vcat(collect(String, SUPERLEARNER_SERVING_REQUIRED_FILES),
+                        [superlearner_serving_direct_file(step)
+                         for step in SUPERLEARNER_SERVING_MODEL_STEPS])
+        @test Set(String.(hashed.name)) == Set(required)
+        for row in eachrow(hashed)
+            # Independent raw-byte oracle; do not reuse the serving hash helper.
+            bytes = read(joinpath(directory, String(row.name)))
+            @test bytes2hex(sha256(bytes)) == String(row.value)
+            @test length(bytes) == Int(round(Float64(row.count)))
+        end
+        # These paired artifacts are also required by the live serving pipeline.
+        deploy = dirname(directory)
+        @test load_static_stack(joinpath(deploy, STATIC_STACK_SERVED_FILE)) isa StaticStack
+        calibration_paths = operational_calibration_artifacts(; deploy_dir=deploy)
+        point = read_inertial_sindy_calibration(calibration_paths.point_csv)
+        @test point.supported_model_steps == OPERATIONAL_INERTIAL_SINDY_SUPPORTED_MODEL_STEPS
+        metadata = first(eachrow(CSV.read(calibration_paths.conformal_csv, DataFrame)))
+        @test metadata.stratum == "__meta__"
+        @test metadata.point_calibration_sha256 ==
+              bytes2hex(sha256(read(calibration_paths.point_csv)))
+        @test read_conformal_calibration(calibration_paths.conformal_csv) isa ConformalCalibration
+        @test load_operational_core() isa OperationalCore
+    end
+
     @testset "published contract" begin
         @test SUPERLEARNER_SERVED_IDENTITY == "dst-superlearner+sindyfloor+conformal"
         @test SUPERLEARNER_SERVED_VARIANT == "superlearner_e"

@@ -8,3 +8,13 @@ test/runtests.jl text eol=crlf
 test/test_live_forecast_verify.jl -text
 test/test_live_observation_evidence.jl -text
 test/test_live_observation_evidence_integration.jl -text
+# Serving manifests bind exact artifact bytes, including line endings.
+deploy/dst_superlearner/* -text
+deploy/static_stack.csv -text
+deploy/static_stack_manifest.csv -text
+deploy/inertial_sindy_calibration.csv -text
+deploy/inertial_sindy_calibration_conformal.csv -text
+data/real_sindy_discovery_coefficients.csv -text
+data/real_ensemble_inclusion.csv -text
+data/real_sindy_ensemble_draws.csv -text
+test/test_superlearner_serving.jl -text
