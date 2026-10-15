@@ -10,17 +10,15 @@ using Test, SolarSINDy, LinearAlgebra, Dates
             @test cal.global_stratum.half_width == 1.0
             @test conformal_halfwidth(cal, 1.0, 0.0) == 1.0
             ac = init_adaptive_conformal(warmup=0)
-            adaptive_conformal_step!(ac, points[1], observations[1])
-            @test ac.history == [1.0]
-            step = adaptive_conformal_step!(ac, points[1], points[1] + 2)
-            @test step.half_width == 1.0
-            @test step.covered === false
-            result = run_adaptive_conformal(
+            # Float64 has spacing 256 at 2^60, so neither +1 observation nor
+            # +/-1 interval bounds can be faithfully served by the typed ACI API.
+            # Split calibration supports the exact residual; ACI must fail closed.
+            @test_throws ArgumentError adaptive_conformal_step!(ac, points[1], observations[1])
+            @test isempty(ac.history)
+            @test_throws ArgumentError run_adaptive_conformal(
                 repeat(points, 3), [points[1] + 1, points[1] + 2, points[1] + 1];
                 warmup=1,
             )
-            @test result.covered == [true, false, true]
-            @test result.coverage == 0.5
         end
         # Overflowing fixed-width subtraction must still have the exact span,
         # while ordinary Float64 residuals retain their previous evaluation.

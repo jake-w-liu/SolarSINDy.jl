@@ -817,6 +817,8 @@ using DataFrames
     end
 
     include("test_compat.jl")
+    include("test_conformal_endpoint_precision.jl")
+    include("test_adaptive_conformal_representation.jl")
     include("test_static_stack_memory_precision.jl")
     include("test_static_stack_projection_precision.jl")
     include("test_static_stack_boost_range.jl")

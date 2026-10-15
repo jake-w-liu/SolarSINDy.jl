@@ -278,7 +278,10 @@ conformal_halfwidth(cal::ConformalCalibration, horizon::Real, latest_dst::Real) 
 """
     conformal_interval(cal, point, horizon, latest_dst)
 
-`(lo, hi)` conformal interval centered on `point`.
+`(lo, hi)` conformal interval centered on `point`. Ordinary inputs use Float64
+endpoints. If that representation loses the center or collapses/overflows the
+band, finite integer and binary floating-point centers use sufficient BigFloat
+precision, while rational centers retain exact Rational{BigInt} endpoints.
 """
 function conformal_interval(cal::ConformalCalibration, point::Real,
                             horizon::Real, latest_dst::Real)
@@ -287,7 +290,38 @@ function conformal_interval(cal::ConformalCalibration, point::Real,
         "conformal interval point must be finite and representable as Float64",
     ))
     hw = conformal_halfwidth(cal, horizon, latest_dst)
-    return (point_float - hw, point_float + hw)
+    lo, hi = point_float - hw, point_float + hw
+    if point != point_float ||
+       (hw > 0 && (lo == point_float || hi == point_float)) ||
+       !(isfinite(lo) && isfinite(hi))
+        # Generic Real inputs can carry a residual below the center's Float64
+        # ULP. Preserve the actual point and band in this exceptional range;
+        # otherwise a nonzero calibrated band collapses and undercovers.
+        if point isa Rational
+            center, width = Rational{BigInt}(point), Rational{BigInt}(hw)
+            return (center - width, center + width)
+        end
+        # Span the least significant possible bit of each dyadic operand and
+        # leave one bit for a carry. Center precision alone misses both tiny
+        # centers added to a broad band and large centers crossing an exponent.
+        center_bits = point isa AbstractFloat ? precision(point) :
+                      point isa Integer ? ndigits(point; base=2) : 53
+        center_exponent = iszero(point) ? 0 :
+                          point isa AbstractFloat ? exponent(abs(point)) :
+                          exponent(abs(point_float))
+        width_exponent = hw > 0 ? exponent(hw) : center_exponent
+        low_bit = min(center_exponent - center_bits + 1,
+                      hw > 0 ? width_exponent - 52 : center_exponent)
+        work_precision = max(256, max(center_exponent, width_exponent) - low_bit + 2)
+        return setprecision(BigFloat, work_precision) do
+            center, width = BigFloat(point), BigFloat(hw)
+            center == point || throw(ArgumentError(
+                "exceptional conformal center must have an exact binary or rational representation",
+            ))
+            (center - width, center + width)
+        end
+    end
+    return (lo, hi)
 end
 
 """
@@ -499,6 +533,9 @@ function _conformal_stream_value(value::Real, label::AbstractString)
     isfinite(value) && !isfinite(converted) && throw(ArgumentError(
         "$label exceeds the supported Float64 range",
     ))
+    isfinite(value) && value != converted && throw(ArgumentError(
+        "$label must be exactly representable as Float64 for the typed adaptive interval",
+    ))
     return converted
 end
 
@@ -514,15 +551,29 @@ const AdaptiveConformalStep = @NamedTuple{
 function _adaptive_conformal_step!(ac::AdaptiveConformal, point::Float64,
                                    observed::Float64,
                                    residual::Float64=abs(observed - point))
-    level = clamp(1.0 - ac.alpha_t, 0.0, 1.0)
-    hw = length(ac.history) < ac.warmup ?
-         _widest_finite(ac.history) :
-         _empirical_halfwidth!(ac.scratch, ac.history, level)
-    lo = point - hw
-    hi = point + hw
     r = residual
     isfinite(point) && isfinite(observed) && !isfinite(r) &&
         throw(ArgumentError("adaptive conformal residual exceeds the supported range"))
+    level = clamp(1.0 - ac.alpha_t, 0.0, 1.0)
+    # Preview an exceptional quantile without changing the reusable scratch
+    # buffer when one candidate width may collapse or overflow at this center.
+    # The physical-range path retains the existing arithmetic and scratch use.
+    representation_risk = isfinite(point) && any(width ->
+        width > 0 && (width <= eps(point) ||
+                      width > floatmax(Float64) - abs(point)), ac.history)
+    quantile_scratch = representation_risk ? Float64[] : ac.scratch
+    hw = length(ac.history) < ac.warmup ?
+         _widest_finite(ac.history) :
+         _empirical_halfwidth!(quantile_scratch, ac.history, level)
+    lo = point - hw
+    hi = point + hw
+    if isfinite(point) && isfinite(hw) &&
+       (!(isfinite(lo) && isfinite(hi)) ||
+        (hw > 0 && (lo == point || hi == point)))
+        throw(ArgumentError(
+            "adaptive interval bounds cannot represent the calibrated width in Float64",
+        ))
+    end
     # Gap step: a non-finite residual carries no coverage information. Report the
     # interval from existing history but skip the history push and α_t update, and
     # mark coverage `missing` rather than `false` so an unobservable step is never
@@ -552,6 +603,11 @@ A non-finite `point` or `observed` value is treated as a missing step. The
 interval is still reported from the current finite history, but the residual is
 not pushed, `α_t` is not updated, and `covered` is `missing` — a gap step is not
 a coverage verdict and must not be pooled with observed hits and misses.
+
+Finite points and observations must be exactly representable as Float64. A
+finite positive band that collapses or overflows at its center is rejected
+before advancing the stream; this preserves the typed Float64 interval instead
+of reporting coverage for endpoints that cannot represent the requested band.
 """
 function adaptive_conformal_step!(ac::AdaptiveConformal, point::Real, observed::Real)
     _validate_adaptive_conformal(ac)
