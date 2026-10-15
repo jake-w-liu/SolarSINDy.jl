@@ -23,7 +23,9 @@ end
 module LiveMonitorRetentionTestHarness
 using Test
 const TEST_MONITOR_DIR = mktempdir()
-withenv("SOLARSINDY_MONITOR_DIR" => TEST_MONITOR_DIR) do
+const TEST_EXTERNAL_DST_DIR = mktempdir()
+withenv("SOLARSINDY_MONITOR_DIR" => TEST_MONITOR_DIR,
+        "SOLARSINDY_EXTERNAL_DST_DIR" => TEST_EXTERNAL_DST_DIR) do
     include(joinpath(@__DIR__, "..", "examples", "live_monitor.jl"))
 end
 
@@ -152,6 +154,22 @@ const CAN_SYMLINK = let
             false
         end
     end
+end
+
+@testset "Live monitor honors the external snapshot directory" begin
+    L = LiveMonitorRetentionTestHarness
+    cfg = L.EXTERNAL_DST_CFG
+    external = L.TEST_EXTERNAL_DST_DIR
+    @test cfg.log_path == joinpath(external, "external_dst_forecast_log.csv")
+    @test cfg.report_path == joinpath(external, "external_dst_forecast_report.md")
+    @test cfg.raw_dir == joinpath(external, "source_cache", "external_dst_snapshots")
+    @test cfg.repo_root == normpath(joinpath(external, ".."))
+    @test cfg.log_path == L.ExternalDstCollectorConfig().log_path
+    @test cfg.report_path == L.ExternalDstCollectorConfig().report_path
+    @test cfg.raw_dir == L.ExternalDstCollectorConfig().raw_dir
+    @test cfg.repo_root == L.ExternalDstCollectorConfig().repo_root
+    @test L.LOG == joinpath(L.TEST_MONITOR_DIR, "live_forecast_log.csv")
+    @test L.REPORT == joinpath(L.TEST_MONITOR_DIR, "live_comparison_report.md")
 end
 
 @testset "Prospective external Dst snapshot collector" begin

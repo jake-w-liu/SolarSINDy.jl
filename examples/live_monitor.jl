@@ -21,6 +21,8 @@
 #
 # Env:
 #   SOLARSINDY_MONITOR_DIR     output/state directory (default <package>/var/monitor)
+#   SOLARSINDY_EXTERNAL_DST_DIR external snapshot directory (default SOLARSINDY_MONITOR_DIR);
+#                              selects a separately owned external log/report/raw store
 #   SOLARSINDY_OPERATIONAL_CALIBRATION  Operational calibration CSV (default <dir>/inertial_sindy_calibration.csv;
 #                              falls back to the package-bundled calibration when absent)
 #   SOLARSINDY_MONITOR_ONCE=1  run exactly one cycle, then exit (also --once)
@@ -164,14 +166,9 @@ MAX_LOG_ROWS >= length(HORIZONS) || error(
     "to retain one complete $(join(HORIZONS, '/')) h product cycle",
 )
 
-# External Dst snapshot collector config pinned to the monitor directory. repo_root keeps the
-# stored raw_path column relative to the directory's parent, matching the deployed layout.
-const EXTERNAL_DST_CFG = ExternalDstCollectorConfig(;
-    log_path = joinpath(MONITOR_DIR, "external_dst_forecast_log.csv"),
-    report_path = joinpath(MONITOR_DIR, "external_dst_forecast_report.md"),
-    raw_dir = joinpath(MONITOR_DIR, "source_cache", "external_dst_snapshots"),
-    repo_root = normpath(joinpath(MONITOR_DIR, "..")),
-)
+# Honor the collector's directory precedence: explicit external directory, monitor directory,
+# then the package default. Its repo_root keeps raw references relative to that directory's parent.
+const EXTERNAL_DST_CFG = ExternalDstCollectorConfig()
 
 stamp() = Dates.format(now(UTC), dateformat"yyyy-mm-ddTHH:MM:SS") * "Z"
 function logln(args...)
