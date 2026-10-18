@@ -54,7 +54,19 @@ jobs:
       - name: Verify independent artifact replay and corruption rejection
         # Standard-library Python and data-only Julia replay; no author model
         # loader, new fitting, network data or scientific acceptance verdict.
-        run: python -B -m unittest discover -s test/initial_reference -p 'test_*.py' -v
+        run: |
+          REPEAT_COUNT=1
+          if [ '${{ matrix.os }}' = ubuntu-latest ] && [ '${{ matrix.julia-version }}' = 1.13.1 ]; then
+            REPEAT_COUNT=3
+          fi
+          python -B test/initial_reference/run_ci_reader_tests.py --repeat "$REPEAT_COUNT"
+      - name: Retain independent reader failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-reference-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/initial-reference-reader
+          if-no-files-found: ignore
       # The suite reports which local-artifact oracles are unavailable in a clean clone.
       - uses: julia-actions/julia-runtest@v1
       - name: Run the research experiments

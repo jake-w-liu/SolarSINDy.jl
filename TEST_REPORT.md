@@ -604,3 +604,29 @@ All eight completed/superseded CI39147477748 raw job logs are retained, with
 cancellations preserved. Five native reader steps completed before cancellation;
 this is partial evidence only and does not qualify candidate59d9766. Fresh full
 canonical and native gates are required on the corrected committed source.
+
+
+### Retained CI child-failure evidence
+
+The corrected reader's local canonical harness on5ba0433 completes with364
+passes,3 warnings and0 failures, with all source/control bytes unchanged.
+That is a Windows full package/examples/harness result; it does not replace a
+failed native-platform job. Linux/Julia1.13.1 CI job117736884994 in run39148405347
+fails at the public reader child exit assertion. Its retained raw job log has
+SHA256580ac5ee0883c822060ca10ec1d61ad0dbfb357df07fea1e6df76c9c24b1012f.
+Five other native reader steps pass. The failed worker's child log was retained
+only under ephemeral/tmp and was absent from the console, so the underlying
+numerical or environment cause remains unverified. Candidate5ba0433 is not
+qualified for main publication by that incomplete/failed matrix.
+
+Failure reporting now emits bounded tails of known owned child logs while
+preserving full raw files. CI uses a dedicated owned temporary root and uploads
+it on failure. An independent injected exit47 with a70000-byte raw log confirms
+that the original failure is raised, the full log remains, and its trailing
+cause is visible within bounded output. The maintained Windows CI entry passes
+all27 Python tests, including the original numerical replay and27 rehashed
+corruptions; the single unavailable file-symlink capability skip is explicit.
+The affected Linux1.13 route requires three consecutive complete iterations;
+any failure stops immediately. Neither this diagnostic change nor a subsequent
+passing run alone is asserted to explain the original failed child. All full
+package/experiment/native gates and numerical tolerances remain mandatory.

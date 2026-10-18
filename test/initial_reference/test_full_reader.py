@@ -186,6 +186,17 @@ class FullReader(unittest.TestCase):
                 'numerical_checks':result['numerical']['checks'],'author_or_ml_imported':False}),flush=True)
         except BaseException:
             print('Retained failed independent reader controls: '+str(root),file=sys.stderr,flush=True)
+            for relative in ('public-cli.log','positive/numerical.log','positive/failure.json',
+                             'corruptions.log','future-tail/audit/numerical.log','future-tail/audit/failure.json'):
+                path=root/relative
+                try:
+                    if path.is_file() and not path.is_symlink():
+                        with path.open('rb') as stream:
+                            stream.seek(max(0,path.stat().st_size-65536));tail=stream.read(65536)
+                        print('Native failure evidence: '+relative+' (last at most64KiB)',file=sys.stderr)
+                        print(tail.decode('utf-8','replace'),file=sys.stderr,flush=True)
+                except OSError as error:
+                    print('Could not read failure evidence '+relative+': '+str(error),file=sys.stderr,flush=True)
             raise
         self.assertEqual(root,root.resolve(strict=True))
         self.assertEqual(root.parent,Path(tempfile.gettempdir()).resolve(strict=True))
