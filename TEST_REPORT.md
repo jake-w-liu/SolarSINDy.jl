@@ -393,3 +393,43 @@ The retained native review receipt SHA-256 is
 517391f18dca9bee219b3a93f55dcfeff56b898cd010f12ec64a59a03c48e13e.
 These focused passes do not replace the final merged source's full six-cell
 package/experiment matrix, strict documentation and canonical harness.
+
+
+## Canonical recipe repair qualification, 18 October 2026
+
+Both native Windows Julia 1.12.6 and 1.13.1 witnesses confirmed successful
+fitting with an accepted equal-valued Int32-index recipe followed by actual
+save_bundle rejection of its model metadata. Each also passed the original
+68 metadata/loss positive controls and 16 mismatch-witness assertions.
+Before-witness receipt SHA-256:
+0eafb3b639d29938b8ebf4d014ba015bce10857125cfbbba282fe7d38835fba8.
+
+The independently frozen positive regression failed on the old implementation
+with 184 PASS and 116 FAIL, no Error During Test, native exit 1 as expected.
+Its raw log SHA-256 is
+7104093c1e25fd3c0555bd55fe7e08c74c4f43bbcd20a65b4ee558483a6163d4.
+The regression file remains byte-exact, SHA-256
+f3ab8e8416c5b107a68579d51c905f7e5c2d460b0422c62d8169fcbb9cbd26f9.
+
+On repaired training source acaf046f, both actual focused disk-fit workers
+exited 0, with all 474 source files and controls unchanged. Displayed testsets
+total 1042 passing assertions each, plus source/binding checks. The original
+732 remain, followed by 300 recipe/canonical metadata checks and ten actual
+stream bundle roundtrip checks. Variants cover Int32 indices, Float32 dynamics,
+combined representations, both delays and two recipes. Off-grid rejection is
+verified before callback/output creation. An initial adapter alias omission
+was retained as a failed setup run, then corrected without changing any frozen
+assertion or production source. Final focused receipt SHA-256:
+f9a4b979e0d858b5f56518005d65f0fb1a21dc6042b8d6f56e5e80936efd2d14.
+
+The unchanged 13-assertion generated resource oracle passed at 10000, 430248
+and 500000 origins using the actual maintained API on acaf046f. At 500000,
+observed peak working set was 752414720 bytes, peak private commit 891686912
+bytes and maximum sampled handle count 200. These are process observations,
+not a constant-memory or new performance claim. Maximum-size receipt SHA-256:
+cc486b04cc2b02f7d4934903c9304e39d94cce9e382b48dd632ee49e09579dbf.
+
+All these inputs were generated. Full unfiltered package tests, all independent
+workers, experiments, canonical harness, strict docs and six-cell native CI
+remain required on the final committed source. No actual archive fit, skill,
+novelty, unopened-cohort or serving verdict follows from these checks.

@@ -41,3 +41,13 @@ maintained disk-fitting exports with their implementation docstrings. Its
 21-export manual, full package tests, experiments, canonical harness and native
 six-cell matrix require fresh qualification of the actual merged commit. The
 earlier 19-export build is not relabeled as a run on the expanded interface.
+
+
+## Recipe metadata repair
+
+The consolidated 21-export manual at 8d13a3b passed strict Ubuntu CI run
+39126089371, job117671411714, log SHA-256
+806a5b614d950422b422b930aa781bcb1cd11d42c53022478aa62ad0a97ed50f.
+The later acaf046f recipe repair adds explicit numeric-representation semantics
+to the manual. A fresh strict build is required for that final committed source;
+the 8d13a3b pass is retained as historical evidence only.

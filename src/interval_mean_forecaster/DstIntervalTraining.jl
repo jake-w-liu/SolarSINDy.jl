@@ -23,8 +23,11 @@ function verify_source_identity()
 end
 
 function _check_setting(setting)
-    setting in A.settings() || throw(ArgumentError("setting differs from frozen18grid"))
-    setting
+    # Grid membership is by value; model and bundle metadata use grid types.
+    for canonical in A.settings()
+        setting==canonical && return canonical
+    end
+    throw(ArgumentError("setting differs from frozen18grid"))
 end
 
 function _check_rows(rows,delay,source;setting=nothing)

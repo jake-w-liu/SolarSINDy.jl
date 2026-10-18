@@ -58,6 +58,11 @@ julia> F.interval_kernel(0.0, 2.0, 3.0).phi
 1.0
 ```
 
+Equal-valued recipe representations are normalized to the fixed grid entry
+before fitting or export. Canonical models therefore retain native `Int` recipe
+indices and `Float64` dynamics metadata for bundle roundtrips. Off-grid recipes
+are rejected before fitting or output-directory creation.
+
 ## Public namespace
 
 ```@docs

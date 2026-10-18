@@ -193,3 +193,27 @@ Export buffering is bounded; the solver deliberately materializes the full
 matrix. The caller owns the directory and pins the expected manifest. No
 hostile-concurrent-filesystem, constant-memory, empirical-skill, actual-archive,
 novelty or deployment claim is made by this implementation.
+
+
+## Accepted recipe metadata canonicalization, 18 October 2026
+
+Contract: an accepted equal-valued fixed-grid recipe must return a canonical
+model that passes the unchanged artifact validator. A read-only independent
+review identified caller numeric types leaking through the membership check.
+Actual maintained-API witnesses on both native Julia versions confirmed an
+accepted Int32 index returned a canonical-schema model rejected by save_bundle
+before any output directory was created.
+
+The recipe lookup now returns the matching frozen grid entry. Grid values,
+solver, clocks, embargo, weights, schema and artifact validator are unchanged.
+Accepted alternate numeric representations acquire canonical Int/Float64
+metadata; off-grid recipes remain rejected before fitting/export I/O. The
+training implementation digest is
+acaf046f8714b5e87e207afe21cfec27aabaf4dfb3295169ac02df3f7471e8cf.
+
+The positive regression was frozen before implementation. Its old-source run
+failed 116 of 300 assertions without setup errors, after the independent
+68-assertion positive metadata control passed. The exact regression now runs
+through the mandatory disk-fit worker, including real stream/bundle roundtrips.
+Original frozen oracles and tolerances are unchanged. Complete final release
+gates must bind this later implementation; 8d13a3b results remain historical.

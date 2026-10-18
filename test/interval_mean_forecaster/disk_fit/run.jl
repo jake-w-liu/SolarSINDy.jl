@@ -161,3 +161,10 @@ const DISK_METADATA = let
 end
 include("canonical_boundary_regressions.jl")
 @test DF.source_identity() == DISK_SOURCE_BEFORE
+
+const DISK_FIT_NAMESPACE=DF
+let path=joinpath(@__DIR__,"recipe_metadata_regressions_frozen_v1.jl")
+    @test bytes2hex(sha256(read(path)))=="f3ab8e8416c5b107a68579d51c905f7e5c2d460b0422c62d8169fcbb9cbd26f9"
+    include(path)
+end
+@test DF.source_identity()==DISK_SOURCE_BEFORE
