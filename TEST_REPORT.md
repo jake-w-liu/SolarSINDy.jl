@@ -297,3 +297,55 @@ These results supersede the earlier prepared-only v8 status for the bounded
 focused checks. Full tests, experiments, canonical harness, strict documentation
 and the six-cell native package matrix remain pending for the combined source.
 No archive forecast-skill, novelty or deployment verdict follows from this run.
+
+
+## Disk-backed canonical fitting qualification, 18 October 2026
+
+The boundary-repaired training source is
+496af09faaed32580222d29e137716724928b49875770fc51dbc023daa709755.
+Both Windows Julia 1.12.6 and 1.13.1 focused workers exited 0 with all 472 source
+files and runner controls unchanged. Their displayed testsets total 732 passing
+assertions, in addition to mandatory binding/source guards: 390 unchanged
+producer/solver assertions, six unchanged malformed-shape assertions, 180 exact
+canonical-model/prediction checks, ten real stream/bundle checks, four file/source
+guards, 68 independently frozen metadata/loss checks and 74 canonical boundary
+regressions. The test bodies and tolerances of the original 396 remain unchanged.
+Focused receipt SHA-256: bde12f468ac6a6786364f5973a8acfb189630e60683ab310feaec88a941fc068.
+
+The before witness on source fe1d301a confirmed the public fit/bundle boundary
+mismatch on both Julia versions, with 68 positive metadata controls and nine
+mismatch checks per run. Current regressions cover both latencies and -1 ms,
++1 ms and +30 minutes; exact-hour models pass the actual bundle validator.
+Owned record-to-directory replacement proves the canonical boundary check runs
+before numeric file access. Diagnostic input bytes remain preserved.
+Before-witness receipt SHA-256: 3d2be1785ecb806dc8bb794dbc1f0c616973b3d34692c2b14ffeab681726cb00.
+
+The unchanged 68-assertion metadata/loss oracle first passed on both native
+versions, then caught swapped gains, swapped data/mask hashes, completion time
+substituted for receipt time, and a dropped storm count on both versions. These
+eight negative controls were run on the earlier fe1d301a implementation; current
+496af09f focused workers rerun the exact frozen positive oracle. No negative
+control result is relabeled as an execution on the later source.
+Mutation receipt SHA-256: 61890887516cd70cdbf0ad92d691eeee8ebb371d8968716269bc7b610a034e63.
+
+The earlier fe1d301a candidate passed all 17 mandatory independent workers on
+both native runtimes, with 69/69 parent entry checks and unchanged source/control
+maps. Those results remain historical; they do not replace complete verification
+of the boundary-repaired source. Prior all17 receipt SHA-256: 9372064d6bb45382ce74ccc1e3e89476c0b1d34d9d5824f471583160bb87b48e.
+
+The actual maintained canonical model API, with source 496af09f, passed the
+unchanged 13-assertion generated resource fixture at each of 10000, 430248 and
+500000 rows on Windows Julia 1.13.1. The largest recovered gains were exactly
+(2,3); weighted SSE was 3.636363636363636 against the literal
+3.6363636363636362. Owned OS observations recorded peak working set 781139968
+bytes, peak private commit 921698304 bytes and maximum sampled handle count 202.
+Cumulative allocation counts are retained separately and are not peak memory.
+Timings include their recorded runtime/warmup context and support no new
+performance claim. The original insufficient-free-memory admission attempt was
+preserved; the successful retry retained the same eight-GiB admission threshold.
+Maximum-size receipt SHA-256: 2c24d320bf1833ce96e15aca7fa9b665de333fd84c2ef10dc7af55d54fd0eaaf.
+
+All inputs above were generated. No actual archive fit, empirical comparison,
+reference admission, model serving or novelty verdict is authorized by these
+component checks. Full package/experiment/harness, strict documentation and the
+native six-cell platform qualifications of the final combined source are pending.

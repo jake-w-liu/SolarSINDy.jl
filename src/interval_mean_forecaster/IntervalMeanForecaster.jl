@@ -21,7 +21,8 @@ include("DstIntervalExperiment.jl")
 export HourlyInputs, StreamCheckpoint, read_author_hourly, stream_basis,
        forecast_clock, fit_eligible, joint_fit_mask, settings, nnls2,
        interval_kernel, interval_moments, condition_interval,
-       fit_gains, predict_rows, select_setting, save_bundle, load_bundle,
+       fit_gains, export_fit_input, fit_gains_from_input,
+       predict_rows, select_setting, save_bundle, load_bundle,
        run_synthetic_experiment, source_identity
 
 """Hourly channel values and hourly tags with explicit source digest and availability kind."""
@@ -50,6 +51,10 @@ const interval_moments = DstIntervalAdapter.Kernel.interval_moments
 const condition_interval = DstIntervalAdapter.Kernel.condition_interval
 """Fit nonnegative gains from eligible rows at an explicit embargoed boundary and recipe."""
 const fit_gains = DstIntervalTraining.fit_gains
+"""Export eligible affine rows from bounded chunks into a new source-bound fit directory."""
+const export_fit_input = DstIntervalTraining.export_fit_input
+"""Fit a canonical research model from an affine input pinned by its manifest digest."""
+const fit_gains_from_input = DstIntervalTraining.fit_gains_from_input
 """Predict both horizons from a source-bound fitted model and compatible streamed rows."""
 const predict_rows = DstIntervalTraining.predict_rows
 """Apply the fixed validation rule to complete panels and an explicitly admitted reference."""

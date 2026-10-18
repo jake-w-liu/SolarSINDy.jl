@@ -6,7 +6,7 @@ const ROOT = normpath(joinpath(@__DIR__, ".."))
 const DRIVER = joinpath(@__DIR__, "interval_mean_forecaster", "worker.jl")
 const JOBS = ("smoke", "scanner", "independent2272", "public-baseline", "public-candidate",
               "cache514", "original", "stage4", "stream-baseline", "stream-candidate",
-              "training362", "warm44", "tenk-baseline", "tenk-candidate", "grammar-producer", "large79")
+              "training362", "warm44", "tenk-baseline", "tenk-candidate", "grammar-producer", "large79", "disk-fit")
 const EVIDENCE = mktempdir(; prefix="solarsindy-interval-functional-", cleanup=false)
 println("INTERVAL_FORECASTER_RETAINED_EVIDENCE=", EVIDENCE)
 

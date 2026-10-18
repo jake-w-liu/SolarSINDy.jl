@@ -1,0 +1,2 @@
+using SolarSINDy
+const IntervalMeanForecaster = SolarSINDy.IntervalMeanForecaster

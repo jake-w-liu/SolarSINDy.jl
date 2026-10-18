@@ -14,7 +14,9 @@ if JOB in ("training362", "grammar-producer")
     include(joinpath(@__DIR__, "boundary_regressions", "training_provenance_binding.jl"))
 end
 
-if JOB == "grammar-producer"
+if JOB == "disk-fit"
+    include(joinpath(@__DIR__, "disk_fit", "run.jl"))
+elseif JOB == "grammar-producer"
     @test hashfile(joinpath(@__DIR__, "boundary_regressions", "run.jl")) == "e1f6512dcf65549343796d5feecaf31be95e4be6fe69c29814258b24f81ce075"
     include(joinpath(@__DIR__, "boundary_regressions", "run.jl"))
 elseif JOB == "scanner"

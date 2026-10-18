@@ -158,3 +158,38 @@ change; the qualified numerical source is copied exactly here. Historical
 earlier Adapter identity. This repaired source has no new performance claim.
 No archive fit, empirical forecast skill, deployment or novelty follows from
 the synthetic numerical repair.
+
+
+## Disk-backed canonical interval gain fitting, 18 October 2026
+
+| Development item | Contract and evidence |
+| --- | --- |
+| Objective | Fit the maintained canonical model without retaining the complete affine NamedTuple panel. |
+| Source ownership | All producer, bounded reader, solver-input validation and model assembly code belongs to DstIntervalTraining.jl and its loaded/disk digest. |
+| Admission | Nonempty chunks up to 4096 rows; at most 500000 source rows; exact h4/h6 by two-coefficient shapes; ordered unique issues; unchanged joint maturity/receipt embargo; at least 100 informative origins. |
+| Numerical contract | Original all-row two-column weighted SVD/NNLS, storm weights, fallback constant loss and existing numerical tolerances. |
+| Persistence | Exclusive new output; checked writes; manifest last; pinned source/manifest/data bytes; exact field sets; recounts and post-solve source/file checks. |
+| Canonical integration | One common model assembly preserves existing fields, ordering and identity hash. Disk and in-memory paths produce identical models for identical valid inputs and implementation bytes. |
+| Independent evidence | Byte-frozen 390 producer/numerical assertions plus six malformed-shape assertions; literal gains/loss, independent metadata oracle, before/after model-boundary witness and fault controls. |
+| Complete gates | Fresh unfiltered package tests, all experiments, canonical harness, strict manual and native Windows/Linux/macOS matrix are mandatory before promotion. |
+
+The early integration exposed a real model-boundary mismatch: fits accepted a
+fractional-hour boundary, while the actual public bundle writer rejected the
+result. Both native Julia versions reproduced it without any source change.
+Canonical fit entry points now reject that boundary before matrix construction
+or numeric record loading; common model assembly also checks it. The existing
+bundle schema is unchanged. Affine export and the private research-result solve
+retain diagnostic fractional-boundary behavior; those results cannot be
+materialized as canonical models at that boundary.
+
+The maintained training source is bound to
+496af09faaed32580222d29e137716724928b49875770fc51dbc023daa709755.
+The seven other scientific implementation files and original independent frozen
+resources retain their admitted bytes. Public model IDs appropriately include
+the changed training implementation identity. Default monitors and serving do
+not activate these research APIs.
+
+Export buffering is bounded; the solver deliberately materializes the full
+matrix. The caller owns the directory and pins the expected manifest. No
+hostile-concurrent-filesystem, constant-memory, empirical-skill, actual-archive,
+novelty or deployment claim is made by this implementation.

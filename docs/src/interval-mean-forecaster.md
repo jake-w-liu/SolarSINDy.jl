@@ -31,6 +31,21 @@ Bundle loading requires the expected manifest digest and implementation source
 map. `source_identity()` verifies all eight loaded implementation files against
 their current disk bytes. Bundle directories must be new.
 
+For longer research panels, `export_fit_input` accepts a producer callback whose
+sink receives nonempty affine chunks of at most 4096 rows, with at most 500000
+source rows. It writes the eligible joint horizon design into a new directory
+and publishes its pinned manifest after successful completion.
+`fit_gains_from_input` requires that manifest digest and produces the same
+canonical model as `fit_gains` for identical rows and source bytes. Predictions
+and bundle save/load use the existing interfaces. Export buffering is bounded;
+the solver still materializes the full matrix. The caller owns the directory
+and can record the fit-input manifest digest in bundle provenance. This path
+provides fitting mechanics without qualifying an actual archive experiment.
+Canonical model fitting through either fit API requires an exact-hour training
+boundary, matching the model bundle contract. The affine exporter also supports
+fractional boundaries for embargo diagnostics; those inputs cannot be converted
+to a canonical model until exported with a valid exact-hour boundary.
+
 ```jldoctest
 julia> using SolarSINDy
 
@@ -60,6 +75,8 @@ SolarSINDy.IntervalMeanForecaster.interval_kernel
 SolarSINDy.IntervalMeanForecaster.interval_moments
 SolarSINDy.IntervalMeanForecaster.condition_interval
 SolarSINDy.IntervalMeanForecaster.fit_gains
+SolarSINDy.IntervalMeanForecaster.export_fit_input
+SolarSINDy.IntervalMeanForecaster.fit_gains_from_input
 SolarSINDy.IntervalMeanForecaster.predict_rows
 SolarSINDy.IntervalMeanForecaster.select_setting
 SolarSINDy.IntervalMeanForecaster.save_bundle
@@ -74,3 +91,21 @@ and platform. That checks before/after bit preservation within the platform;
 it does not promise universal bit identity across BLAS implementations,
 architectures or operating systems. Native Windows, Linux and macOS
 qualification remains a recorded release gate.
+
+## Implementation module references
+
+The following references describe the numerical, replay, feature, streaming,
+training and bundle interfaces used by the public namespace above. The same
+research scope and explicit availability assumptions apply to these interfaces.
+
+```@autodocs
+Modules = [SolarSINDy.IntervalMeanForecaster.DstIntervalAdapter.Kernel,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalAdapter.Replay,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalAdapter.Features,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalAdapter,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalStream,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalTraining,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalArtifacts,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalExperiment]
+Private = false
+```
