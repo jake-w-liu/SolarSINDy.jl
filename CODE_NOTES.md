@@ -257,7 +257,7 @@ SHA2566019c6df59f5f942fe81d5b774b5f5aae13929144670d3b26516a1cc3041b664.
 
 The source-bound initial-reference tools close a missing maintained capability;
 they are research components and do not qualify actual forecast performance.
-Original R906e, B6f4f and E8e7 source bytes remain unchanged. G adds two verified
+Candidate841 preserved R906e, B6f4f and E8e7 source bytes. G added two verified
 repairs before integration. First, the old executor accepted a process running
 Julia1.12 with an admission naming the1.13 executable; a constant reconstruction
 completed under that mismatch, then a nonconstant replay failed the unchanged
@@ -279,3 +279,25 @@ on the exact admitted comparator runtime. Before/after and setup failures are
 preserved. Metric tolerance remains5e-12*max(1,abs(expected)); strict first-grid
 selection does not use that tolerance. No actual archive fit or serving change
 has been performed. Full saved-artifact auditing and the L0/L1 A chain remain.
+
+### Canonical path spelling correction
+
+A fresh independent Windows path test subsequently proves B6f4f accepts a single
+case-aliased file despite its exact-spelling contract. GetLongPathNameW preserves
+the caller's case for an already-long name; actual recorded Base.realpath resolves
+the same path to the file's real spelling. A direct public resolved call fails
+its independent rejection assertion. This is a path-contract defect, with no
+demonstrated containment escape or numerical effect. No scientific data is read.
+
+The maintained spelling primitive now uses realpath on all platforms. Existing
+link/reparse/containment/count/byte/hash checks remain. R906e and E8e7 remain
+byte-exact; B is now4d8cd8b5fba2ac4e901039de92f4f36746afaa28df86f386c536395ec4049fc7.
+The original200-assertion suite remains byte-exact and ten Windows path controls
+are added. The test's B source digest is advanced to the reviewed corrected
+implementation; no numerical expectation or tolerance changes.
+
+Candidate841 was withheld: its full canonical audit was stopped through its
+verified private-job owner, with all descendants subsequently absent. Its CI
+run39139636532 was cancelled after retaining source/jobs evidence. Docs and
+images passed, but no complete native/package/harness verdict is claimed for
+that superseded source. Fresh complete gates must bind the corrected candidate.

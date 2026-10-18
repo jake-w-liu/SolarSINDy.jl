@@ -43,14 +43,9 @@ function safe_components(name)
 end
 canonical(path) = Sys.iswindows() ? lowercase(replace(abspath(path),'\\'=>'/')) : abspath(path)
 function actual_spelling(path)
-    Sys.iswindows() || return realpath(path)
-    # Fixed 64 KiB native lookup avoids enumerating/materializing an unbounded
-    # directory. The native result exposes case and DOS short-name aliases.
-    buffer=zeros(UInt16,32768)
-    count=ccall((:GetLongPathNameW,"kernel32"),stdcall,UInt32,
-        (Cwstring,Ptr{UInt16},UInt32),path,buffer,length(buffer))
-    need(0<count<length(buffer),"bounded Windows path spelling lookup failed")
-    transcode(String,buffer[1:count])
+    # Long-name expansion preserves caller case on Windows. Resolve the actual
+    # canonical spelling before comparing it with the declared path.
+    realpath(path)
 end
 function root_path(path)
     need(path isa AbstractString && isabspath(path) && isdir(path),"explicit existing absolute root required")

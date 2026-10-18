@@ -24,6 +24,11 @@ const ARGS=[normpath(joinpath(@__DIR__,"..","tools","initial_reference"))]
 end
 Base.include(InputSchemas,joinpath(FROZEN,"test_input_metadata_schema_v1.jl"))
 
+module PathSpelling
+const ARGS=[normpath(joinpath(@__DIR__,"..","tools","initial_reference"))]
+end
+Base.include(PathSpelling,joinpath(FROZEN,"test_case_spelling_v1.jl"))
+
 module IndependentCohorts end
 Base.include(IndependentCohorts,joinpath(ROOT,"tools","initial_reference_audit","InitialReferenceAudit.jl"))
 Base.include(IndependentCohorts,joinpath(FROZEN,"independent_reader_hand_oracles_v1.jl"))
@@ -64,7 +69,7 @@ end # PublicEntryMismatch
     @test bytes2hex(sha256(read(joinpath(COMPONENT,"DstInitialGBMReference.jl"))))==
         "906e1a28bb7f56d6e607ae765ff2bb14197a3c2da2f2d1a7741501ea8cacc448"
     @test bytes2hex(sha256(read(joinpath(COMPONENT,"BoundInitialReferenceInputs.jl"))))==
-        "6f4f1d105cbe925cfa1599d19904f945f5b563dbb76cb96753cac46bca258be0"
+        "4d8cd8b5fba2ac4e901039de92f4f36746afaa28df86f386c536395ec4049fc7"
     @test bytes2hex(sha256(read(joinpath(COMPONENT,"InitialGBMReplay.jl"))))==
         "8e7c89d92f31095a890892fb6e33f9fdafddcd714644309623741a39ebf8cb05"
 end

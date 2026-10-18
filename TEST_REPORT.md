@@ -497,3 +497,34 @@ Publication still requires the complete package/examples/canonical-harness,
 native matrix, strict docs and image gates on the exact committed candidate.
 Actual reconstruction, full independent artifact closure, L1/A fitting and
 independent forecast-skill/novelty evidence are separate uncompleted work.
+
+### Case-spelling regression and candidate supersession
+
+The new independent Windows witness confirms both a Python reader prototype and
+the B6f4f public resolved API accept ACTUAL.json for actual.json. Both before
+processes fail assertions without source changes; original file bytes remain.
+Before receipt25d203155b889acbeff983a8d2e427919ae7a5c9809dfd2ab4fb9518ea5d41c1.
+The recorded Base.realpath and native long-name results establish the distinction.
+
+After replacing the spelling primitive with realpath, the maintained focused
+suite passes322 displayed checks on each Windows Julia version: the prior312
+plus10 new canonical/file/root case controls. All source/test/control bytes
+remain unchanged during the two runs. Receipt
+d0c94e6ac0c2ba9b159394704191834e5f867c86472ded3ea594e8a2e9120f47.
+The original200 loader/reference tests are unedited; the B source-identity pin
+changes with the reviewed implementation. Case-sensitive platforms exercise
+six applicable path controls; four additional existing-alias checks are Windows.
+
+Candidate841's in-progress full harness and native CI are explicitly superseded,
+not passed. No final harness terminal exists for the interrupted owned run;
+source/start/log/supersession records remain. Its CI conclusion is cancelled.
+The healthy independent live services are not stopped or changed. Publication
+requires fresh full gates on the coherent corrected tree, including the original
+source-generated grid and independent saved-state regressions.
+
+The coherent R906e/E8e7/B4d8c/Gb16e native eight-process rerun passes with all
+controls unchanged, including the original253/214 all-grid regressions.
+Receiptb0c9a35d6540874b0d92973e7db9924f6ac72c9bca58164cec35248b3f95fd5c.
+CI now executes the mandatory focused reference suite before its still-unfiltered
+package action and full experiments in all six native cells; no existing step,
+platform, tolerance or scientific check is removed.
