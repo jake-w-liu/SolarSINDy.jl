@@ -45,7 +45,7 @@ const R = DailyOperationalReview
         @test occursin("CMO receipt-time screen: false",markdown)
         saved = read(joinpath(output,"review.json"))
         write(claim,"invalid replacement")
-        @test R.write_daily_review(root;reference,http_get=(_;kwargs...)->error("unexpected refetch"),clock) == output
+        @test R.write_daily_review(root;reference,http_get=(_url;kwargs...)->error("unexpected refetch"),clock) == output
         @test read(joinpath(output,"review.json")) == saved
         @test !R.capture_file(claim;reference,check_age=true).available
         write(claim,JSON3.write((;generated_utc=R.utc(reference-Hour(3)))))
@@ -54,20 +54,20 @@ const R = DailyOperationalReview
         @test !R.capture_file(claim;reference,check_age=true).fresh
         write(claim,JSON3.write((;generated_utc=R.utc(reference-Minute(130)))))
         @test R.capture_file(claim;reference,check_age=true).fresh
-        @test !R.capture_endpoint("http://test";http_get=(_;kwargs...)->HTTP.Response(503,"bad"),clock).available
-        @test !R.capture_endpoint("http://test";http_get=(_;kwargs...)->HTTP.Response(200,"invalid"),clock).available
-        invalid = R.capture_endpoint("http://test";http_get=(_;kwargs...)->HTTP.Response(200,"invalid"),clock)
+        @test !R.capture_endpoint("http://test";http_get=(_url;kwargs...)->HTTP.Response(503,"bad"),clock).available
+        @test !R.capture_endpoint("http://test";http_get=(_url;kwargs...)->HTTP.Response(200,"invalid"),clock).available
+        invalid = R.capture_endpoint("http://test";http_get=(_url;kwargs...)->HTTP.Response(200,"invalid"),clock)
         @test invalid.body == "invalid"
         @test invalid.sha256 == bytes2hex(sha256("invalid"))
         @test invalid.http_status == 200
-        unavailable = R.capture_endpoint("http://test";http_get=(_;kwargs...)->HTTP.Response(503,"offline"),clock)
+        unavailable = R.capture_endpoint("http://test";http_get=(_url;kwargs...)->HTTP.Response(503,"offline"),clock)
         @test unavailable.http_status == 503 && unavailable.body == "offline"
         backwards = [reference,reference-Second(1)]
-        skewed = R.capture_endpoint("http://test";http_get=(_;kwargs...)->HTTP.Response(200,"{}"),
+        skewed = R.capture_endpoint("http://test";http_get=(_url;kwargs...)->HTTP.Response(200,"{}"),
             clock=()->popfirst!(backwards))
         @test !skewed.available
         @test skewed.completed_utc == R.utc(reference-Second(1))
-        oversized = R.capture_endpoint("http://test";http_get=(_;kwargs...)->HTTP.Response(200,repeat("x",1024*1024+1)),clock)
+        oversized = R.capture_endpoint("http://test";http_get=(_url;kwargs...)->HTTP.Response(200,repeat("x",1024*1024+1)),clock)
         @test !oversized.available && oversized.body === nothing
         write(claim,"broken JSON")
         broken = R.capture_file(claim;reference,check_age=true)
@@ -80,7 +80,7 @@ const R = DailyOperationalReview
     end
     mktempdir() do root
         # Missing inputs are retained as unavailable, including a failed HTTP request.
-        fail = (_;kwargs...)->error("source unavailable")
+        fail = (_url;kwargs...)->error("source unavailable")
         output = R.write_daily_review(root;reference,http_get=fail,clock)
         record = JSON3.read(read(joinpath(output,"review.json")))
         @test !record.claim.available && !record.claim.fresh

@@ -19,3 +19,17 @@ Integer-millisecond clock boundaries, counts, identities and hand-constructed ex
 Negative fixtures mutate counts, pre-end categories, manifest identity, primary event/value/clock, provenance, issuance flags, revised scores, comparator scores and duplicate rows. Output-hash rebinding alone cannot legitimize a nonempty supposedly empty057 cohort or changed snapshot binding. The file-claim competitor writes actual first-writer bytes at the native mkdir boundary; those bytes must survive rejection. Source-copy hooks actually mutate owned inputs before the expected drift failure. Tests do not substitute implementation outputs for the independent hand-computed expectations.
 
 Resource-boundary controls retain an original twelve-directory/four-entry failure and an original stale-stat growth failure. After correction, the directory control rejects before copying and the independent growth control proves its hook executed at the actual IOStream boundary: requested/returned nine bytes for an eight-byte limit, with no unbounded String read. Accepted metadata includes directories and the CSV; parsing and runtime overhead are not represented as a hard memory bound.
+
+## Cross-platform regression qualification (2026-10-18)
+
+The complete declared-environment contract passes 117 assertions on each native
+Windows Julia 1.12.6 and 1.13.1. Seven independent workflow mutations reject
+missing macOS/runtime coverage, disconnected matrix selection, fail-fast,
+omitted full package tests, omitted experiments and continue-on-error.
+
+The daily-review file passes all unchanged 64 assertions on both releases.
+A separate lowering/semantic oracle passes 13 assertions per release and
+reproduces the old keyword-callback error on Julia 1.12.6. A byte-inverse
+comparison confirms that only eight unused argument names changed.
+Actionlint passes. Full native OS-matrix execution must pass before claiming
+Windows/Linux/macOS support; these focused Windows checks are not that result.

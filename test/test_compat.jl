@@ -57,6 +57,35 @@ function _loaded_modules(directory::AbstractString)
     return found
 end
 
+# The user-facing platform contract supersedes the old single-Ubuntu job.
+# Validate each axis and its actual job wiring; removing a platform, runtime,
+# full test/experiment entry or error propagation must make this oracle fail.
+function _cross_platform_ci_contract(workflow)
+    job = match(r"\n  test:\n(.*?)(?=\n  [A-Za-z0-9_-]+:|\z)"s, workflow)
+    job === nothing && return false
+    body = job.captures[1]
+    versions = match(r"^        julia-version: (\[[^\n]+\])$"m, body)
+    platforms = match(r"^        os: \[([^\n]+)\]$"m, body)
+    (versions === nothing || platforms === nothing) && return false
+    releases = try
+        TOML.parse("versions = " * versions.captures[1])["versions"]
+    catch
+        return false
+    end
+    releases == ["1.12.6", "1.13.1"] || return false
+    operating_systems = strip.(split(platforms.captures[1], ','))
+    length(operating_systems) == 3 && Set(operating_systems) ==
+        Set(["ubuntu-latest", "windows-latest", "macos-latest"]) || return false
+    all(fragment -> occursin(fragment, body), (
+        "runs-on: \${{ matrix.os }}",
+        "version: \${{ matrix.julia-version }}",
+        "arch: 'default'", "shell: bash", "fail-fast: false",
+        "uses: julia-actions/julia-runtest@v1",
+        "run: julia --startup-file=no --project=. examples/experiments.jl",
+    )) || return false
+    !occursin("continue-on-error:", body)
+end
+
 @testset "Declared environment contract" begin
     @testset "CI bootstraps registries before resolving a clean depot" begin
         workflow = read(joinpath(PACKAGE_ROOT, ".github", "workflows", "ci.yml"), String)
@@ -69,8 +98,15 @@ end
             @test registry !== nothing
             @test registry !== nothing && first(registry) < first(resolve)
         end
-        @test count("version: '1.12'", workflow) == 2
-        @test !occursin("matrix", workflow)
+        @test _cross_platform_ci_contract(workflow)
+        # Independent negative mutations enforce coverage and real execution.
+        @test !_cross_platform_ci_contract(replace(workflow, ", macos-latest" => ""; count=1))
+        @test !_cross_platform_ci_contract(replace(workflow, "'1.12.6', '1.13.1'" => "'1.12.6'"; count=1))
+        @test !_cross_platform_ci_contract(replace(workflow, "runs-on: \${{ matrix.os }}" => "runs-on: ubuntu-latest"; count=1))
+        @test !_cross_platform_ci_contract(replace(workflow, "fail-fast: false" => "fail-fast: true"; count=1))
+        @test !_cross_platform_ci_contract(replace(workflow, "julia-actions/julia-runtest@v1" => "omitted-package-tests"; count=1))
+        @test !_cross_platform_ci_contract(replace(workflow, "examples/experiments.jl" => "omitted-experiments.jl"; count=1))
+        @test !_cross_platform_ci_contract(replace(workflow, "    timeout-minutes: 120" => "    timeout-minutes: 120\n    continue-on-error: true"; count=1))
         @test !occursin("1.10", workflow)
         @test !occursin("mv Manifest.toml", workflow)
     end
