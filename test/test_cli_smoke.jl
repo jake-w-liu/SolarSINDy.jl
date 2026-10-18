@@ -128,15 +128,35 @@ printf '%s\n' "$CLI_TEST_MTIME"
         # The shim must answer need_julia's version probe instantly (it runs BEFORE the
         # lock is acquired) and sleep only when invoked as the daemon itself.
         slow = joinpath(shim_dir, "julia_slow")
-        write(slow, "#!/bin/sh\ncase \"\$*\" in *live_monitor.jl*) sleep 30 ;; *) exit 0 ;; esac\n")
+        slow_started = joinpath(shim_dir, "monitor-main.pid")
+        write(slow, "#!/bin/sh\ncase \"\$*\" in *live_monitor.jl*) printf '%s\\n' \"\$\$\" > \"\$CLI_SMOKE_MAIN_STARTED\"; sleep 30 ;; *) exit 0 ;; esac\n")
         chmod(slow, 0o755)
-        envslow = copy(env); envslow["JULIA"] = slow
+        envslow = copy(env); envslow["JULIA"] = slow; envslow["CLI_SMOKE_MAIN_STARTED"] = slow_started
         p1 = run(pipeline(setenv(ignorestatus(`$bash $cli start monitor`), envslow);
                           stdout=devnull, stderr=devnull); wait=false)
+        admission = lockfile * ".admission"
+        function smoke_numeric_pid(path)
+            try
+                record = read(path, String)
+                ncodeunits(record) <= 128 && occursin(r"\A[1-9][0-9]*\n?\z", record) || return nothing
+                return tryparse(Int, chomp(record))
+            catch
+                return nothing
+            end
+        end
+        function smoke_start_phase_ready()
+            process_running(p1) && isfile(lockfile) && !ispath(admission) || return false
+            committed = smoke_numeric_pid(pidfile)
+            return committed !== nothing && committed == smoke_numeric_pid(slow_started)
+        end
+        # Numeric lock visibility precedes admission release. Killing at that earlier
+        # boundary deliberately leaves UNKNOWN admission, not a recoverable dead lock.
+        # Actual shim main entry plus its matching PID proves the intended phase.
         t0 = time()
-        while !isfile(lockfile) && time() - t0 < 15 && process_running(p1)
+        while !smoke_start_phase_ready() && time() - t0 < 15 && process_running(p1)
             sleep(0.2)
         end
+        @test smoke_start_phase_ready()                      # bounded post-admission main-phase precondition
         @test isfile(lockfile)
         ref_io = IOBuffer()
         ref = run(pipeline(setenv(ignorestatus(`$bash $cli start monitor`), envlock);
@@ -144,6 +164,7 @@ printf '%s\n' "$CLI_TEST_MTIME"
         @test ref.exitcode != 0
         @test occursin("another start is already in progress", String(take!(ref_io)))
         @test isfile(lockfile)                               # genuine owner's lock untouched
+        @test smoke_start_phase_ready()                      # contender released its admission before SIGKILL
         # Tear down: SIGKILL the owner (EXIT trap cannot fire), kill its shim daemon, and
         # clear the leftovers; the dead-owner reclaim itself is pinned right below.
         kill(p1, 9)
