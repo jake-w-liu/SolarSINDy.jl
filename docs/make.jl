@@ -24,6 +24,7 @@ makedocs(
             "Analog Ensemble Study API" => "analog-api.md",
         ],
         "Examples" => "examples.md",
+        "Initial GBM Reference Research Tools" => "initial-reference.md",
         "Live Verification" => "live-verification.md",
         "EKF Overlay Decision" => "ekf-overlay-decision.md",
     ],

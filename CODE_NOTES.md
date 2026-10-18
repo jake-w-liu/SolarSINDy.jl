@@ -246,3 +246,36 @@ assertions. This observes current closure, not a hostile-writer or past-leak pro
 The helper digest is b917120e29144a50bae4620ccb36072b51d0f69de172eaf4af35a8b977a03fc3.
 Production numerical/process code is unchanged. Fresh full qualification must
 bind the final stronger test tree before main promotion.
+
+## Initial GBM reference development ledger, 18 October 2026
+
+The previous a48eb163 release completed its full canonical audit (345 PASS,
+3 WARN,0 FAIL), unfiltered package tests, experiments, all17 functional workers,
+six native platform/version cells, strict docs and deployment images. Durable
+qualification is bound by audit/forecaster-qualified-20261018 and qualification
+SHA2566019c6df59f5f942fe81d5b774b5f5aae13929144670d3b26516a1cc3041b664.
+
+The source-bound initial-reference tools close a missing maintained capability;
+they are research components and do not qualify actual forecast performance.
+Original R906e, B6f4f and E8e7 source bytes remain unchanged. G adds two verified
+repairs before integration. First, the old executor accepted a process running
+Julia1.12 with an admission naming the1.13 executable; a constant reconstruction
+completed under that mismatch, then a nonconstant replay failed the unchanged
+metric check. The executing binary location/digest is now checked before model
+access and again at completion, with an observed runtime record. The numerical
+cross-version discrepancy has no established root cause and is not retuned.
+
+Second, the actual original raw-matrix header has six keys and stores its digest
+in sha256. The prototype indexed two keys supplied only by generated fixtures.
+A source-hash-bound actual header and the original writer verify that KeyError
+path. Explicit mode-specific schema handling now binds the original header
+without rewriting it or allowing fixture relabeling. All numerical rules remain.
+
+Independent oracles: the original literal filesystem/reference200 checks are
+retained byte-for-byte; new binary12, metadata36, raw cohort/grid56, public-entry
+rejection4 and source-immutability4 checks run in the package suite. Full native
+constant253 and nonconstant214 source-produced regressions also run externally
+on the exact admitted comparator runtime. Before/after and setup failures are
+preserved. Metric tolerance remains5e-12*max(1,abs(expected)); strict first-grid
+selection does not use that tolerance. No actual archive fit or serving change
+has been performed. Full saved-artifact auditing and the L0/L1 A chain remain.

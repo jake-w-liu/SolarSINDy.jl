@@ -461,3 +461,39 @@ That is a historical failed audit, not final release qualification.
 The final committed test tree still requires fresh full Pkg/experiments/H,
 native six-cell CI, strict documentation and deployment-image qualification.
 No real-data skill, novelty, unopened-cohort or serving verdict follows.
+
+## Source-bound initial-reference tools, 18 October 2026
+
+The preceding a48eb163 test tree subsequently completed all listed gates; its
+release receipt is bound by tag audit/forecaster-qualified-20261018. The current
+addition preserves that full suite and adds mandatory independent reference
+tests rather than substituting a narrow run for package or experiment coverage.
+
+The maintained focused suite passes312 displayed assertions on each native
+Windows Julia1.12.6 and1.13.1 process, all component/test/control bytes unchanged:
+original loader/reference200, binary identity12, metadata schemas36, independent
+clock/cohort/grid56, public-entry mismatch4 and source immutability4. Receipt:
+893d89262d3bab87b4814af0c9c60eb8aad4cdba4cf77c5e012ea3382f1f5293.
+
+Separate coherent G-b16e native verification has eight successful processes:
+the actual1.12-versus-admitted1.13 entrypoint rejection, both binary-control
+suites, both36-check metadata suites, seven actual-header-only data-flow checks,
+and the unchanged253-check constant/214-check nonconstant all-grid regressions
+on the admitted1.13 comparator runtime. Its receipt is
+da48bf6072c2c7200ecc163c05c198d2ff9cfeb3ae03591bf59f18afedf2bbdf.
+The metadata-only test opens no raw matrix, model, prediction or outcome file.
+
+Anti-false-test evidence retains the original successful constant reconstruction
+under the wrong binary, the subsequent nonconstant parity failure, and an
+independent before/after entrypoint witness. A first poison-config fixture failed
+before function entry; its correction supplies literal boundary defaults while
+preserving every assertion. That first fixture is not counted as a valid runtime
+witness. The original header independently lacks both keys indexed by the old
+executor; the new schema normalizer binds it without adding fields to source.
+
+All previous numerical expectations, masks, grid order, fallback rows and
+tolerances remain unchanged. These checks establish software behavior only.
+Publication still requires the complete package/examples/canonical-harness,
+native matrix, strict docs and image gates on the exact committed candidate.
+Actual reconstruction, full independent artifact closure, L1/A fitting and
+independent forecast-skill/novelty evidence are separate uncompleted work.
