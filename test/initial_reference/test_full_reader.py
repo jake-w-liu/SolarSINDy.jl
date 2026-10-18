@@ -134,7 +134,14 @@ class FullReader(unittest.TestCase):
             create('imputed-prefix',lambda r,c:(r/'prefix_imputed17.f64').write_bytes(b'\0'*8+(r/'prefix_imputed17.f64').read_bytes()[8:]))
             create('mode-relabel',lambda r,c:c.update(evidence_mode='exposed_development_reconstruction'))
             create('bson-truncated',lambda r,c:(r/c['results'][0]['grid'][0]['model']).write_bytes(b'bad'))
-            self.assertEqual(len(cases)+len(rejections),25)
+            def imputer_version(ref,completion,version):
+                replay=load(ref/'initial_imputation_replay.json')
+                entry=next(x for x in replay['models'] if x['target']==1)
+                path=ref/entry['new_model'];value=load(path);value['version']=version;put(path,value)
+                entry['new_model_sha256']=sha(path);put(ref/'initial_imputation_replay.json',replay)
+            create('imputer-version-bool',lambda r,c:imputer_version(r,c,[3,2,False]))
+            create('imputer-version-float',lambda r,c:imputer_version(r,c,[3,2,0.]))
+            self.assertEqual(len(cases)+len(rejections),27)
             put(root/'cases.json',cases)
             driver=Path(__file__).resolve().parent/'reader_corruption_cases.jl'
             env=dict(os.environ,JULIA_LOAD_PATH='@'+os.pathsep+'@stdlib',JULIA_PKG_OFFLINE='true',
@@ -175,7 +182,7 @@ class FullReader(unittest.TestCase):
             self.assertEqual(other['numerical']['model_points'],result['numerical']['model_points'])
             self.assertEqual(other['numerical']['fallback_points'],result['numerical']['fallback_points'])
             self.assertEqual(io.inventory(root/'fixture'),before)
-            print(json.dumps({'independent_reader_complete':True,'rehashed_corruptions':25,
+            print(json.dumps({'independent_reader_complete':True,'rehashed_corruptions':27,
                 'numerical_checks':result['numerical']['checks'],'author_or_ml_imported':False}),flush=True)
         except BaseException:
             print('Retained failed independent reader controls: '+str(root),file=sys.stderr,flush=True)

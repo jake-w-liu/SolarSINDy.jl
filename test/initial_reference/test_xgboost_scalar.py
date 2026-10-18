@@ -7,7 +7,7 @@ import unittest
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'tools/initial_reference_audit'))
 from bounded_bson import InvalidArtifact
-from xgboost_scalar import xgb_predict
+from xgboost_scalar import xgb_predict,official_model_version
 
 def leaf(value):
     return {'left_children':[-1],'right_children':[-1],'split_type':[0],
@@ -21,6 +21,17 @@ def model():
         'gradient_booster':{'model':{'trees':[tree]}}}}
 
 class LiteralScalarReplay(unittest.TestCase):
+    def test_version_components_are_integers(self):
+        from prepare_artifact_audit import validate_imputer_model
+        self.assertTrue(official_model_version([3,2,0]))
+        for version in ([3,2,False],[3.,2,0],[3,2.,0],[3,2,0.],(3,2,0),'3.2.0'):
+            with self.subTest(version=version):
+                self.assertFalse(official_model_version(version))
+                value=model();value['version']=version
+                with self.assertRaises(InvalidArtifact):xgb_predict(value,[0.])
+                with self.assertRaisesRegex(ValueError,'integer-version'):
+                    validate_imputer_model({'version':version,'learner':None},[1])
+
     def test_literal_threshold_and_default(self):
         value=model()
         self.assertEqual(xgb_predict(value,[0.]),-1.25)

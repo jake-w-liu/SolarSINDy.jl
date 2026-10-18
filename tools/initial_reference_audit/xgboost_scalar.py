@@ -1,11 +1,14 @@
-"""Independent scalar3.2 JSON prediction; preserved completed-run oracle."""
+"""Independent scalar3.2 JSON arithmetic with strict serialized version types."""
 import json
 import math
 from bounded_bson import require, InvalidArtifact, f32
 
+def official_model_version(value):
+    return isinstance(value,list) and len(value)==3 and all(type(x) is int for x in value) and value==[3,2,0]
+
 def xgb_predict(model,values,objective='reg:squarederror'):
     learner=model['learner']
-    require(model['version']==[3,2,0] and learner['objective']['name']==objective,'imputer XGBoost schema')
+    require(official_model_version(model['version']) and learner['objective']['name']==objective,'imputer XGBoost schema')
     require(int(learner['learner_model_param']['num_feature'])==len(values),'imputer dimension')
     base=json.loads(learner['learner_model_param']['base_score'])
     require(isinstance(base,list) and len(base)==1,'imputer scalar base score')

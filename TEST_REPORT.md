@@ -571,3 +571,36 @@ At this pre-commit checkpoint, complete package/examples/canonical-harness,
 strict docs/images and the six native cells for the new reader remain pending.
 Those gates must pass on the exact committed tree before main publication;
 the immutable release qualification and annotated tag record the later outcome.
+
+
+A subsequent fresh schema-type witness changes the reconstructed imputer JSON
+version from[3,2,0] to[3,2,false], rehashes the model, replay sidecar and reference
+completion, and is accepted by preflight. Witnessdd23b50e96089d517654ac444a5084a7080785e949783fa594283c4cf095be9c
+confirms Python false/zero equality bypassed the integer-version format guard;
+no incorrect numerical point or actual-data effect is demonstrated. Both the
+schema validator and scalar JSON reader now require three exact integer version
+components. The scalar arithmetic is unchanged, while the copied function's
+version guard is deliberately corrected and is no longer claimed byte-identical.
+The unchanged original rehashed witness now rejects before any audit output.
+
+Candidate59d9766 is explicitly withheld. Its full harness was stopped through
+the verified private-job controller after retaining owner/source/start evidence;
+all nine observed owned processes are absent. Its native CI run39147477748 is
+cancelled, with only strict docs completed. Neither interrupted run establishes
+a full package/native/harness success verdict. Healthy live services continue.
+Fresh complete gates must bind the corrected candidate, including Boolean/float
+version literals and two additional rehashed imputer-version controls.
+
+
+The corrected full reader suite subsequently passes26 tests per local Windows
+runtime, Julia1.12.6 and1.13.1, including all original literals,68222 numerical
+checks,27 rehashed corruptions, the public CLI, changed future-tail invariance
+and cleanup/resource controls. Each run reports the same explicit unavailable
+file-symlink capability skip. The complete two-runtime receipt is
+de860653e09705b483d025e52e28f65bb3b2b1ce8de5508ba237f8a8af1d7239;
+all pinned source/test/executable bytes remain unchanged. The original361 Julia
+focused assertions retain identical source bytes and their c0845125 receipt.
+All eight completed/superseded CI39147477748 raw job logs are retained, with
+cancellations preserved. Five native reader steps completed before cancellation;
+this is partial evidence only and does not qualify candidate59d9766. Fresh full
+canonical and native gates are required on the corrected committed source.

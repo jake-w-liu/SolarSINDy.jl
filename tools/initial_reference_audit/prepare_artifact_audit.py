@@ -17,7 +17,7 @@ sys.dont_write_bytecode=True
 from artifact_io import (Limits,InvalidArtifact,need,is_integer,is_digest,plain_root,
                          member,read_file,json_file,inventory,relative_parts)
 from bounded_bson import decode_root,read_bson,validate_model
-from xgboost_scalar import xgb_predict
+from xgboost_scalar import xgb_predict,official_model_version
 from bounded_tables import bounded_table
 
 HERE=Path(__file__).resolve().parent
@@ -92,7 +92,7 @@ def reference_json(root,completion,name,limits):
 
 
 def validate_imputer_model(model,features):
-    need(model['version']==[3,2,0],'official3.2 JSON state required')
+    need(official_model_version(model['version']),'official3.2 integer-version JSON state required')
     learner=model['learner']
     need(learner['feature_names']==[RAW_NAMES[j-1] for j in features],'initial imputer model feature order')
     need(learner['objective']['name']=='reg:squarederror','initial scalar objective differs')

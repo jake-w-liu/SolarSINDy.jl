@@ -353,3 +353,22 @@ Fixed-schema CSV preflight additionally caps physical records at64KiB before
 parsing, fields at4096 characters, exact column widths and bounded rows. It does
 not mutate Python CSV process-global settings. This guards parser inputs without
 claiming measured memory optimality or changing numerical acceptance bounds.
+
+
+A subsequent fresh schema-type witness changes the reconstructed imputer JSON
+version from[3,2,0] to[3,2,false], rehashes the model, replay sidecar and reference
+completion, and is accepted by preflight. Witnessdd23b50e96089d517654ac444a5084a7080785e949783fa594283c4cf095be9c
+confirms Python false/zero equality bypassed the integer-version format guard;
+no incorrect numerical point or actual-data effect is demonstrated. Both the
+schema validator and scalar JSON reader now require three exact integer version
+components. The scalar arithmetic is unchanged, while the copied function's
+version guard is deliberately corrected and is no longer claimed byte-identical.
+The unchanged original rehashed witness now rejects before any audit output.
+
+Candidate59d9766 is explicitly withheld. Its full harness was stopped through
+the verified private-job controller after retaining owner/source/start evidence;
+all nine observed owned processes are absent. Its native CI run39147477748 is
+cancelled, with only strict docs completed. Neither interrupted run establishes
+a full package/native/harness success verdict. Healthy live services continue.
+Fresh complete gates must bind the corrected candidate, including Boolean/float
+version literals and two additional rehashed imputer-version controls.
