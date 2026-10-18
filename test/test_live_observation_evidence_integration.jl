@@ -1,6 +1,6 @@
 module LiveObservationEvidenceIntegrationTests
 using Test
-const TEST_MONITOR_DIR=mktempdir()
+const TEST_MONITOR_DIR=mktempdir(realpath(tempdir()))
 withenv("SOLARSINDY_MONITOR_DIR"=>TEST_MONITOR_DIR) do
     include(joinpath(@__DIR__,"..","examples","live_monitor.jl"))
 end
@@ -30,7 +30,7 @@ end
 quiet(f)=redirect_stdout(f,devnull)
 
 @testset "Fetch retries retain failed bytes and successful receipt" begin
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         root=E.evidence_root(joinpath(tmp,"live.csv"));receipt=Ref{Any}(nothing);calls=Ref(0)
         responses=[HTTP.Response(503,UInt8[0xff,0]),HTTP.Response(200,"not JSON"),HTTP.Response(200,RAW)]
         get_response(url;kwargs...)=begin
@@ -53,7 +53,7 @@ quiet(f)=redirect_stdout(f,devnull)
 end
 
 @testset "Clock rollback responses remain raw evidence and never become inputs" begin
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         for status in (200,503)
             root=E.evidence_root(joinpath(tmp,"clock-$(status).csv"));receipt=Ref{Any}(nothing)
             clocks=[TAG+Minute(30),TAG+Minute(29)];nanos=[100,200]
@@ -70,7 +70,7 @@ end
 end
 
 @testset "An older fetched snapshot is rejected before the live CSV changes" begin
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         log=joinpath(tmp,"live.csv");fixture_log(log);cfg=LiveVerifyConfig(;model=:sindy_core,log_path=log)
         root=E.evidence_root(log)
         function captured(raw,minute,ns)
@@ -91,7 +91,7 @@ end
 end
 
 @testset "Manager reuses one real captured receipt for verification and revisions" begin
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         log=joinpath(tmp,"live.csv");before=fixture_log(log)
         cfg=LiveVerifyConfig(;model=:sindy_core,log_path=log)
         calls=Ref(0)
@@ -133,7 +133,7 @@ end
 
 @testset "Direct verification, wait path and mismatch fail closed" begin
     for mode in (:verify,:wait,:mismatch,:write_failure)
-        mktempdir() do tmp
+        mktempdir(realpath(tempdir())) do tmp
             log=joinpath(tmp,"live.csv");table=fixture_log(log);old=read(log)
             cfg=LiveVerifyConfig(;model=:sindy_core,log_path=log)
             response=(args...;kwargs...)->HTTP.Response(200,RAW)
@@ -176,7 +176,7 @@ end
 
 @testset "Unchanged observations gain one mature post-end receipt" begin
     for mode in (:partial_first, :mature_first, :partial_revision)
-        mktempdir() do tmp
+        mktempdir(realpath(tempdir())) do tmp
             log=joinpath(tmp,"live.csv");fixture_log(log)
             cfg=LiveVerifyConfig(;model=:sindy_core,log_path=log);root=E.evidence_root(log)
             function captured(raw,offset,ns)

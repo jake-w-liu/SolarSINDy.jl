@@ -1315,7 +1315,7 @@ using .SuperlearnerServingFixture
             body = occursin("wind_1m", url) ? wind : occursin("mag_1m", url) ? mag : dst
             HTTP.Response(200, body)
         end
-        mktempdir() do directory
+        mktempdir(realpath(tempdir())) do directory
             isolated_cfg = _copy_config(cfg; log_path=joinpath(directory, "live.csv"))
             result = prepare_issue_inputs(isolated_cfg; snapshot_dir=directory, http_get=response)
             @test result.plasma.speed == [400.0, 401.0]
@@ -1864,7 +1864,14 @@ using .SuperlearnerServingFixture
             lock_path = log_path * ".lock"
             write(lock_path, string(getpid(), " ", gethostname()))
             # A backwards clock step / skewed filesystem: the lock's mtime lies in the future.
-            run(`touch -t 203001010000 $lock_path`)
+            future_time = Dates.datetime2unix(DateTime(2030, 1, 1))
+            file = Base.Filesystem.open(lock_path, Base.Filesystem.JL_O_WRONLY)
+            try
+                Base.Filesystem.futime(file, future_time, future_time)
+            finally
+                close(file)
+            end
+            @test mtime(lock_path) == future_time
             _, _, age = Pidfile.parse_pidfile(String(lock_path))
             @test age < 0
 

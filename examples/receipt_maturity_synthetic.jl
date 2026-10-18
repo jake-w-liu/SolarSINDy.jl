@@ -4,7 +4,7 @@ include(joinpath(@__DIR__,"live_receipt_maturity.jl"))
 const R=LiveReceiptMaturity
 const E=R.LiveObservationEvidence
 function run()
-    root=mktempdir();log=joinpath(root,"synthetic.csv");store=joinpath(root,"evidence")
+    root=mktempdir(realpath(tempdir()));log=joinpath(root,"synthetic.csv");store=joinpath(root,"evidence")
     target=DateTime(2020,1,1,10);origin=target-Hour(1)
     table=DataFrame(issue_time_utc=[string(origin+Minute(30))],latest_dst_time_utc=[string(origin)],
         target_time_utc=[string(target)],model_step_hours=[1],sub_hourly_model_version=[R.CURRENT_MODEL],

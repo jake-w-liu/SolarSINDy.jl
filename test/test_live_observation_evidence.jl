@@ -37,7 +37,7 @@ function prepare(root,receipt,table,log; value=-11.,previous=missing,time=COMPLE
 end
 
 @testset "Actual receipt clocks, exact bytes and target matching" begin
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         root=joinpath(tmp,"evidence")
         receipt=capture(root)
         @test !occursin('\\',receipt.relative_path)
@@ -88,7 +88,7 @@ end
 end
 
 @testset "Intent, actual committed verification and immutable revisions" begin
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         root=joinpath(tmp,"evidence");log=joinpath(tmp,"live.csv")
         table=fixture_log(log);receipt=capture(root)
         binding=E.forecast_binding(table[1,:])
@@ -141,14 +141,14 @@ end
 end
 
 @testset "Atomic publication race and journal mutation detection" begin
-    mktempdir() do root
+    mktempdir(realpath(tempdir())) do root
         path=joinpath(root,"immutable.bin")
         @test_throws ArgumentError E.publish_immutable(path,UInt8[1,2,3];
             before_publish=()->write(path,UInt8[9,8,7]))
         @test read(path)==UInt8[9,8,7]
         @test isempty(filter(p->startswith(basename(p),"jl_"),readdir(root;join=true)))
     end
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         root=joinpath(tmp,"evidence");log=joinpath(tmp,"live.csv")
         table=fixture_log(log);receipt=capture(root)
         intent=prepare(root,receipt,table,log)
@@ -161,7 +161,7 @@ end
 end
 
 @testset "Shared raw bytes retain distinct receipt clocks and are rechecked" begin
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         root=joinpath(tmp,"evidence");log=joinpath(tmp,"live.csv")
         one=fixture_log(log);two=copy(one);two.issue_time_utc[1]-=Minute(1)
         table=vcat(one,two);CSV.write(log,table)
@@ -196,7 +196,7 @@ end
 end
 
 @testset "Concurrent writers and interrupted head recovery preserve actual clocks" begin
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         root=joinpath(tmp,"evidence");log=joinpath(tmp,"live.csv")
         one=fixture_log(log);two=copy(one);two.issue_time_utc[1]+=Minute(1)
         table=vcat(one,two);CSV.write(log,table);receipt=capture(root)
@@ -213,7 +213,7 @@ end
         @test length(state.latest_by_forecast)==2
         @test !ispath(joinpath(root,"journal.lock"))
     end
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         root=joinpath(tmp,"evidence");log=joinpath(tmp,"live.csv")
         table=fixture_log(log);receipt=capture(root);intent=prepare(root,receipt,table,log)
         table.observation_dst_nt[1]=-11.;CSV.write(log,table)
@@ -230,7 +230,7 @@ end
 end
 
 @testset "Invalid clocks preserve bytes but cannot bind observations" begin
-    mktempdir() do root
+    mktempdir(realpath(tempdir())) do root
         for (started,completed,ns_start,ns_end) in (
                 (START,START-Second(1),100,200),
                 (START,COMPLETE,200,100))
@@ -248,7 +248,7 @@ end
 end
 
 @testset "Stale and incomparable receipts cannot overwrite a newer label" begin
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         root=joinpath(tmp,"evidence");log=joinpath(tmp,"live.csv")
         table=fixture_log(log);binding=E.forecast_binding(table[1,:])
         old=capture(root;started=START-Minute(10),completed=COMPLETE-Minute(10))
@@ -271,7 +271,7 @@ end
 end
 
 @testset "Commit clocks cannot regress across concurrently prepared forecasts" begin
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         root=joinpath(tmp,"evidence");log=joinpath(tmp,"live.csv")
         one=fixture_log(log);two=copy(one);two.issue_time_utc[1]-=Minute(1)
         table=vcat(one,two);CSV.write(log,table);receipt=capture(root)
@@ -289,7 +289,7 @@ end
 end
 
 @testset "Same-session monotonic order and stale-intent commit races" begin
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         root=joinpath(tmp,"evidence");log=joinpath(tmp,"live.csv")
         table=fixture_log(log)
         function captured(raw,start,finish,ns_start,ns_finish)
@@ -319,7 +319,7 @@ end
 end
 
 @testset "Failed writes retain a rollback clock without claiming verification" begin
-    mktempdir() do tmp
+    mktempdir(realpath(tempdir())) do tmp
         root=joinpath(tmp,"evidence");log=joinpath(tmp,"live.csv")
         table=fixture_log(log);receipt=capture(root);intent=prepare(root,receipt,table,log)
         failed_at=START-Second(1)

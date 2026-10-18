@@ -307,7 +307,7 @@ function _inventory(root;max_files,max_bytes,max_member_bytes,max_entries=max_fi
 end
 "Read actual inputs without acquiring their journal lock; verify only a new owned stable copy."
 function snapshot_report(log_path::AbstractString,store::AbstractString;asof::DateTime,
-        snapshot_parent::AbstractString=tempdir(),max_files=100_000,max_bytes=1_073_741_824,
+        snapshot_parent::AbstractString=realpath(tempdir()),max_files=100_000,max_bytes=1_073_741_824,
         max_member_bytes=67_108_864,max_entries=max_files,snapshot_hook::Function=stage->nothing,kwargs...)
     limits=(;max_files=_positive_limit(max_files,"file budget"),max_bytes=_positive_limit(max_bytes,"byte budget"),
         max_member_bytes=_positive_limit(max_member_bytes,"member budget"),max_entries=_positive_limit(max_entries,"entry budget"))

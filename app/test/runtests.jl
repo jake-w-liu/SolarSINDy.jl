@@ -2443,18 +2443,26 @@ esac
         @test nrow(get_log(joinpath(dir, "missing.csv"))) == 0  # another path gets no stale frame
 
         # Same-size in-place replacement with restored mtime must still invalidate
-        # the cache through ctime/inode identity.
+        # the cache through ctime/inode identity. An exact integer timestamp avoids
+        # platform-dependent subsecond round trips and requires no Unix utilities.
+        set_fixture_time = (path, stamp) -> begin
+            file = Base.Filesystem.open(path, Base.Filesystem.JL_O_WRONLY)
+            try
+                Base.Filesystem.futime(file, stamp, stamp)
+            finally
+                close(file)
+            end
+        end
+        set_fixture_time(p1, 1_600_000_000.0)
         _LOG_CACHE[] = nothing
         cached = get_log(p1)
         @test latest_cycle(cached) !== cached_cycle
         @test verified_rows(cached) !== cached_verified
         @test build_history(cached).rows !== cached_history.rows
         original = stat(p1)
-        timestamp_reference = joinpath(dir, "timestamp-reference.csv")
-        run(`cp -p $p1 $timestamp_reference`)
         sleep(0.002)
         write(p1, "value\n9\n")
-        run(`touch -r $timestamp_reference $p1`)
+        set_fixture_time(p1, original.mtime)
         @test mtime(p1) == original.mtime
         @test get_log(p1).value == [9]
         @test cached.value == [1]

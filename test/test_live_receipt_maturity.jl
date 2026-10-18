@@ -1,6 +1,6 @@
 module ReceiptMaturityIntegrationTests
 using Dates,SHA,CSV,DataFrames,JSON3,Test
-const ROOT=mktempdir(;cleanup=false)
+const ROOT=mktempdir(realpath(tempdir());cleanup=false)
 include(joinpath(@__DIR__,"..","examples","live_receipt_maturity.jl"))
 const E=LiveReceiptMaturity.LiveObservationEvidence
 const R=LiveReceiptMaturity
@@ -314,6 +314,39 @@ end
     @test receipt_maturity_cli(["--log",f.log,"--evidence-root",f.store,"--output",output,"--as-of",string(T+Hour(2))*"Z"])==0
     @test R.verify_publication(output)
     @test read(f.log)==csv
+end
+
+
+@testset "Physical system temporary parent preserves explicit symlink rejection" begin
+    f=fixture();asof=T+Hour(2)
+    owner=mktempdir(ROOT;prefix="temp-parent-alias-",cleanup=false)
+    physical=joinpath(owner,"physical temp");mkdir(physical)
+    alias=joinpath(owner,"system temp alias")
+    if Sys.iswindows()
+        powershell=Sys.which("powershell.exe")
+        powershell===nothing && error("native PowerShell required for owned directory-junction fixture")
+        script=raw"New-Item -ItemType Junction -Path $env:SOLARSINDY_TEST_TEMP_LINK -Target $env:SOLARSINDY_TEST_TEMP_TARGET | Out-Null"
+        withenv("SOLARSINDY_TEST_TEMP_LINK"=>alias,"SOLARSINDY_TEST_TEMP_TARGET"=>physical) do
+            run(Cmd([powershell,"-NoProfile","-NonInteractive","-Command",script]))
+        end
+    else
+        symlink(physical,alias;dir_target=true)
+    end
+    @test isdir(alias)
+    @test realpath(alias)==realpath(physical)
+    csv_before=read(f.log)
+    withenv("TMPDIR"=>alias,"TMP"=>alias,"TEMP"=>alias) do
+        @test realpath(tempdir())==realpath(physical)
+        snapshot=R.snapshot_report(f.log,f.store;asof)
+        @test dirname(snapshot.snapshot_root)==realpath(physical)
+        @test R.regular(snapshot.snapshot_root)==snapshot.snapshot_root
+        @test snapshot.payload.qualified_scientific_support==0
+        @test_throws ArgumentError R.snapshot_report(f.log,f.store;asof,snapshot_parent=alias)
+        @test_throws ArgumentError E.publish_immutable(joinpath(alias,"caller.bin"),UInt8[1])
+        @test !ispath(joinpath(physical,"caller.bin"))
+        @test read(f.log)==csv_before
+    end
+    # Retain the entire owned fixture, including the link, without recursive cleanup.
 end
 
 end
