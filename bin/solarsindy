@@ -7,6 +7,7 @@
 #                                     SOLARSINDY_NO_OPEN=1 disables)
 #   bin/solarsindy status             process/health/freshness summary
 #                                     (exit: 0 both up, 1 exactly one up, 2 neither)
+#                                     (exit 3: a process identity could not be verified)
 #   bin/solarsindy open               (re)open the dashboard in a browser
 #   bin/solarsindy stop               stop the background daemons
 #   bin/solarsindy restart            stop, then start
@@ -42,6 +43,9 @@ set -euo pipefail
 # Physical path (pwd -P, as deploy/install_launchd.sh does): the daemon argv and the pid_of identity
 # mark embed ROOT, so the same clone reached via a symlink must yield the same ROOT.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+WINDOWS_PROCESS=0
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) WINDOWS_PROCESS=1 ;; esac
+PROCESS_HELPER="$ROOT/bin/cli_process_identity.jl"
 # SOLARSINDY_ENV_FILE overrides the config location (tests point it at /dev/null).
 CONFIG="${SOLARSINDY_ENV_FILE:-$ROOT/solarsindy.env}"
 if [ -f "$CONFIG" ]; then
@@ -158,23 +162,83 @@ need_julia() {
   }
 }
 
-# pid_of FILE MARK -> echoes the pid iff the pidfile names a live process whose command
-# line contains MARK; cleans up stale pidfiles. Returns 1 when not running.
+# Git Bash PIDs are not native Windows PIDs. Never feed $! or $$ to Win32 APIs.
+# Structured arguments and cygpath avoid native/POSIX spelling ambiguity and spaces.
+windows_process() {
+  local action="$1" file="$2" mark="$3"; shift 3
+  local helper_native file_native root_native mark_native
+  [ -f "$PROCESS_HELPER" ] && command -v cygpath >/dev/null 2>&1 &&
+    command -v "$JULIA" >/dev/null 2>&1 || {
+      err "process identity adapter unavailable; preserving state."; return 2;
+    }
+  helper_native="$(cygpath -aw "$PROCESS_HELPER")" && file_native="$(cygpath -aw "$file")" &&
+    root_native="$(cygpath -aw "$ROOT")" && mark_native="$(cygpath -aw "$mark")" || return 2
+  MSYS2_ARG_CONV_EXCL='*' "$JULIA" --startup-file=no "$helper_native" \
+    "$action" "$file_native" "$root_native" "$mark_native" "$@"
+}
+
+# ps -p failure can mean an unsupported query or access failure. Only a successful
+# complete PID query that omits the PID establishes absence on the Unix branch.
+unix_pid_absent() {
+  local pids
+  pids="$(ps -e -o pid= 2>/dev/null)" || return 2
+  if printf '%s\n' "$pids" | grep -E "^[[:space:]]*$1[[:space:]]*$" >/dev/null; then
+    return 2
+  fi
+  return 0
+}
+
+unix_pid_parent_searchable() {
+  local parent next
+  parent="$(dirname "$1")" || return 2
+  [ -n "$parent" ] || return 2
+  while :; do
+    if [ -d "$parent" ] && [ ! -x "$parent" ]; then
+      err "pidfile ancestor is not searchable; preserving state: $parent"; return 2
+    fi
+    next="$(dirname "$parent")" || return 2
+    [ -n "$next" ] || return 2
+    [ "$next" != "$parent" ] || return 0
+    parent="$next"
+  done
+}
+
+# pid_of FILE MARK -> echoes a verified live PID. Unix uses the original numeric
+# pidfile/argv guard; Windows uses a bootstrap receipt and native generation handle.
+# Returns 1 for confirmed absence/staleness, 2 for unknown (preserve/refuse).
 pid_of() {
-  local file="$1" mark="$2" pid rest cmd
-  [ -f "$file" ] || return 1
-  # Strict: the file must be exactly one purely-numeric line. A garbled pidfile
-  # ("1234abc", multi-line) is stale by definition — never "repaired" into some other PID.
-  pid="$(head -n1 "$file" 2>/dev/null | tr -d '[:space:]')"
-  rest="$(sed -n '2,$p' "$file" 2>/dev/null | tr -d '[:space:]')"
-  case "$pid" in
-    ''|*[!0-9]*) rm -f "$file"; return 1 ;;
-  esac
-  [ -n "$rest" ] && { rm -f "$file"; return 1; }
-  cmd="$(ps -o command= -p "$pid" 2>/dev/null || true)"
-  if [ -z "$cmd" ]; then
-    rm -f "$file"                       # process gone: stale pidfile
+  local file="$1" mark="$2" pid pid_bytes cmd rc malformed=0
+  if [ "$WINDOWS_PROCESS" -eq 1 ]; then
+    windows_process query "$file" "$mark"
+    return $?
+  fi
+  if [ -L "$file" ] || { [ -e "$file" ] && [ ! -f "$file" ]; }; then
+    err "pidfile is not a regular file; preserving $file"; return 2
+  fi
+  if [ ! -f "$file" ]; then
+    unix_pid_parent_searchable "$file" || return 2
     return 1
+  fi
+  # Canonical positive PID, at most 128 bytes, optionally one trailing LF.
+  # Preserve bytes until validation; whitespace is never converted into a PID.
+  pid="$(head -c 129 "$file" 2>/dev/null && printf '.')" || { err "pidfile read failed; preserving $file"; return 2; }
+  pid="${pid%.}"
+  pid_bytes="$(head -c 129 "$file" 2>/dev/null | wc -c | tr -d '[:space:]')" || { err "pidfile read failed; preserving $file"; return 2; }
+  [ "$pid_bytes" = "${#pid}" ] && [ "${#pid}" -le 128 ] || malformed=1
+  case "$pid" in *$'\n') pid="${pid%$'\n'}" ;; esac
+  case "$pid" in ''|*[!0123456789]*|0*) malformed=1 ;; esac
+  [ -f "$file" ] && [ ! -L "$file" ] || { err "pidfile type changed; preserving $file"; return 2; }
+  if [ "$malformed" -eq 1 ]; then
+    rm -f "$file" || { err "malformed pidfile cleanup failed; preserving $file"; return 2; }
+    return 1
+  fi
+  if cmd="$(ps -o command= -p "$pid" 2>/dev/null)"; then :; else
+    rc=0; unix_pid_absent "$pid" || rc=$?
+    [ "$rc" -eq 0 ] || { err "process query failed; preserving $file"; return 2; }
+    rm -f "$file"; return 1
+  fi
+  if [ -z "$cmd" ]; then
+    err "empty process query; preserving $file"; return 2
   fi
   case "$cmd" in
     *"$mark"*) printf '%s\n' "$pid"; return 0 ;;
@@ -182,46 +246,157 @@ pid_of() {
   esac
 }
 
-# Exclusive per-component start lock: closes the check-then-spawn race where two
+# Exclusive per-component start lock: Windows uses the native owner-generation
+# adapter; the Unix noclobber implementation below preserves its numeric format.
+# Closes the check-then-spawn race where two
 # concurrent `start` invocations both pass the pid_of check and spawn two daemons, one of
 # which becomes an unreachable orphan (only the pidfile winner is ever stopped). noclobber
 # `>` is the atomic test-and-set (bash 3.2 has no flock); the lock records its owner PID.
-# A lock is honored only when its owner PID is alive AND is actually running this CLI
-# (command line contains "solarsindy") — the same identity discipline pid_of uses. This
-# closes the SIGKILL wedge: a start killed with SIGKILL leaves its lock behind, and if the
-# recorded PID is later recycled by an unrelated live process, an owner-liveness-only check
-# would refuse starts forever; the identity check classifies that as stale and reclaims.
+# A positively live Unix owner is preserved regardless of its flattened command line:
+# aliases/relative paths need not contain physical ROOT. A recycled live PID therefore
+# requires verified reconciliation or its confirmed exit. Only confirmed absence permits
+# recovery; this conservative lock policy does not change daemon pidfile identity checks.
 START_LOCK=""
+START_LOCK_TOKEN=""
+START_LOCK_OWNER=""
+START_ADMISSION=""
+windows_owner_pid() {
+  local arg candidate matched=0
+  # The current Bash still exposes NUL-separated argv even when Julia no longer
+  # does. Admit this physical CLI entrypoint before attesting its native owner.
+  [ -r "/proc/$$/cmdline" ] || return 2
+  while IFS= read -r -d '' arg; do
+    if [ -f "$arg" ]; then
+      candidate="$(cd "$(dirname "$arg")" && pwd -P)/$(basename "$arg")"
+      [ "$candidate" = "$ROOT/bin/solarsindy" ] && matched=1
+    fi
+  done < "/proc/$$/cmdline"
+  [ "$matched" -eq 1 ] || { err "could not bind native lock owner to this CLI entrypoint."; return 2; }
+  cat "/proc/$$/winpid" 2>/dev/null
+}
 acquire_start_lock() {
-  local label="$1" lock owner owner_cmd attempt=0
+  local label="$1" lock admission rc=0
   lock="$RUN_DIR/.$label.start.lock"
-  mkdir -p "$RUN_DIR"
+  mkdir -p "$RUN_DIR" || { err "could not prepare start-lock directory: $RUN_DIR"; return 2; }
+  if [ "$WINDOWS_PROCESS" -eq 1 ]; then
+    START_LOCK_OWNER="$(windows_owner_pid)" || return 2
+    if START_LOCK_TOKEN="$(windows_process lock-acquire "$lock" "$ROOT/bin/solarsindy" "$START_LOCK_OWNER")"; then
+      START_LOCK="$lock"; return 0
+    else
+      return $?
+    fi
+  fi
+  # All Unix acquisitions serialize the complete read/query/remove/claim section.
+  # This directory is never auto-reclaimed: an abandoned/foreign admission is
+  # unknown and requires verified reconciliation, rather than another stale race.
+  admission="$lock.admission"
+  mkdir "$admission" 2>/dev/null || { err "start-lock admission is held or unknown; preserving $admission"; return 2; }
+  START_ADMISSION="$admission"
+  _acquire_unix_start_lock "$lock" || rc=$?
+  release_start_admission || rc=2
+  return "$rc"
+}
+_acquire_unix_start_lock() {
+  local lock="$1" owner owner_bytes owner_cmd attempt=0
   while [ $attempt -lt 2 ]; do
+    if [ -L "$lock" ] || { [ -e "$lock" ] && [ ! -f "$lock" ]; }; then
+      err "start lock is not a regular file; preserving $lock"; return 2
+    fi
     if ( set -C; printf '%s\n' "$$" > "$lock" ) 2>/dev/null; then
       START_LOCK="$lock"
       return 0
     fi
-    owner="$(head -n1 "$lock" 2>/dev/null | tr -d '[:space:]' || true)"
+    [ -f "$lock" ] && [ ! -L "$lock" ] || { err "start lock type is unknown; preserving $lock"; return 2; }
+    # Bound the read and retain newlines until validating the complete record.
+    # The sentinel prevents command substitution from discarding trailing newlines.
+    owner="$(head -c 129 "$lock" 2>/dev/null && printf '.')" || { err "lock read failed; preserving $lock"; return 2; }
+    owner="${owner%.}"
+    owner_bytes="$(head -c 129 "$lock" 2>/dev/null | wc -c | tr -d '[:space:]')" || { err "lock read failed; preserving $lock"; return 2; }
+    # Bash cannot retain NUL bytes; a dropped byte or changing read is unknown.
+    [ "$owner_bytes" = "${#owner}" ] || { err "lock owner bytes are malformed or changed; preserving $lock"; return 2; }
+    [ "${#owner}" -le 128 ] || { err "lock owner is oversized; preserving $lock"; return 2; }
+    case "$owner" in *$'\n') owner="${owner%$'\n'}" ;; esac
     case "$owner" in
-      ''|*[!0-9]*) ;;                                   # unreadable/garbled: treat as stale
+      ''|*[!0-9]*|0*) err "lock owner is malformed; preserving $lock"; return 2 ;;
       *)
-        owner_cmd="$(ps -o command= -p "$owner" 2>/dev/null || true)"
-        case "$owner_cmd" in
-          *solarsindy*) return 1 ;;                     # a live CLI invocation owns it
-        esac
-        ;;                                              # dead, or PID recycled by a non-CLI process: stale
+        if owner_cmd="$(ps -o command= -p "$owner" 2>/dev/null)"; then
+          [ -n "$owner_cmd" ] || { err "empty lock owner query; preserving $lock"; return 2; }
+          return 1                                      # any positively live owner holds it
+        else
+          unix_pid_absent "$owner" || return 2
+        fi
+        ;;                                              # separate PID query confirmed absence
     esac
     rm -f "$lock" 2>/dev/null || true                   # stale lock: reclaim once
     attempt=$((attempt + 1))
   done
   return 1
 }
-release_start_lock() {
-  [ -n "$START_LOCK" ] && rm -f "$START_LOCK" 2>/dev/null
-  START_LOCK=""
+release_start_admission() {
+  [ -n "${START_ADMISSION:-}" ] || return 0
+  # Only our successful mkdir sets START_ADMISSION; never remove foreign content.
+  rmdir "$START_ADMISSION" || { err "could not release owned start-lock admission; preserving $START_ADMISSION"; return 2; }
+  START_ADMISSION=""
   return 0
 }
-trap release_start_lock EXIT
+release_start_lock() {
+  local admission_rc=0
+  release_start_admission || admission_rc=1
+  if [ "$WINDOWS_PROCESS" -eq 1 ] && [ -n "$START_LOCK" ]; then
+    windows_process lock-release "$START_LOCK" "$ROOT/bin/solarsindy" "$START_LOCK_OWNER" "$START_LOCK_TOKEN" || {
+      err "could not verify/release start lock; preserving it."; START_LOCK=""; return 1;
+    }
+    START_LOCK=""; return 0
+  fi
+  [ -n "$START_LOCK" ] && rm -f "$START_LOCK" 2>/dev/null
+  START_LOCK=""
+  return "$admission_rc"
+}
+trap 'CLI_EXIT_STATUS=$?; release_start_lock || CLI_EXIT_STATUS=1; trap - EXIT; exit "$CLI_EXIT_STATUS"' EXIT
+
+process_description() {
+  if [ "$WINDOWS_PROCESS" -eq 1 ]; then
+    windows_process describe "$1" "$2"
+  else
+    local pid up
+    if pid="$(pid_of "$1" "$2")"; then :; else return $?; fi
+    up="$(ps -o etime= -p "$pid" 2>/dev/null)" || { err "uptime query failed; preserving state."; return 2; }
+    [ -n "$up" ] || { err "empty uptime query; preserving state."; return 2; }
+    printf '%s %s\n' "$pid" "$(printf '%s' "$up" | tr -d ' ')"
+  fi
+}
+
+# Bootstrap publishes a native generation receipt before the actual entrypoint runs.
+# An interrupted pending receipt is UNKNOWN and must not authorize a second spawn.
+windows_spawn() {
+  local file="$1" entry="$2" project="$3" log="$4" token
+  token="$(windows_process prepare "$file" "$entry")" || return 1
+  local helper_native state_native root_native entry_native project_native
+  helper_native="$(cygpath -aw "$PROCESS_HELPER")" && state_native="$(cygpath -aw "$file")" &&
+    root_native="$(cygpath -aw "$ROOT")" && entry_native="$(cygpath -aw "$entry")" &&
+    project_native="$(cygpath -aw "$project")" || return 1
+  SOLARSINDY_CLI_BOOTSTRAP=1 SOLARSINDY_CLI_STATE="$state_native" \
+  SOLARSINDY_CLI_ROOT="$root_native" SOLARSINDY_CLI_ENTRY="$entry_native" SOLARSINDY_CLI_NONCE="$token" \
+  MSYS2_ARG_CONV_EXCL='*' nohup "$JULIA" --startup-file=no --project="$project_native" \
+    -L "$helper_native" "$entry_native" >> "$log" 2>&1 &
+  disown 2>/dev/null || true
+  # Pending is expected only inside this bounded startup handshake. A failed query
+  # after a ready receipt remains unknown and is never classified as an exited child.
+  windows_process await "$file" "$entry" || {
+    err "native startup identity was not verified; preserving receipt and refusing adoption."; return 1;
+  }
+}
+
+process_alive() {
+  if [ "$WINDOWS_PROCESS" -eq 1 ]; then pid_of "$2" "$3" >/dev/null; else
+    kill -0 "$1" 2>/dev/null && return 0
+    local current rc=0
+    current="$(pid_of "$2" "$3")" || rc=$?
+    [ "$rc" -eq 0 ] && [ "$current" = "$1" ] && return 0
+    [ "$rc" -eq 2 ] && return 2
+    return 1
+  fi
+}
 
 # Detect the supervised service mode so the CLI does not run a second copy under it.
 service_mode_active() {
@@ -249,8 +424,229 @@ port_busy() {
 
 rotate_cli_log() {
   # Single .old generation: bounded disk, keeps the previous run for forensics.
-  [ -f "$1" ] && mv -f "$1" "$1.old"
+  if [ -f "$1" ]; then
+    mv -f "$1" "$1.old" || return $?
+  fi
   return 0
+}
+
+# Numeric Unix PID publication is committed before the intended main may execute.
+# FD9 is scoped to the checked function-call redirection, never inherited by main.
+UNIX_NEW_PID=""
+UNIX_FD_PLATFORM="$(uname -s)"
+case "$UNIX_FD_PLATFORM" in
+  Darwin|Linux|MINGW*|MSYS*|CYGWIN*) ;;
+  *) err "unknown descriptor platform; preserving state and refusing CLI operation."; exit 1 ;;
+esac
+unix_path_matches_fd() {
+  local file="$1" descriptor="$2" held linked device inode mode rest
+  case "$descriptor" in 5|6|7|8|9) ;; *) return 1 ;; esac
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  case "$UNIX_FD_PLATFORM" in
+    Darwin)
+      # Darwin /dev/fd pathname stat has a different device from fstat(fd).
+      # No-operand native stat uses fstat(stdin), including write-only FDs.
+      held="$(/usr/bin/stat -f '%d:%i:%p' <&"$descriptor" 2>/dev/null && printf '.')" || return 1
+      held="${held%.}"
+      case "$held" in *$'\n') held="${held%$'\n'}" ;; *) return 1 ;; esac
+      linked="$(/usr/bin/stat -f '%d:%i:%p' "$file" 2>/dev/null && printf '.')" || return 1
+      linked="${linked%.}"
+      case "$linked" in *$'\n') linked="${linked%$'\n'}" ;; *) return 1 ;; esac
+      case "$held" in ''|*[!0-9:]*) return 1 ;; esac
+      device="${held%%:*}"; rest="${held#*:}"
+      inode="${rest%%:*}"; mode="${rest#*:}"
+      [ -n "$device" ] && [ -n "$inode" ] && [ "$held" = "$device:$inode:$mode" ] || return 1
+      case "$mode" in 10[0-7][0-7][0-7][0-7]) ;; *) return 1 ;; esac
+      [ "$held" = "$linked" ] && [ -f "$file" ] && [ ! -L "$file" ]
+      ;;
+    Linux|MINGW*|MSYS*|CYGWIN*) [ -f "/dev/fd/$descriptor" ] && [ "$file" -ef "/dev/fd/$descriptor" ] ;;
+    *) return 1 ;;
+  esac
+}
+unix_reservation_matches() {
+  unix_path_matches_fd "$1" 9
+}
+unix_gate_matches() {
+  [ -d "$1" ] && [ ! -L "$1" ] && unix_path_matches_fd "$1/owner" 8
+}
+unix_gate_marker_matches() {
+  unix_path_matches_fd "$1" "$2"
+}
+unix_remove_reservation() {
+  unix_reservation_matches "$1" || { err "PID reservation changed; preserving $1"; return 2; }
+  rm -f "$1" || { err "could not remove owned PID reservation: $1"; return 2; }
+}
+unix_clean_start_gate() {
+  local gate="$1" name descriptor
+  unix_gate_matches "$gate" || { err "startup gate ownership changed; preserving $gate"; return 2; }
+  # Validate every marker before deleting any: type/path alone is not ownership.
+  for name in ready-token allow cancel-token cancel acknowledged; do
+    if [ -e "$gate/$name" ] || [ -L "$gate/$name" ]; then
+      case "$name" in ready-token|allow) descriptor=7 ;; cancel-token|cancel) descriptor=5 ;; acknowledged) descriptor=6 ;; esac
+      unix_gate_marker_matches "$gate/$name" "$descriptor" || { err "startup gate marker ownership changed; preserving $gate"; return 2; }
+    fi
+  done
+  for name in ready-token allow cancel-token cancel acknowledged; do
+    if [ -e "$gate/$name" ] || [ -L "$gate/$name" ]; then
+      unix_gate_matches "$gate" || { err "startup gate ownership changed during cleanup; preserving $gate"; return 2; }
+      case "$name" in ready-token|allow) descriptor=7 ;; cancel-token|cancel) descriptor=5 ;; acknowledged) descriptor=6 ;; esac
+      unix_gate_marker_matches "$gate/$name" "$descriptor" || { err "startup gate marker changed during cleanup; preserving $gate"; return 2; }
+      rm -f "$gate/$name" || { err "could not remove owned startup marker: $gate/$name"; return 2; }
+    fi
+  done
+  unix_gate_matches "$gate" || { err "startup gate ownership changed during cleanup; preserving $gate"; return 2; }
+  rm -f "$gate/owner" || { err "could not remove owned startup anchor: $gate"; return 2; }
+  rmdir "$gate" || { err "could not remove owned startup gate; preserving $gate"; return 2; }
+}
+unix_write_pid() { printf '%s\n' "$1" >&9; }
+unix_pid_written() {
+  local file="$1" pid="$2" actual bytes
+  unix_reservation_matches "$file" || return 2
+  actual="$(head -c 64 "$file" 2>/dev/null && printf '.')" || return 2
+  actual="${actual%.}"
+  bytes="$(head -c 64 "$file" 2>/dev/null | wc -c | tr -d '[:space:]')" || return 2
+  [ "$actual" = "$pid"$'\n' ] && [ "$bytes" = "${#actual}" ] && unix_reservation_matches "$file"
+}
+unix_gate_acknowledged() {
+  local file="$1/acknowledged" actual bytes
+  unix_gate_matches "$1" && unix_gate_marker_matches "$file" 6 || return 1
+  actual="$(head -c 32 "$file" 2>/dev/null && printf '.')" || return 1
+  actual="${actual%.}"
+  bytes="$(head -c 32 "$file" 2>/dev/null | wc -c | tr -d '[:space:]')" || return 1
+  [ "$actual" = acknowledged$'\n' ] && [ "$bytes" = "${#actual}" ]
+}
+unix_spawn_in_gate() {
+  local file="$1" entry="$2" project="$3" log="$4" gate="$5" newpid deadline fd_helper attempts=0
+  entered_gate=1
+  if ! unix_gate_matches "$gate" || ! unix_gate_marker_matches "$gate/ready-token" 7 ||
+      ! unix_gate_marker_matches "$gate/acknowledged" 6 || ! unix_gate_marker_matches "$gate/cancel-token" 5; then
+    err "startup descriptor identity is unavailable; refusing fork and preserving $gate"
+    unix_remove_reservation "$file" || true
+    return 2
+  fi
+  if ! printf '%s\n' allow-once >&7 || ! printf '%s\n' cancel >&5; then
+    err "could not prepare startup token; refusing fork."
+    unix_remove_reservation "$file" || true
+    unix_clean_start_gate "$gate" || true
+    return 2
+  fi
+  fd_helper="$(declare -f unix_path_matches_fd)" || {
+    err "source-defined descriptor predicate is unavailable; refusing fork."
+    unix_remove_reservation "$file" || true
+    unix_clean_start_gate "$gate" || true
+    return 2
+  }
+  if [ -z "$fd_helper" ]; then
+    err "descriptor predicate extraction is empty; refusing fork."
+    unix_remove_reservation "$file" || true
+    unix_clean_start_gate "$gate" || true
+    return 2
+  fi
+  # The source-defined helper plus constant program text; paths/platform/command
+  # arguments remain positional data and are never interpolated into code.
+  # Ignore HUP before exec, preserving the intended nohup semantics without an
+  # assumption that every platform's external nohup preserves its own PID.
+  (
+    trap - EXIT
+    trap '' HUP
+    BASH_ENV=/dev/null exec "$BASH" --noprofile --norc -c "$fd_helper"$'\n''
+set -euo pipefail
+gate="$1"; inherited_set="$2"; inherited_env="$3"; UNIX_FD_PLATFORM="$4"; shift 4
+deadline=$((SECONDS + 30))
+while [ "$SECONDS" -lt "$deadline" ]; do
+  unix_path_matches_fd "$gate/owner" 8 || exit 76
+  if [ -e "$gate/cancel" ] || [ -L "$gate/cancel" ]; then exit 75; fi
+  if [ -e "$gate/allow" ] || [ -L "$gate/allow" ]; then
+    unix_path_matches_fd "$gate/allow" 7 || exit 76
+    unix_path_matches_fd "$gate/acknowledged" 6 || exit 76
+    token=""
+    IFS= read -r -n 32 token < "$gate/allow" || exit 76
+    [ "$token" = allow-once ] || exit 76
+    printf "%s\n" acknowledged >&6 || exit 76
+    exec 5>&- 6>&- 7>&- 8>&-
+    if [ "$inherited_set" = x ]; then export BASH_ENV="$inherited_env"; else unset BASH_ENV; fi
+    exec "$@"
+  fi
+  sleep 0.05
+done
+exit 77
+' "$entry" "$gate" "${BASH_ENV+x}" "${BASH_ENV:-}" "$UNIX_FD_PLATFORM" "$JULIA" --startup-file=no --project="$project" "$entry"
+  ) </dev/null >> "$log" 2>&1 9>&- &
+  newpid=$!
+  if unix_write_pid "$newpid" && unix_pid_written "$file" "$newpid"; then :; else
+    err "PID publication failed; cancelling and waiting the owned gated child."
+    # If this write fails, the child still self-expires; it has never received allow.
+    if unix_gate_matches "$gate" && unix_gate_marker_matches "$gate/cancel-token" 5 &&
+        [ ! -e "$gate/cancel" ] && [ ! -L "$gate/cancel" ]; then
+      mv "$gate/cancel-token" "$gate/cancel" || true
+    fi
+    wait "$newpid" || true
+    unix_remove_reservation "$file" || true
+    unix_clean_start_gate "$gate" || true
+    return 2
+  fi
+  # After activation may have happened, keep the valid PID even on uncertainty.
+  # A caller can still manage that intended process through the normal pidfile guard.
+  if ! unix_gate_matches "$gate" || ! unix_gate_marker_matches "$gate/ready-token" 7 ||
+      [ -e "$gate/allow" ] || [ -L "$gate/allow" ] || ! mv "$gate/ready-token" "$gate/allow"; then
+    err "startup activation is unknown; preserving valid PID and gate: $file"
+    disown 2>/dev/null || true
+    return 2
+  fi
+  deadline=$((SECONDS + 5))
+  while ! unix_gate_acknowledged "$gate" && [ "$SECONDS" -lt "$deadline" ] && [ "$attempts" -lt 100 ]; do
+    attempts=$((attempts + 1)); sleep 0.05
+  done
+  disown 2>/dev/null || true
+  unix_gate_acknowledged "$gate" || { err "startup acknowledgement unknown; preserving valid PID and gate: $file"; return 2; }
+  UNIX_NEW_PID="$newpid"
+  unix_clean_start_gate "$gate" || return 2
+  return 0
+}
+unix_spawn_reserved() {
+  local file="$1" gate name rc=0 entered_gate=0
+  unix_reservation_matches "$file" || { err "linked PID reservation identity is unavailable; refusing fork and preserving $file"; return 2; }
+  gate="$(mktemp -d "$RUN_DIR/.daemon-start.XXXXXX")" || {
+    err "could not prepare bounded startup gate; refusing fork."
+    unix_remove_reservation "$file" || true
+    return 2
+  }
+  # Opening a preexisting FIFO/device may block despite noclobber. Require an
+  # empty, non-symlink private gate before scoped marker reservations.
+  if [ ! -d "$gate" ] || [ -L "$gate" ]; then
+    err "startup gate is not an owned directory; refusing fork and preserving $gate"
+    unix_remove_reservation "$file" || true
+    return 2
+  fi
+  for name in owner ready-token acknowledged cancel-token allow cancel; do
+    if [ -e "$gate/$name" ] || [ -L "$gate/$name" ]; then
+      err "startup gate marker already exists; refusing fork and preserving $gate"
+      unix_remove_reservation "$file" || true
+      return 2
+    fi
+  done
+  # Each regular marker has a retained inode binding. Failed/partial redirection
+  # never enters the child-launch function, and all scoped descriptors close.
+  unix_spawn_in_gate "$@" "$gate" 8> "$gate/owner" 7> "$gate/ready-token" \
+    6> "$gate/acknowledged" 5> "$gate/cancel-token" || rc=$?
+  if [ "$entered_gate" -eq 0 ]; then
+    err "startup marker reservation failed; refusing fork and preserving $gate"
+    unix_remove_reservation "$file" || true
+    rc=2
+  fi
+  return "$rc"
+}
+unix_spawn() {
+  local file="$1" rc=0 was_noclobber=0
+  UNIX_NEW_PID=""
+  # noclobber protects existing regular files; explicitly refuse every existing
+  # target (including symlinks/nonregular files) before attempting reservation.
+  [ ! -e "$file" ] && [ ! -L "$file" ] || { err "PID destination already exists; refusing fork and preserving $file"; return 2; }
+  case "$-" in *C*) was_noclobber=1 ;; esac
+  set -C
+  unix_spawn_reserved "$@" 9> "$file" || rc=$?
+  [ "$was_noclobber" -eq 1 ] || set +C
+  return "$rc"
 }
 
 health_json() { command -v curl >/dev/null 2>&1 || return 0; curl -fsS -m "${1:-3}" "${2:-$URL}/api/health" 2>/dev/null || true; }
@@ -332,10 +728,10 @@ cmd_setup() {
 }
 
 start_monitor() {
-  acquire_start_lock monitor || { err "monitor: another start is already in progress (lock: $RUN_DIR/.monitor.start.lock — remove it if no start is running)."; return 1; }
+  acquire_start_lock monitor || { err "monitor: another start is already in progress, or lock ownership is unknown (lock: $RUN_DIR/.monitor.start.lock; preserve and inspect it)."; return 1; }
   local rc=0
   _start_monitor_locked || rc=$?
-  release_start_lock
+  release_start_lock || rc=1
   return $rc
 }
 
@@ -345,13 +741,15 @@ _start_monitor_locked() {
     note "Use 'launchctl kickstart' / 'systemctl restart', or uninstall-service first."
     return 0
   fi
-  local pid
+  local pid rc=0
   if pid="$(pid_of "$MON_PID" "$MON_MARK")"; then
     say "monitor: already running (pid $pid)."
     return 0
+  else
+    rc=$?; [ "$rc" -eq 1 ] || { err "monitor identity unknown; refusing another start."; return 1; }
   fi
-  mkdir -p "$MONITOR_DIR" "$LOG_DIR" "$RUN_DIR"
-  rotate_cli_log "$MON_LOG"
+  mkdir -p "$MONITOR_DIR" "$LOG_DIR" "$RUN_DIR" || { err "monitor: could not prepare state directories; refusing start."; return 1; }
+  rotate_cli_log "$MON_LOG" || { err "monitor: log rotation failed; refusing start."; return 1; }
   local cadence
   if [ "${LIVE_MONITOR_PHASE_SAMPLING:-0}" = "1" ]; then
     cadence="one issue per UTC hour at alternating minutes 05/55"
@@ -359,21 +757,27 @@ _start_monitor_locked() {
     cadence="fixed ${LIVE_MONITOR_INTERVAL_SEC:-3600} s"
   fi
   say "monitor: starting forecast daemon ($cadence)…"
+  local newpid
+  if [ "$WINDOWS_PROCESS" -eq 1 ]; then
+    newpid="$(SOLARSINDY_MONITOR_DIR="$MONITOR_DIR" JULIA_NUM_THREADS="${SOLARSINDY_JULIA_THREADS:-2}" \
+      windows_spawn "$MON_PID" "$MON_MARK" "$ROOT" "$MON_LOG")" || return 1
+  else
   SOLARSINDY_MONITOR_DIR="$MONITOR_DIR" \
   JULIA_NUM_THREADS="${SOLARSINDY_JULIA_THREADS:-2}" \
-    nohup "$JULIA" --startup-file=no --project="$ROOT" \
-      "$ROOT/examples/live_monitor.jl" >> "$MON_LOG" 2>&1 &
-  local newpid=$!
-  disown 2>/dev/null || true              # suppress job-control "Terminated" noise on stop
-  printf '%s\n' "$newpid" > "$MON_PID"
+    unix_spawn "$MON_PID" "$MON_MARK" "$ROOT" "$MON_LOG" || return 1
+  newpid="$UNIX_NEW_PID"
+  fi
   # Bounded readiness wait (60 x 2 s): the daemon prints its startup banner (contains
   # "interval=") once the package is loaded. Death during startup is reported immediately.
-  local i=0
-  while [ $i -lt 60 ]; do
-    if ! kill -0 "$newpid" 2>/dev/null; then
+  local i=0 readiness_started=$SECONDS
+  while [ $i -lt 60 ] && [ $((SECONDS - readiness_started)) -lt 120 ]; do
+    rc=0; process_alive "$newpid" "$MON_PID" "$MON_MARK" || rc=$?
+    if [ "$rc" -gt 1 ]; then
+      err "monitor identity query failed during startup; preserving state."; return 1
+    elif [ "$rc" -eq 1 ]; then
       err "monitor exited during startup; last log lines:"
       tail -n 25 "$MON_LOG" >&2 || true
-      rm -f "$MON_PID"
+      [ "$WINDOWS_PROCESS" -eq 1 ] || rm -f "$MON_PID"
       return 1
     fi
     if grep -q "interval=" "$MON_LOG" 2>/dev/null; then
@@ -388,10 +792,10 @@ _start_monitor_locked() {
 }
 
 start_dashboard() {
-  acquire_start_lock dashboard || { err "dashboard: another start is already in progress (lock: $RUN_DIR/.dashboard.start.lock — remove it if no start is running)."; return 1; }
+  acquire_start_lock dashboard || { err "dashboard: another start is already in progress, or lock ownership is unknown (lock: $RUN_DIR/.dashboard.start.lock; preserve and inspect it)."; return 1; }
   local rc=0
   _start_dashboard_locked || rc=$?
-  release_start_lock
+  release_start_lock || rc=1
   return $rc
 }
 
@@ -400,36 +804,45 @@ _start_dashboard_locked() {
     say "dashboard: managed by the installed service (launchd/systemd) — not starting a second copy."
     return 0
   fi
-  local pid
+  local pid rc=0
   if pid="$(pid_of "$DASH_PID" "$DASH_MARK")"; then
     say "dashboard: already running (pid $pid) — $URL"
     return 0
+  else
+    rc=$?; [ "$rc" -eq 1 ] || { err "dashboard identity unknown; refusing another start."; return 1; }
   fi
   if port_busy; then
     err "$HOST:$PORT is already in use (another dashboard or app?). Set SWM_PORT to a free port."
     return 1
   fi
-  mkdir -p "$MONITOR_DIR" "$LOG_DIR" "$RUN_DIR"
-  rotate_cli_log "$DASH_LOG"
+  mkdir -p "$MONITOR_DIR" "$LOG_DIR" "$RUN_DIR" || { err "dashboard: could not prepare state directories; refusing start."; return 1; }
+  rotate_cli_log "$DASH_LOG" || { err "dashboard: log rotation failed; refusing start."; return 1; }
   say "dashboard: starting on $URL …"
   # Keep Julia's default compilation for concurrent request handling, matching the supervised
   # launchd deployment (deploy/*.dashboard.plist).
+  local newpid
+  if [ "$WINDOWS_PROCESS" -eq 1 ]; then
+    newpid="$(SWM_HOST="$HOST" SWM_PORT="$PORT" SOLARSINDY_LOG="$MONITOR_DIR/live_forecast_log.csv" \
+      JULIA_NUM_THREADS="${SOLARSINDY_JULIA_THREADS:-4}" \
+      windows_spawn "$DASH_PID" "$DASH_MARK" "$ROOT/app" "$DASH_LOG")" || return 1
+  else
   SWM_HOST="$HOST" SWM_PORT="$PORT" \
   SOLARSINDY_LOG="$MONITOR_DIR/live_forecast_log.csv" \
   JULIA_NUM_THREADS="${SOLARSINDY_JULIA_THREADS:-4}" \
-    nohup "$JULIA" --startup-file=no --project="$ROOT/app" \
-      "$ROOT/app/src/server.jl" >> "$DASH_LOG" 2>&1 &
-  local newpid=$!
-  disown 2>/dev/null || true              # suppress job-control "Terminated" noise on stop
-  printf '%s\n' "$newpid" > "$DASH_PID"
+    unix_spawn "$DASH_PID" "$DASH_MARK" "$ROOT/app" "$DASH_LOG" || return 1
+  newpid="$UNIX_NEW_PID"
+  fi
   # Bounded readiness wait (90 x 2 s = 180 s): covers package load + the endpoint warm-up
   # that runs before the listener opens. Death during startup is reported immediately.
-  local i=0
-  while [ $i -lt 90 ]; do
-    if ! kill -0 "$newpid" 2>/dev/null; then
+  local i=0 readiness_started=$SECONDS
+  while [ $i -lt 90 ] && [ $((SECONDS - readiness_started)) -lt 180 ]; do
+    rc=0; process_alive "$newpid" "$DASH_PID" "$DASH_MARK" || rc=$?
+    if [ "$rc" -gt 1 ]; then
+      err "dashboard identity query failed during startup; preserving state."; return 1
+    elif [ "$rc" -eq 1 ]; then
       err "dashboard exited during startup; last log lines:"
       tail -n 25 "$DASH_LOG" >&2 || true
-      rm -f "$DASH_PID"
+      [ "$WINDOWS_PROCESS" -eq 1 ] || rm -f "$DASH_PID"
       return 1
     fi
     if dash_ready; then
@@ -446,9 +859,21 @@ _start_dashboard_locked() {
 }
 
 stop_one() {
+  if [ "$WINDOWS_PROCESS" -eq 1 ]; then
+    acquire_start_lock "$1" || { err "$1: start/stop lock is held or unknown; refusing stop."; return 1; }
+    local result=0
+    _stop_one "$@" || result=$?
+    release_start_lock || result=1
+    return "$result"
+  fi
+  _stop_one "$@"
+}
+
+_stop_one() {
   # $1 label, $2 pidfile, $3 command marker
-  local label="$1" file="$2" mark="$3" pid
-  if ! pid="$(pid_of "$file" "$mark")"; then
+  local label="$1" file="$2" mark="$3" pid rc=0
+  if pid="$(pid_of "$file" "$mark")"; then :; else
+    rc=$?; [ "$rc" -eq 1 ] || { err "$label identity unknown; refusing to signal and preserving state."; return 1; }
     if service_mode_active "$([ "$label" = monitor ] && echo live-monitor || echo dashboard)"; then
       say "$label: running under the installed service — this CLI will not stop it."
       note "macOS: launchctl bootout gui/$(id -u)/com.<org>.solarsindy.…  |  Linux: systemctl stop solarsindy-…"
@@ -457,18 +882,28 @@ stop_one() {
     fi
     return 0
   fi
+  if [ "$WINDOWS_PROCESS" -eq 1 ]; then
+    say "$label: stopping native process (pid $pid; Windows forced termination)."
+    rc=0; windows_process stop "$file" "$mark" || rc=$?
+    [ "$rc" -le 1 ] || { err "$label stop could not be verified; preserving state."; return 1; }
+    say "$label: stopped."; return 0
+  fi
   say "$label: stopping (pid $pid)…"
   kill -TERM "$pid" 2>/dev/null || true
   local i=0
   while [ $i -lt 30 ]; do
-    kill -0 "$pid" 2>/dev/null || { rm -f "$file"; say "$label: stopped."; return 0; }
+    rc=0; pid_of "$file" "$mark" >/dev/null || rc=$?
+    [ "$rc" -ne 1 ] || { say "$label: stopped."; return 0; }
+    [ "$rc" -eq 0 ] || { err "$label identity unknown while stopping; preserving state."; return 1; }
     i=$((i + 1)); sleep 1
   done
   err "$label did not exit within 30 s; sending SIGKILL."
   kill -KILL "$pid" 2>/dev/null || true
   i=0
   while [ $i -lt 5 ]; do
-    kill -0 "$pid" 2>/dev/null || { rm -f "$file"; say "$label: killed."; return 0; }
+    rc=0; pid_of "$file" "$mark" >/dev/null || rc=$?
+    [ "$rc" -ne 1 ] || { say "$label: killed."; return 0; }
+    [ "$rc" -eq 0 ] || { err "$label identity unknown after kill; preserving state."; return 1; }
     i=$((i + 1)); sleep 1
   done
   err "$label (pid $pid) survived SIGKILL — inspect manually."
@@ -476,20 +911,31 @@ stop_one() {
 }
 
 cmd_status() {
-  local rc_mon=1 rc_dash=1 pid url="$URL" installed_port
+  local rc_mon=1 rc_dash=1 pid description url="$URL" installed_port query_rc=0 unknown_state=0
   say "SolarSINDy live forecast system — $ROOT"
-  if pid="$(pid_of "$MON_PID" "$MON_MARK")"; then
-    say "monitor:   RUNNING (pid $pid, up $(ps -o etime= -p "$pid" | tr -d ' '))  [CLI]"
+  if description="$(process_description "$MON_PID" "$MON_MARK")"; then
+    pid="${description%% *}"
+    say "monitor:   RUNNING (pid $pid, up ${description#* })  [CLI]"
     rc_mon=0
+  else
+  query_rc=$?
+  if [ "$query_rc" -ne 1 ]; then
+    say "monitor:   UNKNOWN (identity query failed; state preserved)"; unknown_state=1
   elif service_mode_active live-monitor; then
     say "monitor:   RUNNING  [installed service]"
     rc_mon=0
   else
     say "monitor:   stopped"
   fi
-  if pid="$(pid_of "$DASH_PID" "$DASH_MARK")"; then
-    say "dashboard: RUNNING (pid $pid, up $(ps -o etime= -p "$pid" | tr -d ' '))  [CLI] — $url"
+  fi
+  if description="$(process_description "$DASH_PID" "$DASH_MARK")"; then
+    pid="${description%% *}"
+    say "dashboard: RUNNING (pid $pid, up ${description#* })  [CLI] — $url"
     rc_dash=0
+  else
+  query_rc=$?
+  if [ "$query_rc" -ne 1 ]; then
+    say "dashboard: UNKNOWN (identity query failed; state preserved)"; unknown_state=1
   elif service_mode_active dashboard; then
     # A CLI-started dashboard binds $PORT by construction; an installed service binds whatever its
     # plist was rendered with, which is the authority once it exists.
@@ -501,6 +947,7 @@ cmd_status() {
     rc_dash=0
   else
     say "dashboard: stopped"
+  fi
   fi
   local h
   h="$(health_json 3 "$url")"
@@ -516,6 +963,7 @@ cmd_status() {
   else
     say "forecasts: no log yet at $log (first cycle pending)"
   fi
+  [ "$unknown_state" -eq 0 ] || return 3
   [ $rc_mon -eq 0 ] && [ $rc_dash -eq 0 ] && return 0
   [ $rc_mon -ne 0 ] && [ $rc_dash -ne 0 ] && return 2
   return 1

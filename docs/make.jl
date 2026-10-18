@@ -15,6 +15,7 @@ makedocs(
         "Home" => "index.md",
         "API Reference" => [
             "Core API" => "api.md",
+            "Interval-Mean Forecaster" => "interval-mean-forecaster.md",
             "Forecasting And Alarms" => "forecast-api.md",
             "Operational API" => "operational-api.md",
             "Super-Learner" => "superlearner-api.md",

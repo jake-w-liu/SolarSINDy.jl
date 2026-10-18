@@ -29,7 +29,7 @@ Standard libraries this package depends on. Their versions track the Julia relea
 bound on one is a Julia pin in disguise.
 """
 const STDLIB_DEPS = ["Dates", "Downloads", "FileWatching", "LinearAlgebra", "Logging", "Printf",
-                     "Random", "SHA", "Statistics"]
+                     "Random", "SHA", "Statistics", "TOML"]
 
 """
 Dependencies that `src/` does not load, but that the package's own shipped code needs under this
@@ -44,15 +44,41 @@ const ENVIRONMENT_ONLY_DEPS = Dict(
     "Logging" => "validation/operational/analog_common.jl",
 )
 
-"Names loaded by `using`/`import` anywhere under `directory`."
+function _module_root(node)
+    node isa Symbol && return node === :. ? nothing : String(node)
+    node isa Expr || return nothing
+    # Members and aliases do not introduce additional module dependencies.
+    node.head in (:(:), :as) && return _module_root(first(node.args))
+    node.head === :. || throw(ArgumentError("unrecognized module import syntax"))
+    isempty(node.args) && throw(ArgumentError("empty module import path"))
+    first(node.args) === :. && return nothing
+    return _module_root(first(node.args))
+end
+
+function _collect_loaded_modules!(found, node)
+    node isa Expr || return found
+    node.head in (:error, :incomplete) && throw(ArgumentError("malformed Julia dependency source"))
+    node.head === :quote && return found
+    if node.head in (:using, :import)
+        for declaration in node.args
+            name = _module_root(declaration)
+            name === nothing || push!(found, name)
+        end
+    else
+        for child in node.args
+            _collect_loaded_modules!(found, child)
+        end
+    end
+    return found
+end
+
+"Names loaded by parsed, unquoted `using`/`import` declarations under `directory`."
 function _loaded_modules(directory::AbstractString)
     found = Set{String}()
     for (root, _, files) in walkdir(directory), file in files
         endswith(file, ".jl") || continue
-        for line in eachline(joinpath(root, file))
-            m = match(r"^\s*(?:using|import)\s+([A-Za-z][A-Za-z0-9_]*)", line)
-            m === nothing || push!(found, m.captures[1])
-        end
+        path = joinpath(root, file)
+        _collect_loaded_modules!(found, Meta.parseall(read(path, String); filename=path))
     end
     return found
 end

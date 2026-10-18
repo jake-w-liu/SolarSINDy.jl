@@ -193,3 +193,5 @@ end
 include(joinpath(@__DIR__, "receipt_maturity_synthetic.jl"))
 main()
 run_receipt_maturity_synthetic()
+include("interval_mean_forecaster_synthetic.jl")
+run_interval_mean_forecaster_synthetic()

@@ -817,6 +817,7 @@ using DataFrames
     end
 
     include("test_compat.jl")
+    include("test_interval_mean_forecaster.jl")
     include("test_conformal_endpoint_precision.jl")
     include("test_adaptive_conformal_representation.jl")
     include("test_static_stack_memory_precision.jl")
@@ -890,6 +891,7 @@ using DataFrames
     include("test_external_dst_snapshot_collector.jl")
     include("test_external_dst_receipt_timing.jl")
     include("test_cli_smoke.jl")
+    include("test_cli_process.jl")
     include("test_analog_gbm.jl")
     include("test_analog_base_table.jl")
     include("test_analog_features.jl")

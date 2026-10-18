@@ -12,8 +12,8 @@
 #   * a malformed solarsindy.env line is skipped with a warning and NEVER bricks the CLI
 #     (recovery commands like `stop` must keep working with a broken config),
 #   * CRLF config files cannot smuggle \r into ports/paths,
-#   * the start lock refuses a concurrent start only for a live *CLI* owner; a dead or
-#     PID-recycled owner is reclaimed (never wedging start after a SIGKILL).
+#   * the start lock preserves any positively live owner (including aliases and a
+#     recycled/unrelated live PID); only confirmed absence permits dead-owner recovery.
 @testset "bin/solarsindy CLI smoke" begin
     cli = normpath(joinpath(@__DIR__, "..", "bin", "solarsindy"))
     @test isfile(cli)
@@ -102,11 +102,9 @@ printf '%s\n' "$CLI_TEST_MTIME"
         @test !isfile(pidfile)                               # stale pidfile removed
         @test process_running(decoy)                         # decoy untouched by the CLI
 
-        # Start lock, identity semantics: the lock is honored only when its recorded owner
-        # PID is a live *solarsindy CLI* process (same discipline as pid_of). A live but
-        # UNRELATED owner — the SIGKILLed-start-then-PID-recycled case — is stale: the lock
-        # is reclaimed without signaling that process, start proceeds (the no-op shim dies
-        # at once), and no in-progress refusal is announced.
+        # Start-lock ownership is deliberately conservative: flattened argv cannot
+        # distinguish physical/alias/relative launches. A positively live unrelated
+        # or recycled owner is held without signaling or spawning a replacement.
         shim_dir = mktempdir()
         shim = joinpath(shim_dir, "julia")
         write(shim, "#!/bin/sh\nexit 0\n"); chmod(shim, 0o755)
@@ -117,11 +115,12 @@ printf '%s\n' "$CLI_TEST_MTIME"
         rec = run(pipeline(setenv(ignorestatus(`$bash $cli start monitor`), envlock);
                            stdout=devnull, stderr=rec_io); wait=true)
         rec_err = String(take!(rec_io))
-        @test rec.exitcode != 0                              # shim died during startup
-        @test !occursin("another start is already in progress", rec_err)
-        @test occursin("exited during startup", rec_err)     # i.e. the reclaim path ran
-        @test !isfile(lockfile)                              # recycled-PID lock reclaimed
-        @test process_running(decoy)                         # reclaim never signals the owner
+        @test rec.exitcode != 0
+        @test occursin("another start is already in progress", rec_err)
+        @test !occursin("exited during startup", rec_err)
+        @test read(lockfile, String) == string(decoy_pid)
+        @test !isfile(pidfile)                               # no replacement spawned
+        @test process_running(decoy)                         # held owner never signaled
         kill(decoy); wait(decoy)
 
         # Genuine live CLI owner: a start sitting in its readiness loop holds the lock, and

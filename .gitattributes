@@ -20,3 +20,9 @@ data/real_sindy_discovery_coefficients.csv -text
 data/real_ensemble_inclusion.csv -text
 data/real_sindy_ensemble_draws.csv -text
 test/test_superlearner_serving.jl -text
+
+# Interval implementation and frozen independent oracles bind raw source bytes.
+src/interval_mean_forecaster/** -text
+test/interval_mean_forecaster/** -text
+test/test_interval_mean_forecaster.jl -text
+examples/interval_mean_forecaster_synthetic.jl -text

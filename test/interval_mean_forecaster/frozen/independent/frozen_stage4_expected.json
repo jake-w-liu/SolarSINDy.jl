@@ -1,0 +1,84 @@
+{
+  "frozen_utc": "2026-10-15T17:01:23.165814+00:00",
+  "input_sha256": "061bbabbcef461d56d4b1dd9f4ffd1e0de607efda70fabfefe4b25d4199ea31b",
+  "scope": "Synthetic orchestration and persistence-fallback control only; no predictive strength or real GBM qualification.",
+  "initial_boundary": "2019-01-25T00:00:00",
+  "final_and_validation_boundary": "2019-02-15T00:00:00",
+  "known_forcing_gap_first_issue_index": 576,
+  "raw_rows": 1100,
+  "initial_fit_calls": 36,
+  "selected_case": {
+    "reference_error_both_leads": 10,
+    "selected_index_both_delays": 1,
+    "final_fit_calls": 2,
+    "publish_calls": 2,
+    "per_delay": {
+      "0": {
+        "per_lead_validation_n": [
+          333,
+          331
+        ],
+        "per_lead_fallback_rmse": [
+          0.4,
+          0.6
+        ],
+        "normalized_storm_mean": 0.05,
+        "initial_fit_n": 402,
+        "initial_informative_n": 235,
+        "final_fit_n": 906,
+        "final_informative_n": 408
+      },
+      "1": {
+        "per_lead_validation_n": [
+          332,
+          330
+        ],
+        "per_lead_fallback_rmse": [
+          0.5,
+          0.7
+        ],
+        "normalized_storm_mean": 0.06,
+        "initial_fit_n": 400,
+        "initial_informative_n": 234,
+        "final_fit_n": 904,
+        "final_informative_n": 408
+      }
+    }
+  },
+  "none_case": {
+    "reference_error_both_leads": 0,
+    "status": "none",
+    "final_fit_calls": 0,
+    "publish_calls": 0,
+    "no_final_directories": true
+  },
+  "missing_case": {
+    "reference": null,
+    "status": "blocked_reference_absent",
+    "final_fit_calls": 0,
+    "publish_calls": 0,
+    "no_final_directories": true
+  },
+  "failure_cases": [
+    "fifth injected initial fit fails: failure retained, no completion marker",
+    "first injected publication fails: failure retained, no completion marker",
+    "existing output directory: no overwrite",
+    "input20001 rows: fail before fitting"
+  ],
+  "bundle_exact_members": [
+    "model.toml",
+    "checkpoint.toml",
+    "provenance.toml",
+    "manifest.toml"
+  ],
+  "bundle_corruptions": [
+    "wrong caller manifest pin",
+    "changed model member with old manifest",
+    "removed checkpoint",
+    "unexpected extra member",
+    "rehashed negative gain with fresh caller pin",
+    "rehashed source identity mismatch with fresh caller pin",
+    "rehashed checkpoint config/source mismatch with fresh caller pin"
+  ],
+  "identity_corruption": "private disk-B after loaded-A must reject before result or completed artifact"
+}

@@ -53,3 +53,108 @@ and discovers Git Bash on Windows. Probes have bounded waits and owned-process
 cleanup. The readiness test uses the selected absolute executable; its original
 stalled-HTTP expectations and deadline remain intact. No numerical model or
 forecast-selection behavior changes.
+
+## Interval-mean research API integration, current preparation
+
+The optional namespace implements the completed-hour input convention,
+receipt-aware replay, exact endpoint/interval Gaussian moments, affine stream
+bases and checkpoints, joint h4/h6 nonnegative gain fitting, prediction,
+selection control flow and source-bound research bundles. Import makes the API
+available; the default monitor and dashboard do not call it. The maintained
+synthetic example's three-field range assignment uses broadcast assignment.
+The driver retains its 20,000-hour synthetic admission bound.
+
+Whole-string digest/token checks reject a terminal LF. Artifact producers
+validate their encoded typed payloads and existing one-million-byte member
+limit before creating the destination. This validates producer/loader agreement;
+it does not provide a hard allocation or execution-time bound.
+
+The current test entry retains the original fifteen workers and adds the
+unchanged large-case numerical oracle as worker sixteen. Original baseline
+source identities, forty fixed test resources and mathematical tolerances stay
+unchanged. Active source identities truthfully include the boundary and numerical
+repairs. Current source requires its own final package, experiments, canonical
+audit, strict documentation and six native OS/version jobs. No empirical skill,
+actual archive admission, deployment clearance or novelty follows from these
+synthetic/library checks.
+
+The following original integration notes are a historical preparation snapshot.
+Their fourteen-worker/eight-unchanged-file statements describe that earlier
+revision, not the present repaired source or its final qualification.
+
+## Interval-mean optional namespace preparation
+
+`SolarSINDy.IntervalMeanForecaster` makes the existing interval-mean research
+implementation available through the maintained library. Its eight implementation
+files are copied byte-for-byte from the measured candidate; the new wrapper only
+loads modules, documents aliases and exposes source identity. Production serving,
+source acquisition and actual archive fitting are not changed.
+
+The namespace covers hourly parsing, explicit L0/L1 receipt assumptions, streamed
+affine bases/checkpoints, constrained gain fitting, predictions and source-bound
+bundles. The experiment entry adds generated synthetic parser/stream/fit/predict/
+save/reload checks. No empirical-skill or deployment verdict follows from these
+interfaces. The synthetic experiment driver retains its 20,000-hour admission
+limit; this is not a claim of a hard process-memory ceiling.
+
+The mandatory package test entry launches 14 native functional workers, retaining
+the independent Gaussian/replay assertions, public/context/cache oracles, full
+primitive-to-bundle chain, all settings/latencies, stream revisions/resume and
+same-platform uncached-baseline bit comparisons. Every worker imports the actual
+package and checks its physical source/method paths and exact eight source pins.
+The old uncached implementation and fixed oracle bodies remain immutable test
+fixtures. No timing benchmark is added to package tests.
+
+Before the dependency-consumer repair, a frozen witness showed the line scanner
+missing SHA/TOML in `using Dates,SHA,TOML`. The AST repair passes independent
+literal/malformed-source and negative-mutation checks, preserving all prior
+dependency assertions. TOML is promoted from test extras to a normal stdlib
+dependency. Manifest dependency contents are unchanged; only its project hash
+is refreshed using the active Pkg implementation.
+
+Preparation smoke passes on native Windows Julia 1.12.6 and 1.13.1; the latter
+also passes all 2,272 unchanged mathematical/replay assertions against the
+package-loaded modules. Full final-source Pkg.test, examples, documentation,
+canonical harness and six native platform jobs remain pending. Earlier package
+and platform results do not qualify this integration.
+
+
+
+## Interval-mean NNLS numerical accuracy repair (2026-10-18)
+
+The optional interval-mean forecaster retains its full weighted two-column
+design, all scalar rows, SVD rank cutoff, four candidates, full-matrix KKT
+certificate, objective comparison, minimum-norm and lexicographic tie rules,
+and public output fields. A bounded refinement repairs demonstrated large
+synthetic gain errors without changing the locked numerical tolerances.
+
+Positive interior and already KKT-valid positive axis candidates may take at
+most two full-residual corrections, guarded by the existing certificate bound
+per row, strict gradient improvement, full KKT acceptance and the existing
+objective comparison. For a positive rank-one candidate, a separate correction
+requires exact collinearity of every converted Float64 matrix row, a material
+row-space defect, strictly improved norm and defect, full KKT and the same
+objective rule. Its positive Float64 conversion rounds toward zero. Diagnostic
+BigFloat arithmetic uses the existing controlled precision context.
+
+The active Adapter source is pinned to
+20f68a96ea7edaa88433bec70f1ffddb74128221862e8476f8d2e1704ddda22f.
+The original eight baseline pins and all original 40 frozen test resources stay
+unchanged. The training-oracle loading adapter still changes only the exact
+historical two-name provenance assertion into the same reviewed four-name list;
+the Adapter hash changes, but its name was already one of those four.
+
+The unchanged 79-assertion large-case oracle is an additional mandatory
+package-loaded worker. A small module alias binds its original include to the
+maintained namespace; its assertions and tolerances are not transformed.
+Neither the zero-trigger saved-model surveys nor reused KKT flags constitute
+independent numerical proof. Arbitrary weighted directions, near-cutoff spectra
+and concurrent invocation remain limits of the present focused review.
+
+The axis helper currently copies a column and computes its norm before the
+refinement trigger. That resource observation is retained for a separate future
+change; the qualified numerical source is copied exactly here. Historical
+3.2x/3.3x stream timings belong to the earlier measured A8 source, including its
+earlier Adapter identity. This repaired source has no new performance claim.
+No archive fit, empirical forecast skill, deployment or novelty follows from
+the synthetic numerical repair.

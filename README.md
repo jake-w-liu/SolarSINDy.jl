@@ -20,11 +20,11 @@ operational monitor and web dashboard. It has two layers:
 
 - Julia **≥ 1.12.6** (`[compat].julia` in [Project.toml](Project.toml))
 - Network access to NOAA SWPC for the live path only
-- Bash and POSIX utilities for shell launchers and the full validation/test
-  toolchain, including `awk` for OMNI extraction and `cp`/`touch` in regression
-  fixtures. On Windows, install Git for Windows and put its `bin` and `usr/bin`
-  directories on `PATH` before the WindowsApps `bash.exe` shim. Run the full
-  test suite from that environment.
+- GNU Bash and POSIX utilities for shell launchers and shell/data validation
+  paths, including `awk` for OMNI extraction. On Windows, install Git for Windows
+  and run the shell commands below from Git Bash; WSL is not required. Use native
+  Julia for the Julia API. Test helpers verify actual GNU Bash execution;
+  `SOLARSINDY_TEST_BASH` can select an explicit Bash executable.
 
 Git attributes preserve the committed source and fixture bytes independently
 of `core.autocrlf`. Keep POSIX launchers in LF form; the explicitly declared
@@ -40,7 +40,7 @@ cd SolarSINDy.jl
 bin/solarsindy setup    # one-time: check Julia, instantiate both environments
 bin/solarsindy start    # forecast daemon + dashboard; opens http://127.0.0.1:8723
 bin/solarsindy status   # process / health / issuance-freshness summary
-bin/solarsindy stop     # stop both services
+bin/solarsindy stop     # stop both background processes
 ```
 
 Other useful commands: `bin/solarsindy once` (single forecast cycle in the
@@ -48,6 +48,42 @@ foreground, the right smoke test), `bin/solarsindy open` (reopen the dashboard),
 `bin/solarsindy logs monitor -f`, `bin/solarsindy install-service` /
 `uninstall-service` (supervised mode: macOS launchd with auto-restart and
 watchdog; systemd templates in [`deploy/`](deploy/)).
+
+On Windows, CLI startup records the native PID, creation time, executable, physical
+clone and actual Julia entrypoint in an exclusive nonce-bound receipt before the
+daemon entrypoint runs. This is CLI startup attestation under user-controlled
+instance state, rather than independently recovered operating-system arguments.
+`status` returns **3** when identity is unknown; `start` and `stop` preserve the
+state and refuse to spawn or signal. Older numeric pidfiles have an ambiguous PID
+domain: reconcile them only after independently verifying the original process
+and instance ownership; do not simply delete them to make a start succeed.
+Windows `stop` validates the same native process handle used for forced termination
+and waits for exit; it does not deliver POSIX SIGTERM. Supervised installation uses
+macOS launchd or Linux systemd; Windows uses the ad-hoc CLI.
+
+Both CLI starts fail before spawning if state-directory preparation or log rotation
+fails. On Unix, a positively live start-lock owner is preserved even when its argv
+uses a clone alias or relative path. This also preserves an unrelated/recycled live
+PID in a start lock: reconcile ownership before changing that state, or wait for
+confirmed exit. Daemon pidfiles retain their separate clone-entrypoint checks.
+Unix lock acquisition also uses an atomic admission directory during stale-owner
+recovery. Existing admission state is unknown and preserved; a crash there requires
+verified reconciliation. This directory is not automatically reclaimed, and older
+CLI versions that ignore it must not share the same instance state.
+
+Unix starts reserve a regular PID file and verify its exact write before allowing
+the intended main to execute. A bounded startup gate prevents a failed PID
+publication from leaving an unrecorded main running. Symlink/nonregular PID state
+is unknown and preserved. If activation or cleanup becomes uncertain after a
+valid PID is committed, start fails and retains the record for verified inspection;
+it does not report readiness. Identity uses native retained-descriptor `fstat`
+metadata on Darwin and Bash `/dev/fd` comparison on Linux.
+
+Unix numeric PID records accept only a positive decimal PID with an optional
+single trailing newline, within 128 bytes. Malformed regular records retain the
+legacy stale cleanup policy; read errors, symlink/nonregular paths and known
+unsearchable directory ancestors preserve state as unknown. Missing directories
+remain absent. These checks do not claim exhaustive filesystem-error diagnosis.
 
 ## The served product
 
