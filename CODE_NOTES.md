@@ -30,3 +30,26 @@ The first native CI run (39104256372) exposed an obsolete single-runner test
 and a Julia 1.12.6 lowering error in keyword callbacks with an all-underscore
 argument. Only the eight unused argument names change to `_url`; callback
 bodies, scientific expectations, cohorts and tolerances are unchanged.
+
+## Physical temporary roots and native test prerequisites (2026-10-18)
+
+Both macOS jobs in native run 39105319155 exposed 24 receipt/evidence fixture
+errors at the existing strict ancestor-link boundary. The internally selected
+snapshot parent now uses realpath(tempdir()); generated receipt fixtures and the
+synthetic receipt example create their directories under that physical parent.
+Explicit caller paths still reject linked parents. An owned junction/symlink
+fixture independently checks the default, explicit rejection, preserved input
+bytes and unchanged empty scientific-support cohort.
+
+Two regression fixtures depended on Unix cp/touch executables. They now set
+timestamps through Julia's libuv-backed file API and close each file in finally.
+The cache fixture uses an exactly representable timestamp before cache fill;
+the equal-size replacement and restored-mtime assertions are retained.
+
+The complete dashboard recheck then reached a WSL launcher through its bare
+bash command instead of exercising the readiness loop. Shared test discovery
+verifies a GNU banner and Bash-version roundtrip, supports an explicit executable,
+and discovers Git Bash on Windows. Probes have bounded waits and owned-process
+cleanup. The readiness test uses the selected absolute executable; its original
+stalled-HTTP expectations and deadline remain intact. No numerical model or
+forecast-selection behavior changes.

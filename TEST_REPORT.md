@@ -33,3 +33,31 @@ reproduces the old keyword-callback error on Julia 1.12.6. A byte-inverse
 comparison confirms that only eight unused argument names changed.
 Actionlint passes. Full native OS-matrix execution must pass before claiming
 Windows/Linux/macOS support; these focused Windows checks are not that result.
+
+## Physical-temp and shell-prerequisite qualification (2026-10-18)
+
+The original default-parent alias witness failed after all 156 original receipt
+assertions passed. The correction adds ten default/explicit-link assertions.
+The explicit path guard is unchanged. Independent native timestamp cases pass
+10/10 on both Windows Julia releases, including exact future/restored mtimes,
+unchanged bytes and closed handles.
+
+The first complete dashboard recheck retained 1613 passed, one failed and one
+broken: a bare bash command reached a WSL launcher and never ran the readiness
+loop. After selecting a verified GNU Bash, the complete suite passes on both
+Windows releases. A separate six-case prerequisite oracle checks positive
+execution, explicit valid/invalid choices and Git discovery with a WindowsApps
+bash entry at the front of PATH. Initial assumptions about which inaccessible entry
+Sys.which would select were rejected before that oracle was frozen.
+
+The final unfiltered native qualification runs all six stages on each of
+Windows Julia 1.12.6 and 1.13.1: complete app tests, receipt maturity,
+observation evidence, evidence integration, live forecast verification and the
+complete experiment script. All 12 stages exit zero with 396 tracked source
+controls unchanged. The terminal SHA256 is
+f7f6f1be957c246da23928bf699a0196ce30fe2f6a583a77a8125a9cd35bba5c.
+No original scientific expectation or numerical tolerance was loosened.
+
+These checks are narrower than Pkg.test(). The unchanged canonical harness and
+the six native OS/runtime CI jobs are still running; neither is claimed passed
+by this focused qualification. Earlier failures remain retained evidence.
