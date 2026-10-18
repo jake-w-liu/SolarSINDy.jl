@@ -349,3 +349,47 @@ All inputs above were generated. No actual archive fit, empirical comparison,
 reference admission, model serving or novelty verdict is authorized by these
 component checks. Full package/experiment/harness, strict documentation and the
 native six-cell platform qualifications of the final combined source are pending.
+
+
+## Strict interval manual repair, 18 October 2026
+
+The initial combined CI exposed 25 existing implementation docstrings absent
+from the manual. The references were added without changing computational
+source, tests, environments or strict Documenter settings. The actual repaired
+Windows Julia 1.12.6 build exited 0; no Documenter errors/warnings were reported.
+Full dependency warnings and raw output are retained. DOCS_REPORT.md records
+the exact bounded coverage and receipt hashes; full computational gates remain
+pending until their own actual closures.
+
+
+## CLI smoke phase repair and historical full gates, 18 October 2026
+
+The previous combined candidate b390755 completed the unchanged canonical
+development harness on Windows Julia 1.13.1 with native exit 0: 336 PASS,
+3 WARN, 0 FAIL. Its unfiltered package tests passed 289896 assertions with
+7 existing broken tests, and full experiments exited 0. The raw harness log
+SHA-256 is 90aecb8fcc29f846a237d90d941188df667b1c32b3c0ff31b6c3daf89d1018be.
+These results qualify that earlier source only.
+
+The same candidate's full native CI failed strict documentation and Unix CLI
+smoke checks. The strict manual repair subsequently passed on Windows and in
+Ubuntu CI run 39123287851. Three Unix package cells failed the dead-owner lock
+cleanup assertion; Ubuntu Julia 1.13.1 instead failed two earlier contender/lock
+assertions after startup exited. Their exact startup/kill phase was not recorded,
+so a single historical root cause is not claimed.
+
+Independent controlled Linux and macOS witnesses in run 39125174829 reproduce
+the documented UNKNOWN admission after an early kill and successful dead-owner
+cleanup after admission release. The fixture now proves actual shim main entry,
+a matching committed PID, absent admission and a live launcher before both the
+contender and SIGKILL. The original 15-second bound and original dead-owner
+assertions remain. Production process-control source is unchanged.
+
+The exact repaired complete smoke file passed on native Ubuntu and macOS with
+Julia 1.12.6 and 1.13.1 in CI run 39125478730. Seven relevant caller files match
+the package checkout. The repaired file SHA-256 is
+78b20a79d74a1b84b0ad33506cec582bef6e34ca4a9f9d4fbe2808c8031eadcb.
+The retained native review receipt SHA-256 is
+517391f18dca9bee219b3a93f55dcfeff56b898cd010f12ec64a59a03c48e13e.
+These focused passes do not replace the final merged source's full six-cell
+package/experiment matrix, strict documentation and canonical harness.
