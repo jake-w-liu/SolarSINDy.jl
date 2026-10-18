@@ -74,3 +74,21 @@ and platform. That checks before/after bit preservation within the platform;
 it does not promise universal bit identity across BLAS implementations,
 architectures or operating systems. Native Windows, Linux and macOS
 qualification remains a recorded release gate.
+
+## Implementation module references
+
+The following references describe the numerical, replay, feature, streaming,
+training and bundle interfaces used by the public namespace above. The same
+research scope and explicit availability assumptions apply to these interfaces.
+
+```@autodocs
+Modules = [SolarSINDy.IntervalMeanForecaster.DstIntervalAdapter.Kernel,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalAdapter.Replay,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalAdapter.Features,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalAdapter,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalStream,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalTraining,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalArtifacts,
+           SolarSINDy.IntervalMeanForecaster.DstIntervalExperiment]
+Private = false
+```

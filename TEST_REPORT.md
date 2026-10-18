@@ -297,3 +297,14 @@ These results supersede the earlier prepared-only v8 status for the bounded
 focused checks. Full tests, experiments, canonical harness, strict documentation
 and the six-cell native package matrix remain pending for the combined source.
 No archive forecast-skill, novelty or deployment verdict follows from this run.
+
+
+## Strict interval manual repair, 18 October 2026
+
+The initial combined CI exposed 25 existing implementation docstrings absent
+from the manual. The references were added without changing computational
+source, tests, environments or strict Documenter settings. The actual repaired
+Windows Julia 1.12.6 build exited 0; no Documenter errors/warnings were reported.
+Full dependency warnings and raw output are retained. DOCS_REPORT.md records
+the exact bounded coverage and receipt hashes; full computational gates remain
+pending until their own actual closures.
