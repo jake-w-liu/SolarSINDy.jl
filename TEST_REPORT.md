@@ -433,3 +433,31 @@ All these inputs were generated. Full unfiltered package tests, all independent
 workers, experiments, canonical harness, strict docs and six-cell native CI
 remain required on the final committed source. No actual archive fit, skill,
 novelty, unopened-cohort or serving verdict follows from these checks.
+
+
+## Strengthened resource oracle qualification, 18 October 2026
+
+The native Windows Julia 1.12.6 and 1.13.1 independent handle controls each pass
+8/8. Two deliberately false helper variants fail assertions with native exit 1,
+as required; no setup error is accepted as a fault-control success. Windows
+receipt SHA-256: aeffb322683a8e8972ecb4cd2b744de9c268250df7084dd012274759d3c6b5ce.
+Actual Linux/macOS by both Julia versions pass the same positive and negative
+controls in CI run39129935817. Earlier path-setup and EBADF test-oracle failures
+are retained. The corrected oracle propagates all unknown query failures.
+
+Both full focused disk-fit workers subsequently exit 0 with all 475 source
+files and tool controls unchanged. Displayed testsets total 1050 passing checks
+each: the previous 1042 plus eight independent handle-control checks. The original
+390-check body now uses the meaningful closure assertion after failed producers;
+all other original source is byte-preserved. Source Training acaf046f is unchanged.
+Focused receipt SHA-256:
+63993aaed4cba90e8773ee0c15718bf32c801105fd1fe4218bfae21280287940.
+
+The prior 42804b43 unfiltered Pkg.test and full experiments pass, and all17
+workers complete, but canonical audit fails the now-replaced tautological
+statement (343 PASS/3 WARN/1 FAIL). Its raw log SHA-256 is
+c773707670234a6bc7ab2373addcbff0da81ab565ef5eb4e8a13a7de110a3cc0.
+That is a historical failed audit, not final release qualification.
+The final committed test tree still requires fresh full Pkg/experiments/H,
+native six-cell CI, strict documentation and deployment-image qualification.
+No real-data skill, novelty, unopened-cohort or serving verdict follows.

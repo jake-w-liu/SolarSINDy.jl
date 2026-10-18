@@ -1,4 +1,5 @@
 using Test, Dates, SHA, TOML
+include(joinpath(@__DIR__,"closed_file_oracle_v2.jl"))
 include(ARGS[1])
 include(joinpath(@__DIR__,"DiskAffineGainFit.jl"))
 const F=IntervalMeanForecaster
@@ -10,6 +11,7 @@ const START=DateTime(2019,1,1)
 const BOUNDARY=START+Hour(1000)
 const ROOT=ARGS[2]
 mkdir(ROOT)
+owned_file_handle_oracle_controls(joinpath(ROOT,"handle-oracle-controls"))
 const counter=Ref(0)
 function owned()
     counter[]+=1
@@ -92,9 +94,8 @@ function rejected_producer(produce;setting=A.settings()[1],delay=0,kwargs...)
         delay_hours=delay,source_sha256=SOURCE,kwargs...)
     @test !isfile(joinpath(destination,"manifest.toml"))
     if isfile(joinpath(destination,"joint-fit.f64"))
-        # A separate exclusive open proves the exporter released its handle.
-        open(io->nothing,joinpath(destination,"joint-fit.f64"),"a")
-        @test true
+        # The independent controls above distinguish held and closed handles.
+        @test owned_file_handles_closed(joinpath(destination,"joint-fit.f64"))
     end
     destination
 end

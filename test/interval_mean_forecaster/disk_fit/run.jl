@@ -22,9 +22,11 @@ function frozen_disk_oracle(name, destination, expected)
     target
 end
 
+@test bytes2hex(sha256(read(joinpath(@__DIR__,"closed_file_oracle_v2.jl"))))=="b917120e29144a50bae4620ccb36072b51d0f69de172eaf4af35a8b977a03fc3"
+
 const DISK_ORACLE = frozen_disk_oracle("test_disk_affine_fit.jl",
     joinpath(DISK_OUTPUT, "frozen-390"),
-    "cbfbbb49ff72c2580a777bed2bf4ca85b9bcd27c4773b91f78f8196f09eb2c4e")
+    "2239747a4a7f27b8fe98eb5f1646d5516a359c3bc4ea6042cc8125e26478d240")
 frozen_disk_oracle("shape_admission_witness.jl",
     joinpath(DISK_OUTPUT, "frozen-shape-6"),
     "36d9d430644541bcfe6e7ce7ef2af254c62374e4e717058a4b6a45ebb3fa45ad")

@@ -217,3 +217,32 @@ failed 116 of 300 assertions without setup errors, after the independent
 through the mandatory disk-fit worker, including real stream/bundle roundtrips.
 Original frozen oracles and tolerances are unchanged. Complete final release
 gates must bind this later implementation; 8d13a3b results remain historical.
+
+
+## Resource assertion strengthening after canonical audit, 18 October 2026
+
+The unchanged canonical audit rejected the copied disk-fit helper's unconditional
+resource assertion. Both historical audits completed package tests and experiments
+successfully but failed this static quality gate: 8d13a3b had 342 PASS/3 WARN/1 FAIL;
+42804b43 had 343 PASS/3 WARN/1 FAIL. No gate was disabled or weakened.
+
+One defective assertion statement and its misleading append-open comment are
+replaced with an independent observed-handle check. All other original test
+bytes, numerical assertions and tolerances are retained, proven by three exact
+source replacements. The original cbfbbb49 file remains in Git history at
+42804b43 and external evidence. The maintained version is now source-pinned as
+2239747a4a7f27b8fe98eb5f1646d5516a359c3bc4ea6042cc8125e26478d240.
+The unchanged test body still reports 390 passing dynamic checks; no claim is
+made that its dynamic count equals its number of source assertion statements.
+
+The independent oracle uses a zero-sharing Windows file probe or native Unix
+fstat device/inode comparison over this process's descriptor directory. Controls
+require detection of held, explicitly closed and unrelated files, preservation
+of file bytes, and rejection of absent/nonregular targets. The known Unix
+enumerator-descriptor closure race is accepted only for exact EBADF; unknown
+query errors fail. Deliberately always-open/always-closed oracles must fail real
+assertions. This observes current closure, not a hostile-writer or past-leak proof.
+
+The helper digest is b917120e29144a50bae4620ccb36072b51d0f69de172eaf4af35a8b977a03fc3.
+Production numerical/process code is unchanged. Fresh full qualification must
+bind the final stronger test tree before main promotion.
