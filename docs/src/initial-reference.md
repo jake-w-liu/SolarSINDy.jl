@@ -33,7 +33,27 @@ each lead's full finite-anchor/target cohort, including fallback rows. Feature
 availability restricts baseline training; it does not delete validation rows.
 Both completion and receipt satisfy the inclusive 168-hour maturity cutoff.
 
-These arithmetic checks are building blocks for a separate full saved-artifact
-reader. They do not load artifacts, admit data, authorize fitting, or establish
-forecast skill. Candidate A real-data fitting, the L1 reference, independent
-saved-state closure, comparative accuracy and novelty remain distinct gates.
+`tools/initial_reference_audit/audit_reference.py` independently reads the saved
+artifacts without author prediction code, Julia type resolution or an ML model
+loader. It reconstructs initial imputation, decodes all 16 saved trees, replays
+features and sample scaling, verifies every validation point and fallback, and
+checks metrics, selection and the separate candidate joins. Float64 binning and
+per-tree Float32 accumulation are retained. The original imputer fingerprint is
+computed independently from cleaned raw channels and eligible hour tags.
+
+The entry point requires Python 3.11 or later, an already instantiated package
+environment, explicit canonical paths, caller-pinned completion/executable
+digests and an explicit evidence mode. The output is new and separate from code
+and inputs. Input sizes, counts and structured data are bounded; the Julia stage
+has a timeout and owns its descendant processes on Windows and POSIX. A complete
+receipt follows numerical success and input/control rechecks. See the reader
+README for command arguments, budgets and the quiescent-input requirement.
+
+The compressed regression fixture contains only source-generated nonconstant
+synthetic data. Its unused executable path is normalized as recorded in its
+manifest. The tests verify saved-state consistency, rehashed corruption
+rejection, future-tail invariance and process cleanup; they do not qualify
+execution lineage or real-data performance. Candidate A real-data fitting, the
+L1 reference, actual-artifact closure, independent confirmation, comparative
+accuracy and novelty remain distinct gates. No reader result authorizes fitting
+or changes the operational forecaster.

@@ -1,0 +1,53 @@
+{
+  "schema": "independent_sandu_completed_reader_oracles_v2",
+  "scope": "Synthetic and manually calculated expectations frozen before decoder/replay implementation. No real outcomes, fitting, author imports, or old receipt rewriting.",
+  "bson_literals": [
+    {"name":"int32_42","hex":"0c0000001078002a00000000","expected":{"x":42}},
+    {"name":"string_ok","hex":"0f000000027300030000006f6b0000","expected":{"s":"ok"}},
+    {"name":"trailing_byte","hex":"0c0000001078002a0000000000","reject":true},
+    {"name":"truncated_int32","hex":"0c0000001078002a000000","reject":true},
+    {"name":"negative_length","hex":"ffffffff00","reject":true},
+    {"name":"duplicate_x","hex":"13000000107800010000001078000200000000","reject":true},
+    {"name":"bool_invalid_encoding","hex":"090000000862000200","reject":true},
+    {"name":"string_missing_terminator","hex":"0f000000027300030000006f6b2100","reject":true}
+  ],
+  "typed_arrays": [
+    {"type":["Core","Float32"],"size":[1,3],"data_hex":"0000003f000080bf00000040","expected":[0.5,-1.0,2.0]},
+    {"type":["Core","Int64"],"size":[2],"data_hex":"0100000000000000feffffffffffffff","expected":[1,-2]},
+    {"type":["Core","Bool"],"size":[2],"data_hex":"0001","expected":[false,true]},
+    {"type":["Core","Bool"],"size":[1],"data_hex":"02","reject":true},
+    {"type":["Core","Float32"],"size":[2],"data_hex":"0000803f","reject":true},
+    {"type":["Core","Float64"],"size":[-1],"data_hex":"","reject":true}
+  ],
+  "backrefs": {
+    "positive": "Two references to one finite acyclic numeric-array table entry decode to equal plain data; decoding never resolves Julia names or instantiates structs.",
+    "negative": ["index zero","index outside table","cycle","unknown Julia type/ref path","duplicate document key","non-sequential BSON array keys","oversized declared document or array"]
+  },
+  "bin_edges": {
+    "edges":[-1.0,0.0,0.0,2.0],
+    "values":[-2.0,-1.0,-0.5,0.0,1.0,2.0,3.0],
+    "expected_one_based_bins":[1,1,2,2,4,4,5]
+  },
+  "tree": {
+    "description":"Heap root uses feature 1, condition bin 2, ordered numeric feature; left leaf +2, right leaf -3; bias +0.5; second leaf-only tree +0.25. Sum each addition in Float32.",
+    "bins":[1,2,3,4,5],
+    "expected_delta":[2.75,2.75,-2.25,-2.25,-2.25],
+    "float32_order_control":{"terms":[16777216.0,1.0,-16777216.0],"expected":0.0,"float64_sum":1.0},
+    "reject":["MSE/K mismatch","29 feature order mismatch","non-finite edges or leaves","unsorted edges","feature index outside 1..29","split child outside tree","invalid split flag","wrong tree count","tree deeper than selected max_depth","wrong numeric widths/dimensions"]
+  },
+  "standardization": {
+    "column":[1.0,2.0,3.0],"center":2.0,"sample_scale":1.0,
+    "constant_column":[4.0,4.0,4.0],"constant_center":4.0,"constant_scale":1.0,
+    "reject":["swapped feature names","non-positive scale","non-finite scale","center +1000","duplicate row","missing eligible row","extra ineligible row","empty rows"]
+  },
+  "masks_and_records": {
+    "native_selection_records":12,
+    "native_selection_keys":"three feature families x two recipes x horizons 4,6, each exactly once",
+    "final_refit_records":14,
+    "final_refit_keys":"12 native plus matched_gbm29 at h4 and h6, each exactly once",
+    "fit_ledger":"Sorted exact independently derived full per-lead finite-anchor/finite-target/availability/168h-maturity row vector, nonempty, with multiplicity one; counts and both maxima match that vector.",
+    "four_preserved_mutants_must_reject":["rehashed_gbm_bson_invalid","rehashed_gbm_scaling_changed","rehashed_gbm_fit_rows_empty","rehashed_duplicate_native_selection"],
+    "fallback":"Every scoreable unavailable-design row predicts exact raw anchor with declared persistence_feature_unavailable status; all available rows replay saved GBM. No dropping rows."
+  },
+  "tolerance":"Retain existing 5e-12 * max(1,abs(expected)) for floating artifact comparisons; exact Float32 sums/bins/schema/keys/masks where exactness is defined. No tolerance promotion."
+}

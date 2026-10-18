@@ -301,3 +301,55 @@ verified private-job owner, with all descendants subsequently absent. Its CI
 run39139636532 was cancelled after retaining source/jobs evidence. Docs and
 images passed, but no complete native/package/harness verdict is claimed for
 that superseded source. Fresh complete gates must bind the corrected candidate.
+
+
+### Independent initial-reference artifact reader
+
+The maintained Python/Julia reader verifies saved artifacts without importing
+SolarSINDy prediction code, BSON type reconstruction or an ML library. It binds
+caller-pinned completions and an explicit executable, replays initial imputation
+from official JSON trees, decodes all sixteen fixed-grid GBM models as bounded
+plain data, and independently reconstructs features, corrected sample moments,
+raw per-lead cohorts, clocks, fallbacks, pooled metrics, strict grid selection and
+separate candidate joins. Saved Float64 scaling remains model state after moment
+verification; changing it by a tiny amount can alter exact bin membership. The
+imputer fingerprint is reconstructed from cleaned raw values and hour tags.
+
+A fresh rehashed corruption matrix first found four accepted contradictory
+metadata fields: selected configuration, selected expected metric, prediction
+file digest and scaling file digest. Their comparisons are now mandatory. The
+preserved failing matrix has seventeen passes and four expected-rejection
+failures; the corrected matrix passes all cases without changing a model,
+cohort, metric tolerance or selection rule. An additional verified resource
+error in the copied BSON helper requested read(-1) for max_bytes=-2 before
+rejecting it. Invalid caps now fail before opening any file. Default decoding
+and original frozen arithmetic assertions are retained.
+
+The public command runs Julia in a private Windows Job Object or an owned POSIX
+session, cleans descendants after root exit and timeout, and writes completion
+only after numerical success and input/control rechecks. Source inputs must be
+quiescent; concurrent hostile replacement is outside the contract. Complete
+original-source declared outputs and the exact reference inventory are checked;
+unlisted legacy audit receipts are not followed. Large original training
+metadata uses the explicit eight-million-node cap; other JSON defaults remain.
+
+The compressed regression fixture is generated-only:177 members,31593482
+expanded bytes. Its sole transformation normalizes an unused executable path;
+all declared model/numerical output bytes remain exact. Its archive SHA256 is
+72a16392bcc2ee9d4280481607a71f18eea8304c5460715c73f1012aa2bf0e1d.
+Its manifest explicitly excludes execution-lineage qualification. The maintained
+native runner is copied byte-exact from the previously verified runner
+1c593d90793f6f70e05622772aec83b53919aa2c22575ab738a4ee1968f116f0.
+The independent scalar-tree and feature arithmetic retain their source bytes;
+the BSON helper differs only by the reviewed early positive-integer cap guard.
+
+The reader establishes consistency within its input contracts, not data
+admission, fitting authorization, novelty, superiority, independent confirmation
+or serving qualification. No actual archive fit or operational model change is
+part of this implementation. The real candidate importer, complete L0/L1 fit
+chain and matched scientific comparison still require separate completion.
+
+Fixed-schema CSV preflight additionally caps physical records at64KiB before
+parsing, fields at4096 characters, exact column widths and bounded rows. It does
+not mutate Python CSV process-global settings. This guards parser inputs without
+claiming measured memory optimality or changing numerical acceptance bounds.

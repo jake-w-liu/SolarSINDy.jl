@@ -48,6 +48,13 @@ jobs:
         # Catch filesystem/runtime/schema differences before the full package
         # run. The unfiltered package suite below still executes these tests.
         run: julia --startup-file=no --pkgimages=no --project=. test/test_initial_reference_tools.jl
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify independent artifact replay and corruption rejection
+        # Standard-library Python and data-only Julia replay; no author model
+        # loader, new fitting, network data or scientific acceptance verdict.
+        run: python -B -m unittest discover -s test/initial_reference -p 'test_*.py' -v
       # The suite reports which local-artifact oracles are unavailable in a clean clone.
       - uses: julia-actions/julia-runtest@v1
       - name: Run the research experiments

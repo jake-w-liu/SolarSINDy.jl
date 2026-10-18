@@ -528,3 +528,46 @@ Receiptb0c9a35d6540874b0d92973e7db9924f6ac72c9bca58164cec35248b3f95fd5c.
 CI now executes the mandatory focused reference suite before its still-unfiltered
 package action and full experiments in all six native cells; no existing step,
 platform, tolerance or scientific check is removed.
+
+
+### Independent artifact-reader pre-commit checkpoint (2026-10-18 UTC)
+
+The Julia package-focused source suite passes361 displayed checks on each local
+Windows runtime, Julia1.12.6 and1.13.1. The original322 checks are retained and
+39 scalar-tree, invalid-state, ownership and saved-scaling boundary checks are
+added. Both native exits are0 with all admitted Julia source bytes unchanged;
+receiptc084512555477deebd60983a78d97c18156335b605195b4019073e6947bac62f.
+
+The initial full numerical reader passes68220 checks per runtime. A subsequent
+fresh rehashed corruption matrix deliberately fails four rejection assertions
+(selected configuration/metric and prediction/scaling digest metadata). Its
+failure receipt56481ff8f485bb0313c8d38daad4b4d67987ff592fe7b728b4e06420eb9f124d
+and exact before-source are retained. After adding the missing comparisons,
+all original rehashed controls reject as required; receipte1a2d3dc79efecd55d2961f34830e78d86b4935dfaa18b33a2f9a3d58ee16964.
+
+The completed maintained Python suite passes25 tests on each local runtime.
+Each executes the public CLI,68222 numerical checks across all sixteen models,
+25 rehashed corruptions, an actual changed raw future-tail invariance control,
+frozen literal BSON/type/bin/Float32 tests, path/count/byte/JSON/CSV guards and
+owned descendant listener controls on normal root exit and timeout. The complete
+matrix receipt is9852cf3ccda712d6c5bac468217c4b024aa798fff58f09358fc9439a7de4128d;
+all pinned source/executable/test bytes remain unchanged. Each local Windows run
+explicitly skips one file-symlink creation test because that capability is
+unavailable. No file-symlink rejection pass is inferred from that skip. The
+other path/case controls and native process lifetime controls execute.
+
+The copied BSON helper's negative-cap witness invokes read(-1) for max_bytes=-2
+before rejection. The corrected helper rejects all eight invalid cap values
+before file opening, preserving default decoding and the original manual
+expectations. CSV preflight additionally bounds physical records before parser
+materialization, exact widths, field sizes, unique headers and row counts.
+This is parser resource coverage, not a claim of measured peak-memory optimality.
+
+The fixture is entirely generated and its normalized execution path is recorded
+in its hash-bound manifest; all numerical/model bytes remain unchanged. No real
+archive fit, actual saved-artifact numerical closure, source-admission verdict,
+forecast superiority, novelty, fresh confirmation or serving change is claimed.
+At this pre-commit checkpoint, complete package/examples/canonical-harness,
+strict docs/images and the six native cells for the new reader remain pending.
+Those gates must pass on the exact committed tree before main publication;
+the immutable release qualification and annotated tag record the later outcome.
