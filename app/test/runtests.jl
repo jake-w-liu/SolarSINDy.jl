@@ -10,6 +10,9 @@
 
 using Test, JSON3, Statistics, HTTP, Sockets
 
+isdefined(@__MODULE__, :solarsindy_test_bash) ||
+    include(joinpath(@__DIR__, "..", "..", "test", "bash_runtime.jl"))
+
 const APPSRC = normpath(joinpath(@__DIR__, "..", "src"))
 # server.jl transitively includes forecaster.jl, dbdt.jl, notify.jl, network.jl, ... exactly
 # once each (including them again here would redefine `const _FORECASTER`). It does not
@@ -2121,7 +2124,8 @@ const INERTIAL_SINDY_DRIVER_TOKEN =
         process = nothing
         try
             port = Int(last(getsockname(listener)))
-            command = addenv(`bash -c $probe`,
+            bash = solarsindy_test_bash()
+            command = addenv(`$bash -c $probe`,
                              "URL" => "http://127.0.0.1:$port",
                              "OUT" => "/dev/null")
             output = IOBuffer()
