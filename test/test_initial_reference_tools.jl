@@ -10,7 +10,7 @@ push!(MEMBERS,joinpath(ROOT,"tools","initial_reference_audit","InitialReferenceA
 const BEFORE=Dict(path=>bytes2hex(sha256(read(path))) for path in MEMBERS)
 
 module SourceAdmission
-const ARGS=[joinpath(mktempdir(;prefix="solarsindy-reference-admission-",cleanup=false),"evidence")]
+const ARGS=[joinpath(realpath(mktempdir(;prefix="solarsindy-reference-admission-",cleanup=false)),"evidence")]
 end
 Base.include(SourceAdmission,joinpath(FROZEN,"test_loader.jl"))
 
@@ -41,7 +41,7 @@ const G=AllGridInitialGBMReference
     # Inert synthetic file/receipt objects cannot authorize executing the current
     # binary. The source/module/input/native objects below intentionally provide
     # no usable fields, so touching them before rejection fails this test.
-    work=mktempdir(;prefix="solarsindy-reference-runtime-",cleanup=false)
+    work=realpath(mktempdir(;prefix="solarsindy-reference-runtime-",cleanup=false))
     f=fixture(joinpath(work,"input"))
     admitted=B.admit(f.path,f.sha256;roots=f.roots)
     config=(validation_start=DateTime(2019)+Hour(500),test_start=DateTime(2019)+Hour(900))
