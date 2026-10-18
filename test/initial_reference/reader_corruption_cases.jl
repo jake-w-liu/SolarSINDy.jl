@@ -1,5 +1,6 @@
 using Test, JSON3
 include(joinpath(@__DIR__,"..","..","tools","initial_reference_audit","audit_prepared_reference.jl"))
+include(joinpath(@__DIR__,"precise_moment_oracle.jl"))
 length(ARGS)==2 || error("CASES_JSON RESULTS_JSON")
 cases=JSON3.read(read(ARGS[1]),Vector{Dict{String,Any}})
 results=Any[]
@@ -16,8 +17,9 @@ end
 write(ARGS[2],JSON3.write(results))
 @testset "Rehashed independent reader corruptions" begin
     for result in results
-        @test !result.accepted
+        @test result.accepted==(result.name=="precise-moment-positive")
     end
+    @test count(result->result.name=="precise-moment-positive",results)==1
     @test isempty(intersect(Set(pkg.name for pkg in keys(Base.loaded_modules)),
                            Set(("SolarSINDy","XGBoost","EvoTrees","BSON"))))
 end

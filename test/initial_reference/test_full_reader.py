@@ -88,7 +88,10 @@ class FullReader(unittest.TestCase):
             self.assertEqual(result['numerical']['fallback_points'],1968)
             self.assertFalse(result['scientific_verdict']);self.assertFalse(result['execution_lineage_qualification'])
             self.assertFalse(result['serving_promotion'])
-            cases=[];rejections=[]
+            precise=root/'precise-positive'
+            prepare.prepare(reference,sha(reference/'completion.json'),source,sha(source/'completion.json'),'synthetic_only',precise)
+            cases=[{'name':'precise-moment-positive','plan':str(precise/'audit-plan.json'),'sha256':sha(precise/'audit-plan.json')}]
+            rejections=[]
             def create(name,mutate):
                 work=root/name;work.mkdir();ref=work/'reference';shutil.copytree(reference,ref)
                 completion=load(ref/'completion.json');original=load(reference/'completion.json')
@@ -121,6 +124,9 @@ class FullReader(unittest.TestCase):
             prediction('fallback-status',lambda rows:next(x for x in rows if x['status']=='persistence_feature_unavailable').update(status='model'))
             create('fit-future-row',lambda r,c:(r/'fit_h4.txt').write_text((r/'fit_h4.txt').read_text()+'999\n'))
             create('scaling',lambda r,c:csv_edit(r/c['results'][0]['grid'][0]['scaling'],lambda rows:rows[0].update(center=str(float(rows[0]['center'])+1))))
+            create('scale-value',lambda r,c:csv_edit(r/c['results'][0]['grid'][0]['scaling'],lambda rows:rows[0].update(scale=str(float(rows[0]['scale'])+1))))
+            create('population-scale',lambda r,c:csv_edit(r/c['results'][0]['grid'][0]['scaling'],
+                lambda rows:rows[16].update(scale=str(float(rows[16]['scale'])*math.sqrt(303/304)))))
             create('metric',lambda r,c:c['results'][0]['grid'][0]['metric'].update(rmse_nt=999))
             create('choice-index',lambda r,c:c['results'][0]['choice'].update(selected_index=1))
             create('choice-bool',lambda r,c:c['results'][0]['choice'].update(selected_index=True))
@@ -141,7 +147,7 @@ class FullReader(unittest.TestCase):
                 entry['new_model_sha256']=sha(path);put(ref/'initial_imputation_replay.json',replay)
             create('imputer-version-bool',lambda r,c:imputer_version(r,c,[3,2,False]))
             create('imputer-version-float',lambda r,c:imputer_version(r,c,[3,2,0.]))
-            self.assertEqual(len(cases)+len(rejections),27)
+            self.assertEqual(len(cases)-1+len(rejections),29)
             put(root/'cases.json',cases)
             driver=Path(__file__).resolve().parent/'reader_corruption_cases.jl'
             env=dict(os.environ,JULIA_LOAD_PATH='@'+os.pathsep+'@stdlib',JULIA_PKG_OFFLINE='true',
@@ -151,7 +157,8 @@ class FullReader(unittest.TestCase):
                 cwd=str(root),environment=env,logpath=root/'corruptions.log',timeout=300)
             self.assertEqual(native['native_exit'],0);self.assertFalse(native['timed_out'])
             results=load(root/'results.json');self.assertEqual(len(results),len(cases))
-            self.assertTrue(all(not x['accepted'] for x in results))
+            self.assertTrue(all(x['accepted']==(x['name']=='precise-moment-positive') for x in results))
+            self.assertEqual(sum(x['name']=='precise-moment-positive' for x in results),1)
             # Change only an excluded raw Dst observation after the complete
             # validation prefix. Rebind its full-matrix metadata and both
             # completions; all stored initial models/points remain byte exact.
@@ -182,7 +189,7 @@ class FullReader(unittest.TestCase):
             self.assertEqual(other['numerical']['model_points'],result['numerical']['model_points'])
             self.assertEqual(other['numerical']['fallback_points'],result['numerical']['fallback_points'])
             self.assertEqual(io.inventory(root/'fixture'),before)
-            print(json.dumps({'independent_reader_complete':True,'rehashed_corruptions':27,
+            print(json.dumps({'independent_reader_complete':True,'rehashed_corruptions':29,'precise_moment_positive':True,
                 'numerical_checks':result['numerical']['checks'],'author_or_ml_imported':False}),flush=True)
         except BaseException:
             print('Retained failed independent reader controls: '+str(root),file=sys.stderr,flush=True)

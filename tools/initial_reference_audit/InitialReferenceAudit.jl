@@ -10,6 +10,34 @@ need(ok,message) = ok || throw(ArgumentError(message))
 isint(x) = x isa Integer && !(x isa Bool)
 finite_number(x) = x isa Real && !(x isa Bool) && isfinite(x)
 
+"""Corrected Float64 sample deviation about a separately verified stored mean.
+
+The mean is model state. Recomputing another rounded mean can turn a tiny
+positive deviation into exact zero, whose legacy unit replacement is discontinuous.
+Compensated accumulation limits reduction error; exactly zero maps to one.
+"""
+function sample_scale_about(values::AbstractVector,center)
+    need(2<=length(values)<=1_000_000,"sample scale count outside 2:1000000")
+    need(finite_number(center) && all(finite_number,values),"finite non-Boolean sample values/mean required")
+    c=Float64(center)
+    need(isfinite(c),"sample mean Float64 overflow")
+    total=0.;correction=0.
+    for value in values
+        x=Float64(value)
+        need(isfinite(x),"sample value Float64 overflow")
+        term=abs2(x-c)
+        need(isfinite(term),"sample variance overflow")
+        adjusted=term-correction
+        updated=total+adjusted
+        correction=(updated-total)-adjusted
+        total=updated
+    end
+    need(isfinite(total) && total>=0.,"sample variance sum overflow")
+    scale=sqrt(total/(length(values)-1))
+    need(isfinite(scale),"sample scale overflow")
+    iszero(scale) ? 1. : scale
+end
+
 function field(record,key)
     if record isa AbstractDict
         need(haskey(record,String(key)),"missing reference field: $key")

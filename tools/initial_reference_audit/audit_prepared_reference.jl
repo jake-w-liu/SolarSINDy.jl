@@ -19,8 +19,9 @@ function readjson(path;maximum=64*1024^2)
     JSON3.read(read(path),Dict{String,Any})
 end
 function near(actual,expected,message)
-    check(actual isa Real && expected isa Real && !(actual isa Bool) && !(expected isa Bool) &&
-          isfinite(actual) && isfinite(expected) && abs(actual-expected)<=5e-12*max(1.,abs(expected)),message)
+    ok=actual isa Real && expected isa Real && !(actual isa Bool) && !(expected isa Bool) &&
+          isfinite(actual) && isfinite(expected) && abs(actual-expected)<=5e-12*max(1.,abs(expected))
+    check(ok,ok ? message : string(message,"; actual=",repr(actual)," expected=",repr(expected)))
 end
 function row_indices(actual,expected,message)
     check(length(actual)==length(expected) && all(x->x isa Integer && !(x isa Bool),actual) && collect(actual)==expected,message)
@@ -155,8 +156,12 @@ function audit(plan_path,expected_plan_sha)
             saved=CSV.read(joinpath(reference,record["scaling"]),DataFrame)
             check(names(saved)==["feature","center","scale"] && saved.feature==F.NAMES,"exact sample-scaling schema differs")
             for j in 1:29
-                near(saved.center[j],center[j],"independent sample center differs")
-                near(saved.scale[j],scale[j],"independent sample scale differs")
+                context=" h=$h grid=$index feature=$(F.NAMES[j])"
+                near(saved.center[j],center[j],"independent sample center differs"*context)
+                # Source variance is centered at the stored, independently
+                # verified rounded mean. Preserve its zero-to-unit mapping.
+                expected_scale=R.sample_scale_about(view(X,cohort.fit,j),saved.center[j])
+                near(saved.scale[j],expected_scale,"independent sample scale differs"*context)
                 check(saved.scale[j]>0,"saved scale must be positive")
             end
             points=CSV.read(joinpath(reference,record["predictions"]),DataFrame)

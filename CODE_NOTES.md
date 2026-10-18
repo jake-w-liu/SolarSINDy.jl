@@ -398,3 +398,54 @@ The affected Linux1.13 route requires three consecutive complete iterations;
 any failure stops immediately. Neither this diagnostic change nor a subsequent
 passing run alone is asserted to explain the original failed child. All full
 package/experiment/native gates and numerical tolerances remain mandatory.
+
+
+### Variance about the verified stored mean
+
+The retained Windows1.13.1 CI artifact from1af9113 reports independent sample
+scale mismatch. All177 generated fixture members are byte-identical to the
+maintained fixture, and its executable matches the locald8804b0 digest. The
+console did not print the exact offending feature/value. Native and generic
+CPU diagnostics on the same bytes show different independently recomputed
+rounded moments; both local routes otherwise pass. Constant vbs0 at h4 has304
+copies of Float641.6, stored center1.6000000000000008 and stored scale
+6.672321400300542e-16. Exact256-bit moments give zero variance and the unit
+replacement. These observations do not establish the unseen CI value.
+
+A controlled independent exact-moment replay of the same complete16-model
+fixture reliably rejects with the original comparison: receipt
+b803b0942f9ddcf30da1755f8eece3f73705643f6ee7e9a5c7caf9701850807c.
+The reader had independently verified the stored mean but then compared scales
+around another rounded mean. Corrected variance is now independently computed
+about the verified stored mean, with compensated accumulation and the original
+exact zero-to-unit mapping. All finite/type/count/overflow checks are explicit.
+Independent mean checks, the5e-12 bound, saved states and every prediction check
+remain unchanged. The original independent feature helper retains its bytes.
+
+The same controlled replay now passes all68222 checks, receipt
+0ebf841f8877ac63c2e9ce67755fd24283f71f443e14d74cc0e74ef13f61ed21.
+The exact-moment generic-CPU route also passes, receiptdce78dc0f8f820899ff392daa48e1844ed408f22167b8c2f114c961f9379dc22,
+as does the ordinary generic-CPU route, receipt733299406d2c3394c352b03bcc56ad626f68fd05229903932f561643c50fb830.
+Fifteen pre-code literal variance/type/size/overflow expectations pass on both
+local Julia versions; frozen oracle396b1e8dcfbe435f2de90694a70574a4ebcd649940eba6b9d3b061ac683e2fc7.
+The full focused suite passes376 checks per Windows runtime, receipt
+1cc327e7213a537ed92e2e30daddd9952fd04727ba7166ff05ce681d307d7562.
+
+Both native Python suites pass27 tests each, including68222 default-moment
+numerical checks, a separate exact-moment positive,29 rehashed corruptions
+(including scale value and population-variance errors), future-tail invariance,
+CLI/failure evidence and cleanup controls. The same unavailable Windows file-
+symlink capability skip remains explicit. Complete matrix receipt
+fb82d1b97b958eaf82964ef129923d615e97a0bffd0b95f504e9df02a7131c36
+binds unchanged code/tests/executables during those runs. Error messages now
+include lead/grid/feature and actual/expected values. The actual prior CI causal
+link remains to be checked by fresh cross-platform execution; no tolerance,
+model, metric, cohort or scientific acceptance rule is weakened.
+
+The canonical full run on the superseded1af9113 source independently finishes
+with364 passes,3 warnings and0 failures. It is retained as evidence for that
+source only; it does not qualify this variance correction. New exact-commit
+full package/examples/harness, strict docs/images and all native cells remain
+mandatory before main publication. Actual-source admission preflight3f86a3af
+passes with no numerical raw parsing, fitting or reference output. Actual
+baseline fitting, actual artifact closure and the complete A chain are unfinished.

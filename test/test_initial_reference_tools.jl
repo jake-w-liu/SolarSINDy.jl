@@ -32,6 +32,7 @@ Base.include(PathSpelling,joinpath(FROZEN,"test_case_spelling_v1.jl"))
 module IndependentCohorts end
 Base.include(IndependentCohorts,joinpath(ROOT,"tools","initial_reference_audit","InitialReferenceAudit.jl"))
 Base.include(IndependentCohorts,joinpath(FROZEN,"independent_reader_hand_oracles_v1.jl"))
+Base.include(IndependentCohorts,joinpath(FROZEN,"stored_mean_scale_oracles_v1.jl"))
 
 module IndependentTreeLiterals end
 Base.include(IndependentTreeLiterals,joinpath(@__DIR__,"initial_reference","test_scalar_tree_replay.jl"))

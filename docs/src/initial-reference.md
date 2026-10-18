@@ -40,6 +40,10 @@ features and sample scaling, verifies every validation point and fallback, and
 checks metrics, selection and the separate candidate joins. Float64 binning and
 per-tree Float32 accumulation are retained. The original imputer fingerprint is
 computed independently from cleaned raw channels and eligible hour tags.
+Stored means are checked against independent moments before corrected variance
+is reconstructed about those stored means. This preserves the source's rounded
+state and exact zero-to-unit convention for constant features. The saved scale,
+every forecast and the original comparison bound remain unchanged.
 
 The entry point requires Python 3.11 or later, an already instantiated package
 environment, explicit canonical paths, caller-pinned completion/executable

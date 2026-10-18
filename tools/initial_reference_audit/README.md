@@ -14,6 +14,12 @@ strict first-minimum selection and separate candidate joins. It checks the
 original imputer training fingerprint and every serialized forecast clock.
 Float64 feature binning and per-tree Float32 accumulation are preserved. Saved
 Float64 scaling parameters remain model state after independent moment checks.
+The stored mean is first checked independently. Corrected variance is then
+reconstructed about that verified stored mean, with compensated accumulation
+and the source's exact zero-to-unit rule. Recomputing another rounded mean can
+change a constant column's tiny positive deviation to zero; applying the unit
+replacement there would compare different finite-precision states. Every saved
+scale and prediction retains the same 5e-12 comparison bound.
 
 Use Python 3.11 or later and a Julia executable with this package environment
 already instantiated. No packages are fetched by the reader. Pass explicit
