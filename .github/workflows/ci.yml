@@ -14,15 +14,26 @@ concurrency:
 
 jobs:
   test:
-    name: Pkg.test — Julia 1.12
-    runs-on: ubuntu-latest
+    name: Julia ${{ matrix.julia-version }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        julia-version: ['1.12.6', '1.13.1']
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
-          version: '1.12'
+          version: ${{ matrix.julia-version }}
+          arch: 'default'
       - uses: julia-actions/cache@v2
+      - name: Verify the JavaScript test runtime
+        run: node --version
       - name: Resolve the package environment
         # resolve() does not bootstrap registries in a fresh Julia depot.
         run: julia --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate()'
@@ -35,6 +46,8 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
       # The suite reports which local-artifact oracles are unavailable in a clean clone.
       - uses: julia-actions/julia-runtest@v1
+      - name: Run the research experiments
+        run: julia --startup-file=no --project=. examples/experiments.jl
 
   docs:
     name: Documentation build
