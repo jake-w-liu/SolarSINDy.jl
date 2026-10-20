@@ -723,3 +723,17 @@ assertion; focused matrix receipt
 0b02506c634db0d70d57b0e5e3586b29930e3ac5425063ed4120dfc5090899ec
 binds unchanged execution sources, tests and controls. Full release gates for
 this collector change remain pending.
+### POSIX process ownership regression
+
+macOS1.13 job118555079345, run39400905407 failed in the second timeout-cleanup
+killpg call, after the generated importer passed. The raw log SHA256 is
+6f8e6a57b1c09da27bc5cc4db7ebe6c0e3c35224713b013aac661835b09efb52.
+Its exact 535-file candidate is retained. No local full harness was started
+for that known failing candidate and no main promotion was performed.
+
+A pre-implementation event oracle and byte-frozen runner reproduce redundant
+signals on timeout, missing-group and permission-denial paths. All six portable
+semantic controls pass after consolidating cleanup into the single finally
+path. They send no real signals. Native listener closure and the complete
+software qualification remain separate required gates. No execution deadline,
+test assertion, numerical tolerance or Windows native ownership logic changed.

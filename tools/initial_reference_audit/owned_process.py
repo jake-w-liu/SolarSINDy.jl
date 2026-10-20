@@ -22,17 +22,17 @@ def run_owned(argv, *, cwd, environment, logpath, timeout, on_launch=None):
             if on_launch:
                 on_launch(process.pid)
             try:
-                native = process.wait(timeout=timeout)
+                process.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 expired = True
-                os.killpg(process.pid, signal.SIGKILL)
-                native = process.wait(timeout=20)
+                # One cleanup below owns both timeout and normal-exit paths.
+                # A second signal after reaping can target a dead POSIX group.
         finally:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            process.wait(timeout=20)
+            native = process.wait(timeout=20)
         return dict(pid=process.pid, native_exit=native, timed_out=expired,
                     descendant_cleanup='owned POSIX session killed after stage',
                     ownership='start_new_session=True')

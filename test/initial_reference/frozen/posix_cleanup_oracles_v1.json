@@ -1,0 +1,123 @@
+{
+  "schema": "owned_posix_cleanup_contract_oracles_v1",
+  "before_source_sha256": "1c593d90793f6f70e05622772aec83b53919aa2c22575ab738a4ee1968f116f0",
+  "fake_owned_pid": 424242,
+  "signal": 9,
+  "timeout": {
+    "events": [
+      [
+        "spawn",
+        true
+      ],
+      [
+        "wait",
+        5
+      ],
+      [
+        "killpg",
+        424242,
+        9
+      ],
+      [
+        "wait",
+        20
+      ]
+    ],
+    "native_exit": -9,
+    "timed_out": true
+  },
+  "normal_exit": {
+    "events": [
+      [
+        "spawn",
+        true
+      ],
+      [
+        "wait",
+        5
+      ],
+      [
+        "killpg",
+        424242,
+        9
+      ],
+      [
+        "wait",
+        20
+      ]
+    ],
+    "native_exit": 0,
+    "timed_out": false
+  },
+  "callback_error": {
+    "events": [
+      [
+        "spawn",
+        true
+      ],
+      [
+        "callback",
+        424242
+      ],
+      [
+        "killpg",
+        424242,
+        9
+      ],
+      [
+        "wait",
+        20
+      ]
+    ],
+    "fatal": true
+  },
+  "disappeared_group": {
+    "events": [
+      [
+        "spawn",
+        true
+      ],
+      [
+        "wait",
+        5
+      ],
+      [
+        "killpg",
+        424242,
+        9
+      ],
+      [
+        "wait",
+        20
+      ]
+    ],
+    "native_exit": 0,
+    "timed_out": true
+  },
+  "permission_denied": {
+    "events": [
+      [
+        "spawn",
+        true
+      ],
+      [
+        "wait",
+        5
+      ],
+      [
+        "killpg",
+        424242,
+        9
+      ]
+    ],
+    "fatal": true
+  },
+  "requirements": [
+    "exactly one owned-group signal per exit path",
+    "timeout remains a failed deadline",
+    "fresh session before callback",
+    "unknown permission failures propagate",
+    "normal parent exit still closes descendant listeners"
+  ],
+  "scope": "Deterministic control oracle, declared before implementation; not a macOS kernel-state observation"
+}

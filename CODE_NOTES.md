@@ -504,3 +504,26 @@ retain their existing contracts. Both local Julia1.12.6 and1.13.1 pass all74
 grouped recovery checks plus the frozen-source hash assertion. The original
 collector bytes remain an independent before oracle. Full package, experiment,
 harness and native-matrix gates are still required for this new source.
+### POSIX descendant cleanup correction, 20 October 2026
+
+The first importer candidate's macOS1.13 native job exposed a redundant second
+process-group signal after the timed-out parent had already been killed and
+reaped. The raw CI trace reports PermissionError at that second call. A frozen
+before runner and pre-code event oracle independently reproduce the duplicated
+signal. The corrected path signals the owned fresh-session group once and
+reaps the parent; missing-group races retain their timed-out classification.
+Genuine permission denials remain fatal. Windows Job Object bytes are unchanged.
+
+Six portable deterministic controls pass after the change. The previous
+candidate and its failed CI evidence are retained; its deferred full local
+harness was stopped before launch. All real descendant-listener controls,
+importer/reader checks, full package/examples and native gates remain required.
+macOS1.13 now requires three consecutive reader passes, as Linux1.13 already did.
+
+Apple's XNU source documents filtering zombie members before selecting EPERM
+for a group with no signalable member. The failed runner's kernel state was
+not retained, so its precise zombie state remains a hypothesis. The verified
+bug is the redundant signal and resulting CI exception. No permission error
+is silently swallowed. Actual initial-reference closure under the prior
+reader remains historical evidence; a fresh actual artifact audit with this
+exact maintained runner is required before its proof can enter the importer.
