@@ -3357,7 +3357,11 @@ esac
             @test_skip "node is unavailable; frontend freshness checks need a JS runtime"
         else
             script = joinpath(@__DIR__, "frontend_freshness.cjs")
-            @test success(`$node --test $script`)
+            # success(AbstractCmd) discards the child's streams. Keep every
+            # frontend assertion, and expose the native failure to CI logs.
+            process = run(ignorestatus(`$node --test --test-reporter=tap $script`))
+            @test process.exitcode == 0
+            @test process.termsignal == 0
         end
     end
 

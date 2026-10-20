@@ -527,3 +527,7 @@ bug is the redundant signal and resulting CI exception. No permission error
 is silently swallowed. Actual initial-reference closure under the prior
 reader remains historical evidence; a fresh actual artifact audit with this
 exact maintained runner is required before its proof can enter the importer.
+
+## Frontend child diagnostic closure (2026-10-20)
+
+The Linux Julia 1.12 job in CI run 39403823863 returned false for the dashboard Node test command. Its child streams, exit code and signal were not recorded by `success(AbstractCmd)`; the underlying frontend failure remains unverified. The runner now inherits child output, records both native exit and signal assertions, and CI runs the unchanged fifteen frontend tests directly before Julia. No frontend assertion, tolerance, package test, experiment or acceptance gate is removed. Full source qualification is pending.

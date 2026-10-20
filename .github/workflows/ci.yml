@@ -34,6 +34,8 @@ jobs:
       - uses: julia-actions/cache@v2
       - name: Verify the JavaScript test runtime
         run: node --version
+      - name: Verify the dashboard frontend directly
+        run: node --test --test-reporter=tap app/test/frontend_freshness.cjs
       - name: Resolve the package environment
         # resolve() does not bootstrap registries in a fresh Julia depot.
         run: julia --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate()'
