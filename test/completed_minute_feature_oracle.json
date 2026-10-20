@@ -1,0 +1,71 @@
+{
+  "scope": "Synthetic independent algebra oracle for the corrected assumed-source adapter, not observational evidence",
+  "issue": "2024-05-10T12:00:00",
+  "ground_vector_definition": "At center issue+k minutes, X=k^2 and Y=0, for integer k=-40 through 31. The one-minute derivative is abs(2*k-1).",
+  "wind_source_rows": [
+    {
+      "offset_minutes": -4,
+      "V": 300.0,
+      "Bz": 2.0,
+      "By": -1.0,
+      "n": 4.0
+    },
+    {
+      "offset_minutes": -1,
+      "V": 400.0,
+      "Bz": -5.0,
+      "By": 1.0,
+      "n": 8.0
+    },
+    {
+      "offset_minutes": 0,
+      "V": 900.0,
+      "Bz": -30.0,
+      "By": 9.0,
+      "n": 20.0
+    }
+  ],
+  "cases": [
+    {
+      "ground_extra_ms": 0,
+      "omni_extra_ms": 0,
+      "label_extra_ms": 0,
+      "oldest_ground_center": "2024-05-10T11:30:00",
+      "ground_anchor": "2024-05-10T11:59:00",
+      "omni_anchor": "2024-05-10T11:59:00",
+      "dbdt_now": 3.0,
+      "dbdt_mean30": 32.0,
+      "dbdt_max30": 61.0,
+      "dbdt_std30": 17.60681686165901,
+      "V": 400.0,
+      "Bz": -5.0,
+      "By": 1.0,
+      "n": 8.0,
+      "Bs": 5.0,
+      "VBs": 2000.0,
+      "target_max_dbdt": 59.0,
+      "label_ready": "2024-05-10T12:30:45"
+    },
+    {
+      "ground_extra_ms": 120000,
+      "omni_extra_ms": 180000,
+      "label_extra_ms": 240000,
+      "oldest_ground_center": "2024-05-10T11:28:00",
+      "ground_anchor": "2024-05-10T11:57:00",
+      "omni_anchor": "2024-05-10T11:56:00",
+      "dbdt_now": 7.0,
+      "dbdt_mean30": 36.0,
+      "dbdt_max30": 65.0,
+      "dbdt_std30": 17.60681686165901,
+      "V": 300.0,
+      "Bz": 2.0,
+      "By": -1.0,
+      "n": 4.0,
+      "Bs": 0.0,
+      "VBs": 0.0,
+      "target_max_dbdt": 59.0,
+      "label_ready": "2024-05-10T12:36:45"
+    }
+  ],
+  "all_historical_receipts_unknown": true
+}

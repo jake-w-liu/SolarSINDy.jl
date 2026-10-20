@@ -1,0 +1,119 @@
+{
+  "schema": "independent_dbdt_source_clock_expectations_v2",
+  "scope": "Explicit counterfactual analysis-availability policy, not historical receipt evidence",
+  "issue_cadence_ms": 60000,
+  "target_horizon_minutes": 30,
+  "ground_future_filter_support_ms": 45000,
+  "omni_arrival_interval_ms": 60000,
+  "cases": [
+    {
+      "issue": "2024-05-10T12:00:00",
+      "ground_extra_ms": 0,
+      "omni_extra_ms": 0,
+      "label_extra_ms": 0,
+      "latest_ground_center": "2024-05-10T11:59:00",
+      "latest_ground_assumed_ready": "2024-05-10T11:59:45",
+      "latest_omni_arrival_start": "2024-05-10T11:59:00",
+      "latest_omni_assumed_ready": "2024-05-10T12:00:00",
+      "first_target_center": "2024-05-10T12:01:00",
+      "last_target_center": "2024-05-10T12:30:00",
+      "label_assumed_ready": "2024-05-10T12:30:45",
+      "first_scheduled_feedback": "2024-05-10T12:31:00",
+      "sufficient_phase_period_minutes": 31,
+      "legacy_30_minute_feedback_ready": false
+    },
+    {
+      "issue": "2024-12-31T23:59:00",
+      "ground_extra_ms": 0,
+      "omni_extra_ms": 0,
+      "label_extra_ms": 0,
+      "latest_ground_center": "2024-12-31T23:58:00",
+      "latest_ground_assumed_ready": "2024-12-31T23:58:45",
+      "latest_omni_arrival_start": "2024-12-31T23:58:00",
+      "latest_omni_assumed_ready": "2024-12-31T23:59:00",
+      "first_target_center": "2025-01-01T00:00:00",
+      "last_target_center": "2025-01-01T00:29:00",
+      "label_assumed_ready": "2025-01-01T00:29:45",
+      "first_scheduled_feedback": "2025-01-01T00:30:00",
+      "sufficient_phase_period_minutes": 31,
+      "legacy_30_minute_feedback_ready": false
+    },
+    {
+      "issue": "1970-01-01T00:00:00",
+      "ground_extra_ms": 120000,
+      "omni_extra_ms": 180000,
+      "label_extra_ms": 240000,
+      "latest_ground_center": "1969-12-31T23:57:00",
+      "latest_ground_assumed_ready": "1969-12-31T23:59:45",
+      "latest_omni_arrival_start": "1969-12-31T23:56:00",
+      "latest_omni_assumed_ready": "1970-01-01T00:00:00",
+      "first_target_center": "1970-01-01T00:01:00",
+      "last_target_center": "1970-01-01T00:30:00",
+      "label_assumed_ready": "1970-01-01T00:36:45",
+      "first_scheduled_feedback": "1970-01-01T00:37:00",
+      "sufficient_phase_period_minutes": 37,
+      "legacy_30_minute_feedback_ready": false
+    },
+    {
+      "issue": "2025-01-01T00:00:00",
+      "ground_extra_ms": 120000,
+      "omni_extra_ms": 0,
+      "label_extra_ms": 0,
+      "latest_ground_center": "2024-12-31T23:57:00",
+      "latest_ground_assumed_ready": "2024-12-31T23:59:45",
+      "latest_omni_arrival_start": "2024-12-31T23:59:00",
+      "latest_omni_assumed_ready": "2025-01-01T00:00:00",
+      "first_target_center": "2025-01-01T00:01:00",
+      "last_target_center": "2025-01-01T00:30:00",
+      "label_assumed_ready": "2025-01-01T00:32:45",
+      "first_scheduled_feedback": "2025-01-01T00:33:00",
+      "sufficient_phase_period_minutes": 33,
+      "legacy_30_minute_feedback_ready": false
+    }
+  ],
+  "ground_boundary": [
+    {
+      "center": "2024-05-10T12:00:00",
+      "issue": "2024-05-10T12:00:44.999",
+      "assumed_complete": false
+    },
+    {
+      "center": "2024-05-10T12:00:00",
+      "issue": "2024-05-10T12:00:45.000",
+      "assumed_complete": true
+    }
+  ],
+  "strict_training_boundary": [
+    {
+      "label_ready": "2025-01-01T00:00:00.000",
+      "next_split_issue": "2025-01-01T00:00:00.000",
+      "eligible": false
+    },
+    {
+      "label_ready": "2024-12-31T23:59:59.999",
+      "next_split_issue": "2025-01-01T00:00:00.000",
+      "eligible": true
+    }
+  ],
+  "pre_epoch_phase": {
+    "issue": "1969-12-31T23:59:00",
+    "period_minutes": 31,
+    "one_based_phase": 31
+  },
+  "historical_receipt_qualification": false,
+  "label_extra_ms_definition": "Additional label-processing delay after the same ground source becomes available. Ground source extra delay applies to both features and future target labels.",
+  "int64_edges": [
+    {
+      "name": "lower_ground_floor",
+      "issue_ms": "-9223372036854720000",
+      "unrepresentable_ground_anchor_ms": "-9223372036854780000",
+      "expected": "OverflowError"
+    },
+    {
+      "name": "upper_feedback_ceiling",
+      "issue_ms": "9223372036852920000",
+      "unrepresentable_feedback_ms": "9223372036854780000",
+      "expected": "OverflowError"
+    }
+  ]
+}

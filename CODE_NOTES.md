@@ -575,3 +575,7 @@ qualification and every actual fit remain pending.
 ## Implementation correctness and independent oracle (20 October 2026)
 
 The published normalization, simultaneous four-state recurrence and output coefficients were verified from Appendix A. The source-bound scalar oracle was frozen before implementation. The package includes 104 assertions against the independent oracle and input/error/prefix/continuation contracts. Focused native Windows runs pass on Julia 1.12.6 and 1.13.1. Mutations, complete Pkg.test(), the actual examples/experiments.jl entry, all native CI axes and the unchanged canonical harness remain qualification gates. No observational skill or novelty verdict is assigned. See docs/LUND_DST_2002_CONTRACT.md and test/lund_dst_2002_oracle.json.
+
+## Completed-source minute replay development ledger (20 October 2026)
+
+The independent timestamp and polynomial-rate oracles precede this additive research namespace. A retained predecessor fails the same-ground-source delay contract; another reproduction catches extreme minute-rounding overflow. The package port uses checked integer rounding and separates feature-prefix admission from readiness-gated labels. It preserves unknown measured receipts, source dictionaries and all existing numerical oracles. Strict documentation, unfiltered Pkg.test(), the actual experiment entry, native cross-platform CI and the unchanged canonical harness must qualify this candidate. Actual paper cohort rebuilding/refits/replays and scientific novelty or skill remain separate open gates.

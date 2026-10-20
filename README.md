@@ -278,3 +278,11 @@ Saved model, checkpoint, point and selection outputs support pinned readback
 without new gain fitting. Actual execution requires its own exact-source
 qualification and stage permit. This initial stage does not perform final
 refitting, L1 experiments, exposed-test scoring or serving promotion.
+
+## Completed-source minute replay
+
+`CompletedMinuteReplay` separates prefix-only ground/wind features from
+readiness-gated 30-minute labels under an explicit analysis-availability policy.
+Source, issue, target and feedback times remain distinct. See the manual and
+`docs/COMPLETED_MINUTE_REPLAY_CONTRACT.md` for units, delay assumptions, independent
+oracles and the additional numerical verification required for scientific use.

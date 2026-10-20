@@ -17,6 +17,7 @@ makedocs(
             "Core API" => "api.md",
             "Interval-Mean Forecaster" => "interval-mean-forecaster.md",
             "Published Lund Dst Reference" => "lund-dst-reference.md",
+            "Completed-Source Minute Replay" => "completed-minute-replay.md",
             "Forecasting And Alarms" => "forecast-api.md",
             "Operational API" => "operational-api.md",
             "Super-Learner" => "superlearner-api.md",
