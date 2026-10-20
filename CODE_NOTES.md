@@ -571,3 +571,7 @@ weights. It does not establish a complete long-reference eighteen-model stage
 or actual-data resource scaling. All existing core equations, tolerances and
 frozen mathematical oracles remain unchanged. Full executor software
 qualification and every actual fit remain pending.
+
+## Implementation correctness and independent oracle (20 October 2026)
+
+The published normalization, simultaneous four-state recurrence and output coefficients were verified from Appendix A. The source-bound scalar oracle was frozen before implementation. The package includes 104 assertions against the independent oracle and input/error/prefix/continuation contracts. Focused native Windows runs pass on Julia 1.12.6 and 1.13.1. Mutations, complete Pkg.test(), the actual examples/experiments.jl entry, all native CI axes and the unchanged canonical harness remain qualification gates. No observational skill or novelty verdict is assigned. See docs/LUND_DST_2002_CONTRACT.md and test/lund_dst_2002_oracle.json.

@@ -780,3 +780,7 @@ Full unfiltered Pkg.test, examples, the unchanged canonical harness, all
 seventeen workers and six native cells plus strict documentation/images are
 still required on the committed executor. No actual candidate fit, final
 refit, L1 run, test score or serving qualification has been performed.
+
+## Lund 2002 reference verification plan (20 October 2026)
+
+The published normalization, simultaneous four-state recurrence and output coefficients were verified from Appendix A. The source-bound scalar oracle was frozen before implementation. The package includes 104 assertions against the independent oracle and input/error/prefix/continuation contracts. Focused native Windows runs pass on Julia 1.12.6 and 1.13.1. Mutations, complete Pkg.test(), the actual examples/experiments.jl entry, all native CI axes and the unchanged canonical harness remain qualification gates. No observational skill or novelty verdict is assigned. See docs/LUND_DST_2002_CONTRACT.md and test/lund_dst_2002_oracle.json.

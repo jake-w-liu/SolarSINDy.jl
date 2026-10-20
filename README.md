@@ -16,6 +16,15 @@ operational monitor and web dashboard. It has two layers:
    dst-superlearner+sindyfloor+conformal
    ```
 
+## Published one-hour reference
+
+`SolarSINDy.LundDst2002` implements the fixed four-state recurrent network in
+Lundstedt et al. (2002), Appendix A, alongside the existing empirical baselines.
+`predict_next(state, bz_nt, density_cm3, speed_kms)` advances one hourly input;
+`rollout` supports exact chunk continuation. It uses no observed Dst and adds no
+imputation or future-driver policy. See [the source and timing contract](docs/LUND_DST_2002_CONTRACT.md).
+A matched forecasting experiment is still required before any skill claim.
+
 ## Requirements
 
 - Julia **≥ 1.12.6** (`[compat].julia` in [Project.toml](Project.toml))
