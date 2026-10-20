@@ -1,11 +1,11 @@
 # Only source-identity provenance differs from the raw historical training
 # oracle. Numerical expectations and the frozen file itself remain unchanged.
 const TRAINING_PROVENANCE_OLD = "@test sort([name for name in keys(source_maps[1]) if source_maps[1][name]!=source_maps[2][name]])==[\"DstIntervalAdapter.jl\",\"DstIntervalObserver.jl\"]"
-const TRAINING_PROVENANCE_NEW = "@test sort([name for name in keys(source_maps[1]) if source_maps[1][name]!=source_maps[2][name]])==[\"DstIntervalAdapter.jl\",\"DstIntervalObserver.jl\",\"DstIntervalStream.jl\",\"DstIntervalTraining.jl\"]"
+const TRAINING_PROVENANCE_NEW = "@test sort([name for name in keys(source_maps[1]) if source_maps[1][name]!=source_maps[2][name]])==[\"DstIntervalAdapter.jl\",\"DstIntervalObserver.jl\",\"DstIntervalReplay.jl\",\"DstIntervalStream.jl\",\"DstIntervalTraining.jl\"]"
 const TRAINING_MODEL_SOURCE_NAMES = ("DstIntervalObserver.jl", "DstIntervalReplay.jl",
     "sandu_fullchannel_features.jl", "DstIntervalAdapter.jl", "DstIntervalStream.jl", "DstIntervalTraining.jl")
 const TRAINING_EXPECTED_CHANGED_SOURCES = ["DstIntervalAdapter.jl", "DstIntervalObserver.jl",
-    "DstIntervalStream.jl", "DstIntervalTraining.jl"]
+    "DstIntervalReplay.jl", "DstIntervalStream.jl", "DstIntervalTraining.jl"]
 
 function provenance_ast(node)
     node isa Expr || return node

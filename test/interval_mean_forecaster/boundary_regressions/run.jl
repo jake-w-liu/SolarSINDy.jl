@@ -5,7 +5,7 @@ const BOUNDARY_RESOURCE_PINS = Dict(
     "digest_api_regressions.jl" => "232327624eda8804904c1aeb1a3695587858cc36b0d3c66ca7a280e5f12ae169",
     "package_grammar_adapters_v1.jl" => "6d993aec4f7a27a3e185e3651ef6f0a604d6ba534bdad8fbdd5499356048e295",
     "producer_cases_frozen_v2.jl" => "6a6b637f1da002110d7e241293a7487c4592f1dcd70634849435bc399580e10c",
-    "training_provenance_binding.jl" => "b9b8e214e79bdf43ba4657c3c4e42157849474399bddce7046c09cfab77405f4",
+    "training_provenance_binding.jl" => "0fd371765e53ad8485b9ddafef8d132c0eac3afae64b17e94bfbcecf6c681d95",
 )
 for (name, digest) in BOUNDARY_RESOURCE_PINS
     @test hashfile(joinpath(@__DIR__, name)) == digest

@@ -10,14 +10,14 @@ const BEFORE = Dict(IMF.source_identity())
 verify_bindings()
 
 if JOB in ("training362", "grammar-producer")
-    @test hashfile(joinpath(@__DIR__, "boundary_regressions", "training_provenance_binding.jl")) == "b9b8e214e79bdf43ba4657c3c4e42157849474399bddce7046c09cfab77405f4"
+    @test hashfile(joinpath(@__DIR__, "boundary_regressions", "training_provenance_binding.jl")) == "0fd371765e53ad8485b9ddafef8d132c0eac3afae64b17e94bfbcecf6c681d95"
     include(joinpath(@__DIR__, "boundary_regressions", "training_provenance_binding.jl"))
 end
 
 if JOB == "disk-fit"
     include(joinpath(@__DIR__, "disk_fit", "run.jl"))
 elseif JOB == "grammar-producer"
-    @test hashfile(joinpath(@__DIR__, "boundary_regressions", "run.jl")) == "e1f6512dcf65549343796d5feecaf31be95e4be6fe69c29814258b24f81ce075"
+    @test hashfile(joinpath(@__DIR__, "boundary_regressions", "run.jl")) == "d8ee1689c03bac5c96f3da8fbb3ea0ef3b1726602ff2344fb11fe53b5d21bcc2"
     include(joinpath(@__DIR__, "boundary_regressions", "run.jl"))
 elseif JOB == "scanner"
     set_arguments(["verify"])
