@@ -1,0 +1,12 @@
+{
+  "schema": "preimplementation_a_import_oracle_arithmetic_review_v1",
+  "complete": true,
+  "verified_utc": "2026-10-18T19:05:25.358023+00:00",
+  "checks": 37,
+  "oracle_sha256": "3c7acac28467b6a18f0c15c2b72b4d6f7d0ba0c2f7004afcffa9656673462d6a",
+  "reviewer_sha256": "d664a75a6e8b24add3aff0b3c98f0334e873739f42be41da84ca1ac72bc2e942",
+  "implementation_imported": false,
+  "actual_data": false,
+  "importer_implemented": false,
+  "scientific_verdict": false
+}

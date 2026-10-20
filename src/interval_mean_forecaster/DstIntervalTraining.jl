@@ -171,14 +171,27 @@ separate source/model/prediction replay qualification before actual use.
 """
 function select_setting(panels::AbstractDict,reference;validation_start::DateTime,
         validation_end::DateTime,delay_hours::Integer)
+    reference===nothing || reference.evidence_kind==:synthetic_initial_reference ||
+        throw(ArgumentError("unqualifiedreferencekind"))
+    reference===nothing || reference.training_boundary==validation_start ||
+        throw(ArgumentError("referenceisnotinitialprevalidationmodel"))
+    _select_initial_reference(panels,reference;validation_start,validation_end,delay_hours)
+end
+
+# Shared numerical selection only. The public NamedTuple route above retains
+# its synthetic guard. The separate artifact importer must verify serialized
+# source/model/prediction proof before and after using this internal helper.
+function _select_initial_reference(panels::AbstractDict,reference;validation_start::DateTime,
+        validation_end::DateTime,delay_hours::Integer)
     hashes=verify_source_identity()
     reference===nothing && return _selection_result((status=:blocked_reference_absent,selected_index=nothing,panels=(),reference=nothing,cohort_sha256=()),hashes)
     validation_start<validation_end || throw(ArgumentError("unorderedvalidationwindow"))
     sort(collect(keys(panels)))==collect(1:18) || throw(ArgumentError("all18candidatepanels required"))
     delay_hours in (0,1) && !(delay_hours isa Bool) || throw(ArgumentError("unknownlatency"))
-    reference.evidence_kind==:synthetic_initial_reference || throw(ArgumentError("unqualifiedreferencekind"))
-    reference.training_boundary==validation_start && reference.delay_hours==delay_hours || throw(ArgumentError("referenceisnotinitialprevalidationmodel"))
-    cutoff=A._shift(validation_start,-168)
+    reference.training_boundary<=validation_start && reference.delay_hours==delay_hours || throw(ArgumentError("referenceisnotinitialprevalidationmodel"))
+    # An independently audited artifact may expose a later selection subwindow.
+    # Fit-label maturity remains anchored to its original training boundary.
+    cutoff=A._shift(reference.training_boundary,-168)
     reference.max_fit_target_complete isa NTuple{2,DateTime} && reference.max_fit_label_receipt isa NTuple{2,DateTime} ||
         throw(ArgumentError("referencefitclocks require exactlytwo DateTime values"))
     all(j->reference.max_fit_target_complete[j]<=reference.max_fit_label_receipt[j]<=cutoff &&

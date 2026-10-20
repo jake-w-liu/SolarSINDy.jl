@@ -1,0 +1,93 @@
+{
+  "schema": "preimplementation_a_reference_import_literal_oracles_v1",
+  "purpose": "Independent small clock/cohort/selection expectations; no actual-source results",
+  "delay_hours": 0,
+  "raw_start": "2019-12-31T20:00:00",
+  "raw_dst": [-37, -38, -39, -40, -41, -42, -43, -55, null, -65, -70, -75, -80],
+  "null_means": "missing raw observation, represented as NaN only after parsing",
+  "validation_start": "2020-01-01T00:00:00",
+  "validation_end": "2020-01-08T06:00:00",
+  "selection_cutoff": "2020-01-01T06:00:00",
+  "eligible_origin_rows_h4": [4, 6],
+  "eligible_origin_rows_h6": [4],
+  "ordered_union_origin_rows": [4, 6],
+  "union_rows": [
+    {
+      "origin_row": 4,
+      "issue": "2020-01-01T00:00:00",
+      "driver_tag": "2019-12-31T23:00:00",
+      "anchor_tag": "2019-12-31T23:00:00",
+      "anchor_complete": "2020-01-01T00:00:00",
+      "anchor_receipt": "2020-01-01T00:00:00",
+      "anchor": -40,
+      "target_tags": ["2020-01-01T03:00:00", "2020-01-01T05:00:00"],
+      "target_complete": ["2020-01-01T04:00:00", "2020-01-01T06:00:00"],
+      "target_receipt": ["2020-01-01T04:00:00", "2020-01-01T06:00:00"],
+      "targets": [-55, -65],
+      "scoreable": [true, true],
+      "selection_eligible": [true, true]
+    },
+    {
+      "origin_row": 6,
+      "issue": "2020-01-01T02:00:00",
+      "driver_tag": "2020-01-01T01:00:00",
+      "anchor_tag": "2020-01-01T01:00:00",
+      "anchor_complete": "2020-01-01T02:00:00",
+      "anchor_receipt": "2020-01-01T02:00:00",
+      "anchor": -42,
+      "target_tags": ["2020-01-01T05:00:00", "2020-01-01T07:00:00"],
+      "target_complete": ["2020-01-01T06:00:00", "2020-01-01T08:00:00"],
+      "target_receipt": ["2020-01-01T06:00:00", "2020-01-01T08:00:00"],
+      "targets": [-65, -75],
+      "scoreable": [true, true],
+      "selection_eligible": [true, false]
+    }
+  ],
+  "omitted_row_5_reason": "h4 raw target is missing; h6 target receipt is after the selection cutoff",
+  "boundary_control": {
+    "issue": "2020-01-01T00:00:00",
+    "target_complete": "2020-01-01T06:00:00",
+    "receipt_equal_cutoff": "2020-01-01T06:00:00",
+    "equal_cutoff_eligible": true,
+    "receipt_plus_1ms": "2020-01-01T06:00:00.001",
+    "plus_1ms_eligible": false,
+    "plus_1ms_is_valid_l0_metadata": false
+  },
+  "missing_opposite_slot_control": {
+    "replace_raw_dst_one_based_row": 12,
+    "replacement": null,
+    "ordered_union_origin_rows": [4, 6],
+    "row_6_scoreable": [true, false],
+    "row_6_selection_eligible": [true, false]
+  },
+  "fallback_control": {
+    "origin_row": 6,
+    "horizon": 4,
+    "model_available": false,
+    "required_anchor": -42,
+    "required_prediction": -42,
+    "reject_alternative_prediction": -41
+  },
+  "selection_control": {
+    "baseline_h4": [-50, -60],
+    "baseline_h6": [-60],
+    "baseline_pooled_rmse": [5, 5],
+    "baseline_storm_rmse": [5, 5],
+    "setting_1_h4": [-55, -55],
+    "setting_1_h6": [-65],
+    "setting_1_qualifies_both_pooled": false,
+    "setting_1_would_incorrectly_win_on_joint_intersection": true,
+    "setting_2_h4": [-51, -61],
+    "setting_2_h6": [-61],
+    "setting_2_pooled_rmse": [4, 4],
+    "setting_2_normalized_storm_ratio": 0.8,
+    "setting_4_duplicates_setting_2": true,
+    "all_other_settings_h4": [-45, -55],
+    "all_other_settings_h6": [-55],
+    "expected_selected_index": 2,
+    "tie_uses_exact_grid_order": true,
+    "no_qualifier_has_selected_index": null,
+    "missing_storm_status": "blocked_storm_reference",
+    "zero_reference_and_zero_candidate_storm_ratio_per_lead": 1
+  }
+}

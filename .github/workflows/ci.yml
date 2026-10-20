@@ -48,6 +48,8 @@ jobs:
         # Catch filesystem/runtime/schema differences before the full package
         # run. The unfiltered package suite below still executes these tests.
         run: julia --startup-file=no --pkgimages=no --project=. test/test_initial_reference_tools.jl
+      - name: Verify source-bound selection import
+        run: julia --startup-file=no --pkgimages=no --project=. test/test_initial_reference_import.jl
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

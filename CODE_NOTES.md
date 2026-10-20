@@ -449,3 +449,29 @@ full package/examples/harness, strict docs/images and all native cells remain
 mandatory before main publication. Actual-source admission preflight3f86a3af
 passes with no numerical raw parsing, fitting or reference output. Actual
 baseline fitting, actual artifact closure and the complete A chain are unfinished.
+# Initial-reference import development, 2026-10-20
+
+The public synthetic reference route remains guarded. A separate typed artifact
+route binds explicit export and independent-audit completion digests, current
+implementation identities, original source admission for actual evidence, raw
+prefix values, all clocks, cohort completeness, selected model identities and
+audited points. It reconstructs fresh rows and rechecks upstream files after
+selection. Separate lead cohorts are joined by their ordered union, preserving
+ineligible opposite-slot targets without assigning a usable reference point.
+
+Focused generated tests passed on installed Julia 1.12.6 and 1.13.1. The frozen
+reference has 224 four-hour rows, 222 six-hour rows, union 226, and 93/91 storm
+targets. These are fixture counts, not predictive results. Valid output
+relocation and 31 rejection cases passed, including rehashed CSV/metadata,
+post-load mutation and oversized physical records. An injected upstream change
+during serialization leaves no completion record. Frozen literal selection
+arithmetic independently distinguishes the intersection-only winner from the
+correct separate-cohort winner.
+
+Two retained development failures exposed a trailing separator in the Windows
+repository root and a one-hour audited selection subwindow. The former now uses
+successive `dirname` calls. The latter keeps fit-label maturity anchored to the
+original training boundary; the public synthetic equal-boundary rule is intact.
+Full package, experiment, harness and six native platform gates for this new
+adapter are still required. Actual A fitting, final refits, L1 support and any
+novelty or superiority verdict remain unqualified.

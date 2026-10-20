@@ -243,3 +243,10 @@ var/monitor/    live state (gitignored): logs, forecast log, cold archive
 - EKF-on-SINDy remains research infrastructure — it failed promotion gates and
   is not part of serving.
 - Citation: [CITATION.cff](CITATION.cff).
+# Initial-reference selection adapter
+
+The optional [source-bound selection importer](tools/initial_reference_import/README.md)
+consumes separately pinned independent-audit and export records. It preserves
+the distinct four-hour and six-hour selection cohorts. This software interface
+does not establish actual-data experiment qualification or predictive gains.
+

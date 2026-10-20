@@ -681,3 +681,20 @@ full package/examples/harness, strict docs/images and all native cells remain
 mandatory before main publication. Actual-source admission preflight3f86a3af
 passes with no numerical raw parsing, fitting or reference output. Actual
 baseline fitting, actual artifact closure and the complete A chain are unfinished.
+# Source-bound selection importer: focused generated checks
+
+On 2026-10-20, Julia 1.12.6 and 1.13.1 each passed the literal importer unit
+checks and generated public export-to-typed-selector test. Two positive imports
+(original output and relocated output) each check 18 independent fixture and
+selection invariants. All 31 malformed or post-load-mutated exports are
+rejected. Perfect candidate predictions are test-only wiring oracles.
+
+The Python export test additionally changes an upstream plan after CSV writing
+and verifies that completion is not published. Input fixture inventories and
+guarded implementation bytes are unchanged after both native runs. Prior
+development failures are retained externally and were corrected without
+changing the frozen fixture, numerical tolerances or public synthetic guard.
+
+These focused results are not full release qualification. Unfiltered Pkg.test,
+examples/experiments.jl, canonical harness and all native OS/Julia combinations
+must pass on the committed combination before main promotion or actual A use.

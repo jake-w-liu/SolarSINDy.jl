@@ -1,0 +1,1 @@
+{"schema":"initial_reference_subwindow_clock_oracle_v1","synthetic_only":true,"training_boundary":"2019-01-21T20:00:00","selection_start":"2019-01-21T21:00:00","max_legal_fit_label":"2019-01-14T20:00:00","first_illegal_fit_label":"2019-01-14T21:00:00","embargo_hours":168,"source":"literal exact-hour arithmetic before subwindow implementation; no fitted results"}
