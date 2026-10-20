@@ -681,3 +681,27 @@ full package/examples/harness, strict docs/images and all native cells remain
 mandatory before main publication. Actual-source admission preflight3f86a3af
 passes with no numerical raw parsing, fitting or reference output. Actual
 baseline fitting, actual artifact closure and the complete A chain are unfinished.
+
+### Actual initial L0 closure and collector recovery controls
+
+The actual initial-reference reconstruction completed all16 grid models using
+the separately admitted original source/runtime. Its completion SHA256 is
+a7b578c27778348707e0c8d5f8f88a2122914bf29d5f92efe368b6a47f3193ed.
+The independently qualified9d426ff data-only reader subsequently completed
+11979232 checks, native exit0, no changed sources/controls and no new fitting;
+independent completion SHA256
+6d25855efeb86e0a414d29975d381e89eefaac65cb64c7f56a92dfe6778abb1e.
+This establishes artifact consistency for that L0 stage. It supplies no Candidate
+A fit, L1 closure, scientific superiority or serving-promotion verdict.
+
+The new collector controls preserve exact before source3fa61b68, reproduce the
+installed HTTP timeout wrapper without network access, and verify that a captured
+transport cause changes from nonretryable to retryable. Unknown causes, local
+file errors, interruptions, source verification failures and issue-publication
+failures retain fatal behavior. Tests also cover the32-wrapper boundary, fixed
+cadence, recorded acquisition failure followed by recovery and exclusive-claim
+cleanup. Both local Julia versions pass74 grouped checks plus the source hash
+assertion; focused matrix receipt
+0b02506c634db0d70d57b0e5e3586b29930e3ac5425063ed4120dfc5090899ec
+binds unchanged execution sources, tests and controls. Full release gates for
+this collector change remain pending.

@@ -243,3 +243,7 @@ var/monitor/    live state (gitignored): logs, forecast log, cold archive
 - EKF-on-SINDy remains research infrastructure — it failed promotion gates and
   is not part of serving.
 - Citation: [CITATION.cff](CITATION.cff).
+
+The maintained [prospective CME collector](tools/cme_prospective/README.md)
+provides source-bound acquisition, fixed-cadence recovery controls and operational
+status for a separately reviewed frozen producer and store.
