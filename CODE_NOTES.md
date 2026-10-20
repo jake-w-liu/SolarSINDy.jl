@@ -541,3 +541,33 @@ All three hashes now use their owning module as the display context. Pre-code li
 ## Reviewed replay provenance binding (2026-10-20)
 
 The first identifier-context candidate stopped before the historical training oracle because its exact source-provenance list did not yet include DstIntervalReplay.jl. Independent comparison of the current and archived source maps confirms five changed model-source files. The existing AST binding now maps only that reviewed list; its exact-pattern, ambiguity and mutation guards remain in force. The wrapper, grammar runner and worker retain updated explicit byte pins. All frozen mathematical files and tolerances are unchanged. Training and grammar workers passed both Julia versions; full qualification is pending.
+
+## Source-bound initial L0 executor (2026-10-20)
+
+The separate ActualAChain tool loads an audited reference and verifies its raw
+input prefix. The actual source path uses the hash-bound 57-column parser and
+checks the complete matrix before retaining the fixed pre-selection prefix;
+this parser materializes a matrix. The subsequent state replay uses bounded
+chunks, nine schedules and eighteen canonical disk-backed gain fits. It keeps
+the selection union, complete joint records including fallback origins, model
+bundles and final checkpoints. It neither imputes labels nor writes eighteen
+full-history panels or hourly checkpoints.
+
+Pinned readback replays raw design and masks, checks the full-matrix solver
+certificates without new gain fits, and verifies checkpoints, exact point bytes
+and the complete selection. It shares the existing independently tested state
+kernel and is an artifact-closure check, not a second optimizer. The initial
+selection may return none. Actual fitting requires a separately pinned permit
+for the exact implementation, runtime, admission, reference audit, fixed
+2020/2023 boundaries and eighteen initial L0 fits. Extra permit fields, Boolean
+or floating counts, later stages and mismatched native qualification cells are
+rejected. Input parsing grants no fitting authority.
+
+Generated tests exercise the complete eighteen-model stage, independent direct
+fits, input/metadata mutation, output relocation and rehashed semantic
+corruptions. A separate 30,000-hour component check compares extreme chunk
+sizes and full joint records for the first physical setting and both eta
+weights. It does not establish a complete long-reference eighteen-model stage
+or actual-data resource scaling. All existing core equations, tolerances and
+frozen mathematical oracles remain unchanged. Full executor software
+qualification and every actual fit remain pending.

@@ -1,0 +1,14 @@
+{
+  "scope": "Generated-only exact post-write failure injection in a fresh Julia process. A more-specific method delegates every write to the unchanged production implementation, then raises only after the target stage completion bytes were written. No source/input file, solver, stage mask or actual data is modified.",
+  "expected_error": "controlled completion publication failure",
+  "initial_fits_before_failure": 18,
+  "state_schedules_before_failure": 9,
+  "completion_json_present_after_failure": false,
+  "quarantined_completion_present": true,
+  "failure_record_complete": false,
+  "reference_bytes_unchanged": true,
+  "consumer_must_reject": true,
+  "actual_data": false,
+  "new_actual_fitting": false,
+  "scientific_verdict": false
+}

@@ -821,6 +821,7 @@ using DataFrames
     include("test_initial_reference_tools.jl")
     include("test_initial_reference_import.jl")
     include("test_hash_context.jl")
+    include("test_actual_a_chain.jl")
 
     include("test_cme_prospective_monitor.jl")
     include("test_conformal_endpoint_precision.jl")

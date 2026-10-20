@@ -1,0 +1,26 @@
+{
+  "schema": "independent_generated_long_prefix_cohort_oracle_v1",
+  "synthetic_only": true,
+  "actual_data": false,
+  "new_actual_fitting": false,
+  "scientific_verdict": false,
+  "rows": 30000,
+  "initial_boundary_hours": 28000,
+  "missing_driver_rows": [
+    10000,
+    20000
+  ],
+  "missing_dst_rows": [
+    5000,
+    17000,
+    25000
+  ],
+  "raw_sha256": "98ef8f593c0b200c2175b88befb25736f42caba6407aba8344072d1e0b9f7242",
+  "joint_count": 27817,
+  "available_joint_count": 27314,
+  "fallback_joint_count": 503,
+  "storm_target_count": 35504,
+  "joint_indices_int64le_sha256": "2196647de94f0eb48686a137aa1d8436170b94b584ed94467d83f0d9a3649ac5",
+  "available_joint_indices_int64le_sha256": "3ec1f4f503f3924c6f645cf86d2453531153a0cd72e321fedce2c0844ebbefa1",
+  "scope": "Independent Python scalar raw/clock/mask arithmetic, before the Julia long-component test. No state equations, gains or reference scores are asserted."
+}

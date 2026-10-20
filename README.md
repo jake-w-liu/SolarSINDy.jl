@@ -259,3 +259,13 @@ status for a separately reviewed frozen producer and store.
 ## Research artifact identifiers
 
 Clocked research identifiers use an explicit module context for their typed representation. Caller imports, including an absent or shadowed `DateTime` name in `Main`, do not change model identifiers, replay fingerprints, or reference-row key digests. Saved bundles remain bound to their recorded implementation sources.
+
+## Initial candidate research executor
+
+The separate [initial L0 executor](tools/actual_a_chain/README.md) consumes an
+audited reference and raw input prefix, streams nine physical settings and fits
+their eighteen fixed gain configurations with complete disk design records.
+Saved model, checkpoint, point and selection outputs support pinned readback
+without new gain fitting. Actual execution requires its own exact-source
+qualification and stage permit. This initial stage does not perform final
+refitting, L1 experiments, exposed-test scoring or serving promotion.

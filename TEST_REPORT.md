@@ -745,3 +745,38 @@ The unchanged implementation failed all three pre-code identifier assertions bef
 ## Replay provenance follow-up (qualification pending)
 
 The retained first full run stopped at training362 with a source-map declaration mismatch after ten successful worker stages. Updating the exact provenance literal and its byte pins allowed the complete training and grammar workers to pass on Julia 1.13.1 and 1.12.6. This changes source-identity metadata only. The replacement candidate must still pass the unfiltered package suite, all seventeen workers, full experiments and all native/docs/image CI gates before publication.
+
+## Initial L0 executor development checks (full qualification pending)
+
+The generated input/stage/console driver passed all three Python methods on
+Julia1.13.1 and1.12.6. Each native stage passed347 Julia assertions covering
+early refusals, eighteen saved models, independent direct fits, readback,
+relocation and rehashed semantic corruptions. The fixed fixture retains326
+joint fit origins,159 available origins and167 fallback origins; selection is
+none. This is generated software evidence, not forecast skill.
+
+The package component checks passed both runtimes. A Python scalar raw/clock
+oracle fixes30,000 source hours,27,817 joint origins,27,314 available origins,
+503 fallback origins and35,504 storm targets. Chunk sizes1 and4096 preserve
+exact models, masks and data for the first physical setting's two eta values;
+all saved full-matrix certificates pass. The long-stream group has37 assertions
+and the pure permit grammar group has51, with additional source and cleanup
+checks. This scope does not replace a full long-reference stage.
+
+The first package-wrapper test exposed Julia's new-binding world-age rule. Its
+follow-up exposed a module-level try/finally flag-scope mistake. Both failed
+controls and generated directories were retained; the corrected wrapper uses
+the latest included bindings and a shared Ref flag, and now asserts successful
+directory removal. No production solver or numerical expectation was changed.
+
+A generated-only post-write fault control passed fourteen assertions on each
+runtime. A narrower test method delegates the writes to the unchanged artifact
+writer and raises only after the stage completion bytes were written. The
+executor quarantines that record, records eighteen completed initial fits and
+nine schedules as failed, preserves the input bytes and refuses readback. The
+portable form and its pre-code oracle are included in the native CI driver.
+
+Full unfiltered Pkg.test, examples, the unchanged canonical harness, all
+seventeen workers and six native cells plus strict documentation/images are
+still required on the committed executor. No actual candidate fit, final
+refit, L1 run, test score or serving qualification has been performed.

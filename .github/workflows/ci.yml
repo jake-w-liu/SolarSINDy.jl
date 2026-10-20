@@ -78,6 +78,15 @@ jobs:
           name: independent-reference-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/initial-reference-reader
           if-no-files-found: ignore
+      - name: Verify the generated initial A executor
+        run: python -B test/actual_a_chain/run_ci_executor_tests.py
+      - name: Retain initial A executor failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: initial-a-executor-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/initial-a-chain
+          if-no-files-found: ignore
       # The suite reports which local-artifact oracles are unavailable in a clean clone.
       - uses: julia-actions/julia-runtest@v1
       - name: Run the research experiments

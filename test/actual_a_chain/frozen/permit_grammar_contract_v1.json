@@ -1,0 +1,38 @@
+{
+  "schema": "initial_a_permit_grammar_contract_v1",
+  "fields": [
+    "admitted_input_seal",
+    "complete",
+    "delay_hours",
+    "final_fit_count",
+    "implementation_sources",
+    "independent_audit_completion_sha256",
+    "initial_fit_count",
+    "julia_binary_sha256",
+    "julia_version",
+    "qualification_file",
+    "qualification_sha256",
+    "reference_completion_sha256",
+    "schema",
+    "scientific_verdict",
+    "serving_promotion",
+    "source_sha256",
+    "stage",
+    "test_scoring",
+    "training_boundary",
+    "validation_end",
+    "validation_start"
+  ],
+  "initial_fit_count": 18,
+  "delay_hours": 0,
+  "final_fit_count": 0,
+  "training_boundary": "2020-01-01T00:00:00",
+  "validation_start": "2020-01-01T00:00:00",
+  "validation_end": "2023-01-01T00:00:00",
+  "forbidden_true": [
+    "test_scoring",
+    "scientific_verdict",
+    "serving_promotion"
+  ],
+  "scope": "Pure permission grammar oracle. This document is not a permit, qualification, input admission or authority to execute actual fits."
+}
