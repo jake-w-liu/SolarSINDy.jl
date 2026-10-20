@@ -71,7 +71,7 @@ end # PublicEntryMismatch
 @testset "Reference component source immutability" begin
     @test Dict(path=>bytes2hex(sha256(read(path))) for path in MEMBERS)==BEFORE
     @test bytes2hex(sha256(read(joinpath(COMPONENT,"DstInitialGBMReference.jl"))))==
-        "906e1a28bb7f56d6e607ae765ff2bb14197a3c2da2f2d1a7741501ea8cacc448"
+        "8ec04577c47cd524e52ec8283f248c2f90da072dd0bbe3cc96b6d1c4b70a6187"
     @test bytes2hex(sha256(read(joinpath(COMPONENT,"BoundInitialReferenceInputs.jl"))))==
         "4d8cd8b5fba2ac4e901039de92f4f36746afaa28df86f386c536395ec4049fc7"
     @test bytes2hex(sha256(read(joinpath(COMPONENT,"InitialGBMReplay.jl"))))==

@@ -87,7 +87,7 @@ function _fingerprint(parts...)
     # finite Float64s, explicit DateTimes and strings; no mutable storage.
     io=IOBuffer()
     for part in parts
-        s=repr(part)
+        s=repr(part;context=:module=>@__MODULE__)
         print(io,ncodeunits(s),':',s)
     end
     bytes2hex(sha256(take!(io)))

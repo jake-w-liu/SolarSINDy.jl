@@ -48,6 +48,8 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
       - name: Verify prospective collector recovery controls
         run: julia --startup-file=no --pkgimages=no --project=. test/test_cme_prospective_monitor.jl
+      - name: Verify identifiers across fresh caller processes
+        run: julia --startup-file=no --pkgimages=no --project=. test/test_hash_context.jl
       - name: Verify source-bound reference tools
         # Catch filesystem/runtime/schema differences before the full package
         # run. The unfiltered package suite below still executes these tests.

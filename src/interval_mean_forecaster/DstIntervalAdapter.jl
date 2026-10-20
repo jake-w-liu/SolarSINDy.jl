@@ -4,7 +4,7 @@ using Dates, LinearAlgebra, SHA
 const LOADED_SOURCE_SHA256=bytes2hex(sha256(read(@__FILE__)))
 const PINNED_DEPENDENCIES=(
     "DstIntervalObserver.jl"=>"48e2af386d2b9b1a2b8afb4366e1c48508261e54a81447d438fd8a419581b816",
-    "DstIntervalReplay.jl"=>"08f8088e55b3b10bb189d4f89360dd72e30e2c5f0f162f7c687e92a7f4ce1165",
+    "DstIntervalReplay.jl"=>"f2962c092bc6bfd6be82a5b8ad95e2c494dddbc4a2addda4f57140e31d0c6fa5",
     "sandu_fullchannel_features.jl"=>"2306f63cadfb5d4ae16579cabb114b813f1f41678aaa6dbdd90caad316ff792c")
 for (name,digest) in PINNED_DEPENDENCIES
     bytes2hex(sha256(read(joinpath(@__DIR__,name))))==digest || error("pinneddependency bytes differ: $name")

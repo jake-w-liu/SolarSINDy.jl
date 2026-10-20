@@ -12,7 +12,8 @@ S.verify_source_identity()
 
 export fit_gains, predict_rows, select_setting, export_fit_input, fit_gains_from_input
 
-_hash(x)=bytes2hex(sha256(repr(x)))
+# Persisted identities must not depend on imports in Main.
+_hash(x)=bytes2hex(sha256(repr(x;context=:module=>@__MODULE__)))
 _valid_hash(x)=x isa AbstractString && occursin(r"\A[0-9a-f]{64}\z",x)
 
 function verify_source_identity()

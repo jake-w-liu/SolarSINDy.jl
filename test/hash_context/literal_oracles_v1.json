@@ -1,0 +1,35 @@
+{
+  "schema": "precode_display_context_hash_oracles_v1",
+  "canonical_expected_sha256": {
+    "training": "bc32079657a8b8841771bf7d674d83760dcb560d58e2f9a63391cf7c29e13dd5",
+    "replay": "bf82083a044744f36bb81c0901877268652de097df85df7505371349dce6c28f",
+    "reference": "585d1cb1c10b9654c6f98529bf2318b86e0ba0ab2e7a627a8c065fa52c0a336e"
+  },
+  "canonical_text": {
+    "training": "(\"context\", DateTime(\"2019-01-01T00:00:00\"), DateTime(\"2019-01-01T04:00:00\"), (-0.0, 1.25), \"source\")",
+    "reference": "((\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", DateTime(\"2019-01-01T00:00:00\"), 4, DateTime(\"2019-01-01T04:00:00\")), (\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", DateTime(\"2019-01-01T00:00:00\"), 6, DateTime(\"2019-01-01T06:00:00\")))",
+    "replay_parts": [
+      "DateTime(\"2019-01-01T00:00:00\")",
+      "(1.25, -0.0)",
+      "\"receipt\""
+    ]
+  },
+  "observed_old_without_main_dates": {
+    "training": "ac1427bb74a883ebf000435b89f694029f48709b22cbc5e104b6bdf452eb53c1",
+    "replay": "a03f7fecf97908b0ec1a9640e6c03348a5b1e73675fe889629cc1798b78f6b3e",
+    "reference": "7763cccda03e38f2e96a69438351ea043f445c84199ee74f582bd1a6454aa7dd"
+  },
+  "observed_old_with_main_dates": {
+    "training": "bc32079657a8b8841771bf7d674d83760dcb560d58e2f9a63391cf7c29e13dd5",
+    "replay": "bf82083a044744f36bb81c0901877268652de097df85df7505371349dce6c28f",
+    "reference": "585d1cb1c10b9654c6f98529bf2318b86e0ba0ab2e7a627a8c065fa52c0a336e"
+  },
+  "old_commit": "22ccee200d3ba671541047c09be404ef936c1c65",
+  "old_source_sha256": {
+    "training": "e6692b4d5d9c5f242a4615973db67e87f246a5d3139a9cf4b0d0ea5c555b2b6d",
+    "replay": "08f8088e55b3b10bb189d4f89360dd72e30e2c5f0f162f7c687e92a7f4ce1165",
+    "reference": "906e1a28bb7f56d6e607ae765ff2bb14197a3c2da2f2d1a7741501ea8cacc448"
+  },
+  "python_independent_literal_hashes_verified": true,
+  "new_fitting": false
+}

@@ -255,3 +255,7 @@ does not establish actual-data experiment qualification or predictive gains.
 The maintained [prospective CME collector](tools/cme_prospective/README.md)
 provides source-bound acquisition, fixed-cadence recovery controls and operational
 status for a separately reviewed frozen producer and store.
+
+## Research artifact identifiers
+
+Clocked research identifiers use an explicit module context for their typed representation. Caller imports, including an absent or shadowed `DateTime` name in `Main`, do not change model identifiers, replay fingerprints, or reference-row key digests. Saved bundles remain bound to their recorded implementation sources.

@@ -18,7 +18,8 @@ function _get(x,k)
     _require(hasproperty(x,Symbol(k)),"missing required receipt/row field: $k")
     getproperty(x,Symbol(k))
 end
-_hash(x)=bytes2hex(sha256(repr(x)))
+# Keep reference row identities independent of caller display bindings.
+_hash(x)=bytes2hex(sha256(repr(x;context=:module=>@__MODULE__)))
 function verify_source_identity()
     _require(bytes2hex(sha256(read(@__FILE__)))==LOADED_SHA256,"loadedsource/disk mismatch: reference adapter")
     ("DstInitialGBMReference.jl"=>LOADED_SHA256,)

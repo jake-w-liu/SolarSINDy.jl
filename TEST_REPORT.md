@@ -737,3 +737,7 @@ semantic controls pass after consolidating cleanup into the single finally
 path. They send no real signals. Native listener closure and the complete
 software qualification remain separate required gates. No execution deadline,
 test assertion, numerical tolerance or Windows native ownership logic changed.
+
+## Caller-context hash regression (qualification pending)
+
+The unchanged implementation failed all three pre-code identifier assertions before importing Dates into Main. The corrected implementation preserves the literal expected hashes before and after that import. Fresh-process bundle tests passed on Julia 1.13.1 and 1.12.6: 19 parent assertions per runtime, with golden-hash, generated producer and three consumer child controls. The surrounding reference admission/schema/arithmetic unit suite passed both runtimes. No numerical equation, training mask, weight, tolerance or frozen mathematical oracle was altered. Full Pkg.test(), experiments, canonical harness and six native CI cells plus documentation/images are still required before main publication.

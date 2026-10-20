@@ -531,3 +531,9 @@ exact maintained runner is required before its proof can enter the importer.
 ## Frontend child diagnostic closure (2026-10-20)
 
 The Linux Julia 1.12 job in CI run 39403823863 returned false for the dashboard Node test command. Its child streams, exit code and signal were not recorded by `success(AbstractCmd)`; the underlying frontend failure remains unverified. The runner now inherits child output, records both native exit and signal assertions, and CI runs the unchanged fifteen frontend tests directly before Julia. No frontend assertion, tolerance, package test, experiment or acceptance gate is removed. Full source qualification is pending.
+
+## Confirmed caller-context identity defect (2026-10-20)
+
+A generated model saved with `Dates` imported was rejected by a fresh Julia process without that import, although the model bytes were unchanged. Default `repr` used `DateTime(...)` in one caller and `Dates.DateTime(...)` in the other. The same before/after import witness confirmed the defect in training identifiers, replay fingerprints and reference-row key digests.
+
+All three hashes now use their owning module as the display context. Pre-code literal strings and an independent Python SHA-256 calculation fix the expected identifiers; these preserve the prior Dates-imported representation. Only the active replay dependency/source pins were updated. Archived baseline pins and forty frozen mathematical oracles remain byte-identical. Fresh child processes check no Dates import, a normal import and a conflicting Main.DateTime type; the source-bound bundle and available/fallback points agree. Full source qualification is pending.
