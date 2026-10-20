@@ -475,3 +475,32 @@ original training boundary; the public synthetic equal-boundary rule is intact.
 Full package, experiment, harness and six native platform gates for this new
 adapter are still required. Actual A fitting, final refits, L1 support and any
 novelty or superiority verdict remain unqualified.
+
+
+### Actual initial L0 artifact closure, 20 October 2026
+
+The separately qualified9d426ff reader has now verified the actual reconstructed
+initial L0 artifacts. The sixteen-grid completion has SHA256
+a7b578c27778348707e0c8d5f8f88a2122914bf29d5f92efe368b6a47f3193ed.
+Independent artifact completion6d25855efeb86e0a414d29975d381e89eefaac65cb64c7f56a92dfe6778abb1e
+records11979232 numerical checks with native exit0, no new fitting, and source
+and control guards unchanged. Candidate A import/full-history fitting, the
+separate L1 reference and scientific confirmation remain unfinished.
+
+### Captured HTTP transport recovery
+
+The frozen collector3fa61b68 can classify a direct HTTP connection I/O error
+but rejects that same error preserved by the installed timeout boundary in
+CapturedException. Offline controls reproduce this distinction using the
+installed HTTP timeout function. The dead production exception object was not
+retained; its stack traverses that boundary, but its concrete inner object was
+not inspected after exit.
+
+The maintained nested tool now unwraps captured causes inside recognized HTTP
+connection/request exceptions, with a32-wrapper bound. Direct local I/O,
+interruptions, unknown/integrity failures and publication failures remain fatal.
+The producer, source export, cadence, frozen deadline and numerical behavior
+retain their existing contracts. Both local Julia1.12.6 and1.13.1 pass all74
+grouped recovery checks plus the frozen-source hash assertion. The original
+collector bytes remain an independent before oracle. Full package, experiment,
+harness and native-matrix gates are still required for this new source.

@@ -698,3 +698,28 @@ changing the frozen fixture, numerical tolerances or public synthetic guard.
 These focused results are not full release qualification. Unfiltered Pkg.test,
 examples/experiments.jl, canonical harness and all native OS/Julia combinations
 must pass on the committed combination before main promotion or actual A use.
+
+
+### Actual initial L0 closure and collector recovery controls
+
+The actual initial-reference reconstruction completed all16 grid models using
+the separately admitted original source/runtime. Its completion SHA256 is
+a7b578c27778348707e0c8d5f8f88a2122914bf29d5f92efe368b6a47f3193ed.
+The independently qualified9d426ff data-only reader subsequently completed
+11979232 checks, native exit0, no changed sources/controls and no new fitting;
+independent completion SHA256
+6d25855efeb86e0a414d29975d381e89eefaac65cb64c7f56a92dfe6778abb1e.
+This establishes artifact consistency for that L0 stage. It supplies no Candidate
+A fit, L1 closure, scientific superiority or serving-promotion verdict.
+
+The new collector controls preserve exact before source3fa61b68, reproduce the
+installed HTTP timeout wrapper without network access, and verify that a captured
+transport cause changes from nonretryable to retryable. Unknown causes, local
+file errors, interruptions, source verification failures and issue-publication
+failures retain fatal behavior. Tests also cover the32-wrapper boundary, fixed
+cadence, recorded acquisition failure followed by recovery and exclusive-claim
+cleanup. Both local Julia versions pass74 grouped checks plus the source hash
+assertion; focused matrix receipt
+0b02506c634db0d70d57b0e5e3586b29930e3ac5425063ed4120dfc5090899ec
+binds unchanged execution sources, tests and controls. Full release gates for
+this collector change remain pending.

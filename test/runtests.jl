@@ -820,6 +820,8 @@ using DataFrames
     include("test_interval_mean_forecaster.jl")
     include("test_initial_reference_tools.jl")
     include("test_initial_reference_import.jl")
+
+    include("test_cme_prospective_monitor.jl")
     include("test_conformal_endpoint_precision.jl")
     include("test_adaptive_conformal_representation.jl")
     include("test_static_stack_memory_precision.jl")

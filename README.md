@@ -250,3 +250,8 @@ consumes separately pinned independent-audit and export records. It preserves
 the distinct four-hour and six-hour selection cohorts. This software interface
 does not establish actual-data experiment qualification or predictive gains.
 
+
+
+The maintained [prospective CME collector](tools/cme_prospective/README.md)
+provides source-bound acquisition, fixed-cadence recovery controls and operational
+status for a separately reviewed frozen producer and store.
