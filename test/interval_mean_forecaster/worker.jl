@@ -25,6 +25,7 @@ elseif JOB == "scanner"
     Core.eval(scanner_target, :(include(path) = Base.include($scanner_target, path)))
     Base.include(scanner_target, joinpath(@__DIR__, "peer_freeze", "scanner_oracle.jl"))
 elseif JOB == "smoke"
+    include("source_pin_regressions.jl")
     @testset "Actual maintained namespace smoke" begin
         @test IMF.HourlyInputs === IMF.DstIntervalAdapter.Features.HourlyInputs
         @test IMF.interval_kernel(0., 2., 3.).phi === 1.
@@ -48,6 +49,7 @@ elseif JOB == "smoke"
                 expected_sources=IMF.DstIntervalArtifacts.verify_source_identity())
             @test isequal(loaded.model, model)
             @test isequal(loaded.checkpoint, streamed.checkpoint)
+            PackageSourcePinRegressions.check_stale_bundle(saved.directory, saved.manifest_sha256)
         end
     end
 elseif JOB == "independent2272"
