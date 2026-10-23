@@ -1,0 +1,109 @@
+{
+  "actual_data": false,
+  "production_imports": false,
+  "records": [
+    {
+      "exact_json_utf8": "{\"status\":\"unavailable\",\"reason\":\"latest_driver_unavailable\",\"issue\":\"2000-01-01T00:00:00.0\",\"state\":\"missing\",\"age\":0,\"q\":null,\"input_prefix_sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "expected",
+      "issue": "2000-01-01T00:00:00.000",
+      "state_id": "fe9a36fbad8be917a96edb7e9cc7ebe4b201e6fcc656ff4187e46b86bb7ad1fb"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"unavailable\",\"reason\":\"unknown_initial_age\",\"issue\":\"2000-01-01T01:00:00.0\",\"state\":\"N\",\"age\":0,\"q\":null,\"input_prefix_sha256\":\"100ec5b103692d8463e3038f7c5169bff2f932c690a657294e07920842e39aac\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "expected",
+      "issue": "2000-01-01T01:00:00.000",
+      "state_id": "3da4466d4973d4b5d67c2e1732ba81b26575cf4bf9bd753c26e9b3550ab07fe7"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"unavailable\",\"reason\":\"unknown_initial_age\",\"issue\":\"2000-01-01T02:00:00.0\",\"state\":\"N\",\"age\":0,\"q\":null,\"input_prefix_sha256\":\"92d0866f3469a26a95c6bbca71c9731524553de4de73a07dcf171c497a1cde50\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "expected",
+      "issue": "2000-01-01T02:00:00.000",
+      "state_id": "e39d2bf6bba8feff7e214bb5a0829f0ec6e0e8db6cb8f6ba17346a4273e86f81"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"available\",\"reason\":\"available\",\"issue\":\"2000-01-01T03:00:00.0\",\"state\":\"S\",\"age\":1,\"q\":0.0,\"input_prefix_sha256\":\"4f2f84190a419e8ee672de7e0b944af314d512fa7a5b39a021da599615c567b0\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "expected",
+      "issue": "2000-01-01T03:00:00.000",
+      "state_id": "62c370572876ba31418c4f641060599d023ca165cdec86bc750f0757dd303984"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"unavailable\",\"reason\":\"latest_driver_unavailable\",\"issue\":\"2000-01-01T04:00:00.0\",\"state\":\"S\",\"age\":1,\"q\":null,\"input_prefix_sha256\":\"4f2f84190a419e8ee672de7e0b944af314d512fa7a5b39a021da599615c567b0\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "expected",
+      "issue": "2000-01-01T04:00:00.000",
+      "state_id": "17a0f5daed01d673d2c7fc65171a7d43e413184c3cea7c25692bd9f0cca966cc"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"unavailable\",\"reason\":\"latest_driver_unavailable\",\"issue\":\"2000-01-01T04:00:00.001\",\"state\":\"S\",\"age\":2,\"q\":null,\"input_prefix_sha256\":\"4e77715743651c98daac7c45b1f44bf312c820ae0d3b26e42df3eca5eb5f3d06\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "expected",
+      "issue": "2000-01-01T04:00:00.001",
+      "state_id": "dc30456a85ce520eaeb39faed21ee3486a2202a7bd4ebdbddf531e51cd849a42"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"unavailable\",\"reason\":\"latest_driver_missing\",\"issue\":\"2000-01-01T05:00:00.0\",\"state\":\"missing\",\"age\":0,\"q\":null,\"input_prefix_sha256\":\"7f94d30345313f01c652bfbb81a4a2e71df6ee17680b977ab04a1167f84dfc4e\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "expected",
+      "issue": "2000-01-01T05:00:00.000",
+      "state_id": "b28512b833b854f85e386639ad0d18d17574f0fcfe0aafd9cba4011b73a2f0e2"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"unavailable\",\"reason\":\"latest_driver_unavailable\",\"issue\":\"2000-01-01T06:00:00.0\",\"state\":\"missing\",\"age\":0,\"q\":null,\"input_prefix_sha256\":\"7f94d30345313f01c652bfbb81a4a2e71df6ee17680b977ab04a1167f84dfc4e\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "expected",
+      "issue": "2000-01-01T06:00:00.000",
+      "state_id": "f99bd57d4fa3137ef439bea4c6ce72e98f50584a24fa65c870063a7570adc57e"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"unavailable\",\"reason\":\"unknown_initial_age\",\"issue\":\"2000-01-01T08:00:00.0\",\"state\":\"S\",\"age\":0,\"q\":null,\"input_prefix_sha256\":\"807627527fb68b483f4971122e8404c93594078463104e41ca191167283ded6e\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "expected",
+      "issue": "2000-01-01T08:00:00.000",
+      "state_id": "414e8fca69a4afcff2f9320ad76f6b2fc17e16731092f952ddfbd881ddcdf82e"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"available\",\"reason\":\"available\",\"issue\":\"2000-01-01T09:00:00.0\",\"state\":\"N\",\"age\":1,\"q\":0.0,\"input_prefix_sha256\":\"3b5c445946111df8e19f28ac9d7e96cd7a2e4f4bdcfa0d76a1910c655a814bf9\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "expected",
+      "issue": "2000-01-01T09:00:00.000",
+      "state_id": "d1c8725fd9019e40e7a73b114a982889b320a62c01f421f83a6145a7e541de4c"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"available\",\"reason\":\"available\",\"issue\":\"2000-01-01T10:00:00.0\",\"state\":\"S\",\"age\":1,\"q\":1.0,\"input_prefix_sha256\":\"8f8098c39b1cf29b1d10fb9eb0a94bde1eb89e25529c9377c78ae80742de4ab0\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "expected",
+      "issue": "2000-01-01T10:00:00.000",
+      "state_id": "43bfe38c5444567c3086c01ab863452338f0488b64781982503ffcc7cb880815"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"available\",\"reason\":\"available\",\"issue\":\"2000-01-01T11:00:00.0\",\"state\":\"S\",\"age\":2,\"q\":1.0,\"input_prefix_sha256\":\"20c0ff3cd7d144f5653ace2377d7a9f24d9c454b1b5a400f1138e4f058ae5fdd\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "expected",
+      "issue": "2000-01-01T11:00:00.000",
+      "state_id": "f520d9db48166ccb97facc94692c6d017246a516deaf8d289842aae53f66be02"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"unavailable\",\"reason\":\"latest_driver_unavailable\",\"issue\":\"2000-01-01T12:00:00.0\",\"state\":\"S\",\"age\":2,\"q\":null,\"input_prefix_sha256\":\"20c0ff3cd7d144f5653ace2377d7a9f24d9c454b1b5a400f1138e4f058ae5fdd\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "expected",
+      "issue": "2000-01-01T12:00:00.000",
+      "state_id": "adb3413ee733f85382f82e2c58ef413d92df5e834ca70cb1e510a431de254a3e"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"unavailable\",\"reason\":\"unknown_initial_age\",\"issue\":\"2000-01-01T01:00:00.0\",\"state\":\"S\",\"age\":0,\"q\":null,\"input_prefix_sha256\":\"76e9e57a1438c32ddf3293a7dbe62115f50e30fe2c29ffa2b6ea63e0321a4625\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "initial_same_state_50_expected",
+      "issue": "2000-01-01T01:00:00.000",
+      "state_id": "b7814cd770c29f5ade85f740491f32fdc169c154db12b93f55a9e25ccfea86b4"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"unavailable\",\"reason\":\"unknown_initial_age\",\"issue\":\"2000-01-03T00:00:00.0\",\"state\":\"S\",\"age\":0,\"q\":null,\"input_prefix_sha256\":\"49875ff4afc9aa94c90b451d53b4ebdfe39e3e5785759efae6baf7b56f82cdd8\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "initial_same_state_50_expected",
+      "issue": "2000-01-03T00:00:00.000",
+      "state_id": "22c88386313b90988541adbd42c7f6926151f41c8ee7ea64a976a9c44bdac398"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"available\",\"reason\":\"available\",\"issue\":\"2000-01-03T01:00:00.0\",\"state\":\"S\",\"age\":49,\"q\":0.0,\"input_prefix_sha256\":\"b73ac4d088e89f2b9c558da4090e950ecf61f8b0b98fdd2b08232d7cc58bae4e\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "initial_same_state_50_expected",
+      "issue": "2000-01-03T01:00:00.000",
+      "state_id": "6cec5504b60bb27976a792edc6571870f839b06f1a3e8810fe56c03c7fb9676b"
+    },
+    {
+      "exact_json_utf8": "{\"status\":\"available\",\"reason\":\"available\",\"issue\":\"2000-01-03T02:00:00.0\",\"state\":\"S\",\"age\":49,\"q\":0.0,\"input_prefix_sha256\":\"03d726d4d81d743c097038423727a77e97e27852ab4e61b204a2cd5c2c99afd2\",\"availability_kind\":\"assumed_completed_hour\"}",
+      "group": "initial_same_state_50_expected",
+      "issue": "2000-01-03T02:00:00.000",
+      "state_id": "a112295793cdec51da1703c35305a79ec21078f1bf334dc0329d165b4848cd25"
+    }
+  ],
+  "schema": "b_stream_bridge_state_id_literals_v1"
+}

@@ -1,0 +1,56 @@
+{
+  "schema": "b_stream_bridge_precode_guard_literals_v1",
+  "actual_data": false,
+  "implementation_exists": false,
+  "date_arithmetic": {
+    "hour_ms": 3600000,
+    "int64_min": "-9223372036854775808",
+    "int64_max": "9223372036854775807",
+    "issue_minus_hour_at_int64_min": "-9223372036858375808",
+    "advance_issue_at_int64_min_error": "OverflowError before any tracker mutation",
+    "a_clock_overflow_error": "unchanged ArgumentError from A._shift",
+    "source_count_cap": 500000,
+    "source_count_cap_plus_one": "ArgumentError before private source copy or callback"
+  },
+  "admission_errors": {
+    "empty_ordinary_vector": "admit; empty prefix; unavailable latest driver for representable issues",
+    "duplicate_identical_tag": "ArgumentError before f",
+    "duplicate_conflicting_tag": "ArgumentError before f",
+    "decreasing_tag": "ArgumentError before f",
+    "nonmonotone_receipts": "ArgumentError before f",
+    "equal_receipts_in_unique_tag_order": "admit; consume all equality-eligible rows in tag order",
+    "zero_based_vector_axes": "ArgumentError before f",
+    "matrix_even_if_one_column": "reject before f; no flattening or axis reinterpretation",
+    "non_WindHour_member": "ArgumentError before f",
+    "finite_bz_positive_and_positive_q": "ArgumentError before f",
+    "bz_missing_q_positive": "admit missing row; reset trace; hash q bits and missing bz token",
+    "bz_negative_q_missing": "admit missing row; reset trace; hash bz bits and missing q token",
+    "negative_zero_bz_and_negative_zero_q": "admit N; q numerical zero; preserve both signed bit tokens",
+    "South_q_zero": "admit S; a witnessed flip still establishes age1",
+    "invalid_source_sha_uppercase": "ArgumentError before f"
+  },
+  "advance_errors": {
+    "issue_backtracking": "ArgumentError; checkpoint and SHA context unchanged",
+    "same_issue": "exact idempotent result and checkpoint",
+    "escaped_closure_after_scope": "ArgumentError before mutation",
+    "concurrent_or_cross_task_closure": "ArgumentError before mutation",
+    "source_bytes_changed_before_success": "wrapper throws; no successful completion result",
+    "callback_throws": "propagate callback failure; no successful wrapper result; prior external side effects retained"
+  },
+  "checkpoint_errors": {
+    "different_type_or_schema": "ArgumentError before f",
+    "changed_prefix_or_identity_digest": "ArgumentError before f",
+    "rehashed_inconsistent_age_run_or_index": "ArgumentError after one replay validation, before f",
+    "same_consumed_prefix_but_different_future_source": "ArgumentError; full wind sequence identity is pinned",
+    "same_values_new_source_provenance": "public current_state equal; new checkpoint provenance/id differ",
+    "byte_identical_relocation": "exact values and IDs preserved"
+  },
+  "A_copy_and_pending": {
+    "mutate_supplied_issue_basis": "all ordinary A rows, later payloads and returned checkpoint bit-identical",
+    "mutate_collected_checkpoint_arrays": "same isolation requirement",
+    "mutate_immutable_checkpoint_field": "assignment rejected; callback exception propagates unless caught",
+    "L1_first_issue": "issue boundary1h, sealed boundary0h, pending index1; no current observation",
+    "L1_second_issue": "sealed equals L0 first posterior; issue state advances q2 without its observation",
+    "invalid_current_driver": "issue_checkpoint and issue_basis nothing; existing pending cleared/reset behavior retained"
+  }
+}

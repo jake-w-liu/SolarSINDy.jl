@@ -173,11 +173,18 @@ never used by the state/design. All emitted rows are retained, including warmup,
 missing-anchor and missing-target rows. A full source identity is supplied by
 the verified parser/caller; a consumed-input chain additionally protects resume.
 The actual late-revision journal adapter is not implemented by this interface.
+Optional `issue_sink` receives a detached past-only issue checkpoint, a fresh
+historical gain-basis matrix and an immutable resume checkpoint before future
+continuation. L1 retains its sealed state and pending driver separately. The
+payload contains no target labels. Callback exceptions abort before that hour's
+ordinary row is published; previously published chunks are retained.
 """
 function stream_basis(input::HourlyInputs;delay_hours::Integer,taus,sigma::Real,
         chunk_hours::Integer=24,sink=(rows)->nothing,checkpoint=nothing,
-        stop_after_index::Integer=length(input.time))
-    verify_source_identity()
+        stop_after_index::Integer=length(input.time),issue_sink=nothing)
+    implementation_hashes=verify_source_identity()
+    issue_sink===nothing || issue_sink isa Function ||
+        throw(ArgumentError("issue sink must be nothing or a function"))
     delay,tau,noise,chunk=_recipe(delay_hours,taus,sigma,chunk_hours)
     _hex(input.source_sha256) || throw(ArgumentError("hash-boundinputidentityrequired"))
     raw=A.Features.censor_fills(input.values)
@@ -223,10 +230,25 @@ function stream_basis(input::HourlyInputs;delay_hours::Integer,taus,sigma::Real,
         clocks=(A.forecast_clock(issue,4,delay),A.forecast_clock(issue,6,delay))
         anchor_index=index-delay
         anchor=anchor_index>=1 ? raw[15,anchor_index] : NaN
-        target=Tuple(index+h<=length(input.time) ? raw[15,index+h] : NaN for h in (4,6))
-        scoreable=Tuple(isfinite(anchor)&&isfinite(y) for y in target)
         available=active && consecutive>=168 && isfinite(anchor)
         reason=!isfinite(anchor) ? "anchor_missing" : !active ? "known_driver_missing" : consecutive<168 ? "warmup" : "model"
+        if issue_sink!==nothing
+            resume=StreamCheckpoint(index,issue,input.source_sha256,prefix,delay,tau,noise,
+                sealed,basis,pending,active,consecutive,reset)
+            detached=model_state===nothing ? nothing : R.Checkpoint(model_state.boundary,
+                collect(model_state.mean),R._matrix(model_state.covariance))
+            issue_sink((;index,issue,driver_tag=tag,driver_receipt=issue,delay_hours=delay,
+                taus=tau,sigma=noise,availability_kind=input.availability_kind,active,
+                consecutive_valid=consecutive,reset_tag=reset,anchor_index,
+                anchor_tag=clocks[1].anchor_tag,anchor_complete=clocks[1].anchor_complete,
+                anchor_receipt=clocks[1].anchor_receipt,anchor,a_model_available=available,
+                a_reason=reason,current_driver=current,issue_checkpoint=detached,
+                issue_basis=model_basis===nothing ? nothing : _matrix(model_basis),
+                resume_checkpoint=resume,source_sha256=input.source_sha256,
+                input_prefix_sha256=prefix,implementation_hashes))
+        end
+        target=Tuple(index+h<=length(input.time) ? raw[15,index+h] : NaN for h in (4,6))
+        scoreable=Tuple(isfinite(anchor)&&isfinite(y) for y in target)
         offsets,coefficients,variances = if available
             _targets(model_state,model_basis,current,lambdas,sigmas)
         else

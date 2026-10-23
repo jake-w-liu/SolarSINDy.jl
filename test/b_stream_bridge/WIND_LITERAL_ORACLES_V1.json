@@ -1,0 +1,308 @@
+{
+  "actual_data": false,
+  "all_prefix_sha256": [
+    "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "100ec5b103692d8463e3038f7c5169bff2f932c690a657294e07920842e39aac",
+    "92d0866f3469a26a95c6bbca71c9731524553de4de73a07dcf171c497a1cde50",
+    "4f2f84190a419e8ee672de7e0b944af314d512fa7a5b39a021da599615c567b0",
+    "4e77715743651c98daac7c45b1f44bf312c820ae0d3b26e42df3eca5eb5f3d06",
+    "7f94d30345313f01c652bfbb81a4a2e71df6ee17680b977ab04a1167f84dfc4e",
+    "292ef09dd0d8c8fc865fc62d46e667e0a1a3f8206900425471886e24201dba14",
+    "807627527fb68b483f4971122e8404c93594078463104e41ca191167283ded6e",
+    "3b5c445946111df8e19f28ac9d7e96cd7a2e4f4bdcfa0d76a1910c655a814bf9",
+    "8f8098c39b1cf29b1d10fb9eb0a94bde1eb89e25529c9377c78ae80742de4ab0",
+    "20c0ff3cd7d144f5653ace2377d7a9f24d9c454b1b5a400f1138e4f058ae5fdd"
+  ],
+  "exact_ascii_lines": [
+    "63082368000000|63082371600000|63082371600000|4607182418800017408|0\n",
+    "63082371600000|63082375200000|63082375200000|4607182418800017408|0\n",
+    "63082375200000|63082378800000|63082378800000|13830554455654793216|0\n",
+    "63082378800000|63082382400000|63082382400001|13830554455654793216|4611686018427387904\n",
+    "63082382400000|63082386000000|63082386000000|missing|missing\n",
+    "63082386000000|63082389600000|63082396800000|13830554455654793216|4611686018427387904\n",
+    "63082393200000|63082396800000|63082396800000|13830554455654793216|4611686018427387904\n",
+    "63082396800000|63082400400000|63082400400000|4607182418800017408|0\n",
+    "63082400400000|63082404000000|63082404000000|13830554455654793216|4607182418800017408\n",
+    "63082404000000|63082407600000|63082407600000|13830554455654793216|4607182418800017408\n"
+  ],
+  "expected": [
+    {
+      "age": 0,
+      "consumed_count": 0,
+      "input_prefix_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "issue": "2000-01-01T00:00:00.000",
+      "q": null,
+      "reason": "latest_driver_unavailable",
+      "state": "missing",
+      "status": "unavailable"
+    },
+    {
+      "age": 0,
+      "consumed_count": 1,
+      "input_prefix_sha256": "100ec5b103692d8463e3038f7c5169bff2f932c690a657294e07920842e39aac",
+      "issue": "2000-01-01T01:00:00.000",
+      "q": null,
+      "reason": "unknown_initial_age",
+      "state": "N",
+      "status": "unavailable"
+    },
+    {
+      "age": 0,
+      "consumed_count": 2,
+      "input_prefix_sha256": "92d0866f3469a26a95c6bbca71c9731524553de4de73a07dcf171c497a1cde50",
+      "issue": "2000-01-01T02:00:00.000",
+      "q": null,
+      "reason": "unknown_initial_age",
+      "state": "N",
+      "status": "unavailable"
+    },
+    {
+      "age": 1,
+      "consumed_count": 3,
+      "input_prefix_sha256": "4f2f84190a419e8ee672de7e0b944af314d512fa7a5b39a021da599615c567b0",
+      "issue": "2000-01-01T03:00:00.000",
+      "q": 0.0,
+      "reason": "available",
+      "state": "S",
+      "status": "available"
+    },
+    {
+      "age": 1,
+      "consumed_count": 3,
+      "input_prefix_sha256": "4f2f84190a419e8ee672de7e0b944af314d512fa7a5b39a021da599615c567b0",
+      "issue": "2000-01-01T04:00:00.000",
+      "q": null,
+      "reason": "latest_driver_unavailable",
+      "state": "S",
+      "status": "unavailable"
+    },
+    {
+      "age": 2,
+      "consumed_count": 4,
+      "input_prefix_sha256": "4e77715743651c98daac7c45b1f44bf312c820ae0d3b26e42df3eca5eb5f3d06",
+      "issue": "2000-01-01T04:00:00.001",
+      "q": null,
+      "reason": "latest_driver_unavailable",
+      "state": "S",
+      "status": "unavailable"
+    },
+    {
+      "age": 0,
+      "consumed_count": 5,
+      "input_prefix_sha256": "7f94d30345313f01c652bfbb81a4a2e71df6ee17680b977ab04a1167f84dfc4e",
+      "issue": "2000-01-01T05:00:00.000",
+      "q": null,
+      "reason": "latest_driver_missing",
+      "state": "missing",
+      "status": "unavailable"
+    },
+    {
+      "age": 0,
+      "consumed_count": 5,
+      "input_prefix_sha256": "7f94d30345313f01c652bfbb81a4a2e71df6ee17680b977ab04a1167f84dfc4e",
+      "issue": "2000-01-01T06:00:00.000",
+      "q": null,
+      "reason": "latest_driver_unavailable",
+      "state": "missing",
+      "status": "unavailable"
+    },
+    {
+      "age": 0,
+      "consumed_count": 7,
+      "input_prefix_sha256": "807627527fb68b483f4971122e8404c93594078463104e41ca191167283ded6e",
+      "issue": "2000-01-01T08:00:00.000",
+      "q": null,
+      "reason": "unknown_initial_age",
+      "state": "S",
+      "status": "unavailable"
+    },
+    {
+      "age": 1,
+      "consumed_count": 8,
+      "input_prefix_sha256": "3b5c445946111df8e19f28ac9d7e96cd7a2e4f4bdcfa0d76a1910c655a814bf9",
+      "issue": "2000-01-01T09:00:00.000",
+      "q": 0.0,
+      "reason": "available",
+      "state": "N",
+      "status": "available"
+    },
+    {
+      "age": 1,
+      "consumed_count": 9,
+      "input_prefix_sha256": "8f8098c39b1cf29b1d10fb9eb0a94bde1eb89e25529c9377c78ae80742de4ab0",
+      "issue": "2000-01-01T10:00:00.000",
+      "q": 1.0,
+      "reason": "available",
+      "state": "S",
+      "status": "available"
+    },
+    {
+      "age": 2,
+      "consumed_count": 10,
+      "input_prefix_sha256": "20c0ff3cd7d144f5653ace2377d7a9f24d9c454b1b5a400f1138e4f058ae5fdd",
+      "issue": "2000-01-01T11:00:00.000",
+      "q": 1.0,
+      "reason": "available",
+      "state": "S",
+      "status": "available"
+    },
+    {
+      "age": 2,
+      "consumed_count": 10,
+      "input_prefix_sha256": "20c0ff3cd7d144f5653ace2377d7a9f24d9c454b1b5a400f1138e4f058ae5fdd",
+      "issue": "2000-01-01T12:00:00.000",
+      "q": null,
+      "reason": "latest_driver_unavailable",
+      "state": "S",
+      "status": "unavailable"
+    }
+  ],
+  "float_bits": {
+    "-0.0": "9223372036854775808",
+    "-1.0": "13830554455654793216",
+    "0.0": "0",
+    "1.0": "4607182418800017408",
+    "2.0": "4611686018427387904"
+  },
+  "initial_same_state_50_expected": [
+    {
+      "age": 0,
+      "consumed_count": 1,
+      "input_prefix_sha256": "76e9e57a1438c32ddf3293a7dbe62115f50e30fe2c29ffa2b6ea63e0321a4625",
+      "issue": "2000-01-01T01:00:00.000",
+      "q": null,
+      "reason": "unknown_initial_age",
+      "state": "S",
+      "status": "unavailable"
+    },
+    {
+      "age": 0,
+      "consumed_count": 48,
+      "input_prefix_sha256": "49875ff4afc9aa94c90b451d53b4ebdfe39e3e5785759efae6baf7b56f82cdd8",
+      "issue": "2000-01-03T00:00:00.000",
+      "q": null,
+      "reason": "unknown_initial_age",
+      "state": "S",
+      "status": "unavailable"
+    },
+    {
+      "age": 49,
+      "consumed_count": 49,
+      "input_prefix_sha256": "b73ac4d088e89f2b9c558da4090e950ecf61f8b0b98fdd2b08232d7cc58bae4e",
+      "issue": "2000-01-03T01:00:00.000",
+      "q": 0.0,
+      "reason": "available",
+      "state": "S",
+      "status": "available"
+    },
+    {
+      "age": 49,
+      "consumed_count": 50,
+      "input_prefix_sha256": "03d726d4d81d743c097038423727a77e97e27852ab4e61b204a2cd5c2c99afd2",
+      "issue": "2000-01-03T02:00:00.000",
+      "q": 0.0,
+      "reason": "available",
+      "state": "S",
+      "status": "available"
+    }
+  ],
+  "nonmonotone_counterexample": {
+    "lines": [
+      "63082368000000|63082371600000|63082378800000|4607182418800017408|0\n",
+      "63082371600000|63082375200000|63082375200000|13830554455654793216|0\n"
+    ],
+    "public_issue2": {
+      "age": 0,
+      "input_prefix_sha256": "01737801666a206354271317ed4ec86459e41c11531e585f05a244675d9f3435",
+      "q": null,
+      "reason": "unknown_initial_age",
+      "state": "S",
+      "status": "unavailable"
+    },
+    "public_issue3": {
+      "age": 1,
+      "input_prefix_sha256": "ec687848822d3a5d6dd7b4f2676b9847b9e80633301960aa7d86017dd15f0f0b",
+      "q": null,
+      "reason": "latest_driver_unavailable",
+      "state": "S",
+      "status": "unavailable"
+    },
+    "tracker_admission": "ArgumentError before callback or state mutation",
+    "wrong_arrival_order_sha256": "7e987d80ce2ad054f59b846360bf09d2a82668cd86faf8f6ac8968bc7265e5ca"
+  },
+  "origin_ms": 63082368000000,
+  "repeated_issue_exact_idempotence": true,
+  "rows": [
+    {
+      "bz": 1.0,
+      "hour": 0,
+      "q": 0.0,
+      "receipt_ms": 63082371600000
+    },
+    {
+      "bz": 1.0,
+      "hour": 1,
+      "q": 0.0,
+      "receipt_ms": 63082375200000
+    },
+    {
+      "bz": -1.0,
+      "hour": 2,
+      "q": 0.0,
+      "receipt_ms": 63082378800000
+    },
+    {
+      "bz": -1.0,
+      "hour": 3,
+      "q": 2.0,
+      "receipt_ms": 63082382400001
+    },
+    {
+      "bz": null,
+      "hour": 4,
+      "q": null,
+      "receipt_ms": 63082386000000
+    },
+    {
+      "bz": -1.0,
+      "hour": 5,
+      "q": 2.0,
+      "receipt_ms": 63082396800000
+    },
+    {
+      "bz": -1.0,
+      "hour": 7,
+      "q": 2.0,
+      "receipt_ms": 63082396800000
+    },
+    {
+      "bz": 1.0,
+      "hour": 8,
+      "q": 0.0,
+      "receipt_ms": 63082400400000
+    },
+    {
+      "bz": -1.0,
+      "hour": 9,
+      "q": 1.0,
+      "receipt_ms": 63082404000000
+    },
+    {
+      "bz": -1.0,
+      "hour": 10,
+      "q": 1.0,
+      "receipt_ms": 63082407600000
+    }
+  ],
+  "same_receipt_expected_tag_hours": [
+    5,
+    7
+  ],
+  "same_receipt_ms": 63082396800000,
+  "same_receipt_row_ordinals": [
+    6,
+    7
+  ],
+  "schema": "b_stream_bridge_wind_literals_v1",
+  "tie_duplicate_policy": "duplicate tags rejected even identical; equal receipt tags strictly ordered"
+}
