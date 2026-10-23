@@ -39,9 +39,44 @@ function _bound(path,limit=T.MAX_META)
     body=open(path,"r") do io;read(io,min(limit+1,declared+1));end
     _need(length(body)==declared&&filesize(path)==declared,"B member length changed during bounded read");body
 end
+_fatal_json_exception(e)=e isa InterruptException||e isa OutOfMemoryError||e isa StackOverflowError
+function _json_depth_preflight(body::AbstractVector{UInt8})
+    _need(axes(body)==(Base.OneTo(length(body)),)&&0<length(body)<=T.MAX_META,"bounded one-based B JSON bytes required")
+    kinds=Vector{UInt8}(undef,13);depth=0;in_string=false;escaped=false
+    for byte in body
+        if in_string
+            if escaped;escaped=false
+            elseif byte==0x5c;escaped=true
+            elseif byte==0x22;in_string=false
+            end
+        elseif byte==0x22
+            _need(depth<=12,"B JSON nesting exceeds limit");in_string=true
+        elseif byte==0x7b||byte==0x5b
+            # Canonical node depth starts at0. An empty container at depth12
+            # is valid, so13 open containers are allowed until a child appears.
+            _need(depth<=12,"B JSON nesting exceeds limit");depth+=1;kinds[depth]=byte
+        elseif byte==0x7d||byte==0x5d
+            _need(depth>0&&((byte==0x7d&&kinds[depth]==0x7b)||(byte==0x5d&&kinds[depth]==0x5b)),"B JSON container mismatch")
+            depth-=1
+        elseif !(byte in (0x20,0x09,0x0a,0x0d,0x2c,0x3a))
+            _need(depth<=12,"B JSON nesting exceeds limit")
+        end
+    end
+    _need(!in_string&&!escaped&&depth==0,"unfinished B JSON container/string")
+    true
+end
+function _bounded_json_parse(body::AbstractVector{UInt8},parser=JSON3.read)
+    _json_depth_preflight(body)
+    try
+        parser(body)
+    catch e
+        _fatal_json_exception(e)&&rethrow()
+        throw(ArgumentError("invalid B JSON"))
+    end
+end
 function _json(path;fields=nothing)
     body=_bound(path);_need(!(length(body)>=3&&body[1:3]==UInt8[0xef,0xbb,0xbf]),"B UTF8 BOM rejected")
-    object=try JSON3.read(body) catch;throw(ArgumentError("invalid B JSON"));end
+    object=_bounded_json_parse(body)
     _need(_bytes(object)==body,"noncanonical or duplicate-key B JSON rejected")
     fields===nothing||_fields(object,fields)
     object,body
@@ -60,7 +95,7 @@ function _qualification_integer(body,counter_path)
         while position[]<=n
             byte=body[position[]];position[]+=1
             if byte==0x22
-                return String(JSON3.read(body[first:position[]-1]))
+                return String(_bounded_json_parse(body[first:position[]-1]))
             elseif byte==0x5c
                 _need(position[]<=n,"unterminated qualification escape");position[]+=1
             else
@@ -99,7 +134,7 @@ function _qualification_integer(body,counter_path)
             if path==target
                 count=position[]-first
                 _need(!found[]&&1<=count<=19&&all(x->0x30<=x<=0x39,@view(body[first:position[]-1]))&&(count==1||body[first]!=0x30),"qualification counter must have a canonical bounded unsigned integer token")
-                result[]=try parse(Int64,String(body[first:position[]-1])) catch;throw(ArgumentError("qualification counter exceeds Int64"));end
+                result[]=try parse(Int64,String(body[first:position[]-1])) catch e;_fatal_json_exception(e)&&rethrow();throw(ArgumentError("qualification counter exceeds Int64"));end
                 found[]=true
             end
         end
@@ -107,6 +142,7 @@ function _qualification_integer(body,counter_path)
     try
         value(0);whitespace();_need(position[]==n+1&&found[],"qualification counter token absent or trailing data")
     catch e
+        _fatal_json_exception(e)&&rethrow()
         e isa ArgumentError&&rethrow()
         throw(ArgumentError("invalid qualification JSON token grammar"))
     end
@@ -118,7 +154,7 @@ function _software_qualification(body;schema,evidence_mode,head,sources)
     # Token grammar is checked before JSON3's integer normalization.
     counts=ntuple(i->_qualification_integer(body,("harness","counts",("PASS","WARN","FAIL")[i])),3)
     _need(counts[3]==0,"component software qualification has failures")
-    q=try JSON3.read(body) catch;throw(ArgumentError("invalid component software qualification"));end
+    q=_bounded_json_parse(body)
     _fields(q,SOFTWARE_QUALIFICATION_FIELDS)
     _need(q.schema==schema&&q.complete===true&&q.evidence_mode==evidence_mode&&q.head==head&&q.software_qualification_only===true&&q.actual_panel_fit_or_outcome_qualified===false&&q.serving_promotion===false,"component software qualification schema/head/scope differs")
     _fields(q.harness,(:counts,:all17_independent_workers_complete,:unfiltered_pkg_test_complete,:experiments_entry_complete));_fields(q.harness.counts,(:PASS,:WARN,:FAIL))

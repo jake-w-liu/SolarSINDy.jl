@@ -986,3 +986,5 @@ include("test_versioned_shadow_trials.jl")
     end
 
 end
+
+include(joinpath(@__DIR__, "b_point_training", "runtests.jl"))

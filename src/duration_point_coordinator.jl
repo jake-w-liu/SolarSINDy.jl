@@ -121,6 +121,35 @@ function _join(design::DesignRow,row,v,delay)
     design isa BTrainingDesignRow ? BTrainingRow(design,row.target) : BForecastRow(design,row.target)
 end
 const _NO_PROBE=(args...)->nothing
+_same_event(a,b)=a isa _ChunkMessage&&b isa _ChunkMessage ? a.producer==b.producer&&a.rows===b.rows : a===b
+function _contains_event(sequence,message,last=length(sequence))
+    for i in 1:last;_same_event(sequence[i],message)&&return true;end
+    false
+end
+function _offer_event!(events,offered,message::_Message)
+    producer=message.producer
+    _need(1<=producer<=9&&offered[producer]===nothing,"B duplicate/invalid offered producer")
+    offered[producer]=message
+    try put!(events,message)
+    finally offered[producer]=nothing
+    end
+end
+function _queue_diagnostics(events,offered,current=nothing)
+    buffer=events.data;unique=0;chunks=0
+    for i in eachindex(buffer)
+        message=buffer[i]
+        if !_contains_event(buffer,message,i-1);unique+=1;chunks+=message isa _ChunkMessage;end
+    end
+    for i in eachindex(offered)
+        message=offered[i]
+        if message!==nothing&&!_contains_event(buffer,message)&&!_contains_event(offered,message,i-1)
+            unique+=1;chunks+=message isa _ChunkMessage
+        end
+    end
+    with_consumer=chunks
+    if current isa _ChunkMessage&&!_contains_event(buffer,current)&&!_contains_event(offered,current);with_consumer+=1;end
+    (;buffered=length(buffer),capacity=events.sz_max,available=Base.n_avail(events),unique_messages=unique,queued_A_chunks=chunks,with_consumer)
+end
 function _barrier_payload(scope,p,physical,epoch)
     _need(keys(p)==ISSUE_KEYS&&p.index isa Int&&p.index==epoch&&p.issue==Adapter._shift(scope.view.input.time[epoch],1),"B barrier payload index/keys differ")
     recipe=Adapter.settings()[2*physical-1];v=scope.view;b=scope.training[1].binding
@@ -154,10 +183,12 @@ function _coordinate_issue_streams(v::PointInputView,laws,sink::Function;delay_h
     _need(v.evidence_mode==:synthetic_only||probe===_NO_PROBE,"B actual producer probe substitution forbidden")
     _with_joint_design_scope(v,laws,(;delay_hours=delay,mask=training_mask,fold_id),(;mask=forecast_union_mask,validation_start,validation_end)) do scope
         events=Channel{_Message}(9);acks=[Channel{Int}(1) for _ in 1:9];cancelling=Ref(false)
+        offered=fill!(Vector{Union{Nothing,_Message}}(undef,9),nothing)
         tasks=Task[];errors=Any[];cleanup=Any[];results=Vector{NamedTuple}(undef,9)
         pending=[Dict{Int,Tuple{DesignRow,DesignRow}}() for _ in 1:9]
         expected=ones(Int,9);last_chunk=zeros(Int,9);done=falses(9);epoch=1
         payloads=Vector{NamedTuple}(undef,9);seen=falses(9);max_pending=0;max_queued=0
+        max_buffered=0;max_unique=0;max_chunks=0;max_with_consumer=0
         for physical in 1:9
             recipe=Adapter.settings()[2*physical-1]
             task=@async begin
@@ -167,16 +198,16 @@ function _coordinate_issue_streams(v::PointInputView,laws,sink::Function;delay_h
                             replacement=probe(:before_issue,physical,p)
                             message_payload=replacement isa NamedTuple ? replacement : p
                             _need(message_payload isa NamedTuple,"B synthetic probe payload differs")
-                            put!(events,_IssueMessage(physical,message_payload));ack=take!(acks[physical])
+                            _offer_event!(events,offered,_IssueMessage(physical,message_payload));ack=take!(acks[physical])
                             _need(ack==p.index,"B acknowledgment epoch differs")
                             probe(:after_ack,physical,p)
                         end,
-                        sink=rows->put!(events,_ChunkMessage(physical,rows)))
-                    put!(events,_DoneMessage(physical,out));out
+                        sink=rows->_offer_event!(events,offered,_ChunkMessage(physical,rows)))
+                    _offer_event!(events,offered,_DoneMessage(physical,out));out
                 catch e
                     captured=CapturedException(e,catch_backtrace())
                     if !cancelling[]
-                        try put!(events,_ErrorMessage(physical,captured)) catch;end
+                        try _offer_event!(events,offered,_ErrorMessage(physical,captured)) catch;end
                     end
                     _ProducerFailure(captured,cancelling[])
                 end
@@ -185,7 +216,11 @@ function _coordinate_issue_streams(v::PointInputView,laws,sink::Function;delay_h
         end
         try
             while !all(done)
-                max_queued=max(max_queued,Base.n_avail(events));message=take!(events);physical=message.producer
+                q=_queue_diagnostics(events,offered)
+                max_queued=max(max_queued,q.available);max_buffered=max(max_buffered,q.buffered);max_unique=max(max_unique,q.unique_messages);max_chunks=max(max_chunks,q.queued_A_chunks);max_with_consumer=max(max_with_consumer,q.with_consumer)
+                message=take!(events);physical=message.producer
+                q=_queue_diagnostics(events,offered,message)
+                max_queued=max(max_queued,q.available);max_buffered=max(max_buffered,q.buffered);max_unique=max(max_unique,q.unique_messages);max_chunks=max(max_chunks,q.queued_A_chunks);max_with_consumer=max(max_with_consumer,q.with_consumer)
                 _need(1<=physical<=9&&!done[physical],"B duplicate/unknown completed producer")
                 if message isa _IssueMessage
                     p=message.payload
@@ -246,10 +281,11 @@ function _coordinate_issue_streams(v::PointInputView,laws,sink::Function;delay_h
                 end
             end
             _need(all(istaskdone,tasks),"B producer Task escaped scope")
-            try probe(:cleanup_done,0,(;terminated_tasks=count(istaskdone,tasks),cleanup)) catch e;push!(errors,e);end
+            _need(all(isnothing,offered),"B offered message reference escaped cleanup")
+            try probe(:cleanup_done,0,(;terminated_tasks=count(istaskdone,tasks),offered_slots_cleared=all(isnothing,offered),cleanup)) catch e;push!(errors,e);end
         end
         _raise(errors)
         _need(epoch==v.source_hours+1&&all(isempty,pending),"B source/pending tail differs")
-        (;streams=results,max_pending_design_rows=max_pending,max_queued_messages=max_queued,producer_tasks=9,terminated_tasks=count(istaskdone,tasks),cleanup,counts=copy(scope.state.counts))
+        (;streams=results,max_pending_design_rows=max_pending,max_queued_messages=max_queued,producer_tasks=9,terminated_tasks=count(istaskdone,tasks),cleanup,counts=copy(scope.state.counts),max_buffered_messages=max_buffered,event_channel_capacity=events.sz_max,max_queued_unique_messages=max_unique,max_queued_A_chunks=max_chunks,max_A_chunks_with_consumer=max_with_consumer)
     end
 end

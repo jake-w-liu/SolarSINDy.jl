@@ -74,6 +74,8 @@ function _verify_basis(v::T.PointInputView,laws,directory;expected_manifest_sha2
     try
         for i in 1:18
             member=manifest.members[i];_fields(member,BASIS_MEMBER_FIELDS)
+            T._int(member.physical_schedule,1,9);T._int(member.beta,1,20);T._int(member.bytes,16,T.MAX_FILE)
+            T._int(member.training_origins,0,T.MAX_ROWS);T._int(member.forecast_origins,0,T.MAX_ROWS)
             _need(member.name=="basis-$i.bin"&&member.physical_schedule==(i-1)÷2+1&&member.beta==(5,20)[(i-1)%2+1]&&member.training_origins==count(masks.training)&&member.forecast_origins==count(masks.forecast),"B basis setting/count differs")
             hash,bytes=_file_sha(_member(root,String(member.name)))
             _need(hash==member.sha256&&bytes==member.bytes==16+248*(count(masks.training)+count(masks.forecast)),"B basis data bytes differ")

@@ -191,16 +191,23 @@ function verify_initial_l0(directory,a::BInputs.BPrefixAdmission,reference::BSel
     T._need(T._int(d.streams.replay_A_streams,9,9)==9&&T._int(d.streams.replay_gain_solves,0,0)==0&&T._int(d.streams.terminated_producer_tasks,9,9)==9,"B completion stream scope differs")
     for field in keys(d.streams.producer_counts);T._int(getproperty(d.streams.producer_counts,field),0,20*T.MAX_ROWS);end
     tree=_tree(root);T._need(tree.sha256==d.output_sha256&&tree.bytes==d.output_bytes&&tree.files==d.output_file_count&&tree.directories==d.output_directory_count,"B stage full output inventory differs")
+    support,support_body=P._json(P._member(root,"support.json");fields=(:schema,:all36_checked,:accepted,:selected_index,:gain_fit_count,:settings))
+    T._need(support.schema=="b_all36_support_preflight_v1"&&support.all36_checked===true&&support.accepted===true&&support.selected_index===nothing&&T._int(support.gain_fit_count,0,0)==0&&length(support.settings)==36,"B completed stage support scope differs")
+    for (index,entry) in enumerate(support.settings)
+        T._fields(entry,(:setting_index,:joint_origins,:informative_origins,:supported))
+        T._need(T._int(entry.setting_index,1,36)==index&&T._int(entry.joint_origins,100,T.MAX_ROWS)>=T._int(entry.informative_origins,100,T.MAX_ROWS)&&entry.supported===true,"B completed stage support entry differs")
+    end
     T._need(length(d.hazards)==2&&length(d.models)==36,"B stage law/model count differs")
     laws=ntuple(2) do bi
         entry=d.hazards[bi];T._fields(entry,(:beta,:model_id,:directory,:manifest_sha256));T._need(T._int(entry.beta,1,20)==(5,20)[bi]&&entry.directory=="laws/beta-$((5,20)[bi])","B law order differs")
-        law=D.load_model(P._member(root,String(entry.directory));expected_manifest_sha256=String(entry.manifest_sha256))
+        lawroot=P._member(root,String(entry.directory));P._preflight_duration_artifact(lawroot)
+        law=D.load_model(lawroot;expected_manifest_sha256=String(entry.manifest_sha256))
         T._need(law.model_id==entry.model_id&&law.source_sha256==a.view.source_sha256&&law.boundary==a.metadata.training_boundary,"B loaded law source/boundary differs");law
     end
     basis_pin=String(d.streams.basis_manifest_sha256)
     proof=P._verify_basis(a.view,laws,P._member(root,"basis");expected_manifest_sha256=basis_pin,expected_sources=sources,chunk_hours)
     T._need(T._bytes(d.streams.producer_counts)==T._bytes(proof.producer_counts),"B completion producer counters differ from independent replay")
-    pointpins=BSelection.BPointFilePanel[]
+    pointpins=BSelection.BPointFilePanel[];expected_support=NamedTuple[]
     for physical in 1:9
         panels=ntuple(bi->P._read_verified_panel(proof,a.view,physical,bi),2)
         for eta_index in 1:2,bi in 1:2
@@ -211,6 +218,12 @@ function verify_initial_l0(directory,a::BInputs.BPrefixAdmission,reference::BSel
             context=_export_context(a,panel,permission)
             loaded=P.load_point_bundle(P._member(root,String(entry.directory));expected_manifest_sha256=String(entry.manifest_sha256),expected_sources=sources,expected_binding=context)
             model=loaded.model;T._need(model.model_id==entry.model_id&&model.fit_input_manifest_sha256==entry.fit_manifest_sha256,"B independently loaded fit/model differs")
+            T._need(entry.points.model_id==model.model_id,"B point sidecar model identity differs from verified model")
+            T._need(P._bound(P._member(root,"gain-journal/setting-$index.json"))==T._bytes(T._model_data(model;identity=true)),"B gain journal differs from verified model")
+            # load_point_bundle has just recomputed and checked this informative
+            # count against the independent raw-replayed panel. Reuse that
+            # checked scalar rather than scanning the N-row panel a second time.
+            push!(expected_support,(;setting_index=index,joint_origins=length(panel.training.rows),informative_origins=model.informative_count,supported=model.informative_count>=100))
             fitroot=P._member(root,String(entry.fit_directory));fitmeta,fitbody=P._json(P._member(fitroot,"manifest.json");fields=P.FIT_INPUT_FIELDS)
             T._need(T._sha(fitbody)==entry.fit_manifest_sha256&&T._sha(P._bound(P._member(fitroot,"joint-fit.bin"),T.MAX_FILE))==model.fit_data_sha256&&T._sha(P._bound(P._member(fitroot,"fit-mask.ascii"),T.MAX_FILE))==model.fit_mask_sha256,"B serialized fit readback differs")
             predictions=T.predict_point_rows(model,panel.forecast);io=IOBuffer();P._header(io,"SSBPPTS1",16);for row in predictions,x in row.means;P._put_float(io,x);end;expected=take!(io)
@@ -218,6 +231,8 @@ function verify_initial_l0(directory,a::BInputs.BPrefixAdmission,reference::BSel
             push!(pointpins,BSelection.BPointFilePanel(P._member(root,String(point.name)),String(point.sha256),reference))
         end
     end
+    expected_support_record=(;schema="b_all36_support_preflight_v1",all36_checked=true,accepted=true,selected_index=nothing,gain_fit_count=0,settings=expected_support)
+    T._need(T._bytes(expected_support_record)==support_body&&P._bound(P._member(root,"support.json"))==support_body,"B all36 support differs from independently replayed panel counts")
     descriptors=Union{Vector{T.BPointPredictionRow},BSelection.BPointFilePanel}[x for x in pointpins]
     selection=BSelection.provisional_l0(BSelection.BL0Panels(descriptors),reference;validation_start=a.metadata.validation_start,validation_end=a.metadata.validation_end)
     T._need(T._bytes(selection.data)==P._bound(P._member(root,"provisional-selection.json"))&&T._bytes(selection.data)==T._bytes(d.provisional_selection),"B provisional selection replay differs")

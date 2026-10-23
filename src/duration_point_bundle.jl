@@ -1,3 +1,11 @@
+function _preflight_duration_artifact(root)
+    # The caller owns a quiescent, source-bound B stage tree. This adds only
+    # B's declared metadata resource guard; D.load_model keeps all its checks.
+    for name in ("COMMITTED.json","MANIFEST.json","model.json")
+        _json_depth_preflight(_bound(_member(root,name)))
+    end
+    true
+end
 function _embedded_law(root,law::D.DurationModel)
     D._validate(law)
     body=D._json(merge(D._data(law),(model_id=law.model_id,)))
@@ -7,9 +15,9 @@ end
 function _load_embedded_law(root)
     _need(sort(readdir(root))==["manifest.json","model.json"],"embedded B law membership differs")
     manifest=_bound(_member(root,"manifest.json"));body=_bound(_member(root,"model.json"))
-    m=JSON3.read(manifest);_fields(m,(:schema,:model_sha256))
+    m=_bounded_json_parse(manifest);_fields(m,(:schema,:model_sha256))
     _need(m.schema=="duration_model_manifest_v1"&&m.model_sha256==_sha(body),"embedded duration manifest differs")
-    d=JSON3.read(body)
+    d=_bounded_json_parse(body)
     fields=(:schema,:availability_kind,:beta,:boundary,:cutoff,:edges,:risks,:flips,:global_risks,:global_flips,:marks,:mark_counts,:training_prefix_sha256,:source_sha256,:source_signature,:quantile_rule,:mark_rule,:model_id)
     _fields(d,fields)
     _need(d.schema=="duration_forcing_research_v1"&&d.availability_kind=="assumed_completed_hour"&&d.quantile_rule=="nearest_rank_lower_bin_v1"&&d.mark_rule=="four_ceil_rank_blocks_v1","embedded duration schema differs")
