@@ -52,4 +52,4 @@ function main(arguments)
     R._exclusive_write(joinpath(output,"runtime.json"),R.canonical_bytes(runtime))
     println("completed synthetic native operation ",request["operation"]," payload=",internal["payload_sha256"])
 end
-abspath(PROGRAM_FILE)==@__FILE__ && main(ARGS)
+abspath(PROGRAM_FILE)==(@__FILE__) && main(ARGS)

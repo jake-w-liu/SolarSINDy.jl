@@ -38,4 +38,4 @@ function finalize(arguments)
     end
     println("committed synthetic artifact ",bundle.kind," manifest=",bundle.manifest_sha256)
 end
-abspath(PROGRAM_FILE)==@__FILE__ && finalize(ARGS)
+abspath(PROGRAM_FILE)==(@__FILE__) && finalize(ARGS)
