@@ -431,6 +431,22 @@ function _mean_base_schedule(checkpoint,lambdas,sigmas,pressure,observation_vari
     end
 end
 
+function _mean_affine_coefficients(schedule,basis::Basis,qmeans)
+    coefficients=NTuple{2,Float64}[];endpoints=Basis[]
+    phi=ntuple(j->schedule.kernels[j].phi,2);c=ntuple(j->schedule.kernels[j].mean_coefficient,2)
+    u=ntuple(j->schedule.kernels[j].forcing_endpoint,2);v=ntuple(j->schedule.kernels[j].forcing_mean,2)
+    K._precise() do
+        previous=basis
+        for qmean in qmeans
+            q=BigFloat(qmean)
+            design=ntuple(k->K._result(sum(BigFloat(c[j])*BigFloat(previous[j][k]) for j in 1:2)-BigFloat(v[k])*q,"expected gain coefficient"),2)
+            previous=ntuple(j->ntuple(k->K._result(BigFloat(phi[j])*BigFloat(previous[j][k])-(j==k ? BigFloat(u[j])*q : 0),"expected endpoint basis"),2),2)
+            push!(coefficients,design);push!(endpoints,previous)
+        end
+    end
+    (;coefficients=Tuple(coefficients),endpoint_bases=Tuple(endpoints))
+end
+
 """
     mean_affine_rollout(model, current, checkpoint, initial_basis; lambdas, sigmas,
         pressure, target_observation_variance, horizon=6)
@@ -456,22 +472,11 @@ function mean_affine_rollout(model::DurationModel,current,checkpoint::R.Checkpoi
     schedule=_mean_base_schedule(checkpoint,lambdas,sigmas,pressure,target_observation_variance,horizon)
     forcing=_mean_forcing(model,current,horizon)
     forcing.status==:available || return forcing
-    coefficients=NTuple{2,Float64}[];endpoints=Basis[]
-    phi=ntuple(j->schedule.kernels[j].phi,2);c=ntuple(j->schedule.kernels[j].mean_coefficient,2)
-    u=ntuple(j->schedule.kernels[j].forcing_endpoint,2);v=ntuple(j->schedule.kernels[j].forcing_mean,2)
-    K._precise() do
-        previous=basis
-        for qmean in forcing.qmeans
-            q=BigFloat(qmean)
-            design=ntuple(k->K._result(sum(BigFloat(c[j])*BigFloat(previous[j][k]) for j in 1:2)-BigFloat(v[k])*q,"expected gain coefficient"),2)
-            previous=ntuple(j->ntuple(k->K._result(BigFloat(phi[j])*BigFloat(previous[j][k])-(j==k ? BigFloat(u[j])*q : 0),"expected endpoint basis"),2),2)
-            push!(coefficients,design);push!(endpoints,previous)
-        end
-    end
+    affine=_mean_affine_coefficients(schedule,basis,forcing.qmeans)
     _validate(model)
     (;status=:available,reason=:available,issue=current.issue,horizon=Int(horizon),model_id=model.model_id,
       current_state_id=current.state_id,offsets=schedule.offsets,base_means=schedule.means,
-      coefficients=Tuple(coefficients),endpoint_bases=Tuple(endpoints),forcing.qmeans,
+      coefficients=affine.coefficients,endpoint_bases=affine.endpoint_bases,forcing.qmeans,
       forcing.state_distributions,forcing.peak_states,forcing.expanded_states,
       computation_scope=:point_mean_only,measured_receipts_available=false,claim_ready=false)
 end
