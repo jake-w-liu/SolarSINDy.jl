@@ -1,5 +1,19 @@
 # Candidate implementation notes
 
+## Boosted numerical range correction (24 October 2026)
+
+The pinned EvoTrees CPU backend stores predictions in Float32. Generated-data
+regressions reproduced accepted fits containing nonfinite leaves for large
+finite learning rates and targets, and nonzero target loss below that range.
+The maintained wrapper now requires finite scalar hyperparameters and targets
+that remain finite and preserve nonzero values in Float32. It rejects nonfinite
+stored predictions after fitting and nonfinite accumulated output at prediction.
+It does not rescale targets, alter binning or change model equations. Independent
+original-source characterization binds the exact trees and all512 predictions
+for each of the eight depth/round/bin configurations on both supported runtimes.
+Full package, experiment, harness, documentation and platform gates remain
+required before integration; these checks make no scientific performance claim.
+
 ## Archival B bridge development ledger
 
 The pre-code contract and independent literal SHA/state/OU oracles preceded this

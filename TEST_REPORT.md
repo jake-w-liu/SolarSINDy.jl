@@ -1,5 +1,16 @@
 # Receipt-report integration test plan
 
+## Boosted numerical range regression (24 October 2026)
+
+On Julia1.12.6 and1.13.1 the complete maintained analog GBM suite passes165
+assertions, including invalid parameter/target ranges, ordinary zero targets,
+nonfinite copied leaves and overflow from finite copied leaves. A separate
+original-source characterization passes4120 assertions per runtime: all eight
+model-tree digests and all4096 prediction Float64 words are unchanged. Both
+owned native runs exit0 without timeout, changed controls or unsafe runtime
+warnings. No actual archive, forecast skill, serving or paper result is qualified
+by these generated-data tests. Full release gates remain mandatory.
+
 ## Archival B bridge verification contract
 
 The isolated bridge suite pins five independent pre-code oracle files and five

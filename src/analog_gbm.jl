@@ -255,6 +255,10 @@ knob is pinned (`bagging_size=1`, `rowsample=1`, `colsample=1`, explicit seed),
 so repeated fits on identical inputs are bit-identical. `L2`, `gamma`,
 `rowsample` and `colsample` are exposed only so the configuration is fully
 recorded; their defaults are the EvoTrees $(GBM_EVOTREES_VERSION) defaults.
+
+Targets must remain finite and preserve nonzero values in the backend's
+`Float32` range. Unsupported targets and nonfinite fitted predictions are
+rejected without changing the target scale or the fitted equations.
 """
 function gbm_fit(
         X::AbstractMatrix,
@@ -283,6 +287,12 @@ function gbm_fit(
     all(isfinite, target) || throw(ArgumentError(
         "analog ensemble boosted targets must be finite",
     ))
+    all(value -> begin
+        encoded = Float32(value)
+        isfinite(encoded) && (value == 0.0 || encoded != 0.0f0)
+    end, target) || throw(ArgumentError(
+        "analog ensemble boosted targets exceed the supported Float32 range",
+    ))
     1 <= Int(max_depth) <= 12 || throw(ArgumentError(
         "analog ensemble boosted max_depth must be between 1 and 12",
     ))
@@ -293,6 +303,10 @@ function gbm_fit(
         "analog ensemble boosted nbins must be between 2 and 255",
     ))
     Int(seed) >= 0 || throw(ArgumentError("analog ensemble boosted seed must be nonnegative"))
+    all(isfinite, (Float64(eta), Float64(min_weight), Float64(lambda),
+                   Float64(L2), Float64(gamma))) || throw(ArgumentError(
+        "analog ensemble boosted scalar hyperparameters must be finite",
+    ))
     Float64(eta) > 0 || throw(ArgumentError("analog ensemble boosted eta must be positive"))
     Float64(min_weight) >= 0 || throw(ArgumentError(
         "analog ensemble boosted min_weight must be nonnegative",
@@ -321,9 +335,13 @@ function gbm_fit(
         rowsample=Float64(rowsample), colsample=Float64(colsample),
         nbins=Int(nbins), seed=Int(seed), tree_type=:binary, device=:cpu,
     )
-    return EvoTrees.fit(
+    model = EvoTrees.fit(
         config; x_train=matrix, y_train=target, feature_names=names, verbosity=0,
     )
+    all(tree -> all(isfinite, tree.pred), model.trees) || throw(ArgumentError(
+        "analog ensemble boosted fit produced nonfinite Float32 tree predictions",
+    ))
+    return model
 end
 
 """
@@ -345,7 +363,11 @@ function gbm_predict(model, X::AbstractMatrix)
     all(isfinite, matrix) || throw(ArgumentError(
         "gbm_predict feature matrices must be finite",
     ))
-    return Float64.(EvoTrees.predict(model, matrix))
+    predictions = Float64.(EvoTrees.predict(model, matrix))
+    all(isfinite, predictions) || throw(ArgumentError(
+        "analog ensemble boosted prediction exceeded the finite Float32 range",
+    ))
+    return predictions
 end
 
 """
