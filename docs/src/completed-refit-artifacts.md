@@ -14,6 +14,46 @@ with zero/nonfinite scales replaced by1, an unpenalized intercept and an explici
 candidate from the five fixed penalties. A selected ground refit requires the
 separate verified selection chain and is rejected here.
 
+## Reproduce the generated-source chain
+
+Run the fixed synthetic driver from a repository checkout with Python3.11 or
+newer available:
+
+```sh
+julia --startup-file=no --pkgimages=no --threads=1 --project=. test/completed_refit_artifacts/run_ci_native_chain.jl
+```
+
+The driver preserves a new output directory containing raw generated source
+bodies, the exact caller resolution maps, every native log and ownership
+receipt, and immutable point/calibration bundles. Each layout performs the
+actual ridge solve twice, independently checks it, publishes the full signed
+calibration chronology, then loads it in a fresh owned process. The Julia
+numeric worker always uses the prescribed startup, compiled-module, package
+image and thread flags. Linux and macOS use the same fixed entry with owned
+POSIX sessions; the complete ownership runner is shipped byte-for-byte.
+
+The ordinary native entry requires a clean source checkpoint. Dependency
+resolution in a test checkout may change only its tracked `Manifest.toml`.
+The explicit test wrapper then creates a separate clone, preserves every other
+source byte, records the exact lock diff, and makes a truthful local test
+checkpoint. The original checkout is unchanged. Native artifacts identify that
+actual child checkpoint. They do not imply execution under the parent commit
+or compatibility with another dependency lock.
+
+The driver prints its preserved output directory. To reuse that same reviewed
+synthetic proof for package tests and examples, set
+`SOLARSINDY_SYNTHETIC_REFIT_TEST_ROOT` to that absolute directory. An explicit
+Python interpreter can be selected with the absolute
+`SOLARSINDY_RESEARCH_PYTHON` path. The source identity and receipt graph are
+checked again when loading; either environment variable alone is insufficient
+evidence. No actual source format, model selection study or serving path is
+enabled by this driver.
+
+Python optimization modes are rejected before argument processing or source
+generation. Source-lock reads and Git-control output have fixed byte limits;
+overflow and timeouts fail the route while retaining bounded logs and owned
+process receipts.
+
 Only the two synthetic source formats are accepted. A source audit binds approved
 body bytes, native parsing and an independent parser reconstruction. A feature
 schedule retains every requested issue and rejection without consulting target

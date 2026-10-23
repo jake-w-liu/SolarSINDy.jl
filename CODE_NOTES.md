@@ -843,3 +843,23 @@ matched baselines/common-case proof, actual scientific execution and serving
 remain separate mandatory work. Cohort labels alone do not prove intersection.
 Root owns fullPkg/examples/harness/native-platform CI on the integrated head;
 software tests do not waive novelty, proper-loss or venue evidence gates.
+
+The later a72 development checkpoint passes1297 focused assertions on each
+runtime and four genuine ground11/mixed8 native routes with136 owned launches
+and2646 independent frozen-oracle checks. These remain prepackage historical
+evidence: a subsequently confirmed public receipt-argument identity gap requires
+an exact loaded-manifest comparison and fresh code-matched route regressions.
+The original source/input/fit/calibration numerical bytes and tolerances remain
+unchanged by that identity correction.
+
+The fixed synthetic source factory and raw owned native runner are now shipped
+with a strict clean-checkout route and an explicit test-descendant wrapper.
+Only an actual tracked Manifest delta can be projected into a fresh private
+no-local clone; all other source bytes and the original checkout are preserved.
+Artifacts identify the truthful child checkpoint. Optimized Python is rejected
+before entry/factory actions. Manifest reads and both Git-output streams are
+bounded before full buffering; the unchanged owner cleans overflow/timeout
+descendants. The21-case filesystem/control regression passes on Windows, with
+all earlier failures preserved. Packaged-source native routes, full-project
+dependency resolution, all37 semantic mutants, resources and final gates remain
+pending; this controller result is not numerical or cross-platform qualification.

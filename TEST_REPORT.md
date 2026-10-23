@@ -1072,3 +1072,26 @@ data-only ordinary-session/no-Git/foreign-OS loading; publication interruption a
 tamper matrix; valid scaled DAG/row resource qualification; examples and final
 strict docs. FullPkg,experiments,harness,canonicalH and all8CI are root-owned
 integration gates. Every synthetic provenance flag remains false for actual use.
+
+The a72 prepackage checkpoint subsequently passed1297 focused assertions per
+runtime, including66 independent dyadic-precision checks, and all four native
+layout/runtime routes. Their136 owned launches exited0 without timeout or
+changed controls;2646 independent original-oracle checks passed at the unchanged
+atol1e-13,rtol0. The ambient-precision dyadic codec failure and original same-
+payload red/green witnesses are retained. Those graphs are historical positives,
+not final packaged-source qualification.
+
+A genuine positive-first public publication probe then exposed an unbound
+requested receipt manifest. The narrow fix compares the loaded receipt to the
+actual argument pin; fresh String/Bundle and fit/calibration regressions are
+required on the packaged graph. Synthetic packaging preserves the raw pinned
+owned runner and numerical flags, adds the fixed generated-only source factory,
+and records an explicit source/lock test descendant without original writes.
+The21-case Python support regression passes with exact source controls stable:
+ordinary source/Manifest projections, forbidden modifications, concurrent source
+change, link-flag rejection, optimized-Python rejection, pre-read size caps,
+bounded dual-stream Git capture, overflow and actual timeout descendant cleanup.
+This is bounded Windows controller evidence. All24 predeclared portable cases,
+actual POSIX numerical execution, full-project resolve compatibility, final four
+native routes,37 quantitative fitter mutants, resources and full software gates
+remain open.

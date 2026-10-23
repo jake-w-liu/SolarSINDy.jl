@@ -7,7 +7,9 @@ function _load_native_job(directory;protocol::RefitProtocol,pins,expected_operat
 end
 function _as_job(value,protocol,pins,operation)
     pin=value isa _Bundle ? value.manifest_sha256 : sha_string(value)
-    _load_native_job(_resolve(pins,pin;directory=true);protocol,pins,expected_operation=operation)
+    loaded=_load_native_job(_resolve(pins,pin;directory=true);protocol,pins,expected_operation=operation)
+    require(loaded.manifest_sha256==pin,"native receipt manifest argument differs")
+    loaded
 end
 function _native_reference(job::_Bundle)
     k=decode_canonical(job.context)["kind_context"]

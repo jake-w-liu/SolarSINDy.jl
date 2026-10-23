@@ -210,3 +210,6 @@ run_synthetic_completed_source_replay()
 include(joinpath(@__DIR__, "completed_label_events_synthetic.jl"))
 run_synthetic_completed_label_events()
 run_synthetic_completed_label_events_bounded()
+
+include(joinpath(@__DIR__, "completed_refit_artifacts.jl"))
+CompletedRefitArtifactsExample.run_example()
