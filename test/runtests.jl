@@ -865,6 +865,7 @@ using DataFrames
     include("test_l1_receipt_collector.jl")
     include("test_l1_receipt_pairing.jl")
     include("test_l1_collector_launchd.jl")
+    include("test_shadow_trial_launchers.jl")
     include("test_l1_prospective_issue_capture.jl")
     include("test_static_stack.jl")
     include("test_static_stack_residual.jl")

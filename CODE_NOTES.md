@@ -707,3 +707,11 @@ export/doctest/warning gate unchanged; a scoped internal legacy appendix explain
 the archive-tag builder rather than hiding it or re-exporting it. Port-tool text
 encoding and two documentation failures were retained, corrected and reverified.
 Full package/experiment/harness/native CI and actual scientific gates remain open.
+## Shadow trial launcher propagation (23 October 2026)
+
+The launchd render allowlists now carry the three trial config/pin settings to
+both consuming jobs and include them in unapplied-key diagnostics. Watchdog
+and collector lists are unchanged. Independent pre-code literal environments
+and argument paths drive actual extracted rendering into private plists; a
+separate stdlib XML parser checks the outputs. No installer or service-loading
+top level is executed, and no HOME override or live trial is involved.

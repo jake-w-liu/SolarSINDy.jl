@@ -27,7 +27,9 @@
                       service reads (SOLARSINDY_OPERATIONAL_CALIBRATION, LIVE_MONITOR_*,
                       LIVE_FUTURE_CLOCK_TOLERANCE_MIN, LIVE_MAX_FUTURE_CLOCK_SKEW_MIN,
                       SOLARSINDY_SUPERLEARNER_DEPLOY_DIR,
-                      SOLARSINDY_STATIC_STACK*). A manual install replaces the line with its own
+                      SOLARSINDY_STATIC_STACK*, SOLARSINDY_SHADOW_TRIAL_CONFIG,
+                      SOLARSINDY_SHADOW_TRIAL_SHA256 and SOLARSINDY_SHADOW_TRIAL_SEAL_SHA256).
+                      A manual install replaces the line with its own
                       <key>/<string> pairs, or deletes it to run with no extra keys.
 
   Console streams go to bounded, self-rotating files under __MONITOR_DIR__/logs (launchd does not

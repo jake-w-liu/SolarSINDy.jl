@@ -929,3 +929,12 @@ tolerance change. The final fresh API/import/registration/CI route found no
 additional confirmed issue within this port. Full unfiltered Pkg.test(), the
 actual full experiment entry, canonical harness and all8 CI cells are outstanding
 root-owned combined-head gates, as are actual source/model/event/evidence stages.
+## Shadow trial launcher regression plan (23 October 2026)
+
+The retained before-fix render has123 independent checks and13 actual failures:
+consumer values are missing and unapplied trial keys are not diagnosed. The
+new focused suite renders all four services with absent, complete, each partial
+and explicitly empty settings, verifies exact XML-decoded environments and
+special-character arguments, and checks selected-service diagnostic scope.
+Legacy fixture isolation clears the three new keys. Full package, experiments,
+harness and native CI qualification remain required on the final combined head.

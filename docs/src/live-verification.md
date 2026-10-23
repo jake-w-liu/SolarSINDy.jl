@@ -685,3 +685,11 @@ The historical display authenticates the separately sealed snapshot. Later
 outcome maturations or revisions in the ordinary scoring log do not amend that
 assessment. Active-trial validation does not authenticate the entire mutable
 pre-start log against the snapshot or certify its historical completeness.
+
+The launchd installer renders all three explicit trial settings into both the
+monitor and dashboard jobs. Unset settings stay absent, and watchdog/collector
+jobs do not receive them. Re-render the selected jobs after changing their
+configuration. For systemd, supply the same three values through the reviewed
+unit environment or an environment file. For Compose, mount the config
+read-only at the same path in both services and pass all three values through
+an explicit override. The default templates select the existing A3 assessment.
