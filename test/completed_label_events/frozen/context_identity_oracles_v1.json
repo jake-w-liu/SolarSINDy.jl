@@ -1,0 +1,22 @@
+{
+  "schema": "completed_label_event_context_independent_precode_v1",
+  "pre_code": true,
+  "stream_id": "synthetic_station/ground11/policy0",
+  "protocol_id": "synthetic-completed-events-v1",
+  "alternate_protocol_id": "synthetic-completed-events-other",
+  "required_context": {
+    "mode": "ground11",
+    "point_model_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "availability_kind": "assumed_completed_source_intervals",
+    "measured_receipts_available": false,
+    "source_bound_provenance_verified": false
+  },
+  "rejected_label_cases": ["missing", "empty", "whitespace_only", "nonstring", "513_ASCII_bytes"],
+  "label_rejection_effect": "no owner is constructed",
+  "cross_owner_plan_result": "ArgumentError with all fields unchanged",
+  "changed_context_plan_result": "ArgumentError with all fields unchanged",
+  "metadata_event_kinds": ["source_receipt", "duplicate_source", "ignored_stale", "completed_target", "censored_target", "issue", "unavailable_bound", "feedback", "score"],
+  "same_owner_identical_replay": "idempotent, no new events or counters",
+  "numerical_oracles_changed": false,
+  "actual_artifact_provenance_proved": false
+}

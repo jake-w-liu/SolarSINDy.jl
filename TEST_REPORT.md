@@ -967,3 +967,41 @@ than merely fail import/parse. Source/oracle/control hashes and all failed nativ
 attempts are retained in external receipts. Final focused/docs/profile receipts
 are separate from root-owned full package/experiment/harness/all-platform gates.
 No scientific result or validation tolerance is changed to obtain a pass.
+
+
+The shared-event child namespace adds independent literal clock/grace, reverse
+completion order, same-time issue, partial early miss, finite-score rollback,
+duplicate/zero, strict warmup, checked extremes, denominator and1000-issue state
+tests. The context amendment adds required-label and plan-isolation oracles.
+Initial native v1 retained a new test setup using rolling capacity2 against the
+frozen n9 upper0 fixture; that changes the quantile rank to infinity. The setup
+was corrected to capacity9 before v2, with no numerical oracle/tolerance change.
+Initial v2 passed966 assertions; context checks also pass in v3. Original487 test
+bytes remain unchanged. Final both-runtime/example/mutation/strict-doc receipts
+are required before this stage is declared focused-qualified. Full unfiltered
+Pkg.test(), full examples/experiments.jl, canonical harness and all8 native CI
+cells remain root-owned combined-head gates; no scientific result is asserted.
+The first final focused pass contains1020 assertions per Julia1.12.6/1.13.1 and
+both synthetic examples pass. Strict docs pass with every existing gate intact;
+the unmodified mutation control passes and all28 targeted event mutants are
+detected without timeout. A subsequent independent offset-axis probe exposed a
+confirmed new shared-entry point-alignment defect. A pre-edit freeze binds the
+probe and correction contract before adding the one-based input guard and8
+independent assertions. Final both-runtime/example/docs and targeted mutation
+reruns remain required on these corrected bytes.
+The corrected final source passes1028/1028 assertions on Julia1.12.6 and1.13.1
+and both standalone44/1000 synthetic examples. Strict documentation passes with
+checkdocs=:exports, doctest=true and warnonly=false unchanged. The final guard
+control passes and omission of its guard is detected, adding to all28 original
+event mutants for29 unique witnesses, all on Julia1.13.1 without timeout. All
+native stages retain private process ownership, cleanup and unchanged controls.
+Independent read-only pre-axis characterization passes5073 assertions per runtime
+for420 terminal windows (46 completed,374 censored), with source/oracle guards
+clean. Final production differs only by the admissible-array-preserving one-line
+guard. No other confirmed defect remained in these bounded synthetic reviews.
+Only these two development/result ledgers changed after final focused/docs/
+mutation receipts; the external disposition binds exact before/after hashes.
+Full Pkg.test(), full experiment entry, canonical harness and all8 native CI
+cells remain mandatory root-owned combined-head gates. Actual data/refits,
+export provenance, static UQ/GP/GPD/threshold/UP numerical adapters and matched
+scientific replay remain separate stages; no scientific readiness is claimed.

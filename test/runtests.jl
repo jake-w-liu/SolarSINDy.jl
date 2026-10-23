@@ -6,6 +6,7 @@ include("test_duration_conditioned_forcing.jl")
 include("test_duration_mean.jl")
 include("test_duration_mean_compatibility.jl")
 include("completed_source_dbdt/runtests.jl")
+include("completed_label_events/runtests.jl")
 using LinearAlgebra
 using Statistics
 using Random

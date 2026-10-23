@@ -67,4 +67,5 @@ check_mode(mode)=mode in (:ground11,:mixed8) || throw(ArgumentError("mode must b
 include("adapter.jl")
 include("controllers.jl")
 include("maximum.jl")
+include("label_events/CompletedLabelEvents.jl")
 end
