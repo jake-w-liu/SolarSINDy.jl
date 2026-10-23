@@ -1,0 +1,64 @@
+{
+  "schema": "completed_minute_scalar_range_oracle_v1",
+  "parent": "de355e990d258ab36023bf3a9f0b817ccf47894f",
+  "before_repair_receipt_sha256": "298b4305d58b810af266ceb95e1d94e0c663d22cb90e3ea4e600649bd5cb8233",
+  "contract": "Finite Real source fields are supported only when conversion to Float64 remains finite and preserves nonzero magnitude. Reject unsupported nonzero underflow. Exact positive/negative zero and representable subnormals remain allowed; physical speed and density must remain nonnegative.",
+  "scalar_cases": [
+    {
+      "input": "zero",
+      "valid": true
+    },
+    {
+      "input": "negative_zero",
+      "valid": true
+    },
+    {
+      "input": "min_subnormal",
+      "valid": true
+    },
+    {
+      "input": "negative_min_subnormal",
+      "valid": true
+    },
+    {
+      "input": "half_min_subnormal",
+      "valid": false
+    },
+    {
+      "input": "negative_half_min_subnormal",
+      "valid": false
+    },
+    {
+      "input": "tiny",
+      "valid": false
+    },
+    {
+      "input": "negative_tiny",
+      "valid": false
+    },
+    {
+      "input": "float32_subnormal",
+      "valid": true
+    },
+    {
+      "input": "beyond_max_float",
+      "valid": false
+    },
+    {
+      "input": "nan",
+      "valid": false
+    },
+    {
+      "input": "infinity",
+      "valid": false
+    },
+    {
+      "input": "boolean",
+      "valid": false
+    }
+  ],
+  "input_rate_positive_vs_zero_bound_is_miss": true,
+  "negative_physical_speed_or_density_is_valid": false,
+  "native_reproduction_failed_assertions_per_runtime": 5,
+  "scope": "Pure numerical source admission; no real case or outcome read, fit, operational replay or scientific verdict."
+}

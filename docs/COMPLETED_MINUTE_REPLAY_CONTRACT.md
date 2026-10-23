@@ -72,6 +72,11 @@ contract. Another retained reproduction exposed unchecked extreme-date minute
 rounding. Both have regression expectations here. Source-clock mutations and
 future-value changes must be detected; changing target values must leave issue
 features unchanged. Missing and invalid values never become fabricated zeros.
+The Float64 source range excludes nonzero scalars that underflow to zero as
+well as nonfinite conversions. Signed zeros and representable subnormals remain
+valid. In particular, conversion cannot admit an originally negative speed or
+density as zero. Literal power-of-two and BigFloat range controls exercise
+ground-history, target and wind admission independently.
 A separate unbounded-integer fixture fixes nine extreme history cases,
 including the first representable issue and its preceding minute under four
 ground delays. Omitting the history-span guard must reproduce the failure.

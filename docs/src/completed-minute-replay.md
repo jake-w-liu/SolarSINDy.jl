@@ -35,6 +35,11 @@ accessing target vectors. `replay_case` joins the two results. Every admission
 result has `accepted`, `reason` and `value` fields; rejected inputs retain an
 explicit missing, invalid or not-ready reason.
 
+Source scalars must remain finite when converted to Float64. A nonzero value
+that underflows to zero is rejected as invalid; exact signed zeros and
+representable subnormals are supported. This preserves the speed and density
+domain checks rather than accepting a negative value after rounding to zero.
+
 These helpers implement a declared analysis convention. NASA's OMNI arrival
 times and final ground archives do not establish actual historical receipt or
 revision vintage. The module preserves that distinction in its output. It

@@ -113,7 +113,11 @@ export admit_ground_features, admit_features, admit_target, replay_case
 
 rejected(reason) = (; accepted=false, reason, value=nothing)
 accepted(value) = (; accepted=true, reason=:complete, value)
-finite_scalar(x) = x isa Real && !(x isa Bool) && isfinite(x) && isfinite(Float64(x))
+function finite_scalar(x)
+    x isa Real && !(x isa Bool) && isfinite(x) || return false
+    value = Float64(x)
+    isfinite(value) && (iszero(x) || !iszero(value))
+end
 
 function rate_at(mag::AbstractDict, center::DateTime)
     previous = center-Minute(1)

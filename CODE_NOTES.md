@@ -606,3 +606,13 @@ source prefixes, invalid inputs, array axes and extreme histories have separate
 controls. No fitted model, paper outcome, source lock or serving path changes.
 Focused tests, examples, mutation controls and strict documentation precede root
 review; full package/experiment/harness and native CI gates remain required.
+
+## Completed-source scalar range (23 October 2026)
+
+Independent native controls reproduced negative physical wind inputs admitted
+after nonzero BigFloat values rounded to signed zero. Source admission now
+rejects nonzero-to-zero Float64 conversions, preserving exact zeros and
+representable subnormals. The same predicate covers ground history, targets
+and all wind scalars. A pre-edit literal oracle fixes domain/range boundaries;
+no actual data, fitted model or historical result is changed. Full package,
+experiment, harness and native platform qualification remain required.

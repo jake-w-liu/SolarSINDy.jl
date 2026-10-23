@@ -817,3 +817,15 @@ native checks pass892 assertions on each of Julia1.12.6 and1.13.1, including
 and strict documentation pass. The unmodified mutation control passes and all
 eight mutations are detected. These checks do not qualify observational skill;
 full Pkg.test(), actual experiments, canonical harness and native CI remain open.
+
+## Completed-source scalar range verification (23 October 2026)
+
+The new independent scalar oracle adds38 assertions for signed zeros,
+representable subnormals, half-minimum underflow, nonfinite conversions,
+physical wind domains, ground histories and future targets. The complete
+focused minute-replay suite passes930 assertions on Julia1.12.6 and1.13.1;
+both synthetic examples and strict documentation pass. Reverting only the
+scalar predicate produces the exact parent module bytes and is detected by
+the new assertions on both runtimes. Existing tolerances and fixtures remain
+unchanged. These checks precede full package/experiment/harness and native CI
+qualification, and make no forecast-skill or paper-readiness claim.
