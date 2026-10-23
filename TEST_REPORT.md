@@ -891,3 +891,41 @@ under the same config pin. New regressions require a separate external receipt
 pin and completion-time chronology. A strict callback taking only the original
 keywords detects unintentional legacy API changes. Revision/removal controls
 document the snapshot-display scope rather than claiming whole-log immutability.
+
+## Completed-source dB/dt package port verification plan (23 October 2026)
+
+The port retains479 frozen independent assertions, with only namespace/import
+and oracle-location adaptation. All source-clock/status/count/target expectations
+are exact; feature absolute tolerance1e-13, short alpha-trace tolerance1e-14,
+accounting1e-12 and the1000-issue accounting1e-10 are unchanged. Package-boundary
+tests separately bind the sibling namespace, exact exports and local reference
+SHA256. The required focused checks run on native Julia1.12.6/1.13.1; the
+standalone polynomial example is registered in examples/experiments.jl.
+
+Mutation controls must retain the unmodified pass, all seven V2 scalar/atomic
+witnesses, and the inherited clock/calendar/eligibility/controller/retention
+witnesses. Strict Documenter uses doctest=true and warnonly=false. Actual-data
+fit/export provenance and the common completion-event adapter remain outside
+this port. Full unfiltered Pkg.test(), the full experiment entry, canonical
+harness and all native platform CI cells remain required at the combined head.
+Focused results and the external source freeze will be recorded after execution.
+Completed-source dB/dt focused results:487/487 assertions on Julia1.12.6 and
+1.13.1; both standalone examples exit0; the unmodified mutation control passes
+and all25 unique mutants fail as required. These cover all19 inherited and all7
+V2 witnesses, with the identical premature receipt-clock mutation counted once.
+Native stages finish within their bounds with unchanged source controls.
+
+Strict docs pass after retaining and correcting a missing private-reference
+appendix and two unqualified links. checkdocs=:exports, doctest=true and
+warnonly=false are unchanged; no module was ignored. The byte-pinned legacy
+reference remains private and ground_cases has no direct binding/export in the
+new namespace. The manual explains its archive-tag behavior explicitly.
+
+A pre-execution equality guard also caught a Windows default-encoding error in
+the port tooling; exact source operators were restored and all text reads made
+explicitly UTF-8 before native tests. Three confirmed tooling/documentation
+issues were corrected and directly reverified, with no algorithm, oracle or
+tolerance change. The final fresh API/import/registration/CI route found no
+additional confirmed issue within this port. Full unfiltered Pkg.test(), the
+actual full experiment entry, canonical harness and all8 CI cells are outstanding
+root-owned combined-head gates, as are actual source/model/event/evidence stages.

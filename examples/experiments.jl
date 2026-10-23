@@ -202,3 +202,6 @@ run_completed_minute_replay_synthetic()
 include(joinpath(@__DIR__, "duration_forcing_synthetic.jl"))
 include(joinpath(@__DIR__, "versioned_shadow_trial_synthetic.jl"))
 run_versioned_shadow_trial_synthetic()
+
+include(joinpath(@__DIR__, "completed_source_dbdt_synthetic.jl"))
+run_synthetic_completed_source_replay()

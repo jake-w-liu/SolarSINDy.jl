@@ -19,6 +19,7 @@ makedocs(
             "Duration-Conditioned Forcing" => "duration-conditioned-forcing.md",
             "Published Lund Dst Reference" => "lund-dst-reference.md",
             "Completed-Source Minute Replay" => "completed-minute-replay.md",
+            "Completed-Source dB/dt Replay" => "completed-source-dbdt.md",
             "Forecasting And Alarms" => "forecast-api.md",
             "Operational API" => "operational-api.md",
             "Super-Learner" => "superlearner-api.md",

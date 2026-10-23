@@ -679,3 +679,31 @@ snapshot after assessment, requires an independently pinned receipt digest and
 forwards new callback keywords only for explicit new trials. Historical display
 authenticates a sealed snapshot; it does not claim the mutable pre-start scoring
 log is still byte-identical or complete. The old finding set remains separate.
+
+## Completed-source dB/dt package port development ledger (23 October 2026)
+
+| Item | Contract and evidence |
+|---|---|
+| Objective | Add the frozen corrected synthetic adapter/controller prototype as CompletedSourceDBDT. |
+| Contract | docs/COMPLETED_SOURCE_DBDT_PORT_CONTRACT.md; feature-first schedules, explicit readiness and unknown outcomes. |
+| Independent oracles | Unchanged polynomial/calendar, strict split,31-phase/FIFO Fraction traces, receipt/atomicity/resource and V2 scalar oracles. |
+| Implementation | Sibling CompletedMinuteReplay import; local immutable SHA256-bound feature/model reference; no external source dependency or live serving registration. |
+| Baselines | Static/phase/FIFO complete-label dictionaries and explicit early/maturity receipts retain their separate availability assumptions. Common graced comparison is not qualified. |
+| Data regeneration | Synthetic example only; actual source-bound fitting/export/calibration, matched events and all scientific replay remain unimplemented separate stages. |
+| Risk | Model SHA/purpose declarations do not prove refit provenance. Bounded synthetic state is not a production memory/performance qualification. |
+| Qualification | Focused native tests/example, mutations and strict docs precede source freeze. Root owns full package/experiment/harness/native CI at the combined revision. |
+
+No original oracle value or tolerance is changed. The raw reference library is
+copied byte-for-byte; legacy raw-tag ground_cases has no direct binding or export
+in the new public namespace. The namespace calls only its feature_matrix helper
+in this synthetic port. No raw observations, actual cases, fitted models,
+outcomes, paper text, figures, venue contracts or old locks are changed.
+Focused verification of the completed-source dB/dt package port passes487
+assertions on each of Julia1.12.6 and1.13.1 (479 preserved plus8 package-boundary
+checks), both synthetic examples and25 unique mutation witnesses. The unmodified
+control passes. Raw reference/oracle bytes and stripped-docstring source/test
+identity were checked independently. Strict documentation passes with every
+export/doctest/warning gate unchanged; a scoped internal legacy appendix explains
+the archive-tag builder rather than hiding it or re-exporting it. Port-tool text
+encoding and two documentation failures were retained, corrected and reverified.
+Full package/experiment/harness/native CI and actual scientific gates remain open.

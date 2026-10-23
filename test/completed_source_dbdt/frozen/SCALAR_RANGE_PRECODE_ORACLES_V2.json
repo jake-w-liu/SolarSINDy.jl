@@ -1,0 +1,67 @@
+{
+  "schema": "completed_source_scalar_range_precode_v2",
+  "delta": "2^-1074",
+  "exact_arithmetic": "BigFloat evaluated at256bits from integer power-of-two identity; do not parse through Float64",
+  "cases": [
+    {
+      "id": "true_zero",
+      "multiple": "0",
+      "source_nonzero": false,
+      "converted": "0",
+      "admit": true
+    },
+    {
+      "id": "quarter_delta",
+      "multiple": "1/4",
+      "source_nonzero": true,
+      "converted": "0",
+      "admit": false
+    },
+    {
+      "id": "half_delta_tie",
+      "multiple": "1/2",
+      "source_nonzero": true,
+      "converted": "0",
+      "admit": false
+    },
+    {
+      "id": "three_quarter_delta",
+      "multiple": "3/4",
+      "source_nonzero": true,
+      "converted": "delta",
+      "admit": true
+    },
+    {
+      "id": "minimum_subnormal",
+      "multiple": "1",
+      "source_nonzero": true,
+      "converted": "delta",
+      "admit": true
+    },
+    {
+      "id": "two_subnormals",
+      "multiple": "2",
+      "source_nonzero": true,
+      "converted": "2delta",
+      "admit": true
+    }
+  ],
+  "signs": [
+    1,
+    -1
+  ],
+  "rate_and_target_domain": "nonnegative source scalar",
+  "score_and_center_domain": "signed finite scalar",
+  "mutation_controls": [
+    "omit shared nonzero-to-zero guard",
+    "bypass mature target guard",
+    "bypass received rate guard",
+    "validate received rows after advance",
+    "reject all subnormals",
+    "bypass calibration guard",
+    "bypass prediction guard"
+  ],
+  "atomic_fields": "all fields; pending rates/feedback; retained observations; scores/head; issue and receipt clocks",
+  "actual_data_read": false,
+  "pre_code": true
+}
