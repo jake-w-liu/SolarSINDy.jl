@@ -14,6 +14,14 @@
 
 using CSV, DataFrames, Dates, Statistics, JSON3
 
+if !isdefined(@__MODULE__, :CalibrationShadowTrials)
+    candidates=(joinpath(@__DIR__,"..","..","src","calibration_shadow_trials.jl"),
+                joinpath(@__DIR__,"..","src_shared","calibration_shadow_trials.jl"))
+    source=findfirst(isfile,candidates)
+    source===nothing && error("shared calibration-shadow trial definition is missing")
+    include(candidates[source])
+end
+
 # The depth-safe alerting center is defined once, in the package's dependency-free
 # `src/serving_depth_safe.jl`. This application runs in its own environment and cannot load the
 # package, so it includes that file: a second copy of the rule here is exactly how the published
@@ -648,7 +656,7 @@ function _max_consecutive_days(days::Vector{Date})
     return best
 end
 
-function _calibration_shadow_summary(v::AbstractDataFrame, cyc::DataFrame)
+function _calibration_shadow_summary(v::AbstractDataFrame, cyc::DataFrame; trial=CalibrationShadowTrials.LEGACY_A3)
     current_identity = _common_cycle_field(cyc, :superlearner_cal_shadow_model_version)
     current_digest = _common_cycle_field(cyc, :superlearner_cal_shadow_config_sha256)
     current_manifest = _common_cycle_field(cyc, :superlearner_manifest_sha256)
@@ -658,9 +666,14 @@ function _calibration_shadow_summary(v::AbstractDataFrame, cyc::DataFrame)
     current_status = isempty(status_values) ? "not_logged" :
                      length(unique(status_values)) == 1 ? first(status_values) :
                      "mixed:" * join(sort(unique(status_values)), ",")
-    configured = current_identity == SUPERLEARNER_CALIBRATION_SHADOW_MODEL_VERSION &&
-                 current_digest == SUPERLEARNER_CALIBRATION_SHADOW_CONFIG_SHA256 &&
-                 current_manifest == SUPERLEARNER_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256
+    configured = current_identity == trial.identity && current_digest == trial.config_sha256 &&
+                 current_manifest == trial.served_manifest_sha256
+    if !trial.legacy
+        configured = configured && nrow(cyc)>0 && all(eachrow(cyc)) do row
+            issue=_calibration_shadow_time(row,:issue_time_utc_dt,:issue_time_utc)
+            issue isa DateTime && issue>=trial.start_utc
+        end
+    end
     collecting = configured && !isempty(status_values) &&
                  all(_calibration_shadow_collecting_status, status_values)
     current_cycle_ready = configured && !isempty(status_values) && all(==("ok"), status_values)
@@ -685,13 +698,13 @@ function _calibration_shadow_summary(v::AbstractDataFrame, cyc::DataFrame)
             hi = jnum(_rowget(row, :superlearner_cal_shadow_ci95_nt))
             obs = jnum(_rowget(row, :observation_dst_nt))
             valid = identity isa AbstractString &&
-                    identity == SUPERLEARNER_CALIBRATION_SHADOW_MODEL_VERSION &&
+                    identity == trial.identity &&
                     digest isa AbstractString &&
-                    digest == SUPERLEARNER_CALIBRATION_SHADOW_CONFIG_SHA256 &&
+                    digest == trial.config_sha256 &&
                     served_model isa AbstractString &&
                     served_model == CURRENT_OPERATIONAL_SERVED_MODEL_VERSION &&
                     manifest isa AbstractString &&
-                    manifest == SUPERLEARNER_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256 &&
+                    manifest == trial.served_manifest_sha256 &&
                     superlearner_status isa AbstractString && superlearner_status == "ok" &&
                     status isa AbstractString && status == "ok" &&
                     lo !== nothing && hi !== nothing &&
@@ -700,7 +713,8 @@ function _calibration_shadow_summary(v::AbstractDataFrame, cyc::DataFrame)
             issue = _calibration_shadow_time(row, :issue_time_utc_dt, :issue_time_utc)
             target = _calibration_shadow_time(row, :target_time_utc_dt, :target_time_utc)
             (issue isa DateTime && target isa DateTime) || continue
-            key = (floor(issue, Hour), target, SUPERLEARNER_CALIBRATION_SHADOW_MODEL_VERSION)
+            !trial.legacy && issue<trial.start_utc && continue
+            key = (floor(issue, Hour), target, trial.identity)
             previous = get(chosen, key, nothing)
             (previous === nothing || issue > previous[1]) && (chosen[key] = (issue, row_idx))
         end

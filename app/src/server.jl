@@ -99,6 +99,62 @@ function claim_audit_status(log_path::AbstractString; reference::DateTime=now(UT
     end
 end
 
+function _checked_trial_assessment(assessment,trial;reference::DateTime,fresh::Bool=true)
+    assessment.shadow_identity==trial.identity &&
+        assessment.shadow_config_sha256==trial.config_sha256 &&
+        assessment.served_manifest_sha256==trial.served_manifest_sha256 ||
+        error("assessment identity does not match its trial")
+    generated=parse_dt(assessment.generated_utc)
+    generated isa DateTime && generated<=reference || error("assessment date cannot be verified")
+    fresh && _source_freshness(assessment.generated_utc,180.0;reference).stale &&
+        error("assessment is stale or future-dated")
+    assessment.integrity.gate_pass isa Bool && assessment.integrity.violations isa AbstractVector &&
+        all(x->x isa AbstractString,assessment.integrity.violations) || error("malformed assessment integrity")
+    !isempty(assessment.integrity.violations) && assessment.integrity.gate_pass &&
+        error("integrity verdict contradicts its findings")
+    for section in (assessment.marginal,assessment.storm)
+        gates=collect(values(section.gates))
+        !isempty(gates) && all(x->x isa Bool,gates) && section.claim_ready isa Bool &&
+            section.claim_ready==all(gates) && section.gates.integrity==assessment.integrity.gate_pass ||
+            error("claim verdict contradicts its checks")
+    end
+    assessment
+end
+
+function _read_trial_assessment(path)
+    CalibrationShadowTrials.regular_file(path)
+    filesize(path)<=1_048_576 || error("assessment exceeds size limit")
+    JSON3.read(read(path,String))
+end
+
+"Additive status: old default API remains A3; a new trial and sealed findings are separate."
+function versioned_shadow_status_payload(log_path::AbstractString;
+        reference::DateTime=now(UTC),trial=nothing)
+    legacy=nothing
+    try
+        trial===nothing && (trial=CalibrationShadowTrials.configured_trial())
+        trial.legacy && return NamedTuple()
+        seal=CalibrationShadowTrials.verify_legacy_seal(log_path,trial)
+        sealed_at=parse_dt(seal.sealed_utc)
+        sealed_at<=reference || error("legacy seal is future-dated")
+        old=_checked_trial_assessment(_read_trial_assessment(seal.assessment),CalibrationShadowTrials.LEGACY_A3;
+            reference=sealed_at,fresh=false)
+        legacy=(historical=true,sealed_utc=seal.sealed_utc,seal_sha256=seal.receipt_sha256,assessment=old)
+        paths=CalibrationShadowTrials.trial_paths(log_path,trial)
+        active=_checked_trial_assessment(_read_trial_assessment(paths.status),trial;reference)
+        active.trial_id==trial.trial_id && active.trial_start_utc==string(trial.start_utc)*"Z" &&
+            active.legacy_seal_sha256==seal.receipt_sha256 || error("trial assessment seal binding mismatch")
+        data=get_log(log_path)
+        summary=_calibration_shadow_summary(verified_rows(data),_payload_cycle(data).cycle;trial)
+        return (calibration_shadow_trial=(available=true,trial_id=trial.trial_id,
+            start_utc=string(trial.start_utc)*"Z",collection=summary,assessment=active,legacy),)
+    catch e
+        e isa InterruptException && rethrow()
+        return (calibration_shadow_trial=(available=false,
+            reason="versioned trial evidence cannot be verified",legacy),)
+    end
+end
+
 include(joinpath(@__DIR__, "notify.jl"))
 
 # Resolve the live forecast log: $SOLARSINDY_LOG if set, otherwise the package's
@@ -211,7 +267,8 @@ function api_handler(path::AbstractString, query::AbstractString, log_path::Abst
         snap = swpc_snapshot_cached_or_refresh()
         return json_response(merge(build_status(get_log(log_path)),
                                    (upstream = snap, upstream_status = upstream_assessment(snap),
-                                    claim_audit = claim_audit_status(log_path))))
+                                    claim_audit = claim_audit_status(log_path)),
+                                   versioned_shadow_status_payload(log_path)))
     elseif path == "/api/swpc"
         # Dashboard requests must not inherit third-party latency. A cold or expired cache starts
         # exactly one background refresh and returns the last snapshot (or unavailable) immediately;

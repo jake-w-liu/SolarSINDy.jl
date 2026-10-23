@@ -630,7 +630,7 @@ function _issue_horizon_cycle!(inputs;
                                log_path::AbstractString=LOG,
                                calibration_path::AbstractString=OPERATIONAL_CALIB,
                                complete_fn::Function=_complete_issuance_cycle,
-                               interval_policy::Symbol)
+                               interval_policy::Symbol, shadow_trial=CalibrationShadowTrials.LEGACY_A3)
     interval_policy = _checked_interval_policy(interval_policy)
     interval_policy == :auto && throw(ArgumentError(
         "live monitor horizon batches require an explicit coherent interval policy",
@@ -639,11 +639,15 @@ function _issue_horizon_cycle!(inputs;
     trajectory_horizon = maximum(HORIZONS)
     for h in HORIZONS
         issued_ok += guarded("issue h=$h", () -> begin
-            issue_fn(LiveVerifyConfig(; mode=:issue, model=:inertial_sindy, horizon_hours=h,
+            cfg=LiveVerifyConfig(; mode=:issue, model=:inertial_sindy, horizon_hours=h,
                                       log_path=String(log_path),
-                                      inertial_sindy_calibration_path=String(calibration_path));
-                     inputs=inputs, write_trajectory=h == trajectory_horizon,
-                     verbose=false, interval_policy=interval_policy)
+                                      inertial_sindy_calibration_path=String(calibration_path))
+            kwargs=(;inputs,write_trajectory=h==trajectory_horizon,verbose=false,interval_policy)
+            if shadow_trial.legacy
+                issue_fn(cfg;kwargs...)
+            else
+                issue_fn(cfg;kwargs...,shadow_trial)
+            end
             nothing
         end)
     end
@@ -689,7 +693,12 @@ function cycle!(; prepare_fn::Function=cfg -> prepare_issue_inputs(cfg;
                   report_path::AbstractString=REPORT,
                   calibration_path::AbstractString=OPERATIONAL_CALIB,
                   external_cfg=EXTERNAL_DST_CFG,
-                  max_log_rows::Integer=MAX_LOG_ROWS)
+                  max_log_rows::Integer=MAX_LOG_ROWS,
+                  shadow_trial=CalibrationShadowTrials.LEGACY_A3,
+                  trial_reference::DateTime=now(UTC),
+                  trial_claim_audit_fn::Function=SuperlearnerLiveClaimAudit.run_trial_claim_audit)
+    CalibrationShadowTrials.require_started(shadow_trial,trial_reference)
+    shadow_trial.legacy || CalibrationShadowTrials.verify_legacy_seal(String(log_path),shadow_trial)
     base_cfg = LiveVerifyConfig(; mode=:issue, model=:inertial_sindy, horizon_hours=first(HORIZONS),
                                 log_path=String(log_path),
                                 inertial_sindy_calibration_path=String(calibration_path))
@@ -715,9 +724,11 @@ function cycle!(; prepare_fn::Function=cfg -> prepare_issue_inputs(cfg;
         (succeeded=0, complete=false)
     else
         logln("forecast interval policy: ", interval_policy)
-        issue_cycle_fn(inputs; log_path=String(log_path),
-                       calibration_path=String(calibration_path),
-                       interval_policy=interval_policy)
+        if shadow_trial.legacy
+            issue_cycle_fn(inputs; log_path=String(log_path),calibration_path=String(calibration_path),interval_policy=interval_policy)
+        else
+            issue_cycle_fn(inputs; log_path=String(log_path),calibration_path=String(calibration_path),interval_policy=interval_policy,shadow_trial)
+        end
     end
 
     # Observation feed for the remaining steps. Reuse the issuance fetch when there is one;
@@ -755,11 +766,10 @@ function cycle!(; prepare_fn::Function=cfg -> prepare_issue_inputs(cfg;
     )
     guarded("forecast_log_retention",
             () -> retention_fn(String(log_path), Int(max_log_rows)))
-    guarded("superlearner_live_claim_audit", () -> claim_audit_fn(
-        String(log_path),
-        joinpath(dirname(abspath(log_path)), "superlearner_live_claim_status.json"),
-        joinpath(dirname(abspath(log_path)), "superlearner_live_claim_status.md"),
-    ))
+    guarded("superlearner_live_claim_audit", () -> shadow_trial.legacy ? claim_audit_fn(
+        String(log_path),joinpath(dirname(abspath(log_path)), "superlearner_live_claim_status.json"),
+        joinpath(dirname(abspath(log_path)), "superlearner_live_claim_status.md")) :
+        trial_claim_audit_fn(String(log_path),shadow_trial))
     observations = dst === nothing ? nothing : DataFrame(
         observed_time_utc=DateTime.(dst_times),
         observed_dst_nt=Float64.(dst_vals),
@@ -784,6 +794,9 @@ function cycle!(; prepare_fn::Function=cfg -> prepare_issue_inputs(cfg;
 end
 
 function main_live_monitor()
+    shadow_trial=CalibrationShadowTrials.configured_trial()
+    CalibrationShadowTrials.require_started(shadow_trial)
+    shadow_trial.legacy || CalibrationShadowTrials.verify_legacy_seal(LOG,shadow_trial)
     # Bounded diagnostics must be ready before the first line: ensure the log directory exists and
     # rotate the launchd console-capture files for this (re)start so out-of-band crash output from the
     # previous generation is preserved once and both streams stay bounded.
@@ -806,7 +819,7 @@ function main_live_monitor()
         cycle_started_utc = now(UTC)
         cycles += 1
         logln("cycle ", cycles, " begin")
-        issuance = cycle!()
+        issuance = cycle!(;shadow_trial)
 
         # Log-freshness self-check every cycle: the report can no longer read healthy during an
         # issuance gap because the age of the newest issued row is surfaced here and in the report.

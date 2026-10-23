@@ -8,6 +8,8 @@ using Dates
 using JSON3
 using Random
 using Statistics
+using SHA, TOML
+include(joinpath(@__DIR__, "..", "..", "src", "calibration_shadow_trials.jl"))
 
 include(joinpath(@__DIR__, "..", "..", "examples", "live_log_lock.jl"))
 
@@ -123,7 +125,7 @@ function _empty_shadow_rows()
 end
 
 "Canonical post-freeze shadow rows plus fail-closed integrity findings."
-function canonical_shadow_rows(df::DataFrame)
+function canonical_shadow_rows(df::DataFrame; trial=CalibrationShadowTrials.LEGACY_A3)
     identity_column = :superlearner_cal_shadow_model_version
 
     records = NamedTuple[]
@@ -134,23 +136,34 @@ function canonical_shadow_rows(df::DataFrame)
 
     for (row_index, row) in enumerate(eachrow(df))
         shadow_identity = _text(_rowvalue(row, identity_column))
+        if !trial.legacy
+            issue=_time(_rowvalue(row,:issue_time_utc))
+            if issue===nothing
+                deployment_rows+=1
+                push!(violations,"row $row_index has an unclassifiable trial issue time")
+                continue
+            elseif issue<trial.start_utc
+                shadow_identity==trial.identity && push!(violations,"row $row_index predates the prospective shadow deployment")
+                continue
+            end
+        end
         if isempty(shadow_identity)
             issue = _time(_rowvalue(row, :issue_time_utc))
-            issue !== nothing && issue < SHADOW_START_UTC && continue
+            issue !== nothing && issue < trial.start_utc && continue
             deployment_rows += 1
             push!(violations, "row $row_index lacks a shadow identity and cannot establish a pre-deployment issue")
             continue
         end
         deployment_rows += 1
-        shadow_identity == SHADOW_IDENTITY || begin
+        shadow_identity == trial.identity || begin
             push!(violations, "row $row_index has an unexpected calibration-shadow identity")
             continue
         end
-        _text(_rowvalue(row, :superlearner_cal_shadow_config_sha256)) == SHADOW_CONFIG_SHA256 || begin
+        _text(_rowvalue(row, :superlearner_cal_shadow_config_sha256)) == trial.config_sha256 || begin
             push!(violations, "row $row_index has an unexpected calibration-shadow digest")
             continue
         end
-        _text(_rowvalue(row, :superlearner_manifest_sha256)) == SERVED_MANIFEST_SHA256 || begin
+        _text(_rowvalue(row, :superlearner_manifest_sha256)) == trial.served_manifest_sha256 || begin
             push!(violations, "row $row_index has an unexpected served-manifest digest")
             continue
         end
@@ -190,7 +203,7 @@ function canonical_shadow_rows(df::DataFrame)
             push!(violations, "row $row_index violates the future-target chronology")
             continue
         end
-        issue >= SHADOW_START_UTC || begin
+        issue >= trial.start_utc || begin
             push!(violations, "row $row_index predates the prospective shadow deployment")
             continue
         end
@@ -287,7 +300,7 @@ function canonical_shadow_rows(df::DataFrame)
 
     chosen = Dict{Tuple{DateTime,DateTime,String},NamedTuple}()
     for record in records
-        key = (record.issue_hour_utc, record.target_time_utc, SHADOW_IDENTITY)
+        key = (record.issue_hour_utc, record.target_time_utc, trial.identity)
         previous = get(chosen, key, nothing)
         if previous === nothing || record.issue_time_utc > previous.issue_time_utc
             chosen[key] = record
@@ -373,15 +386,15 @@ function _claim_source_rows(path::String)
     return length(frames) == 1 ? only(frames) : vcat(frames...; cols=:union)
 end
 
-function canonical_shadow_rows(path::AbstractString; lock_timeout_sec::Real=30.0)
+function canonical_shadow_rows(path::AbstractString; lock_timeout_sec::Real=30.0, trial=CalibrationShadowTrials.LEGACY_A3)
     try
         rows = _with_forecast_log_lock(abspath(path); timeout_sec=Float64(lock_timeout_sec)) do
             _claim_source_rows(abspath(path))
         end
-        return canonical_shadow_rows(rows)
+        return canonical_shadow_rows(rows;trial)
     catch error
         error isa InterruptException && rethrow()
-        empty = canonical_shadow_rows(DataFrame())
+        empty = canonical_shadow_rows(DataFrame();trial)
         return merge(empty, (violations=["prospective source snapshot unavailable: " *
                                          sprint(showerror, error)],))
     end
@@ -487,7 +500,7 @@ function _event_gain_lower(superlearner::Vector{Float64}, static_stack::Vector{F
     return quantile(draws, 0.05)
 end
 
-function _prospective_status(canonical; bootstrap_reps::Int=DEFAULT_BOOTSTRAP_REPS,
+function _prospective_status(canonical; trial=CalibrationShadowTrials.LEGACY_A3, bootstrap_reps::Int=DEFAULT_BOOTSTRAP_REPS,
                              bootstrap_seed::Int=DEFAULT_BOOTSTRAP_SEED)
     bootstrap_reps >= 100 || throw(ArgumentError("bootstrap_reps must be at least 100"))
     rows = canonical.rows
@@ -663,9 +676,9 @@ function _prospective_status(canonical; bootstrap_reps::Int=DEFAULT_BOOTSTRAP_RE
     return (
         generated_utc=string(now(UTC)) * "Z",
         scope="prospective_shadow_only_not_served",
-        served_manifest_sha256=SERVED_MANIFEST_SHA256,
-        shadow_identity=SHADOW_IDENTITY,
-        shadow_config_sha256=SHADOW_CONFIG_SHA256,
+        served_manifest_sha256=trial.served_manifest_sha256,
+        shadow_identity=trial.identity,
+        shadow_config_sha256=trial.config_sha256,
         integrity=(
             deployment_rows=canonical.deployment_rows,
             canonical_rows=nrow(rows),
@@ -708,11 +721,11 @@ function _prospective_status(canonical; bootstrap_reps::Int=DEFAULT_BOOTSTRAP_RE
     )
 end
 
-prospective_status(df::DataFrame; kwargs...) =
-    _prospective_status(canonical_shadow_rows(df); kwargs...)
+prospective_status(df::DataFrame; trial=CalibrationShadowTrials.LEGACY_A3, kwargs...) =
+    _prospective_status(canonical_shadow_rows(df;trial); trial,kwargs...)
 
-prospective_status(path::AbstractString; lock_timeout_sec::Real=30.0, kwargs...) =
-    _prospective_status(canonical_shadow_rows(path; lock_timeout_sec); kwargs...)
+prospective_status(path::AbstractString; lock_timeout_sec::Real=30.0, trial=CalibrationShadowTrials.LEGACY_A3, kwargs...) =
+    _prospective_status(canonical_shadow_rows(path; lock_timeout_sec,trial); trial,kwargs...)
 
 function _atomic_text(path::AbstractString, content::AbstractString)
     mkpath(dirname(abspath(path)))
@@ -837,6 +850,69 @@ function run_claim_audit(log_path::AbstractString, json_path::AbstractString,
     return status
 end
 
+"""Seal legacy A3 once, under the log lock, before a separately registered trial starts.
+
+This explicit operation never activates a trial or rewrites its original source.
+An existing/partial seal is retained and refused rather than overwritten.
+"""
+function seal_legacy_trial!(log_path::AbstractString,trial;
+                            reference::DateTime=now(UTC),
+                            bootstrap_reps::Int=DEFAULT_BOOTSTRAP_REPS)
+    trial.legacy && throw(ArgumentError("only a new trial can seal its legacy assessment"))
+    trial.seal_sha256===nothing || throw(ArgumentError("a bound trial cannot create another legacy seal"))
+    trial.registered_utc<=reference<=trial.start_utc ||
+        error("legacy evidence must be sealed between registration and trial start")
+    paths=CalibrationShadowTrials.trial_paths(log_path,trial)
+    _with_forecast_log_lock(abspath(log_path)) do
+        rows=_claim_source_rows(abspath(log_path))
+        for row in eachrow(rows)
+            issue=_time(_rowvalue(row,:issue_time_utc))
+            issue===nothing && continue # The unchanged legacy auditor records malformed evidence.
+            issue<trial.start_utc || error("cannot seal a source already containing trial-era issues")
+        end
+        status=prospective_status(rows;bootstrap_reps)
+        islink(paths.root) && error("trial evidence root is a symlink")
+        mkpath(paths.root)
+        mkdir(paths.seal) # Exclusive: a partial prior operation must be inspected.
+        source=joinpath(paths.seal,"source_rows.csv")
+        assessment=joinpath(paths.seal,"assessment.json")
+        report=joinpath(paths.seal,"assessment.md")
+        CSV.write(source,rows)
+        write(assessment,JSON3.write(status))
+        write(report,_report(status))
+        # The assessment and copied members are complete before their seal date.
+        sealed_at=max(reference,now(UTC))
+        sealed_at<=trial.start_utc || error("legacy snapshot did not finish before trial start")
+        receipt=Dict("schema"=>1,"trial_id"=>trial.trial_id,
+            "trial_config_sha256"=>trial.config_sha256,
+            "trial_start_utc"=>string(trial.start_utc)*"Z",
+            "legacy_identity"=>SHADOW_IDENTITY,"sealed_utc"=>string(sealed_at)*"Z",
+            "source_rows"=>nrow(rows),"legacy_integrity_findings"=>length(status.integrity.violations),
+            "source_sha256"=>CalibrationShadowTrials.digest(source),
+            "assessment_sha256"=>CalibrationShadowTrials.digest(assessment),
+            "report_sha256"=>CalibrationShadowTrials.digest(report))
+        open(joinpath(paths.seal,"seal.toml"),"w") do io
+            TOML.print(io,receipt;sorted=true)
+        end
+        receipt_path=joinpath(paths.seal,"seal.toml")
+        bound=CalibrationShadowTrials.bind_legacy_seal(trial,CalibrationShadowTrials.digest(receipt_path))
+        CalibrationShadowTrials.verify_legacy_seal(log_path,bound)
+    end
+end
+
+"Write only the new trial's assessment; verify and retain the sealed old finding set."
+function run_trial_claim_audit(log_path::AbstractString,trial;kwargs...)
+    trial.legacy && throw(ArgumentError("use run_claim_audit for unchanged legacy A3"))
+    seal=CalibrationShadowTrials.verify_legacy_seal(log_path,trial)
+    status=prospective_status(log_path;trial,kwargs...)
+    status=merge(status,(trial_id=trial.trial_id,trial_start_utc=string(trial.start_utc)*"Z",
+        legacy_seal_sha256=seal.receipt_sha256))
+    paths=CalibrationShadowTrials.trial_paths(log_path,trial)
+    _atomic_text(paths.status,JSON3.write(status))
+    _atomic_text(paths.report,_report(status))
+    status
+end
+
 function _cli(args)
     package_root = normpath(joinpath(@__DIR__, "..", ".."))
     monitor_dir = joinpath(package_root, "var", "monitor")
@@ -850,7 +926,27 @@ function _cli(args)
     json_path = get(options, "json", joinpath(monitor_dir, "superlearner_live_claim_status.json"))
     report_path = get(options, "report", joinpath(monitor_dir, "superlearner_live_claim_status.md"))
     reps = parse(Int, get(options, "bootstrap-reps", string(DEFAULT_BOOTSTRAP_REPS)))
-    status = run_claim_audit(log_path, json_path, report_path; bootstrap_reps=reps)
+    config_path=get(options,"trial-config","")
+    pin=get(options,"trial-sha256","")
+    get(options,"seal-legacy","false") in ("true","false") || error("seal-legacy must be true or false")
+    isempty(config_path)==isempty(pin) || error("trial config and digest must be supplied together")
+    status = if isempty(config_path)
+        haskey(options,"seal-legacy") && error("sealing requires an explicit new-trial config")
+        run_claim_audit(log_path, json_path, report_path; bootstrap_reps=reps)
+    else
+        any(haskey(options,key) for key in ("json","report")) &&
+            error("new trials use their separate registered output paths")
+        trial=CalibrationShadowTrials.load_trial(config_path,pin)
+        if get(options,"seal-legacy","false")=="true"
+            haskey(options,"trial-seal-sha256") && error("seal creation requires an unbound registered config")
+            seal=seal_legacy_trial!(log_path,trial;bootstrap_reps=reps)
+            println("legacy assessment sealed; trial not activated; external seal SHA256: ",seal.receipt_sha256)
+            return true
+        end
+        trial=CalibrationShadowTrials.bind_legacy_seal(trial,get(options,"trial-seal-sha256",""))
+        report_path=CalibrationShadowTrials.trial_paths(log_path,trial).report
+        run_trial_claim_audit(log_path,trial;bootstrap_reps=reps)
+    end
     println("super-learner prospective live-claim audit")
     println("  marginal claim ready: $(status.marginal.claim_ready)")
     println("  storm-skill claim ready: $(status.storm.claim_ready)")

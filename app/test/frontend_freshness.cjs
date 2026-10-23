@@ -293,3 +293,37 @@ test("Dst banner identifies its issuance anchor and clears its hour tag on outag
   assert.match(html, /Dst used at issue \(nT\)/);
   assert.doesNotMatch(html, /current Dst \(nT\)/);
 });
+
+test("separate cold trial keeps sealed A3 findings visible without pooling evidence", () => {
+  const { context, element } = dashboard();
+  const payload = {
+    available: true, trial_id: "synthetic-2027", start_utc: "2027-01-01T00:00:00Z",
+    collection: { current_status: "warmup:0/30" },
+    assessment: { integrity: { violations: [] }, marginal: { n_rows: 0, claim_ready: false },
+      storm: { claim_ready: false } },
+    legacy: { sealed_utc: "2026-12-31T12:00:00Z", assessment: {
+      generated_utc: "2026-12-31T11:59:00Z", integrity: { violations: ["old mismatch", "old mismatch 2"] } } },
+  };
+  const html = context.renderVersionedShadowTrial(payload);
+  assert.match(html, /2 historical integrity findings remain recorded/);
+  assert.match(html, /0 matured trial rows; 0 trial integrity findings/);
+  assert.match(html, /warmup:0\/30/);
+  assert.match(html, /Residual history starts fresh; legacy rows are excluded/);
+  assert.match(html, /Marginal claim: not qualified; storm-skill claim: not qualified/);
+  assert.match(html, /2026-12-31T11:59:00Z/);
+  assert.match(html, /not served or used for alerts/);
+  context.renderCalib({calibration: {n_verified: 0},calibration_shadow_trial: payload});
+  assert.match(element("calib").innerHTML, /2 historical integrity findings remain recorded/);
+  assert.match(element("calib").innerHTML, /warmup:0\/30/);
+});
+
+test("unverifiable new trial retains sealed findings and escapes displayed identities", () => {
+  const { context } = dashboard();
+  assert.equal(context.renderVersionedShadowTrial(null), "");
+  const legacy = { sealed_utc: "seal", assessment: { generated_utc: "old", integrity: { violations: ["retained"] } } };
+  const html = context.renderVersionedShadowTrial({ available: false, legacy, reason: "<script>bad</script>" });
+  assert.match(html, /1 historical integrity findings remain recorded/);
+  assert.match(html, /No qualification is inferred/);
+  assert.ok(!html.includes("<script>"));
+  assert.match(html, /&lt;script&gt;/);
+});

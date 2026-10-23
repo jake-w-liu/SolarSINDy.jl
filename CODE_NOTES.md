@@ -659,3 +659,23 @@ The pre-edit literal count oracle is pinned in test/duration_forcing/. Fresh
 focused V6,14 mutation controls and strict manual/resource gates must qualify
 this repaired source; original A and pre-code B numerical expectations remain
 unchanged.
+## Separate prospective shadow trials (23 October 2026)
+
+The contract and literal configuration-byte, cold/warm, median and width
+expectations precede this implementation. A shared immutable spec pins an
+explicit new identity, start, config and serving bundle while preserving all
+legacy A3 constants/default routes. New history has no inherited residuals.
+An explicit pre-start operation exclusively seals the locked legacy source,
+including archives, and its assessment; ordinary new audits cannot rewrite it.
+Generation, monitor preflight, separate reports and additive API/dashboard
+display share the spec. No deployment timestamp or active config is chosen.
+The synthetic example parses a spec without activating or writing trial state.
+Complete package/experiment/harness and native CI qualification remain required.
+
+Pre-release controls exposed pre-start issuance, entry-time sealing dates,
+unanchored coherent seal replacement and strict legacy callback incompatibility.
+The implementation now rejects acquisition before start, dates the completed
+snapshot after assessment, requires an independently pinned receipt digest and
+forwards new callback keywords only for explicit new trials. Historical display
+authenticates a sealed snapshot; it does not claim the mutable pre-start scoring
+log is still byte-identical or complete. The old finding set remains separate.

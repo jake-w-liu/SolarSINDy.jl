@@ -873,3 +873,21 @@ The pre-edit literal count oracle is pinned in test/duration_forcing/. Fresh
 focused V6,14 mutation controls and strict manual/resource gates must qualify
 this repaired source; original A and pre-code B numerical expectations remain
 unchanged.
+## Versioned shadow trial verification plan (23 October 2026)
+
+The pre-code fixture fixes exact config SHA256 and hand-derived medians18.5/23.5
+and endpoints. Tests isolate old, pre-start, wrong-identity/config/manifest and
+future residuals; retain duplicate/revision handling; verify exclusive sealing,
+original findings and unchanged source; and reject corrupted seals/reports,
+stale or contradictory assessments. Monitor callbacks prove trial propagation
+and rejection before acquisition. Direct frontend tests cover a cold zero-row
+trial and retained historical findings. No existing tolerance or fixture is
+weakened. Focused results do not replace Pkg.test(), experiments, canonical
+harness, strict documentation and native cross-platform CI.
+
+Retained before-repair controls verify that an assessment could be15ms newer
+than its seal and that coherent replacement accepted a zero-finding assessment
+under the same config pin. New regressions require a separate external receipt
+pin and completion-time chronology. A strict callback taking only the original
+keywords detects unintentional legacy API changes. Revision/removal controls
+document the snapshot-display scope rather than claiming whole-log immutability.
