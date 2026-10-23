@@ -1,0 +1,81 @@
+{
+  "schema": "completed-minute-history-bigint-oracle-v1",
+  "integer_domain": "signed 64-bit DateTime milliseconds",
+  "derivation": "Python unbounded integers; floor division for anchor; required oldest vector is anchor minus 30 minutes",
+  "minimum_ms": "-9223372036854775808",
+  "first_representable_minute_ms": "-9223372036854720000",
+  "cases": [
+    {
+      "name": "original-overflow-reproduction",
+      "issue_ms": "-9223372036854660000",
+      "ground_extra_ms": 0,
+      "ground_anchor_ms": "-9223372036854720000",
+      "oldest_required_ground_ms": "-9223372036856520000",
+      "expected": "OverflowError"
+    },
+    {
+      "name": "default-first-representable",
+      "issue_ms": "-9223372036852860000",
+      "ground_extra_ms": 0,
+      "ground_anchor_ms": "-9223372036852920000",
+      "oldest_required_ground_ms": "-9223372036854720000",
+      "expected": "accepted"
+    },
+    {
+      "name": "default-previous-minute",
+      "issue_ms": "-9223372036852920000",
+      "ground_extra_ms": 0,
+      "ground_anchor_ms": "-9223372036852980000",
+      "oldest_required_ground_ms": "-9223372036854780000",
+      "expected": "OverflowError"
+    },
+    {
+      "name": "exact-minute-delay-first-representable",
+      "issue_ms": "-9223372036852860000",
+      "ground_extra_ms": 15000,
+      "ground_anchor_ms": "-9223372036852920000",
+      "oldest_required_ground_ms": "-9223372036854720000",
+      "expected": "accepted"
+    },
+    {
+      "name": "exact-minute-delay-previous-minute",
+      "issue_ms": "-9223372036852920000",
+      "ground_extra_ms": 15000,
+      "ground_anchor_ms": "-9223372036852980000",
+      "oldest_required_ground_ms": "-9223372036854780000",
+      "expected": "OverflowError"
+    },
+    {
+      "name": "one-ms-past-minute-first-representable",
+      "issue_ms": "-9223372036852800000",
+      "ground_extra_ms": 15001,
+      "ground_anchor_ms": "-9223372036852920000",
+      "oldest_required_ground_ms": "-9223372036854720000",
+      "expected": "accepted"
+    },
+    {
+      "name": "one-ms-past-minute-previous-minute",
+      "issue_ms": "-9223372036852860000",
+      "ground_extra_ms": 15001,
+      "ground_anchor_ms": "-9223372036852980000",
+      "oldest_required_ground_ms": "-9223372036854780000",
+      "expected": "OverflowError"
+    },
+    {
+      "name": "maximum-ground-delay-first-representable",
+      "issue_ms": "-9223372036766460000",
+      "ground_extra_ms": 86400000,
+      "ground_anchor_ms": "-9223372036852920000",
+      "oldest_required_ground_ms": "-9223372036854720000",
+      "expected": "accepted"
+    },
+    {
+      "name": "maximum-ground-delay-previous-minute",
+      "issue_ms": "-9223372036766520000",
+      "ground_extra_ms": 86400000,
+      "ground_anchor_ms": "-9223372036852980000",
+      "oldest_required_ground_ms": "-9223372036854780000",
+      "expected": "OverflowError"
+    }
+  ]
+}

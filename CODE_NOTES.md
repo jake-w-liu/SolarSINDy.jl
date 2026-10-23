@@ -579,3 +579,16 @@ The published normalization, simultaneous four-state recurrence and output coeff
 ## Completed-source minute replay development ledger (20 October 2026)
 
 The independent timestamp and polynomial-rate oracles precede this additive research namespace. A retained predecessor fails the same-ground-source delay contract; another reproduction catches extreme minute-rounding overflow. The package port uses checked integer rounding and separates feature-prefix admission from readiness-gated labels. It preserves unknown measured receipts, source dictionaries and all existing numerical oracles. Strict documentation, unfiltered Pkg.test(), the actual experiment entry, native cross-platform CI and the unchanged canonical harness must qualify this candidate. Actual paper cohort rebuilding/refits/replays and scientific novelty or skill remain separate open gates.
+
+## Completed-source history representability (23 October 2026)
+
+The clock plan can be representable while the oldest of the 31 ground vectors
+needed for 30 rates is below the DateTime Int64 range. An independent
+unbounded-integer fixture reproduced five accepted wrapped histories before
+this repair. Feature admission now checks the oldest vector with the existing
+checked shift before accessing source dictionaries. Nine fixed cases include
+four first-representable histories and their preceding minute; valid source
+times and the existing clock/rate equations remain unchanged. Focused native,
+example, strict-documentation and omitted-guard mutation checks accompany this
+fix. Complete package/experiment/harness and native CI qualification remain
+required before merging this candidate or using scientific results.

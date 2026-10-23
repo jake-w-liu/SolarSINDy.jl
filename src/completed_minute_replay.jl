@@ -138,6 +138,8 @@ Keys are UTC ground-center and OMNI arrival-start tags. Return `accepted`,
 function admit_features(mag::AbstractDict, omni::AbstractDict, issue::DateTime;
                         policy::ReplayPolicy=ReplayPolicy())
     timing = issue_timing(issue,policy)
+    # Thirty rates require thirty-one vectors; reject before any wrapped key.
+    shift(timing.latest_ground_center, -TARGET_MINUTES*MINUTE_MS)
     history = Float64[]
     for k in 29:-1:0
         rate = rate_at(mag,timing.latest_ground_center-Minute(k))

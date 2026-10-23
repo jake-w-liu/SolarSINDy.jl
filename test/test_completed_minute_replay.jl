@@ -128,4 +128,35 @@ Base.iterate(v::ZeroBasedVector{N},i::Int=0) where {N} =
     @test replay_case(ground_zero,wind_zero,issue,issue+Hour(1))==replay_case(mag,omni,issue,issue+Hour(1))
 end
 
+# Boundary literals were derived with unbounded integer arithmetic before the
+# history-span repair. Wrapped adversarial keys must never admit future data.
+history_oracle = JSON3.read(read(joinpath(@__DIR__,"completed_minute_history_oracle.json")),Dict{String,Any})
+@testset "Representable completed-source feature history" begin
+    from_ms(value) = DateTime(Dates.UTInstant{Millisecond}(Millisecond(parse(Int64,value))))
+    for row in history_oracle["cases"]
+        edge_issue = from_ms(row["issue_ms"])
+        policy = ReplayPolicy(;ground_extra_ms=row["ground_extra_ms"])
+        timing = issue_timing(edge_issue,policy)
+        @test Dates.value(timing.latest_ground_center) == parse(Int64,row["ground_anchor_ms"])
+        exact_oldest = parse(BigInt,row["oldest_required_ground_ms"])
+        edge_mag = Dict{DateTime,Tuple{Float64,Float64}}()
+        for k in 0:30
+            exact = parse(BigInt,row["ground_anchor_ms"])-60_000k
+            wrapped = Int64(mod(exact-BigInt(typemin(Int64)),big(2)^64)+BigInt(typemin(Int64)))
+            edge_mag[DateTime(Dates.UTInstant{Millisecond}(Millisecond(wrapped)))] = (Float64(k),0.0)
+        end
+        edge_wind = Dict(timing.latest_omni_arrival_start=>(400.0,-5.0,1.0,8.0))
+        if row["expected"] == "OverflowError"
+            @test exact_oldest < BigInt(typemin(Int64))
+            @test_throws OverflowError admit_features(edge_mag,edge_wind,edge_issue;policy)
+        else
+            @test exact_oldest >= BigInt(typemin(Int64))
+            admitted = admit_features(edge_mag,edge_wind,edge_issue;policy)
+            @test admitted.accepted
+            @test admitted.value.row.dbdt_now == admitted.value.row.dbdt_mean30 == admitted.value.row.dbdt_max30 == 1.0
+            @test admitted.value.row.dbdt_std30 == 0.0
+        end
+    end
+end
+
 end

@@ -788,3 +788,15 @@ The published normalization, simultaneous four-state recurrence and output coeff
 ## Completed-source minute replay verification plan (20 October 2026)
 
 Coverage combines independently fixed millisecond/source/feedback/calendar cases with hand-derived polynomial ground rates, prefix-only dictionaries, target mutations, missing/invalid inputs and explicit labels not yet ready. Integer clocks and exact values use equality; sqrt(310) sample standard deviation uses fixed absolute tolerance 1e-13. Anti-false-test controls retain an old delay-contract failure and an extreme-rounding failure, plus source-clock mutations. The synthetic experiment verifies admission and year boundaries, without an observational skill claim. Full package tests, actual experiments, strict docs, native CI and canonical harness remain mandatory. No original frozen paper target, tolerance, live serving policy or scientific selection decision is altered.
+
+## Completed-source history overflow regression (23 October 2026)
+
+The unbounded-integer history fixture precedes the source repair. The original
+source fails five expected OverflowErrors while accepting the four valid
+first-representable histories. The regression constructs adversarial wrapped
+source keys, so an incomplete guard cannot pass merely by returning missing
+data. Ground delays cover zero, an exact-minute support boundary, one
+millisecond beyond that boundary and the maximum allowed day. Removing only
+the checked history-span guard must reproduce these failures. No numerical
+tolerance or existing frozen fixture was changed. Focused checks do not replace
+unfiltered Pkg.test(), the actual experiment entry, canonical harness or CI.

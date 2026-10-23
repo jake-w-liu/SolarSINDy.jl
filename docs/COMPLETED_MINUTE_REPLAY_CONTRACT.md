@@ -47,6 +47,9 @@ additionally requires label readiness strictly before the next split issue.
 Clock shifts and minute rounding reject Int64 overflow. Input vectors are read
 by order rather than assuming their first array index is one. Functions leave
 source dictionaries unchanged and hold at most 30 rates per feature/label call.
+The complete ground history requires 31 vectors. Feature admission checks its
+oldest vector before reading any source key, rejecting an unrepresentable
+history even if a dictionary contains keys produced by wrapped arithmetic.
 
 ## Independent expectations and verification
 
@@ -62,6 +65,9 @@ contract. Another retained reproduction exposed unchecked extreme-date minute
 rounding. Both have regression expectations here. Source-clock mutations and
 future-value changes must be detected; changing target values must leave issue
 features unchanged. Missing and invalid values never become fabricated zeros.
+A separate unbounded-integer fixture fixes nine extreme history cases,
+including the first representable issue and its preceding minute under four
+ground delays. Omitting the history-span guard must reproduce the failure.
 
 Full package tests, the actual experiment entry, strict documentation, the
 unchanged canonical harness and native cross-platform CI remain qualification
