@@ -49,7 +49,12 @@ end
 function _dyadic(x::BigFloat)
     require(isfinite(x),"nonfinite diagnostic endpoint")
     x==0 && return "0p0"
-    rational=Rational{BigInt}(x);numerator_value=numerator(rational);denominator_value=denominator(rational)
+    # Rational conversion calls ldexp internally; preserve the operand bits
+    # even when the surrounding task uses a lower BigFloat precision.
+    rational=setprecision(BigFloat,precision(x)) do
+        Rational{BigInt}(x)
+    end
+    numerator_value=numerator(rational);denominator_value=denominator(rational)
     exponent=-ndigits(denominator_value;base=2)+1
     while iseven(numerator_value);numerator_value>>=1;exponent+=1;end
     mantissa=string(abs(numerator_value);base=16)

@@ -12,6 +12,7 @@ include("test_protocol.jl")
 include("test_store_cache.jl")
 include("test_numerical.jl")
 include("test_numerical_diagnostics.jl")
+include("test_dyadic_precision.jl")
 include("test_runtime_semantics.jl")
 include("test_source_reconstruction.jl")
 end
