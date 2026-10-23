@@ -202,3 +202,6 @@ run_completed_minute_replay_synthetic()
 
 include(joinpath(@__DIR__, "completed_source_dbdt_synthetic.jl"))
 run_synthetic_completed_source_replay()
+include(joinpath(@__DIR__, "completed_label_events_synthetic.jl"))
+run_synthetic_completed_label_events()
+run_synthetic_completed_label_events_bounded()

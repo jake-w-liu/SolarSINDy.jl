@@ -1,0 +1,16 @@
+{
+  "schema": "shared_event_input_axis_independent_v1",
+  "created_before_guard_patch": true,
+  "prepared_acceptance": [true, false],
+  "positional_centers": [0, 100],
+  "positional_scales": [1, 1],
+  "non_one_based_axes": [0, 1],
+  "rejected_independently": ["prepared", "centers", "scales"],
+  "required_error": "ArgumentError",
+  "source_batch_accesses_after_rejection": 0,
+  "ordinary_control_indices": [1],
+  "ordinary_control_bound_center": 0,
+  "ordinary_control_attempted": 1,
+  "original_17_fixture_groups_changed": false,
+  "legacy_D_helper_changed": false
+}

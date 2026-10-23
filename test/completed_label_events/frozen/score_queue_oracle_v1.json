@@ -1,0 +1,12 @@
+{
+  "schema": "independent_exact_signed_score_queue_test_v1",
+  "source": "hand-derived log1p(0)=0 and (0-center)/1; no production imports",
+  "original_numerical_oracles_changed": false,
+  "rolling_capacity": 2,
+  "initial_scores": [0, 0],
+  "completed_centers": [-1, -2, -3],
+  "complete_scores": [1, 2, 3],
+  "rolling_storage_after_each_completion": [[1, 0], [1, 2], [3, 2]],
+  "rolling_head_after_each_completion": [2, 1, 2],
+  "fixed_storage_after_all_completions": [0, 0, 0, 0, 0, 0, 0, 0, 0]
+}

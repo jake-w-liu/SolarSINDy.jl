@@ -644,3 +644,35 @@ export/doctest/warning gate unchanged; a scoped internal legacy appendix explain
 the archive-tag builder rather than hiding it or re-exporting it. Port-tool text
 encoding and two documentation failures were retained, corrected and reverified.
 Full package/experiment/harness/native CI and actual scientific gates remain open.
+
+## Shared completed-label synthetic adapter development ledger (23 October 2026)
+
+The root-approved pre-code contract/oracles and context amendment bind this
+additive child namespace. Source windows are retained for every attempted issue,
+including unavailable mandatory phase bounds; those fail the study and retain
+unknown denominator rows. All fixed subscribers prepare/commit atomically from
+one completion stream. Static/phase/FIFO calibration and early/maturity rolling
+algorithms retain their original scope. Strict expiry, checked clocks/ids,
+deterministic completion order, owner/context/revision binding and bounded live
+state are independently exercised. Explicit stream/protocol labels carry a
+false source-bound provenance flag. No callbacks, actual refits or UP numeric
+implementation are added. The original487 port assertions, original numerical
+oracle bytes and immutable reference bytes remain unchanged. Both focused native
+runtimes, synthetic examples, mutation controls and strict docs precede freeze;
+root owns full package/experiment/harness/native CI and scientific stages.
+Fresh review directly reproduced a point-alignment fault in the new shared
+entry for offset point axes when the final feature row is rejected. Root approved
+a one-based input guard and an independent prepared/point/scale offset fixture.
+The pre-fix source/probe/receipts were frozen first; the legacy helper and every
+original test/oracle byte remain unchanged. Final focused/example/docs and a
+targeted guard mutation must be repeated after this correction.
+Final focused qualification passes1028 assertions on each native Windows
+Julia1.12.6/1.13.1:487 unchanged port assertions plus541 additive event checks.
+Both44/1000 synthetic examples and strict docs pass; unmodified controls pass
+and29 unique event/guard mutants are detected on Julia1.13.1 without timeout.
+An independent bounded pre-axis audit passes5073 assertions on both runtimes for
+420 terminal windows. Its four reviewed files differ from final production only
+by the explicit one-based entry guard, which preserves admissible arrays.
+The external source freeze records all receipts and the two permitted post-run
+ledger-only changes. Full root-owned qualification and scientific stages remain
+open; this synthetic stage makes no provenance, coverage or skill verdict.

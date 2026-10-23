@@ -65,8 +65,10 @@ issues at the same time. Receipt grace belongs to that separate path. Only early
 mode can apply a proven miss before the full maximum is known; a completed score
 always requires all30 valid rates and label readiness. Expiry is strictly after
 the scheduled feedback clock plus grace. Diagnostic flushes preserve issued
-bounds. Static-map and late/graced receipt paths require a common completion-event
-adapter before matched comparisons; that adapter is not implemented here.
+bounds. The child `CompletedLabelEvents` module provides a common synthetic
+completion-event path for fixed consumers. These original static-map routines
+retain their complete-label assumptions; matched actual-data comparisons still
+require source-bound refits and the remaining qualification gates.
 
 The standalone synthetic example is `examples/completed_source_dbdt_synthetic.jl`;
 it is also registered in the package experiment entry. The polynomial example

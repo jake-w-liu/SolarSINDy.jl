@@ -1,0 +1,3124 @@
+{
+  "schema": "completed_label_events_independent_precode_oracles_v1",
+  "created_utc": "2026-10-23T04:22:52.235388+00:00",
+  "pre_code": true,
+  "production_event_adapter_implemented": false,
+  "port_source_freeze_sha256": "7a4b17792c591d74768609beb1b16130a4677439669da351a2356f50a6ea9038",
+  "independence": "Only literal inputs, unbounded integer support arithmetic, Fraction alpha recurrence and Decimal logarithm; no production code/test output imported.",
+  "time_origin": "2024-01-01T00:00:00 UTC; offsets are exact integer milliseconds unless raw_DateTime_value is explicitly named",
+  "common_initial": {
+    "calibration_scores": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "nominal": "1/10",
+    "point_center": 0.0,
+    "scale": 1.0,
+    "issued_upper": 0.0,
+    "initial_alpha": "1/10",
+    "policy": {
+      "ground_extra_ms": 0,
+      "omni_extra_ms": 0,
+      "label_extra_ms": 0
+    },
+    "source_owner": "synthetic_station/ground11/policy0",
+    "all_issues_feature_eligible": true,
+    "availability_kind": "assumed_completed_source_intervals",
+    "measured_receipts_available": false
+  },
+  "scalar_reference": {
+    "delta": "2^-1074",
+    "underflow_rejected": "2^-1076",
+    "minimum_subnormal_accepted": true,
+    "signed_zeros_accepted": true,
+    "rate_zero_canonicalization_only_after_validation": true
+  },
+  "complete_score_oracles": {
+    "ln3_decimal_80digits": "1.0986122886681096913952452369225257046474905578227494517346943336374942932186090",
+    "score_target2_center2_scale2_decimal": "-0.4506938556659451543023773815387371476762547210886252741326528331812528533906955"
+  },
+  "tolerances": {
+    "integer_clock_count_target_status": "exact",
+    "short_alpha_atol": "1e-14",
+    "feature_or_complete_score_atol": "1e-13",
+    "accounting_atol": "1e-12",
+    "long_resource_accounting_atol": "1e-10",
+    "rtol": "0",
+    "original_tolerances_unchanged": true
+  },
+  "fixtures": [
+    {
+      "id": "literal_clock_support",
+      "input": {
+        "issue": "2024-01-01T00:00:00",
+        "ground_extra_ms": 0,
+        "label_extra_ms": 0,
+        "omni_extra_ms": 0
+      },
+      "expected": {
+        "feature_vector_centers_offset_ms": [
+          -1860000,
+          -1800000,
+          -1740000,
+          -1680000,
+          -1620000,
+          -1560000,
+          -1500000,
+          -1440000,
+          -1380000,
+          -1320000,
+          -1260000,
+          -1200000,
+          -1140000,
+          -1080000,
+          -1020000,
+          -960000,
+          -900000,
+          -840000,
+          -780000,
+          -720000,
+          -660000,
+          -600000,
+          -540000,
+          -480000,
+          -420000,
+          -360000,
+          -300000,
+          -240000,
+          -180000,
+          -120000,
+          -60000
+        ],
+        "target_vector_centers_offset_ms": [
+          0,
+          60000,
+          120000,
+          180000,
+          240000,
+          300000,
+          360000,
+          420000,
+          480000,
+          540000,
+          600000,
+          660000,
+          720000,
+          780000,
+          840000,
+          900000,
+          960000,
+          1020000,
+          1080000,
+          1140000,
+          1200000,
+          1260000,
+          1320000,
+          1380000,
+          1440000,
+          1500000,
+          1560000,
+          1620000,
+          1680000,
+          1740000,
+          1800000
+        ],
+        "target_rate_centers_offset_ms": [
+          60000,
+          120000,
+          180000,
+          240000,
+          300000,
+          360000,
+          420000,
+          480000,
+          540000,
+          600000,
+          660000,
+          720000,
+          780000,
+          840000,
+          900000,
+          960000,
+          1020000,
+          1080000,
+          1140000,
+          1200000,
+          1260000,
+          1320000,
+          1380000,
+          1440000,
+          1500000,
+          1560000,
+          1620000,
+          1680000,
+          1740000,
+          1800000
+        ],
+        "first_rate_ready_offset_ms": 105000,
+        "target_end_offset_ms": 1800000,
+        "label_ready_offset_ms": 1845000,
+        "feedback_due_offset_ms": 1860000,
+        "expiry_offset_ms": 1860000,
+        "first_expiry_timer_offset_ms": 1860001,
+        "base_phase_period_minutes": 31
+      },
+      "derivation": "30 increments need31 vectors; centered support45s; integer minute ceiling."
+    },
+    {
+      "id": "ground_and_label_delay_omni_independent",
+      "input": {
+        "ground_extra_ms": 120000,
+        "label_extra_ms": 240000,
+        "omni_extra_ms": 180000
+      },
+      "expected": {
+        "first_rate_ready_offset_ms": 465000,
+        "label_ready_offset_ms": 2205000,
+        "feedback_due_offset_ms": 2220000,
+        "base_phase_period_minutes": 37
+      },
+      "derivation": "Add120000+240000 to ground feedback clocks; OMNI delay is unrelated."
+    },
+    {
+      "id": "grace_boundary_0",
+      "input": {
+        "grace_ms": 0,
+        "window": {
+          "id": 1,
+          "issue_offset_ms": 0,
+          "feature_row_id": "synthetic/1",
+          "target_end_offset_ms": 1800000,
+          "label_ready_offset_ms": 1845000,
+          "feedback_due_offset_ms": 1860000,
+          "expiry_offset_ms": 1860000
+        },
+        "initial_batch": {
+          "received_offset_ms": 1800000,
+          "observations": [
+            {
+              "center_offset_ms": 60000,
+              "rate": 2.0
+            },
+            {
+              "center_offset_ms": 120000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 180000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 240000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 300000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 360000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 420000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 480000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 540000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 600000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 660000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 720000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 780000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 840000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 900000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 960000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1020000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1080000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1140000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1200000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1260000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1320000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1380000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1440000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1500000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1560000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1620000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1680000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1740000,
+              "rate": 0.0
+            }
+          ]
+        },
+        "last_rate": {
+          "center_offset_ms": 1800000,
+          "rate": 0.0
+        },
+        "attempt_issue": {
+          "id": 2,
+          "issue_offset_ms": 1860000,
+          "center": 0.0,
+          "scale": 1.0
+        },
+        "variants": [
+          {
+            "received_offset_ms": 1860000
+          },
+          {
+            "received_offset_ms": 1860001
+          }
+        ]
+      },
+      "expected": {
+        "at_expiry": {
+          "completed_ids": [
+            1
+          ],
+          "targets": [
+            2.0
+          ],
+          "completed_at_offset_ms": 1860000,
+          "censored_ids": [],
+          "completed_score": "ln(3)",
+          "phase_unavailable_ids": [],
+          "phase_upper_for_id2": "Inf",
+          "source_attempted_count": 2,
+          "source_completed_count": 1,
+          "pending_target_ids": [
+            2
+          ],
+          "source_target_unknown_total": 1
+        },
+        "strictly_after_expiry": {
+          "completed_ids": [],
+          "censored_ids": [
+            1
+          ],
+          "censored_target_unknown_ids": [
+            1
+          ],
+          "pending_target_ids": [
+            2
+          ],
+          "source_attempted_count": 2,
+          "source_completed_count": 0,
+          "source_target_unknown_total": 2,
+          "late_window_reopen": false,
+          "completed_scores": 0,
+          "phase_unavailable_ids": [
+            2
+          ],
+          "phase_upper_for_id2": null
+        },
+        "earliest_safe_terminal_period_minutes": 32,
+        "default31_reuse_if_still_pending": {
+          "source_attempted_ids": [
+            1,
+            2
+          ],
+          "phase_issued_ids": [
+            1
+          ],
+          "phase_unavailable_ids": [
+            2
+          ],
+          "phase_upper_for_id2": null,
+          "phase_reason": "prior_label_pending",
+          "phase_attempted_count": 2,
+          "phase_issued_count": 1,
+          "phase_unavailable_count": 1,
+          "mandatory_comparator_study_pass": false
+        }
+      },
+      "derivation": "Receipt equality is admissible; censor begins expiry+1ms. First whole-minute reuse strictly after expiry."
+    },
+    {
+      "id": "grace_boundary_1",
+      "input": {
+        "grace_ms": 1,
+        "window": {
+          "id": 1,
+          "issue_offset_ms": 0,
+          "feature_row_id": "synthetic/1",
+          "target_end_offset_ms": 1800000,
+          "label_ready_offset_ms": 1845000,
+          "feedback_due_offset_ms": 1860000,
+          "expiry_offset_ms": 1860001
+        },
+        "initial_batch": {
+          "received_offset_ms": 1800000,
+          "observations": [
+            {
+              "center_offset_ms": 60000,
+              "rate": 2.0
+            },
+            {
+              "center_offset_ms": 120000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 180000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 240000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 300000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 360000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 420000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 480000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 540000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 600000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 660000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 720000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 780000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 840000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 900000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 960000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1020000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1080000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1140000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1200000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1260000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1320000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1380000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1440000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1500000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1560000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1620000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1680000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1740000,
+              "rate": 0.0
+            }
+          ]
+        },
+        "last_rate": {
+          "center_offset_ms": 1800000,
+          "rate": 0.0
+        },
+        "attempt_issue": {
+          "id": 2,
+          "issue_offset_ms": 1860000,
+          "center": 0.0,
+          "scale": 1.0
+        },
+        "variants": [
+          {
+            "received_offset_ms": 1860001
+          },
+          {
+            "received_offset_ms": 1860002
+          }
+        ]
+      },
+      "expected": {
+        "at_expiry": {
+          "completed_ids": [
+            1
+          ],
+          "targets": [
+            2.0
+          ],
+          "completed_at_offset_ms": 1860001,
+          "censored_ids": [],
+          "completed_score": "ln(3)",
+          "phase_unavailable_ids": [
+            2
+          ],
+          "phase_upper_for_id2": null,
+          "source_attempted_count": 2,
+          "source_completed_count": 1,
+          "pending_target_ids": [
+            2
+          ],
+          "source_target_unknown_total": 1
+        },
+        "strictly_after_expiry": {
+          "completed_ids": [],
+          "censored_ids": [
+            1
+          ],
+          "censored_target_unknown_ids": [
+            1
+          ],
+          "pending_target_ids": [
+            2
+          ],
+          "source_attempted_count": 2,
+          "source_completed_count": 0,
+          "source_target_unknown_total": 2,
+          "late_window_reopen": false,
+          "completed_scores": 0,
+          "phase_unavailable_ids": [
+            2
+          ],
+          "phase_upper_for_id2": null
+        },
+        "earliest_safe_terminal_period_minutes": 32,
+        "default31_reuse_if_still_pending": {
+          "source_attempted_ids": [
+            1,
+            2
+          ],
+          "phase_issued_ids": [
+            1
+          ],
+          "phase_unavailable_ids": [
+            2
+          ],
+          "phase_upper_for_id2": null,
+          "phase_reason": "prior_label_pending",
+          "phase_attempted_count": 2,
+          "phase_issued_count": 1,
+          "phase_unavailable_count": 1,
+          "mandatory_comparator_study_pass": false
+        }
+      },
+      "derivation": "Receipt equality is admissible; censor begins expiry+1ms. First whole-minute reuse strictly after expiry."
+    },
+    {
+      "id": "grace_boundary_60000",
+      "input": {
+        "grace_ms": 60000,
+        "window": {
+          "id": 1,
+          "issue_offset_ms": 0,
+          "feature_row_id": "synthetic/1",
+          "target_end_offset_ms": 1800000,
+          "label_ready_offset_ms": 1845000,
+          "feedback_due_offset_ms": 1860000,
+          "expiry_offset_ms": 1920000
+        },
+        "initial_batch": {
+          "received_offset_ms": 1800000,
+          "observations": [
+            {
+              "center_offset_ms": 60000,
+              "rate": 2.0
+            },
+            {
+              "center_offset_ms": 120000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 180000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 240000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 300000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 360000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 420000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 480000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 540000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 600000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 660000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 720000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 780000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 840000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 900000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 960000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1020000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1080000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1140000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1200000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1260000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1320000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1380000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1440000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1500000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1560000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1620000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1680000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1740000,
+              "rate": 0.0
+            }
+          ]
+        },
+        "last_rate": {
+          "center_offset_ms": 1800000,
+          "rate": 0.0
+        },
+        "attempt_issue": {
+          "id": 2,
+          "issue_offset_ms": 1860000,
+          "center": 0.0,
+          "scale": 1.0
+        },
+        "variants": [
+          {
+            "received_offset_ms": 1920000
+          },
+          {
+            "received_offset_ms": 1920001
+          }
+        ]
+      },
+      "expected": {
+        "at_expiry": {
+          "completed_ids": [
+            1
+          ],
+          "targets": [
+            2.0
+          ],
+          "completed_at_offset_ms": 1920000,
+          "censored_ids": [],
+          "completed_score": "ln(3)",
+          "phase_unavailable_ids": [
+            2
+          ],
+          "phase_upper_for_id2": null,
+          "source_attempted_count": 2,
+          "source_completed_count": 1,
+          "pending_target_ids": [
+            2
+          ],
+          "source_target_unknown_total": 1
+        },
+        "strictly_after_expiry": {
+          "completed_ids": [],
+          "censored_ids": [
+            1
+          ],
+          "censored_target_unknown_ids": [
+            1
+          ],
+          "pending_target_ids": [
+            2
+          ],
+          "source_attempted_count": 2,
+          "source_completed_count": 0,
+          "source_target_unknown_total": 2,
+          "late_window_reopen": false,
+          "completed_scores": 0,
+          "phase_unavailable_ids": [
+            2
+          ],
+          "phase_upper_for_id2": null
+        },
+        "earliest_safe_terminal_period_minutes": 33,
+        "default31_reuse_if_still_pending": {
+          "source_attempted_ids": [
+            1,
+            2
+          ],
+          "phase_issued_ids": [
+            1
+          ],
+          "phase_unavailable_ids": [
+            2
+          ],
+          "phase_upper_for_id2": null,
+          "phase_reason": "prior_label_pending",
+          "phase_attempted_count": 2,
+          "phase_issued_count": 1,
+          "phase_unavailable_count": 1,
+          "mandatory_comparator_study_pass": false
+        }
+      },
+      "derivation": "Receipt equality is admissible; censor begins expiry+1ms. First whole-minute reuse strictly after expiry."
+    },
+    {
+      "id": "grace_boundary_60001",
+      "input": {
+        "grace_ms": 60001,
+        "window": {
+          "id": 1,
+          "issue_offset_ms": 0,
+          "feature_row_id": "synthetic/1",
+          "target_end_offset_ms": 1800000,
+          "label_ready_offset_ms": 1845000,
+          "feedback_due_offset_ms": 1860000,
+          "expiry_offset_ms": 1920001
+        },
+        "initial_batch": {
+          "received_offset_ms": 1800000,
+          "observations": [
+            {
+              "center_offset_ms": 60000,
+              "rate": 2.0
+            },
+            {
+              "center_offset_ms": 120000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 180000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 240000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 300000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 360000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 420000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 480000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 540000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 600000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 660000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 720000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 780000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 840000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 900000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 960000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1020000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1080000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1140000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1200000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1260000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1320000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1380000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1440000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1500000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1560000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1620000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1680000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1740000,
+              "rate": 0.0
+            }
+          ]
+        },
+        "last_rate": {
+          "center_offset_ms": 1800000,
+          "rate": 0.0
+        },
+        "attempt_issue": {
+          "id": 2,
+          "issue_offset_ms": 1860000,
+          "center": 0.0,
+          "scale": 1.0
+        },
+        "variants": [
+          {
+            "received_offset_ms": 1920001
+          },
+          {
+            "received_offset_ms": 1920002
+          }
+        ]
+      },
+      "expected": {
+        "at_expiry": {
+          "completed_ids": [
+            1
+          ],
+          "targets": [
+            2.0
+          ],
+          "completed_at_offset_ms": 1920001,
+          "censored_ids": [],
+          "completed_score": "ln(3)",
+          "phase_unavailable_ids": [
+            2
+          ],
+          "phase_upper_for_id2": null,
+          "source_attempted_count": 2,
+          "source_completed_count": 1,
+          "pending_target_ids": [
+            2
+          ],
+          "source_target_unknown_total": 1
+        },
+        "strictly_after_expiry": {
+          "completed_ids": [],
+          "censored_ids": [
+            1
+          ],
+          "censored_target_unknown_ids": [
+            1
+          ],
+          "pending_target_ids": [
+            2
+          ],
+          "source_attempted_count": 2,
+          "source_completed_count": 0,
+          "source_target_unknown_total": 2,
+          "late_window_reopen": false,
+          "completed_scores": 0,
+          "phase_unavailable_ids": [
+            2
+          ],
+          "phase_upper_for_id2": null
+        },
+        "earliest_safe_terminal_period_minutes": 33,
+        "default31_reuse_if_still_pending": {
+          "source_attempted_ids": [
+            1,
+            2
+          ],
+          "phase_issued_ids": [
+            1
+          ],
+          "phase_unavailable_ids": [
+            2
+          ],
+          "phase_upper_for_id2": null,
+          "phase_reason": "prior_label_pending",
+          "phase_attempted_count": 2,
+          "phase_issued_count": 1,
+          "phase_unavailable_count": 1,
+          "mandatory_comparator_study_pass": false
+        }
+      },
+      "derivation": "Receipt equality is admissible; censor begins expiry+1ms. First whole-minute reuse strictly after expiry."
+    },
+    {
+      "id": "same_time_final_receipt_then_phase_issue",
+      "input": {
+        "grace_ms": 0,
+        "phase_period_minutes": 31,
+        "calibration_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "windows": [
+          {
+            "id": 1,
+            "issue_offset_ms": 0,
+            "feature_row_id": "synthetic/1",
+            "target_end_offset_ms": 1800000,
+            "label_ready_offset_ms": 1845000,
+            "feedback_due_offset_ms": 1860000,
+            "expiry_offset_ms": 1860000
+          }
+        ],
+        "initial_batch": {
+          "received_offset_ms": 1800000,
+          "observations": [
+            {
+              "center_offset_ms": 60000,
+              "rate": 2.0
+            },
+            {
+              "center_offset_ms": 120000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 180000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 240000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 300000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 360000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 420000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 480000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 540000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 600000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 660000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 720000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 780000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 840000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 900000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 960000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1020000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1080000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1140000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1200000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1260000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1320000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1380000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1440000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1500000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1560000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1620000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1680000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1740000,
+              "rate": 0.0
+            }
+          ]
+        },
+        "time_transaction": {
+          "time_offset_ms": 1860000,
+          "observations": [
+            {
+              "center_offset_ms": 1800000,
+              "rate": 0.0
+            }
+          ],
+          "attempt_issue": {
+            "id": 2,
+            "issue_offset_ms": 1860000,
+            "center": 0.0,
+            "scale": 1.0
+          }
+        }
+      },
+      "expected": {
+        "global_kind_order": [
+          "source_receipt",
+          "completed_target",
+          "issue"
+        ],
+        "completed_ids": [
+          1
+        ],
+        "completed_targets": [
+          2.0
+        ],
+        "phase_alpha_at_new_issue": "1/100",
+        "phase_new_upper": "Inf",
+        "phase_unavailable_ids": [],
+        "phase_binary_count": 1,
+        "phase_misses": 1
+      },
+      "derivation": "Old ticket miss updates its phase before the issue31 bound; n9,alpha.01 requires rank10 ->Inf."
+    },
+    {
+      "id": "same_time_overlapping_complete_windows",
+      "input": {
+        "grace_ms": 60000,
+        "windows": [
+          {
+            "id": 1,
+            "issue_offset_ms": 0,
+            "feature_row_id": "synthetic/1",
+            "target_end_offset_ms": 1800000,
+            "label_ready_offset_ms": 1845000,
+            "feedback_due_offset_ms": 1860000,
+            "expiry_offset_ms": 1920000
+          },
+          {
+            "id": 2,
+            "issue_offset_ms": 60000,
+            "feature_row_id": "synthetic/2",
+            "target_end_offset_ms": 1860000,
+            "label_ready_offset_ms": 1905000,
+            "feedback_due_offset_ms": 1920000,
+            "expiry_offset_ms": 1980000
+          }
+        ],
+        "batches_in_two_input_orders": [
+          {
+            "received_offset_ms": 1920000,
+            "observations": [
+              {
+                "center_offset_ms": 60000,
+                "rate": 2.0
+              },
+              {
+                "center_offset_ms": 120000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 180000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 240000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 300000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 360000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 420000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 480000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 540000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 600000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 660000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 720000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 780000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 840000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 900000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 960000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1020000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1080000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1140000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1200000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1260000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1320000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1380000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1440000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1500000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1560000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1620000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1680000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1740000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1800000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1860000,
+                "rate": 0.0
+              }
+            ]
+          },
+          {
+            "received_offset_ms": 1920000,
+            "observations": [
+              {
+                "center_offset_ms": 1860000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1800000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1740000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1680000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1620000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1560000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1500000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1440000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1380000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1320000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1260000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1200000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1140000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1080000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1020000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 960000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 900000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 840000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 780000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 720000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 660000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 600000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 540000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 480000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 420000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 360000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 300000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 240000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 180000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 120000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 60000,
+                "rate": 2.0
+              }
+            ]
+          }
+        ],
+        "duplicate_row": {
+          "center_offset_ms": 120000,
+          "rate": 0.0
+        }
+      },
+      "expected": {
+        "completed_ids": [
+          1,
+          2
+        ],
+        "completed_targets": [
+          2.0,
+          0.0
+        ],
+        "completed_at_offsets_ms": [
+          1920000,
+          1920000
+        ],
+        "fifo_binary_errors": [
+          true,
+          false
+        ],
+        "fifo_alpha_sequence": [
+          "1/100",
+          "1/50"
+        ],
+        "score_insert_order": [
+          1,
+          2
+        ],
+        "total_completed_scores": 2,
+        "total_feedback_per_consumer": 2,
+        "raw_row_order_changes_event_sequence": false
+      },
+      "derivation": "Window0 contains positive rate1; window1 starts at rate2. Complete same-time labels sort byissue/id."
+    },
+    {
+      "id": "reversed_completion_order_without_head_blocking",
+      "input": {
+        "grace_ms": 180000,
+        "windows": [
+          {
+            "id": 1,
+            "issue_offset_ms": 0,
+            "feature_row_id": "synthetic/1",
+            "target_end_offset_ms": 1800000,
+            "label_ready_offset_ms": 1845000,
+            "feedback_due_offset_ms": 1860000,
+            "expiry_offset_ms": 2040000
+          },
+          {
+            "id": 2,
+            "issue_offset_ms": 60000,
+            "feature_row_id": "synthetic/2",
+            "target_end_offset_ms": 1860000,
+            "label_ready_offset_ms": 1905000,
+            "feedback_due_offset_ms": 1920000,
+            "expiry_offset_ms": 2100000
+          }
+        ],
+        "batches": [
+          {
+            "received_offset_ms": 1920000,
+            "observations": [
+              {
+                "center_offset_ms": 120000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 180000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 240000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 300000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 360000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 420000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 480000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 540000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 600000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 660000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 720000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 780000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 840000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 900000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 960000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1020000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1080000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1140000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1200000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1260000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1320000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1380000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1440000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1500000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1560000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1620000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1680000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1740000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1800000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1860000,
+                "rate": 0.0
+              }
+            ]
+          },
+          {
+            "received_offset_ms": 1980000,
+            "observations": [
+              {
+                "center_offset_ms": 60000,
+                "rate": 2.0
+              }
+            ]
+          }
+        ],
+        "extra_issues_after_batches": [
+          {
+            "id": 3,
+            "issue_offset_ms": 1920000
+          },
+          {
+            "id": 4,
+            "issue_offset_ms": 1980000
+          }
+        ],
+        "calibration_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "expected": {
+        "completed_ids": [
+          2,
+          1
+        ],
+        "completed_targets": [
+          0.0,
+          2.0
+        ],
+        "completed_at_offsets_ms": [
+          1920000,
+          1980000
+        ],
+        "fifo_binary_errors": [
+          false,
+          true
+        ],
+        "fifo_alpha_sequence": [
+          "11/100",
+          "1/50"
+        ],
+        "fifo_alpha_at_extra_issues": [
+          "11/100",
+          "1/50"
+        ],
+        "fifo_upper_at_extra_issues": [
+          0.0,
+          "Inf"
+        ],
+        "score_insert_order": [
+          2,
+          1
+        ],
+        "no_head_blocking": true
+      },
+      "derivation": "Rate1 is needed only by window0, so window1 completes first. Completion-order errors0,1 give.11,.02."
+    },
+    {
+      "id": "early_binary_known_final_target_unknown",
+      "input": {
+        "window": {
+          "id": 1,
+          "issue_offset_ms": 0,
+          "feature_row_id": "synthetic/1",
+          "target_end_offset_ms": 1800000,
+          "label_ready_offset_ms": 1845000,
+          "feedback_due_offset_ms": 1860000,
+          "expiry_offset_ms": 1860000
+        },
+        "batches": [
+          {
+            "received_offset_ms": 105000,
+            "observations": [
+              {
+                "center_offset_ms": 60000,
+                "rate": 2.0
+              }
+            ]
+          },
+          {
+            "received_offset_ms": 1860000,
+            "observations": [
+              {
+                "center_offset_ms": 120000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 180000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 240000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 300000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 360000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 420000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 480000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 540000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 600000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 660000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 720000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 780000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 840000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 960000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1020000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1080000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1140000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1200000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1260000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1320000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1380000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1440000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1500000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1560000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1620000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1680000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1740000,
+                "rate": 0.0
+              },
+              {
+                "center_offset_ms": 1800000,
+                "rate": 0.0
+              }
+            ]
+          }
+        ],
+        "advance_offset_ms": 1860001,
+        "late_rate_batch": {
+          "received_offset_ms": 1860002,
+          "observations": [
+            {
+              "center_offset_ms": 900000,
+              "rate": 0.0
+            }
+          ]
+        }
+      },
+      "expected": {
+        "early": {
+          "binary_resolved": 1,
+          "binary_misses": 1,
+          "binary_unknown": 0,
+          "alpha": "1/100",
+          "completed_scores": 0
+        },
+        "maturity": {
+          "binary_resolved": 0,
+          "binary_misses": 0,
+          "binary_unknown": 1,
+          "alpha": "1/10",
+          "completed_scores": 0
+        },
+        "shared": {
+          "completed_targets": 0,
+          "censored_ids": [
+            1
+          ],
+          "target_unknown": 1,
+          "missing_center_offsets_ms": [
+            900000
+          ],
+          "terminal_event_count": 1
+        },
+        "late_completion_reopens": false,
+        "early_duplicate_feedback": false
+      },
+      "derivation": "Received rate2>bound0 certifies a miss; missing rate15 prevents a full maximum and every residual."
+    },
+    {
+      "id": "signed_zero_duplicate_plus_minus",
+      "input": {
+        "window": {
+          "id": 1,
+          "issue_offset_ms": 0,
+          "feature_row_id": "synthetic/1",
+          "target_end_offset_ms": 1800000,
+          "label_ready_offset_ms": 1845000,
+          "feedback_due_offset_ms": 1860000,
+          "expiry_offset_ms": 1860000
+        },
+        "batch": {
+          "received_offset_ms": 105000,
+          "observations": [
+            {
+              "center_offset_ms": 60000,
+              "rate": 0.0,
+              "rate_bits_hex": "0000000000000000"
+            },
+            {
+              "center_offset_ms": 60000,
+              "rate": -0.0,
+              "rate_bits_hex": "8000000000000000"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "valid_rows": 2,
+        "accepted_unique_source_events": 1,
+        "canonical_rate": 0.0,
+        "canonical_rate_bits_hex": "0000000000000000",
+        "canonical_stored_rate_signbit": false,
+        "early_feedback_count": 0,
+        "target_still_pending": true,
+        "raw_source_numeric_identities_preserved": true
+      },
+      "derivation": "Both zeros valid; canonicalize physical rates after validation and before duplicate comparison."
+    },
+    {
+      "id": "signed_zero_duplicate_minus_plus",
+      "input": {
+        "window": {
+          "id": 1,
+          "issue_offset_ms": 0,
+          "feature_row_id": "synthetic/1",
+          "target_end_offset_ms": 1800000,
+          "label_ready_offset_ms": 1845000,
+          "feedback_due_offset_ms": 1860000,
+          "expiry_offset_ms": 1860000
+        },
+        "batch": {
+          "received_offset_ms": 105000,
+          "observations": [
+            {
+              "center_offset_ms": 60000,
+              "rate": -0.0,
+              "rate_bits_hex": "8000000000000000"
+            },
+            {
+              "center_offset_ms": 60000,
+              "rate": 0.0,
+              "rate_bits_hex": "0000000000000000"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "valid_rows": 2,
+        "accepted_unique_source_events": 1,
+        "canonical_rate": 0.0,
+        "canonical_rate_bits_hex": "0000000000000000",
+        "canonical_stored_rate_signbit": false,
+        "early_feedback_count": 0,
+        "target_still_pending": true,
+        "raw_source_numeric_identities_preserved": true
+      },
+      "derivation": "Both zeros valid; canonicalize physical rates after validation and before duplicate comparison."
+    },
+    {
+      "id": "all_subscriber_rollback_on_score_overflow",
+      "input": {
+        "window": {
+          "id": 1,
+          "issue_offset_ms": 0,
+          "feature_row_id": "synthetic/1",
+          "target_end_offset_ms": 1800000,
+          "label_ready_offset_ms": 1845000,
+          "feedback_due_offset_ms": 1860000,
+          "expiry_offset_ms": 1860000
+        },
+        "subscriber": {
+          "kind": "early",
+          "point_center": -1e+308,
+          "scale": 1e-308,
+          "issued_upper": -1.0,
+          "alpha": "1/10"
+        },
+        "batch": {
+          "received_offset_ms": 1860000,
+          "observations": [
+            {
+              "center_offset_ms": 60000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 120000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 180000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 240000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 300000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 360000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 420000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 480000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 540000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 600000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 660000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 720000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 780000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 840000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 900000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 960000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1020000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1080000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1140000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1200000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1260000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1320000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1380000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1440000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1500000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1560000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1620000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1680000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1740000,
+              "rate": 0.0
+            },
+            {
+              "center_offset_ms": 1800000,
+              "rate": 0.0
+            }
+          ]
+        }
+      },
+      "expected": {
+        "error": "ArgumentError",
+        "all_adapter_and_subscriber_fields_unchanged": true,
+        "emitted_event_count": 0,
+        "clock_offset_ms": 0,
+        "source_seen_count": 0,
+        "pending_rate_count": 0,
+        "issued_bound_stays": -1.0,
+        "binary_resolved": 0,
+        "binary_misses": 0,
+        "completed_scores": 0,
+        "alpha": "1/10",
+        "failure_expression": "(log1p(0)-(-1e308))/1e-308 is nonfinite"
+      },
+      "derivation": "Final target0 would be an early miss against-1, but nonfinite score prevents every commit."
+    },
+    {
+      "id": "invalid_source_clock_grammar_transaction_atomicity",
+      "input_cases": [
+        {
+          "id": "conflicting_duplicate_same_batch",
+          "previous_clock": 0,
+          "batch": {
+            "received_offset_ms": 120000,
+            "observations": [
+              {
+                "center_offset_ms": 60000,
+                "rate": 1.0
+              },
+              {
+                "center_offset_ms": 60000,
+                "rate": 2.0
+              }
+            ]
+          }
+        },
+        {
+          "id": "conflicting_retained_duplicate",
+          "previous_clock": 120000,
+          "previous_seen": [
+            {
+              "center_offset_ms": 60000,
+              "rate": 1.0
+            }
+          ],
+          "batch": {
+            "received_offset_ms": 180000,
+            "observations": [
+              {
+                "center_offset_ms": 60000,
+                "rate": 2.0
+              }
+            ]
+          }
+        },
+        {
+          "id": "receipt_before_rate_ready",
+          "previous_clock": 0,
+          "batch": {
+            "received_offset_ms": 104999,
+            "observations": [
+              {
+                "center_offset_ms": 60000,
+                "rate": 0.0
+              }
+            ]
+          }
+        },
+        {
+          "id": "backward_clock",
+          "previous_clock": 120000,
+          "batch": {
+            "received_offset_ms": 119999,
+            "observations": []
+          }
+        },
+        {
+          "id": "irregular_center",
+          "previous_clock": 0,
+          "batch": {
+            "received_offset_ms": 120000,
+            "observations": [
+              {
+                "center_offset_ms": 60001,
+                "rate": 0.0
+              }
+            ]
+          }
+        },
+        {
+          "id": "bool_rate",
+          "previous_clock": 0,
+          "batch": {
+            "received_offset_ms": 120000,
+            "observations": [
+              {
+                "center_offset_ms": 60000,
+                "rate": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "nonzero_underflow",
+          "previous_clock": 0,
+          "batch": {
+            "received_offset_ms": 120000,
+            "observations": [
+              {
+                "center_offset_ms": 60000,
+                "rate_expression": "BigFloat(2)^(-1076)"
+              }
+            ]
+          }
+        },
+        {
+          "id": "extra_same_time_after_closed_watermark",
+          "previous_clock": 120000,
+          "closed_transaction_id": "tx1",
+          "new_transaction_id": "tx2",
+          "batch": {
+            "received_offset_ms": 120000,
+            "observations": [
+              {
+                "center_offset_ms": 60000,
+                "rate": 0.0
+              }
+            ]
+          }
+        },
+        {
+          "id": "stale_prepare_revision",
+          "prepared_revision": 1,
+          "current_revision": 2
+        },
+        {
+          "id": "arbitrary_mutating_subscriber_callback",
+          "subscriber_kind": "CallableMutator",
+          "callback_must_be_called": false
+        }
+      ],
+      "expected_for_every_case": {
+        "error": "ArgumentError",
+        "all_adapter_and_subscriber_fields_unchanged": true,
+        "no_events": true,
+        "no_new_issue": true,
+        "no_callback_called": true
+      },
+      "derivation": "Validate all complete batches/plans before mutation. These are malformed input, unlike expected phase unavailability."
+    },
+    {
+      "id": "strict_warmup_membership_and_period",
+      "input": {
+        "stream_start_offset_ms": 0,
+        "phase_period_minutes": 31,
+        "ground_extra_ms": 15000,
+        "label_extra_ms": 0,
+        "grace_ms": 60000,
+        "candidates": [
+          {
+            "id": 1,
+            "issue_offset_ms": -1920000,
+            "label_ready_offset_ms": -60000,
+            "completed_at_offset_ms": -1,
+            "period": 31
+          },
+          {
+            "id": 2,
+            "issue_offset_ms": -1860000,
+            "label_ready_offset_ms": 0,
+            "completed_at_offset_ms": 0,
+            "period": 31
+          },
+          {
+            "id": 3,
+            "issue_offset_ms": -1920000,
+            "label_ready_offset_ms": -60000,
+            "completed_at_offset_ms": 0,
+            "period": 31
+          },
+          {
+            "id": 4,
+            "issue_offset_ms": -1920000,
+            "label_ready_offset_ms": -60000,
+            "completed_at_offset_ms": -1,
+            "period": 30
+          }
+        ]
+      },
+      "expected": {
+        "warmup_ids": [
+          1
+        ],
+        "equality_excluded_ids": [
+          2,
+          3
+        ],
+        "incompatible_period_ids": [
+          4
+        ],
+        "period_mismatch_error": "ArgumentError",
+        "numeric_UP_state_not_claimed": true
+      },
+      "derivation": "Both assumed readiness and actual completion must be strictly before stream start, and phase periods must match."
+    },
+    {
+      "id": "default_44_issue_trace_and_flush",
+      "input": {
+        "issue_offsets_ms": [
+          0,
+          60000,
+          120000,
+          180000,
+          240000,
+          300000,
+          360000,
+          420000,
+          480000,
+          540000,
+          600000,
+          660000,
+          720000,
+          780000,
+          840000,
+          900000,
+          960000,
+          1020000,
+          1080000,
+          1140000,
+          1200000,
+          1260000,
+          1320000,
+          1380000,
+          1440000,
+          1500000,
+          1560000,
+          1620000,
+          1680000,
+          1740000,
+          1800000,
+          1860000,
+          1920000,
+          1980000,
+          2040000,
+          2100000,
+          2160000,
+          2220000,
+          2280000,
+          2340000,
+          2400000,
+          2460000,
+          2520000,
+          2580000
+        ],
+        "source_rate_centers_offset_ms": [
+          60000,
+          120000,
+          180000,
+          240000,
+          300000,
+          360000,
+          420000,
+          480000,
+          540000,
+          600000,
+          660000,
+          720000,
+          780000,
+          840000,
+          900000,
+          960000,
+          1020000,
+          1080000,
+          1140000,
+          1200000,
+          1260000,
+          1320000,
+          1380000,
+          1440000,
+          1500000,
+          1560000,
+          1620000,
+          1680000,
+          1740000,
+          1800000,
+          1860000,
+          1920000,
+          1980000,
+          2040000,
+          2100000,
+          2160000,
+          2220000,
+          2280000,
+          2340000,
+          2400000,
+          2460000,
+          2520000,
+          2580000,
+          2640000,
+          2700000,
+          2760000,
+          2820000,
+          2880000,
+          2940000,
+          3000000,
+          3060000,
+          3120000,
+          3180000,
+          3240000,
+          3300000,
+          3360000,
+          3420000,
+          3480000,
+          3540000,
+          3600000,
+          3660000,
+          3720000,
+          3780000,
+          3840000,
+          3900000,
+          3960000,
+          4020000,
+          4080000,
+          4140000,
+          4200000,
+          4260000,
+          4320000,
+          4380000
+        ],
+        "rate_by_center": "rate1=1; allother listed rates0",
+        "received_rule": "center+60000ms",
+        "asof_before_flush_offset_ms": 2580000,
+        "asof_after_flush_offset_ms": 4440000,
+        "nominal": "1/10",
+        "phase_gain": "1/10",
+        "fifo_gain": "1/310",
+        "calibration_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "expected": {
+        "issued_before_and_after": 44,
+        "completed_before": 13,
+        "completed_after": 44,
+        "unknown_before": 31,
+        "unknown_after": 0,
+        "targets": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "phase_trace": [
+          {
+            "issue_offset_ms": 0,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 60000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 120000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 180000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 240000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 300000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 360000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 420000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 480000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 540000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 600000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 660000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 720000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 780000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 840000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 900000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 960000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1020000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1080000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1140000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1200000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1260000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1320000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1380000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1440000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1500000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1560000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1620000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1680000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1740000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1800000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1860000,
+            "alpha": "1/100",
+            "upper": "Inf"
+          },
+          {
+            "issue_offset_ms": 1920000,
+            "alpha": "11/100",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1980000,
+            "alpha": "11/100",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 2040000,
+            "alpha": "11/100",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 2100000,
+            "alpha": "11/100",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 2160000,
+            "alpha": "11/100",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 2220000,
+            "alpha": "11/100",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 2280000,
+            "alpha": "11/100",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 2340000,
+            "alpha": "11/100",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 2400000,
+            "alpha": "11/100",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 2460000,
+            "alpha": "11/100",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 2520000,
+            "alpha": "11/100",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 2580000,
+            "alpha": "11/100",
+            "upper": 0.0
+          }
+        ],
+        "fifo_trace": [
+          {
+            "issue_offset_ms": 0,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 60000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 120000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 180000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 240000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 300000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 360000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 420000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 480000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 540000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 600000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 660000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 720000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 780000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 840000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 900000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 960000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1020000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1080000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1140000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1200000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1260000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1320000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1380000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1440000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1500000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1560000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1620000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1680000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1740000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1800000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 1860000,
+            "alpha": "301/3100",
+            "upper": "Inf"
+          },
+          {
+            "issue_offset_ms": 1920000,
+            "alpha": "151/1550",
+            "upper": "Inf"
+          },
+          {
+            "issue_offset_ms": 1980000,
+            "alpha": "303/3100",
+            "upper": "Inf"
+          },
+          {
+            "issue_offset_ms": 2040000,
+            "alpha": "76/775",
+            "upper": "Inf"
+          },
+          {
+            "issue_offset_ms": 2100000,
+            "alpha": "61/620",
+            "upper": "Inf"
+          },
+          {
+            "issue_offset_ms": 2160000,
+            "alpha": "153/1550",
+            "upper": "Inf"
+          },
+          {
+            "issue_offset_ms": 2220000,
+            "alpha": "307/3100",
+            "upper": "Inf"
+          },
+          {
+            "issue_offset_ms": 2280000,
+            "alpha": "77/775",
+            "upper": "Inf"
+          },
+          {
+            "issue_offset_ms": 2340000,
+            "alpha": "309/3100",
+            "upper": "Inf"
+          },
+          {
+            "issue_offset_ms": 2400000,
+            "alpha": "1/10",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 2460000,
+            "alpha": "311/3100",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 2520000,
+            "alpha": "78/775",
+            "upper": 0.0
+          },
+          {
+            "issue_offset_ms": 2580000,
+            "alpha": "313/3100",
+            "upper": 0.0
+          }
+        ],
+        "every_issued_bound_point_scale_alpha_availability_unchanged_by_flush": true
+      },
+      "derivation": "At minute43, tickets0..12 have scheduled labels; drain through minute74 resolves all44. Fraction recurrence fixes alphas."
+    },
+    {
+      "id": "capacity_and_checked_extremes",
+      "input": {
+        "grace_values_ms": [
+          0,
+          1,
+          60000,
+          60001,
+          86400000
+        ],
+        "base_period_minutes": 31,
+        "synthetic_issue_count": 1000,
+        "one_issue_per_whole_minute": true,
+        "arrival_rule": "At issue minutej, receive zero rate at centerj-1 before issuing; j=0:999",
+        "rolling_capacity": 5,
+        "checked_failure_cases": [
+          {
+            "operation": "expiry+1ms",
+            "expiry_raw_DateTime_value": 9223372036854775807
+          },
+          {
+            "operation": "id+1",
+            "id": 9223372036854775807
+          },
+          {
+            "operation": "retention cutoff",
+            "clock_raw_DateTime_value": -9223372036854775808
+          }
+        ]
+      },
+      "expected": {
+        "safe_terminal_period_minutes": [
+          32,
+          32,
+          33,
+          33,
+          1472
+        ],
+        "pending_capacity_conservative": [
+          32,
+          33,
+          33,
+          34,
+          1472
+        ],
+        "resource_1000": {
+          "attempted": 1000,
+          "completed": 969,
+          "pending": 31,
+          "max_pending": 31,
+          "max_retained_source_upper_bound": 33,
+          "rolling_score_length_upper_bound": 5
+        },
+        "checked_failures_all_throw_before_mutation": true,
+        "checked_error": "OverflowError"
+      },
+      "derivation": "P+floor(G/min)+1 for strict terminal reuse; P+ceil(G/min)+1 conservative pending capacity; integers do not wrap."
+    }
+  ],
+  "fixture_count": 17,
+  "mutation_witnesses": [
+    "source commit before subscriber score validation",
+    "miss from partial window inserted as full residual",
+    "duplicate binary or full-score update",
+    "receipt equality rejected at expiry",
+    "receipt after expiry reopens old window",
+    "phase pending reuse silently issues or drops attempted row",
+    "phase uses30 or autoextends period",
+    "FIFO head-blocks out-of-order completed labels",
+    "same-time issue before receipts",
+    "same-time completion ties reversed",
+    "all zero signs rejected or source-zero sign depends on input order",
+    "underflow converted to zero before source validation",
+    "raw malformed row is silently discarded",
+    "warmup equality accepted",
+    "P30 warmup used asP31",
+    "backward/overflow clock mutates state",
+    "stale plan re-applied",
+    "callbacks mutate state during prepare",
+    "unbounded source/pending/rolling state",
+    "flush rewrites an issued record",
+    "late outcome reduces reported unknown count after censor"
+  ],
+  "actual_data_reads": false,
+  "fits_started": false,
+  "scientific_verdict": false,
+  "full_gates_run": false
+}

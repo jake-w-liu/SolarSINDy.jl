@@ -3,6 +3,7 @@ using SolarSINDy
 include("test_lund_dst_2002.jl")
 include("test_completed_minute_replay.jl")
 include("completed_source_dbdt/runtests.jl")
+include("completed_label_events/runtests.jl")
 using LinearAlgebra
 using Statistics
 using Random
