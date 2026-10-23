@@ -1032,3 +1032,8 @@ Full Pkg.test(), full experiment entry, canonical harness and all8 native CI
 cells remain mandatory root-owned combined-head gates. Actual data/refits,
 export provenance, static UQ/GP/GPD/threshold/UP numerical adapters and matched
 scientific replay remain separate stages; no scientific readiness is claimed.
+
+
+## Completed refit artifacts: verification plan
+
+Pre-edit651 checkout/filter hashes match exact combined6e8f0c46db68ba549d2ad7f7a16fc06564db9230. Independent V1 mathematical oracles and V2 nonzero source/fit/calibration literals are frozen before code. V2 has20 windows (8fit,9cal,3prediction), both layouts and37 observable integration-mutant signatures;20-window erratum7555e25e2368c0bac19a9e171c644fc7378b76a07c47394a220f7617d031fe59 preserves frozen prose bytes. Scalar/canonical/size/schema checks begin first. No new implementation test, native fit, strict-doc or full qualification result is yet claimed. Required later checks retain all original tolerances and prior suites; actual artifacts cannot be qualified by synthetic flags or arbitrary metadata.
