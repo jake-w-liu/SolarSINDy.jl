@@ -189,6 +189,7 @@ function _execute_request(request,protocol,pins,runtime)
         if op=="load_cal_check"
             b=_read_bundle(_resolve(pins,input;directory=true),protocol,pins;expected_kind="calibration",expected_manifest=input)
             k=decode_canonical(b.context)["kind_context"]
+            require(datapin==k["input_data_sha256"],"native load-cal scientific input data pin differs")
             point=_load_point(_resolve(pins,k["point_manifest_sha256"];directory=true);pins,expected_role=nothing)
             calibration=load_calibration(b.directory;point,pins,first_issue=read_time_text(k["first_allowed_issue"]))
             fitinput=_load_input(_resolve(pins,k["input_manifest_sha256"];directory=true);protocol,pins)
