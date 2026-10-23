@@ -1,0 +1,14 @@
+{
+  "schema": "duration_bounded_transition_count_oracle_v1",
+  "max_source_hours": 500000,
+  "unknown_first_row_risks": 0,
+  "right_censored_last_row_risks": 0,
+  "max_combined_known_next_risks": 499998,
+  "proof": "For n>=2, distinct first/last rows cannot be eligible known-age current rows with known next labels. Thus at most n-2 risks. For n<=1, zero risks. Initial S then all N attains n-2.",
+  "counterexample": {
+    "N": 300000,
+    "S": 300000,
+    "total": 600000
+  },
+  "scope_limit": "A feasible aggregate bound does not verify chronology, provenance, or all age-cell realizability."
+}

@@ -1,5 +1,11 @@
 # SolarSINDy.jl
 
+The optional `DurationConditionedForcing` research namespace provides mature
+hourly transition fitting, exact marked forcing paths, interval-observer affine
+rollouts and source-bound model artifacts. Its synthetic example and independent
+oracles do not establish forecasting skill or change the original A experiment.
+See [the research API](docs/src/duration-conditioned-forcing.md).
+
 A Julia package for data-driven geomagnetic storm (Dst) forecasting, with a live
 operational monitor and web dashboard. It has two layers:
 

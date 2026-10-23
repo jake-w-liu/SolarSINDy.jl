@@ -54,6 +54,8 @@ include("superlearner_serving.jl")
 
 include("interval_mean_forecaster/IntervalMeanForecaster.jl")
 export IntervalMeanForecaster
+include("duration_conditioned_forcing.jl")
+export DurationConditionedForcing
 
 export # Utils
        numerical_derivative, smooth_moving_average, pressure_correct_dst,

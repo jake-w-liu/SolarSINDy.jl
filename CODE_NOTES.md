@@ -575,3 +575,47 @@ qualification and every actual fit remain pending.
 ## Implementation correctness and independent oracle (20 October 2026)
 
 The published normalization, simultaneous four-state recurrence and output coefficients were verified from Appendix A. The source-bound scalar oracle was frozen before implementation. The package includes 104 assertions against the independent oracle and input/error/prefix/continuation contracts. Focused native Windows runs pass on Julia 1.12.6 and 1.13.1. Mutations, complete Pkg.test(), the actual examples/experiments.jl entry, all native CI axes and the unchanged canonical harness remain qualification gates. No observational skill or novelty verdict is assigned. See docs/LUND_DST_2002_CONTRACT.md and test/lund_dst_2002_oracle.json.
+
+
+## Duration-conditioned forcing B research component (23 October 2026)
+
+The separately named DurationConditionedForcing namespace implements the pure
+marked-duration component proposed in the internal mechanism contract. It leaves
+the original A equations, eighteen-fit protocol and negative real initial result
+unchanged. The pre-code contract and independent rational/Decimal oracles are
+retained in docs/DURATION_FORCING_CONTRACT.md and test/duration_forcing/.
+
+The contract requires completed-and-received known next-hour transitions before
+B minus168h, correct unknown-age/gap/right-censor handling, beta5/20 shrinkage,
+nearest-rank lower-bin quantiles and four rank-partitioned first-S marks with
+separate identities and actual masses. Unsupported global/mark support remains
+unavailable. Immutable model fields and bounded data-only artifacts bind prefix,
+source and implementation identities. Post-publication verification failure
+quarantines the completion marker rather than leaving a successful record.
+
+Every positive-mass h6 forcing path retains its A affine interval design and
+conditional covariance. Shared per-depth A base/covariance calculations avoid
+repeating a full Gaussian covariance update at every node. Mixture variance
+separates within-path and between-forcing terms; observation variance is explicit.
+Fixed pressure/parameter assumptions and the absence of measured receipts and
+calibration remain visible. A synthetic NNLS check recovers independent two-gain
+convolution targets; actual A+B fitting is not implemented or authorized here.
+
+Focused V4 tests and the synthetic example passed on Julia1.12.6 and1.13.1,
+including all1093 leaves and13840 additional corner assertions. All13 deliberate
+mutation controls were detected, and the strict manual built with export checks
+and doctests. A test-only dynamic-module binding warning was then corrected;
+focused tests, mutation controls and strict docs must qualify that final source.
+Broader package/examples/harness/CI and bounded resource gates remain pending. No actual fit, new outcome, serving
+promotion, forecast-superiority or novelty conclusion follows from this component.
+
+An independent artifact review reproduced acceptance of600000 combined risks
+despite the500000-hour source limit. A separately frozen counting proof excludes
+the first unknown-age and final right-censored rows, bounding total risks
+by499998. Model construction, validation, saving and caller-pinned loading now
+apply this bound; direct and self-consistently rehashed artifact regressions
+exercise it. The aggregate check does not certify chronology or provenance.
+The pre-edit literal count oracle is pinned in test/duration_forcing/. Fresh
+focused V6,14 mutation controls and strict manual/resource gates must qualify
+this repaired source; original A and pre-code B numerical expectations remain
+unchanged.
