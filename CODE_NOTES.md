@@ -1,5 +1,34 @@
 # Candidate implementation notes
 
+## Archival B bridge development ledger
+
+The pre-code contract and independent literal SHA/state/OU oracles preceded this
+bounded implementation. A's optional detached issue hook reuses its historical
+filter, preserving L1's separate sealed/pending and issue-time states. Numerical
+bodies of driver/update/target/prefix functions remain unchanged. The new B
+tracker owns a concrete vector, one incremental prefix context and constant-size
+trace. Its admitted domain explicitly requires monotone receipts in tag order;
+general public current_state and all public model/artifact boundaries remain
+strict. It introduces no fitted-model, actual-input, calibration or live path.
+
+The caller owns serial scope use and external callback side effects. Advances
+commit only after complete result construction; immutable checkpoints validate
+through one replay on resume. Full sequence and implementation identity are
+separate from declared raw-source provenance. Source entry/exit checks gate a
+successful scope; every emitted callback result remains provisional until then.
+
+Independent tests use frozen trace/clock/ASCII/state-ID literals and100-digit
+integrated-OU/Schur-complement values. Separate immutable A187 sources support
+tolerance-free regression across all nine recipes, both delays, chunking and
+resume. Isolated source changes and eight executed numerical/clock/hash/copy
+mutants must fail the fixed expectations after successful load and execution.
+Resource checks count each admitted/eligible row byte once and source checks
+twice per scope. Generated tracker sizes4096/32768/131072/500000 and4096-hour
+A full-grid/all-chunk observations are distinct; no full-grid500000-hour A
+runtime claim follows. Concurrency-qualified observations are not quiet CPU
+benchmarks. M's mean/evaluator source remains byte-identical to the reviewed M2
+base. Final full package/experiments/harness/CI integration gates remain required.
+
 ## Development Ledger
 
 Receipt-maturity reporting integration only; no forecast arithmetic, source acquisition, fitted model, existing report schema or legacy057 identity changes. The preimplementation contract and independent scalar/category oracle precede the isolated prototype and this package integration.

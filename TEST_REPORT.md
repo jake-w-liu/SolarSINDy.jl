@@ -1,5 +1,32 @@
 # Receipt-report integration test plan
 
+## Archival B bridge verification contract
+
+The isolated bridge suite pins five independent pre-code oracle files and five
+A187 source fixtures by SHA256. Exact clocks, statuses, SHA/state IDs, counters,
+old-A Float64 outputs and checkpoint values use equality/bit equality. The
+independent analytic A reference uses the predeclared covariance atol5e-11,
+basis atol5e-12 and rtol5e-14 for staged Float64 rounding; these tolerances never
+replace exact old-A regression. No existing oracle, tolerance or public guard is
+weakened.
+
+Coverage includes both delays/pending resume/current-invalid reset, mutation of
+detached copies, missing anchors, warmup, no-op/default callbacks, source changes
+before entry and during scope, expired/cross-task closures, atomic invalid clock
+calls, equal and delayed receipts, stale latest tags, South q0, signed zeros,
+missing/gaps,49+ age boundaries, axes/duplicate/size admission and checkpoint
+identity/rehashed-semantic corruption. Numeric mutants must load and execute;
+parse/import/controller failures never count as successful mutation controls.
+
+Native receipts retain every failed attempt and pin runners/runtime/source
+controls. Early wrapper V1 externally guarded tracked source only; the new
+untracked tracker still had its own internal loaded-source checks. Subsequent
+wrapper V2 also guards untracked new code/helpers and samples only its owned
+child's memory/handles. The V2 focused test-controller do-block error was fixed
+at the invocation site without changing expectations or production arithmetic.
+Final source-bound receipts, full unfiltered Pkg.test(), complete experiments,
+canonical harness, strict docs and native CI determine integration qualification.
+
 The sealed prototype's independent hand-computed nominal clock and metric cases are ported into the package test entry point. The independent input/metric reader and report mutation controls remain separately source-bound. Tests never use a live endpoint or reconstruct historical receipt times.
 
 New checks exercise source read-only copying and stable inventories, missing legacy evidence versus corrupt existing journals, CSV/head drift before and after copy, lock/budget/static-link rejection, exclusive output creation, completion hashes, fixed empty057 claim support and CLI option errors. The experiment creates only a new synthetic mock journal/report. Test values and strict as-of inequalities are frozen before candidate execution.
