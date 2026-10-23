@@ -863,3 +863,13 @@ descendants. The21-case filesystem/control regression passes on Windows, with
 all earlier failures preserved. Packaged-source native routes, full-project
 dependency resolution, all37 semantic mutants, resources and final gates remain
 pending; this controller result is not numerical or cross-platform qualification.
+
+An independent partial-write fault probe then confirmed that a drain-thread I/O
+failure could leave truncated Git output with exit0. The two owned candidate
+route controllers were deliberately cancelled; their source guards and cleanup
+remain preserved, without a qualification claim. The narrow capture repair now
+propagates every stream/open/read/write/flush/close failure, rejects short writes
+and separates unexpected capture-main failures from legitimate command exits.
+All23 control tests pass, including the original21 and seven owned stream-fault
+variants plus an internal launch failure. Fresh final-source graphs and every
+remaining numerical/resource/full software gate are still mandatory.

@@ -1095,3 +1095,16 @@ This is bounded Windows controller evidence. All24 predeclared portable cases,
 actual POSIX numerical execution, full-project resolve compatibility, final four
 native routes,37 quantitative fitter mutants, resources and full software gates
 remain open.
+
+The following bounded controller audit confirmed partial-output acceptance after
+a thread writer exception or short write. Its ordinary emitter succeeds first;
+the unchanged old capture then returns one byte with exit0 under either fault.
+The initial text-emitter LF/CRLF mismatch is retained as a probe configuration
+failure. Only the two verified self-owned route wrappers were cancelled; native
+interruption, private Job cleanup and unchanged source maps are retained, with
+no final-route success claim. The repaired capture passes23 control tests with
+all guarded source bytes stable. Open/read/write/flush/file-close/pipe-close
+faults, short writes and unexpected child-launch failure produce an explicit
+capture failure; ordinary exits, exact caps, overflow and timeout cleanup remain
+green. All scientific/numerical oracles and tolerances remain unchanged. Fresh
+source-matched native routes and remaining package/resource/CI gates are pending.

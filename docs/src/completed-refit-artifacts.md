@@ -53,6 +53,8 @@ Python optimization modes are rejected before argument processing or source
 generation. Source-lock reads and Git-control output have fixed byte limits;
 overflow and timeouts fail the route while retaining bounded logs and owned
 process receipts.
+Partial writes and stream I/O errors also fail the capture process, even if the
+underlying Git command has already exited successfully.
 
 Only the two synthetic source formats are accepted. A source audit binds approved
 body bytes, native parsing and an independent parser reconstruction. A feature

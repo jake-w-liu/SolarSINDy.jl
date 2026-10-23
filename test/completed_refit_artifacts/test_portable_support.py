@@ -24,6 +24,71 @@ def source(name):
     return path
 
 class ProjectionTests(unittest.TestCase):
+    def test_owned_capture_rejects_partial_and_other_stream_io_failures(self):
+        command=[sys.executable,'-B','-c',"import os;os.write(1,b'complete expected stdout\\n');os.write(2,b'complete expected stderr\\n')"]
+        positive=S.captured(command,timeout=30)
+        self.assertEqual(positive.returncode,0);self.assertEqual(positive.stdout,b'complete expected stdout\n')
+        original=S._CAPTURE_CODE
+        for mode in ('write_error','short_write','open_error','flush_error','file_close_error','read_error','reader_close_error'):
+            prefix='''import builtins,subprocess,sys
+MODE=FAULT_MODE
+_original_open=builtins.open
+_original_popen=subprocess.Popen
+class FaultingWrite:
+    def __init__(self,file):self.file=file
+    def __enter__(self):self.file.__enter__();return self
+    def __exit__(self,*args):
+        result=self.file.__exit__(*args)
+        if MODE=="file_close_error":raise OSError("controlled file close fault")
+        return result
+    def write(self,data):
+        if MODE in ("write_error","short_write"):
+            self.file.write(data[:1])
+            if MODE=="write_error":raise OSError("controlled partial stdout write fault")
+            return 1
+        return self.file.write(data)
+    def flush(self):
+        if MODE=="flush_error":raise OSError("controlled flush fault")
+        return self.file.flush()
+class FaultingRead:
+    def __init__(self,pipe):self.pipe=pipe;self.called=False
+    def read(self,size):
+        if MODE=="read_error":
+            if self.called:raise OSError("controlled reader fault")
+            self.called=True;return self.pipe.read(1)
+        return self.pipe.read(size)
+    def close(self):
+        self.pipe.close()
+        if MODE=="reader_close_error":raise OSError("controlled reader close fault")
+def injected_open(path,*args,**kwargs):
+    if str(path)==sys.argv[1] and MODE=="open_error":raise OSError("controlled open fault")
+    file=_original_open(path,*args,**kwargs)
+    return FaultingWrite(file) if str(path)==sys.argv[1] else file
+def injected_popen(*args,**kwargs):
+    process=_original_popen(*args,**kwargs)
+    if MODE in ("read_error","reader_close_error"):process.stdout=FaultingRead(process.stdout)
+    return process
+builtins.open=injected_open
+subprocess.Popen=injected_popen
+'''.replace('FAULT_MODE',repr(mode))
+            with mock.patch.object(S,'_CAPTURE_CODE',prefix+original):
+                with self.assertRaisesRegex(RuntimeError,'bounded Git capture failed') as context:
+                    S.captured(command,timeout=30)
+            directory=Path(str(context.exception).split(': ',1)[1])
+            receipt=json.loads((directory/'OWNED_NATIVE_RAW.json').read_text())
+            self.assertEqual(receipt['native_exit'],88,mode);self.assertFalse(receipt['timed_out'],mode)
+            self.assertIn(b'failure:',(directory/'capture.log').read_bytes(),mode)
+            for name in ('stdout.log','stderr.log'):
+                if (directory/name).exists():self.assertLessEqual((directory/name).stat().st_size,8388608,mode)
+
+    def test_owned_capture_distinguishes_internal_launch_failure(self):
+        with self.assertRaisesRegex(RuntimeError,'bounded Git capture failed') as context:
+            S.captured([str(OUT/'nonexistent-control-child')],timeout=30)
+        directory=Path(str(context.exception).split(': ',1)[1])
+        receipt=json.loads((directory/'OWNED_NATIVE_RAW.json').read_text())
+        self.assertEqual(receipt['native_exit'],88);self.assertFalse(receipt['timed_out'])
+        self.assertIn(b'capture main failure:',(directory/'capture.log').read_bytes())
+
     def test_optimized_entrypoints_reject_before_arguments_or_actions(self):
         for name in ('synthetic_checkpoint.py','run_synthetic_chain.py','synthetic_sources.py'):
             path=PACKAGE/'research/dbdt_completed_source'/name
