@@ -23,7 +23,9 @@
     __SWM_PORT__      TCP port to bind, 1-65535 (packaged default: see deploy/solarsindy.env.example)
     EXTRA_ENV marker  the commented marker line inside EnvironmentVariables. The install script
                       replaces that line with the allow-listed solarsindy.env keys this service
-                      reads (SWM_WEBHOOK_URL). A manual install replaces the line with its own
+                      reads (SWM_WEBHOOK_URL, SOLARSINDY_SHADOW_TRIAL_CONFIG,
+                      SOLARSINDY_SHADOW_TRIAL_SHA256 and SOLARSINDY_SHADOW_TRIAL_SEAL_SHA256).
+                      A manual install replaces the line with its own
                       <key>/<string> pairs, or deletes it to run with no extra keys.
 
   Set SWM_WEBHOOK_URL to enable Slack/Discord/generic push alerts. Bind stays on 127.0.0.1 by

@@ -596,3 +596,12 @@ snapshot after assessment, requires an independently pinned receipt digest and
 forwards new callback keywords only for explicit new trials. Historical display
 authenticates a sealed snapshot; it does not claim the mutable pre-start scoring
 log is still byte-identical or complete. The old finding set remains separate.
+
+## Shadow trial launcher propagation (23 October 2026)
+
+The launchd render allowlists now carry the three trial config/pin settings to
+both consuming jobs and include them in unapplied-key diagnostics. Watchdog
+and collector lists are unchanged. Independent pre-code literal environments
+and argument paths drive actual extracted rendering into private plists; a
+separate stdlib XML parser checks the outputs. No installer or service-loading
+top level is executed, and no HOME override or live trial is involved.

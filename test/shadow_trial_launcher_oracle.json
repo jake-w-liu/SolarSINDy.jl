@@ -1,0 +1,94 @@
+{
+  "schema": 1,
+  "trial_keys": [
+    "SOLARSINDY_SHADOW_TRIAL_CONFIG",
+    "SOLARSINDY_SHADOW_TRIAL_SHA256",
+    "SOLARSINDY_SHADOW_TRIAL_SEAL_SHA256"
+  ],
+  "trial_values": {
+    "SOLARSINDY_SHADOW_TRIAL_CONFIG": "/trial configs & <private> \"quoted\" 'single' #1/trial.toml",
+    "SOLARSINDY_SHADOW_TRIAL_SHA256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "SOLARSINDY_SHADOW_TRIAL_SEAL_SHA256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "paths": {
+    "clone": "/fixture clone & <branch> \"quoted\" 'single' #1",
+    "app": "/fixture clone & <branch> \"quoted\" 'single' #1/app",
+    "monitor": "/fixture state & <archive> 'quoted' #2",
+    "julia": "/fixture bin & <runtime> \"stable\" #3/julia",
+    "receipts": "/fixture receipts & <raw> #4",
+    "logs": "/fixture collector logs & <tail> #5",
+    "health": "http://127.0.0.1:9876/api/health?trial=1&safe=<yes>",
+    "host": "127.0.0.1",
+    "port": "9876",
+    "stale": "172800"
+  },
+  "suffix": {
+    "monitor": "live-monitor",
+    "dashboard": "dashboard",
+    "watchdog": "watchdog",
+    "collector": "l1-receipt-collector"
+  },
+  "baseline_environment": {
+    "monitor": {
+      "SOLARSINDY_REVIEW_DASH_URL": "http://127.0.0.1:9876/api/health?trial=1&safe=<yes>",
+      "SOLARSINDY_MONITOR_DIR": "/fixture state & <archive> 'quoted' #2",
+      "JULIA_NUM_THREADS": "2"
+    },
+    "dashboard": {
+      "SWM_HOST": "127.0.0.1",
+      "SWM_PORT": "9876",
+      "SOLARSINDY_LOG": "/fixture state & <archive> 'quoted' #2/live_forecast_log.csv",
+      "JULIA_NUM_THREADS": "2"
+    },
+    "watchdog": {
+      "SOLARSINDY_MONITOR_DIR": "/fixture state & <archive> 'quoted' #2",
+      "SOLARSINDY_WATCHDOG_DASH_URL": "http://127.0.0.1:9876/api/health?trial=1&safe=<yes>",
+      "SOLARSINDY_WATCHDOG_STALE_SEC": "172800",
+      "SOLARSINDY_L1_RECEIPT_LOG_DIR": "/fixture collector logs & <tail> #5"
+    },
+    "collector": {
+      "JULIA_NUM_THREADS": "1"
+    }
+  },
+  "program_arguments": {
+    "monitor": [
+      "/fixture bin & <runtime> \"stable\" #3/julia",
+      "--project=/fixture clone & <branch> \"quoted\" 'single' #1",
+      "/fixture clone & <branch> \"quoted\" 'single' #1/examples/live_monitor.jl"
+    ],
+    "dashboard": [
+      "/fixture bin & <runtime> \"stable\" #3/julia",
+      "--startup-file=no",
+      "--project=/fixture clone & <branch> \"quoted\" 'single' #1/app",
+      "/fixture clone & <branch> \"quoted\" 'single' #1/app/src/server.jl"
+    ],
+    "watchdog": [
+      "/bin/bash",
+      "/fixture clone & <branch> \"quoted\" 'single' #1/deploy/watchdog.sh"
+    ],
+    "collector": [
+      "/fixture bin & <runtime> \"stable\" #3/julia",
+      "--startup-file=no",
+      "--project=/fixture clone & <branch> \"quoted\" 'single' #1",
+      "/fixture clone & <branch> \"quoted\" 'single' #1/examples/l1_receipt_collector.jl",
+      "--root=/fixture receipts & <raw> #4",
+      "--interval-sec=60"
+    ]
+  },
+  "consuming_services": [
+    "monitor",
+    "dashboard"
+  ],
+  "non_consuming_services": [
+    "watchdog",
+    "collector"
+  ],
+  "cases": [
+    "absent",
+    "all",
+    "config-only",
+    "config-pin-only",
+    "seal-pin-only",
+    "empty-config"
+  ]
+}
