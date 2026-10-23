@@ -200,6 +200,7 @@ run_lund_dst_2002_reference()
 include(joinpath(@__DIR__, "completed_minute_replay_synthetic.jl"))
 run_completed_minute_replay_synthetic()
 include(joinpath(@__DIR__, "duration_forcing_synthetic.jl"))
+include(joinpath(@__DIR__, "duration_mean_synthetic.jl"))
 include(joinpath(@__DIR__, "versioned_shadow_trial_synthetic.jl"))
 run_versioned_shadow_trial_synthetic()
 

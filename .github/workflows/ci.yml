@@ -46,6 +46,9 @@ jobs:
             exit 1
           fi
       - uses: julia-actions/julia-buildpkg@v1
+      - name: Verify cold ordinary duration API
+        timeout-minutes: 10
+        run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/duration_forcing/cold_public_api.jl
       - name: Verify prospective collector recovery controls
         run: julia --startup-file=no --pkgimages=no --project=. test/test_cme_prospective_monitor.jl
       - name: Verify identifiers across fresh caller processes

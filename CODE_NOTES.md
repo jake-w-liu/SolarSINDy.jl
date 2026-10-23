@@ -715,3 +715,24 @@ and collector lists are unchanged. Independent pre-code literal environments
 and argument paths drive actual extracted rendering into private plists; a
 separate stdlib XML parser checks the outputs. No installer or service-loading
 top level is executed, and no HOME override or live trial is involved.
+
+
+## Duration point-mean and evaluator resource development ledger (23 October 2026)
+
+| Item | Contract/evidence |
+|---|---|
+| Objective | Exact expected point designs without full forcing paths; repair confirmed cold evaluator specialization cost. |
+| Inputs/output | Same source/model/current/checkpoint/basis/clock/parameter checks; h1:6; exact Rational{BigInt} wind-state masses; point-only means with no variance. |
+| Derivation | Expected A endpoint basis and interval gain coefficients are linear in already-thresholded q; marginal E[q_h] suffices for fixed linear point means. Raw-driver thresholding does not commute. |
+| Independent oracle | Pre-code Fraction full-tree/Brownian JSON SHAab5726e0bc4df1843e14f0a58bb272096ea71c61aec2f6e324f26544908886ca; original risk/mark/mixture fixtures unchanged. |
+| Public compatibility | Original exhaustive affine body unchanged; SHA-pinned pre-correction evaluator retained in test/duration_forcing/frozen/evaluator_before_barrier_v1.jl. Same values/order/tuples/extra metadata/overwrites, evaluated field types deliberately Any. |
+| Cold evidence | Original focused Julia1.12.6/1.13.1 and instrumented checks reached600s; exact all-horizon N/S prototype compatibility then passed both versions. All failures and controlled experiments retained externally. |
+| Test matrix | Both betas/starts, ages2/48/49, all9 tau/sigma corners and h1:6; exact q/mass/MarkID oracles, duplicate centroids/unequal masses/current identity, PSD/shape/domain/support/clock failures. |
+| End to end | Synthetic duration fit, immutable publication/reload, future-prefix invariance, independent Brownian targets and gain recovery from computed mean design. No actual data/fits/outcomes. |
+| Resources | Call-owned Dict/Vector workspaces; immutable public data; unchanged A precision lock; no source-validation cache/bypass. Three warmups/1000sample CPU/allocation/type diagnostics; see OPTIMIZATION_REPORT.md. |
+| Gates | Focused duration+mean+compatibility tests and standalone direct cold API, both synthetic examples,9 meaningful mutants, strict docs, final-source profile. Complete Pkg.test/experiments/harness/CI remain root-owned. |
+| Data trigger | No actual archive/paper data/figures changed. No actual-panel or skill/novelty verdict is authorized by these synthetic checks. |
+
+The original 18A/36A+B configuration/168h embargo and negative A result remain
+unchanged. Exact E[thresholded q] through fixed A is point-identical to the full
+mixture mean; it is a computation equivalence, not a separate skill baseline.

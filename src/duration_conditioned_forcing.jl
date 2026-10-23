@@ -14,7 +14,8 @@ const HOUR_MS = Int64(3_600_000)
 const MAX_HOURS = 500_000
 const MAX_ARTIFACT_BYTES = 2_097_152
 export WindHour, DurationModel, fit_duration, current_state, hazard,
-       affine_rollout, evaluate_rollout, save_model, load_model, source_identity
+       affine_rollout, evaluate_rollout, mean_affine_rollout, evaluate_mean_rollout,
+       save_model, load_model, source_identity
 
 _need(ok, message) = ok || throw(ArgumentError(message))
 _sha(bytes) = bytes2hex(sha256(bytes))
@@ -314,36 +315,183 @@ function affine_rollout(model::DurationModel,current,checkpoint::R.Checkpoint,in
       measured_receipts_available=false,claim_ready=false)
 end
 
+# Keep arbitrary result metadata and repeated evaluation semantics, without
+# specializing caller inference on the size of immutable mixture payloads.
+@noinline Base.@nospecializeinfer function _attach_evaluation(@nospecialize(result),g,@nospecialize(summaries),@nospecialize(components))
+    names=Symbol[];values=Any[]
+    for name in keys(result)
+        push!(names,name)
+        push!(values,name===:gains ? g : name===:summaries ? summaries : name===:components ? components : getproperty(result,name))
+    end
+    for name in (:gains,:summaries,:components)
+        if !(name in names)
+            push!(names,name)
+            push!(values,name===:gains ? g : name===:summaries ? summaries : components)
+        end
+    end
+    fields=Tuple(names)
+    NamedTuple{fields,NTuple{length(fields),Any}}(Tuple(values))
+end
+
 """Evaluate a B affine tree at nonnegative gains and retain full mixture components."""
 function evaluate_rollout(result,gains)
     source_identity()
     result.status==:available || return result
     _need(length(gains)==2,"two gains required")
     g=Tuple(K._number(x,"gain") for x in gains);_need(all(>=(0),g),"negative gain")
+    paths=collect(result.paths)
+    schedule=result.schedule;horizon=result.horizon
     summaries=K._precise() do
         Tuple(begin
-            weights=[BigFloat(p.probability) for p in result.paths]
-            offset=result.schedule.offsets[h]
-            coefficients=ntuple(k->Float64(sum(weights[i]*BigFloat(result.paths[i].coefficients[h][k]) for i in eachindex(weights))),2)
+            weights=[BigFloat(p.probability) for p in paths]
+            offset=schedule.offsets[h]
+            coefficients=ntuple(k->Float64(sum(weights[i]*BigFloat(paths[i].coefficients[h][k]) for i in eachindex(weights))),2)
             mean=offset+sum(coefficients[k]*g[k] for k in 1:2)
-            branches=[offset+sum(p.coefficients[h][k]*g[k] for k in 1:2) for p in result.paths]
+            branches=[offset+sum(p.coefficients[h][k]*g[k] for k in 1:2) for p in paths]
             _need(isfinite(mean)&&all(isfinite,branches),"nonfinite branch prediction")
-            conditional=result.schedule.variances[h]
+            conditional=schedule.variances[h]
             between=Float64(sum(weights[i]*(BigFloat(branches[i])-BigFloat(mean))^2 for i in eachindex(weights)))
             total=conditional+between
             _need(isfinite(between)&&isfinite(total)&&between>=0,"invalid mixture variance")
             (;horizon=h,offset,coefficients,mean,conditional_variance=conditional,
               between_forcing_variance=between,total_variance=total)
-        end for h in 1:result.horizon)
+        end for h in 1:horizon)
     end
     components=Tuple(begin
-        endpoints=Tuple(ntuple(j->result.schedule.means[h][j]+sum(p.endpoint_bases[h][j][k]*g[k] for k in 1:2),2) for h in 1:result.horizon)
+        endpoints=Tuple(ntuple(j->schedule.means[h][j]+sum(p.endpoint_bases[h][j][k]*g[k] for k in 1:2),2) for h in 1:horizon)
         (;branch_id=p.id,probability=p.probability,states=p.states,injections=p.injections,
-          interval_means=Tuple(result.schedule.offsets[h]+sum(p.coefficients[h][k]*g[k] for k in 1:2) for h in 1:result.horizon),
-          conditional_variances=result.schedule.variances,endpoint_means=endpoints,
-          endpoint_covariances=result.schedule.covariances)
-    end for p in result.paths)
-    merge(result,(gains=g,summaries,components))
+          interval_means=Tuple(schedule.offsets[h]+sum(p.coefficients[h][k]*g[k] for k in 1:2) for h in 1:horizon),
+          conditional_variances=schedule.variances,endpoint_means=endpoints,
+          endpoint_covariances=schedule.covariances)
+    end for p in paths)
+    _attach_evaluation(result,g,summaries,components)
+end
+
+# Marginal wind-state probabilities suffice only for expected linear A targets.
+# Mark IDs remain distinct even when their Float64 centroids coincide.
+const MeanStateKey = Tuple{Symbol,Int,Int}
+const MeanMass = Rational{BigInt}
+function _mean_forcing(model,current,horizon)
+    initial=_hazard(model,current.state,current.age,current.q)
+    initial.status==:available || return _unavailable(initial.reason)
+    states=Dict{MeanStateKey,MeanMass}((current.state,current.age,current.state==:S ? 5 : 0)=>big(1)//big(1))
+    distributions=Tuple[];qmeans=MeanMass[];expanded=1;peak=1
+    value(key)=key[1]==:N ? 0. : key[3]==5 ? current.q : model.marks[key[3]]
+    for _ in 1:horizon
+        next=Dict{MeanStateKey,MeanMass}()
+        add(key,mass)=next[key]=get(next,key,big(0)//big(1))+mass
+        for (key,mass) in states
+            state,age,mark=key;q=value(key)
+            h=_hazard(model,state,age,q)
+            h.status==:available || return _unavailable(h.reason)
+            h.probability<1 && add((state,min(age+1,49),mark),mass*(1-h.probability))
+            if h.probability>0
+                if state==:S
+                    add((:N,1,0),mass*h.probability)
+                else
+                    model.marks===nothing && return _unavailable(:first_S_mark_support_missing)
+                    for k in 1:4
+                        weight=BigInt(model.mark_counts[k])//BigInt(sum(model.mark_counts))
+                        add((:S,1,k),mass*h.probability*weight)
+                    end
+                end
+            end
+        end
+        _need(sum(values(next))==1,"forcing state mass differs from one")
+        ordered=sort!(collect(keys(next)))
+        push!(distributions,Tuple((;state=k[1],age=k[2],mark_id=k[3],probability=next[k]) for k in ordered))
+        push!(qmeans,sum(next[k]*MeanMass(value(k)) for k in ordered))
+        expanded+=length(next);peak=max(peak,length(next));states=next
+    end
+    (;status=:available,qmeans=Tuple(qmeans),state_distributions=Tuple(distributions),
+      peak_states=peak,expanded_states=expanded)
+end
+
+function _mean_base_schedule(checkpoint,lambdas,sigmas,pressure,observation_variance,horizon)
+    _need(length(lambdas)==length(sigmas)==2,"two modes required")
+    l=Tuple(K._number(x,"lambda") for x in lambdas);s=Tuple(K._number(x,"sigma") for x in sigmas)
+    _need(all(>=(0),l)&&all(>=(0),s),"nonnegative lambda/sigma required")
+    p=K._number(pressure,"fixed pressure");r=K._number(observation_variance,"target observation variance")
+    _need(r>=0,"negative observation variance")
+    _need(length(checkpoint.mean)==2,"two-mode checkpoint required")
+    K._vector(collect(checkpoint.mean),"checkpoint mean")
+    K._covariance(R._matrix(checkpoint.covariance),2,"checkpoint covariance")
+    correction=7.26sqrt(max(p,0.))-11.
+    kernels=Tuple(K.interval_kernel(l[j],s[j],1.) for j in 1:2)
+    K._precise() do
+        exact=ntuple(j->K._kernel_big(l[j],s[j],1.),2)
+        mean=checkpoint.mean;offsets=Float64[];means=NTuple{2,Float64}[]
+        for _ in 1:horizon
+            offset=K._result(sum(exact[j][2]*BigFloat(mean[j]) for j in 1:2),"interval mean")+correction
+            mean=ntuple(j->K._result(exact[j][1]*BigFloat(mean[j]),"endpoint mean"),2)
+            _need(isfinite(offset),"nonfinite mean forecast schedule")
+            push!(offsets,offset);push!(means,mean)
+        end
+        (;kernels,offsets=Tuple(offsets),means=Tuple(means))
+    end
+end
+
+"""
+    mean_affine_rollout(model, current, checkpoint, initial_basis; lambdas, sigmas,
+        pressure, target_observation_variance, horizon=6)
+
+Compute expected A affine hourly point targets from exact marked wind-state masses.
+All positive support is retained; duplicate centroid IDs and the initial-S identity
+remain separate. Expectations concern already thresholded injection q. This API
+returns no mixture or covariance information. Sigma and target observation noise
+are validated, but future covariance overflow is outside this point-mean domain.
+The exhaustive `affine_rollout` remains the probabilistic reference.
+"""
+function mean_affine_rollout(model::DurationModel,current,checkpoint::R.Checkpoint,initial_basis::AbstractMatrix;
+        lambdas,sigmas,pressure,target_observation_variance,horizon::Integer=6)
+    _validate(model)
+    _need(!(horizon isa Bool)&&1<=horizon<=6,"horizon must be1:6")
+    fields=(:status,:reason,:issue,:state,:age,:q,:input_prefix_sha256,:availability_kind)
+    _need(keys(current)==(fields...,:state_id) && _hash(NamedTuple{fields}(Tuple(current[k] for k in fields)))==current.state_id,"current state identity differs")
+    current.status==:available || return _unavailable(current.reason)
+    _need(current.availability_kind==:assumed_completed_hour && checkpoint.boundary==current.issue &&
+          current.issue>=model.boundary,"state/issue/model fitting boundary differs")
+    _need(size(initial_basis)==(2,2),"two-mode/two-gain historical basis required")
+    basis=_basis(map(x->K._number(x,"historical basis"),initial_basis))
+    schedule=_mean_base_schedule(checkpoint,lambdas,sigmas,pressure,target_observation_variance,horizon)
+    forcing=_mean_forcing(model,current,horizon)
+    forcing.status==:available || return forcing
+    coefficients=NTuple{2,Float64}[];endpoints=Basis[]
+    phi=ntuple(j->schedule.kernels[j].phi,2);c=ntuple(j->schedule.kernels[j].mean_coefficient,2)
+    u=ntuple(j->schedule.kernels[j].forcing_endpoint,2);v=ntuple(j->schedule.kernels[j].forcing_mean,2)
+    K._precise() do
+        previous=basis
+        for qmean in forcing.qmeans
+            q=BigFloat(qmean)
+            design=ntuple(k->K._result(sum(BigFloat(c[j])*BigFloat(previous[j][k]) for j in 1:2)-BigFloat(v[k])*q,"expected gain coefficient"),2)
+            previous=ntuple(j->ntuple(k->K._result(BigFloat(phi[j])*BigFloat(previous[j][k])-(j==k ? BigFloat(u[j])*q : 0),"expected endpoint basis"),2),2)
+            push!(coefficients,design);push!(endpoints,previous)
+        end
+    end
+    _validate(model)
+    (;status=:available,reason=:available,issue=current.issue,horizon=Int(horizon),model_id=model.model_id,
+      current_state_id=current.state_id,offsets=schedule.offsets,base_means=schedule.means,
+      coefficients=Tuple(coefficients),endpoint_bases=Tuple(endpoints),forcing.qmeans,
+      forcing.state_distributions,forcing.peak_states,forcing.expanded_states,
+      computation_scope=:point_mean_only,measured_receipts_available=false,claim_ready=false)
+end
+
+"""Evaluate a mean-only affine rollout at two finite nonnegative gains.
+Return hourly point means and endpoint point means, with no uncertainty claims.
+"""
+function evaluate_mean_rollout(result,gains)
+    source_identity()
+    result.status==:available || return result
+    _need(result.computation_scope==:point_mean_only,"point-mean rollout required")
+    _need(length(gains)==2,"two gains required")
+    g=Tuple(K._number(x,"gain") for x in gains);_need(all(>=(0),g),"negative gain")
+    summaries=Tuple(begin
+        mean=result.offsets[h]+sum(result.coefficients[h][k]*g[k] for k in 1:2)
+        endpoint=ntuple(j->result.base_means[h][j]+sum(result.endpoint_bases[h][j][k]*g[k] for k in 1:2),2)
+        _need(isfinite(mean)&&all(isfinite,endpoint),"nonfinite point prediction")
+        (;horizon=h,offset=result.offsets[h],coefficients=result.coefficients[h],mean,endpoint_mean=endpoint)
+    end for h in 1:result.horizon)
+    merge(result,(gains=g,summaries))
 end
 
 function _new(path,body)

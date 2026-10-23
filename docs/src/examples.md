@@ -71,6 +71,11 @@ println("PE = ", prediction_efficiency(Dst_pred, swd.Dst_star))
 
 ## Research Reproduction Scripts
 
+`examples/duration_mean_synthetic.jl` fits a synthetic duration law, publishes and
+reloads its immutable model, checks as-of causality, and recovers two nonnegative
+gains from independently specified Brownian interval targets using the computed
+mean-only affine design. It consumes no actual archive or forecast outcomes.
+
 The paper-style workflows live in `validation/`, not `examples/`.
 
 Common scripts:

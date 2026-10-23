@@ -938,3 +938,32 @@ and explicitly empty settings, verifies exact XML-decoded environments and
 special-character arguments, and checks selected-service diagnostic scope.
 Legacy fixture isolation clears the three new keys. Full package, experiments,
 harness and native CI qualification remain required on the final combined head.
+
+
+## Duration mean/cold-evaluator coverage and anti-false-test record
+
+The pre-code mean oracle SHAab5726e0bc4df1843e14f0a58bb272096ea71c61aec2f6e324f26544908886ca
+and original duration oracle values/tolerances are immutable. Exact rational
+state masses, q expectations, MarkIDs and Brownian target arrays are independent
+Fraction full-tree expectations. Floating comparisons retain the original
+atol5e-11/rtol5e-14 contract; exact masses and source hashes use equality.
+
+test_duration_mean.jl exercises all9 tau/sigma corners, both beta/start/age/horizon
+families, duplicate mark centroids with unequal masses, observed-q identity,
+positive-support failures and numeric/clock boundaries. Only its independent
+weighted reference iterates a Vector copy; ordinary public exhaustive calls remain.
+test_duration_mean_compatibility.jl checks exact frozen numeric/component/path/
+metadata values, extra fields, gain overwrite/re-evaluation and field identities.
+test/duration_forcing/cold_public_api.jl is a fresh-process ordinary public h1:6,N/S
+regression against independent literal Brownian targets, run under a native bound.
+The synthetic example fits gains from the actual computed design using separately
+specified targets and checks artifact reload plus later-driver invariance.
+
+Mutation controls target equal mark masses, collapsed duplicate IDs, lost current
+identity, cap48, endpoint-vs-interval target, sign flip, omitted endpoint forcing,
+omitted historical basis and omitted pressure correction. Correct baseline must
+pass; every mutant must violate literal scientific/contract expectations, rather
+than merely fail import/parse. Source/oracle/control hashes and all failed native
+attempts are retained in external receipts. Final focused/docs/profile receipts
+are separate from root-owned full package/experiment/harness/all-platform gates.
+No scientific result or validation tolerance is changed to obtain a pass.
