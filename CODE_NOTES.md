@@ -592,3 +592,17 @@ times and the existing clock/rate equations remain unchanged. Focused native,
 example, strict-documentation and omitted-guard mutation checks accompany this
 fix. Complete package/experiment/harness and native CI qualification remain
 required before merging this candidate or using scientific results.
+
+## Completed-source ground-only admission (23 October 2026)
+
+Ground-only models must not require wind observations or inherit wind missingness.
+`admit_ground_features` now exposes the same checked 31-vector history used by
+mixed admission, with the four rate summaries and explicit issue/source clocks.
+Shared private history and summary helpers preserve mixed predictor values,
+field order and rejection precedence. The history representability guard remains
+before dictionary access. An independent Python integer/Fraction oracle fixes
+41 polynomial cases across source-delay boundaries up to one day; absent wind,
+source prefixes, invalid inputs, array axes and extreme histories have separate
+controls. No fitted model, paper outcome, source lock or serving path changes.
+Focused tests, examples, mutation controls and strict documentation precede root
+review; full package/experiment/harness and native CI gates remain required.

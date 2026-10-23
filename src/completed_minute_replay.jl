@@ -109,7 +109,7 @@ training_eligible(label_ready::DateTime, next_split_issue::DateTime) =
 
 
 using Statistics
-export admit_features, admit_target, replay_case
+export admit_ground_features, admit_features, admit_target, replay_case
 
 rejected(reason) = (; accepted=false, reason, value=nothing)
 accepted(value) = (; accepted=true, reason=:complete, value)
@@ -127,6 +127,45 @@ function rate_at(mag::AbstractDict, center::DateTime)
     accepted(rate)
 end
 
+function _admit_ground_history(mag::AbstractDict, issue::DateTime,
+                               policy::ReplayPolicy)
+    timing = issue_timing(issue,policy)
+    # Thirty rates require thirty-one vectors; reject before any wrapped key.
+    shift(timing.latest_ground_center, -TARGET_MINUTES*MINUTE_MS)
+    history = Float64[]
+    for k in 29:-1:0
+        rate = rate_at(mag,timing.latest_ground_center-Minute(k))
+        rate.accepted || return rejected(rate.reason===:missing ? :missing_ground_history : :invalid_ground_history)
+        push!(history,rate.value)
+    end
+    accepted((;history,timing))
+end
+
+function _ground_feature_row(history, timing)
+    avg=mean(history); deviation=std(history)
+    all(isfinite,(avg,deviation)) || return rejected(:invalid_feature_summary)
+    row=(;datetime=timing.issue,ground_anchor=timing.latest_ground_center,
+          dbdt_now=last(history),dbdt_mean30=avg,dbdt_max30=maximum(history),dbdt_std30=deviation,
+          availability_kind=timing.availability_kind,measured_receipts_available=false)
+    accepted((;row,timing))
+end
+
+"""
+    admit_ground_features(mag, issue; policy=ReplayPolicy())
+
+Admit 30 completed-source ground rates without requiring wind observations.
+Ground-center UTC keys map to ordered `(X,Y)` vectors in nT; rate summaries
+use nT/min. Return the `accepted`, `reason` and `value` envelope. Accepted
+values contain `row` and `timing`, preserving assumed availability and unknown
+measured receipts. Missing or invalid histories remain explicit rejections.
+"""
+function admit_ground_features(mag::AbstractDict, issue::DateTime;
+                               policy::ReplayPolicy=ReplayPolicy())
+    ground=_admit_ground_history(mag,issue,policy)
+    ground.accepted || return ground
+    _ground_feature_row(ground.value.history,ground.value.timing)
+end
+
 """
     admit_features(mag, omni, issue; policy=ReplayPolicy())
 
@@ -137,15 +176,9 @@ Keys are UTC ground-center and OMNI arrival-start tags. Return `accepted`,
 """
 function admit_features(mag::AbstractDict, omni::AbstractDict, issue::DateTime;
                         policy::ReplayPolicy=ReplayPolicy())
-    timing = issue_timing(issue,policy)
-    # Thirty rates require thirty-one vectors; reject before any wrapped key.
-    shift(timing.latest_ground_center, -TARGET_MINUTES*MINUTE_MS)
-    history = Float64[]
-    for k in 29:-1:0
-        rate = rate_at(mag,timing.latest_ground_center-Minute(k))
-        rate.accepted || return rejected(rate.reason===:missing ? :missing_ground_history : :invalid_ground_history)
-        push!(history,rate.value)
-    end
+    ground=_admit_ground_history(mag,issue,policy)
+    ground.accepted || return ground
+    timing=ground.value.timing
     haskey(omni,timing.latest_omni_arrival_start) || return rejected(:missing_omni_history)
     wind = omni[timing.latest_omni_arrival_start]
     wind isa Union{Tuple,AbstractVector} && length(wind)==4 && all(finite_scalar,wind) ||
@@ -156,12 +189,15 @@ function admit_features(mag::AbstractDict, omni::AbstractDict, issue::DateTime;
     end
     velocity,bz,by,density = wind_values
     velocity>=0 && density>=0 || return rejected(:invalid_omni_history)
+    summaries=_ground_feature_row(ground.value.history,timing)
+    summaries.accepted || return summaries
+    ground_row=summaries.value.row
     south = max(-bz,0.0); coupling = velocity*south
-    avg=mean(history); deviation=std(history)
-    all(isfinite,(avg,deviation,coupling)) || return rejected(:invalid_feature_summary)
+    isfinite(coupling) || return rejected(:invalid_feature_summary)
     row=(; datetime=issue,ground_anchor=timing.latest_ground_center,
           omni_anchor=timing.latest_omni_arrival_start,
-          dbdt_now=last(history),dbdt_mean30=avg,dbdt_max30=maximum(history),dbdt_std30=deviation,
+          dbdt_now=ground_row.dbdt_now,dbdt_mean30=ground_row.dbdt_mean30,
+          dbdt_max30=ground_row.dbdt_max30,dbdt_std30=ground_row.dbdt_std30,
           V=velocity,Bz=bz,By=by,n=density,Bs=south,VBs=coupling,
           availability_kind=timing.availability_kind,measured_receipts_available=false)
     accepted((;row,timing))

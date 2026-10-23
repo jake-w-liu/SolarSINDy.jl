@@ -283,6 +283,8 @@ refitting, L1 experiments, exposed-test scoring or serving promotion.
 
 `CompletedMinuteReplay` separates prefix-only ground/wind features from
 readiness-gated 30-minute labels under an explicit analysis-availability policy.
+Its `admit_ground_features` entry admits ground-only predictors without requiring
+an OMNI row, using the same checked ground-history contract as mixed admission.
 Source, issue, target and feedback times remain distinct. See the manual and
 `docs/COMPLETED_MINUTE_REPLAY_CONTRACT.md` for units, delay assumptions, independent
 oracles and the additional numerical verification required for scientific use.

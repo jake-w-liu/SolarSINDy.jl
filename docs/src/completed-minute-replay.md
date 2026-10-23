@@ -22,6 +22,12 @@ and OMNI arrival-start row. The 30 target centers are the next 30 minutes;
 their last ground filter completes 45 seconds after the final center. The
 earliest whole-minute feedback is therefore 31 minutes after issue.
 
+`admit_ground_features` admits the four ground-rate summaries without requiring
+wind observations. Its ground-only row keeps the actual issue and latest
+completed ground anchor separate. OMNI and label-processing delays do not
+change that ground information set. `admit_features` extends this admission
+with wind predictors; a missing wind row does not prevent ground-only use.
+
 `admit_features` accepts dictionaries of ground `(X,Y)` vectors in nT and wind
 `(V,Bz,By,n)` rows in km/s, nT, nT and cm^-3. It accesses only the admitted
 prefix. `admit_target` takes an explicit `asof` and checks readiness before
@@ -41,6 +47,7 @@ SolarSINDy.CompletedMinuteReplay.ReplayPolicy
 SolarSINDy.CompletedMinuteReplay.issue_timing
 SolarSINDy.CompletedMinuteReplay.minute_phase
 SolarSINDy.CompletedMinuteReplay.training_eligible
+SolarSINDy.CompletedMinuteReplay.admit_ground_features
 SolarSINDy.CompletedMinuteReplay.admit_features
 SolarSINDy.CompletedMinuteReplay.admit_target
 SolarSINDy.CompletedMinuteReplay.replay_case

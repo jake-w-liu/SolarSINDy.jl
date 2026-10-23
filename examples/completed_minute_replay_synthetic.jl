@@ -7,8 +7,13 @@ function run_completed_minute_replay_synthetic()
     ground=Dict(issue+Minute(k)=>(Float64(k*k),0.0) for k in -40:31)
     wind=Dict(issue-Minute(1)=>(400.0,-5.0,1.0,8.0))
     prefix=Dict(k=>v for (k,v) in ground if k<issue)
+    ground_only=admit_ground_features(prefix,issue)
+    @assert ground_only.accepted
+    @assert ground_only.value.row.dbdt_now==3.0
+    @assert !haskey(ground_only.value.row,:V)
     features=admit_features(prefix,wind,issue)
     @assert features.accepted && features.value.row.dbdt_now==3.0
+    @assert features.value.row.dbdt_mean30==ground_only.value.row.dbdt_mean30==32.0
     @assert admit_target(ground,issue,issue+Minute(30)).reason===:label_not_ready
     result=replay_case(ground,wind,issue,issue+Minute(31))
     @assert result.accepted && result.value.row.target_max_dbdt==59.0

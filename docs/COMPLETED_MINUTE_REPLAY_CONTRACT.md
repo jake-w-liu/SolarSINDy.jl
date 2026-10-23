@@ -37,6 +37,13 @@ first scheduled feedback is issue+31 minutes. A sufficient fixed phase period
 is the ceiling, in minutes, of 30 minutes+45 seconds+ground extra+label extra.
 Unknown or unbounded actual receipts require a different admission contract.
 
+`admit_ground_features` admits the four ground summaries without any wind
+input. Its row contains the issue, ground anchor, rate summaries and explicit
+availability convention. OMNI and additional label delays do not change the
+ground feature row. Ground-only case eligibility therefore does not depend
+on wind missingness. Both feature APIs share the checked history-span admission
+and summary calculation; mixed admission retains its prior validation order.
+
 `admit_features` reads only admitted history, using `(X,Y)` in nT and wind
 `(V,Bz,By,n)` in km/s, nT, nT and cm^-3. It can operate on a source prefix
 containing no target values. `admit_target` requires explicit `asof` and checks

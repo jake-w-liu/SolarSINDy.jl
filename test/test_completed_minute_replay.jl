@@ -159,4 +159,6 @@ history_oracle = JSON3.read(read(joinpath(@__DIR__,"completed_minute_history_ora
     end
 end
 
+include("test_completed_ground_admission.jl")
+
 end

@@ -800,3 +800,20 @@ millisecond beyond that boundary and the maximum allowed day. Removing only
 the checked history-span guard must reproduce these failures. No numerical
 tolerance or existing frozen fixture was changed. Focused checks do not replace
 unfiltered Pkg.test(), the actual experiment entry, canonical harness or CI.
+
+## Ground-only completed-source verification (23 October 2026)
+
+Independent literals fix41 ground-delay cases using X=k^2,Y=0 and exact sample
+variance310. Ground summaries use equality except the unchanged absolute1e-13
+sample-standard-deviation tolerance. Guarded prefix dictionaries forbid future
+reads or scans. Tests cover unrelated wind/label policies, missing and malformed
+ground vectors, finite-arithmetic failure, all-zero rates, zero-based vectors,
+all nine checked-history fixtures and preserved mixed validation precedence.
+Mutation controls must reject current-center/history changes, a removed history
+guard, missing-data fabrication, population instead of sample standard deviation,
+wind-dependent ground admission and changed mixed validation order. Focused
+native checks pass892 assertions on each of Julia1.12.6 and1.13.1, including
+196 inherited assertions and696 ground-only assertions. Both synthetic examples
+and strict documentation pass. The unmodified mutation control passes and all
+eight mutations are detected. These checks do not qualify observational skill;
+full Pkg.test(), actual experiments, canonical harness and native CI remain open.
