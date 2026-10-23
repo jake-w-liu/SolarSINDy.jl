@@ -784,3 +784,22 @@ refit, L1 run, test score or serving qualification has been performed.
 ## Lund 2002 reference verification plan (20 October 2026)
 
 The published normalization, simultaneous four-state recurrence and output coefficients were verified from Appendix A. The source-bound scalar oracle was frozen before implementation. The package includes 104 assertions against the independent oracle and input/error/prefix/continuation contracts. Focused native Windows runs pass on Julia 1.12.6 and 1.13.1. Mutations, complete Pkg.test(), the actual examples/experiments.jl entry, all native CI axes and the unchanged canonical harness remain qualification gates. No observational skill or novelty verdict is assigned. See docs/LUND_DST_2002_CONTRACT.md and test/lund_dst_2002_oracle.json.
+
+## Versioned shadow trial verification plan (23 October 2026)
+
+The pre-code fixture fixes exact config SHA256 and hand-derived medians18.5/23.5
+and endpoints. Tests isolate old, pre-start, wrong-identity/config/manifest and
+future residuals; retain duplicate/revision handling; verify exclusive sealing,
+original findings and unchanged source; and reject corrupted seals/reports,
+stale or contradictory assessments. Monitor callbacks prove trial propagation
+and rejection before acquisition. Direct frontend tests cover a cold zero-row
+trial and retained historical findings. No existing tolerance or fixture is
+weakened. Focused results do not replace Pkg.test(), experiments, canonical
+harness, strict documentation and native cross-platform CI.
+
+Retained before-repair controls verify that an assessment could be15ms newer
+than its seal and that coherent replacement accepted a zero-finding assessment
+under the same config pin. New regressions require a separate external receipt
+pin and completion-time chronology. A strict callback taking only the original
+keywords detects unintentional legacy API changes. Revision/removal controls
+document the snapshot-display scope rather than claiming whole-log immutability.

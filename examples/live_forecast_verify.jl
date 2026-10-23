@@ -18,6 +18,9 @@ using SHA
 using Statistics
 using FileWatching: Pidfile
 
+isdefined(@__MODULE__, :CalibrationShadowTrials) ||
+    include(joinpath(@__DIR__, "..", "src", "calibration_shadow_trials.jl"))
+
 isdefined(@__MODULE__, :LiveObservationEvidence) ||
     include(joinpath(@__DIR__, "live_observation_evidence.jl"))
 const LIVE_VERIFY_SOURCE_SHA256 = bytes2hex(sha256(read(@__FILE__)))
@@ -2781,11 +2784,13 @@ function _superlearner_calibration_shadow_from_log(log_path::AbstractString,
                                             static_hi::Real, model_steps::Integer,
                                             latest_dst_time::DateTime,
                                             issue_time::DateTime;
-                                            dst_times=nothing, dst_vals=nothing)
+                                            dst_times=nothing, dst_vals=nothing,
+                                            shadow_trial=CalibrationShadowTrials.LEGACY_A3)
     unavailable(status::AbstractString; history_n::Integer=0) =
         (status=String(status), lo=missing, hi=missing, location=missing,
          history_n=Int(history_n))
     try
+        !shadow_trial.legacy && issue_time<shadow_trial.start_utc && return unavailable("unavailable:trial_not_started")
         isfile(log_path) || return unavailable("unavailable:no_log")
         (dst_times === nothing) == (dst_vals === nothing) ||
             throw(ArgumentError("Dst times and values must be provided together"))
@@ -2800,8 +2805,10 @@ function _superlearner_calibration_shadow_from_log(log_path::AbstractString,
             required = (:issue_time_utc, :latest_dst_time_utc, :target_time_utc,
                         :model_step_hours, :observation_dst_nt, :served_pred_dst_nt,
                         :sub_hourly_model_version, :superlearner_status, :superlearner_manifest_sha256)
-            df = _csv_read(log_path, DataFrame; select=collect(required))
-            all(String(column) in names(df) for column in required) || return nothing
+            trial_fields=(:superlearner_cal_shadow_model_version,:superlearner_cal_shadow_config_sha256)
+            selected=shadow_trial.legacy ? collect(required) : vcat(collect(required),collect(trial_fields))
+            df = _csv_read(log_path, DataFrame; select=selected)
+            all(String(column) in names(df) for column in selected) || return nothing
             chosen = Dict{Tuple{DateTime,DateTime,String},NamedTuple}()
             for row_idx in 1:nrow(df)
                 identity = df[row_idx, :sub_hourly_model_version]
@@ -2811,11 +2818,16 @@ function _superlearner_calibration_shadow_from_log(log_path::AbstractString,
                 (status isa AbstractString && String(status) == SUPERLEARNER_STATUS_OK) || continue
                 manifest = df[row_idx, :superlearner_manifest_sha256]
                 (manifest isa AbstractString &&
-                 String(manifest) == SUPERLEARNER_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256) || continue
+                 String(manifest) == shadow_trial.served_manifest_sha256) || continue
                 center = _optional_float(df, row_idx, :served_pred_dst_nt)
                 step = _optional_float(df, row_idx, :model_step_hours)
                 issue = _parse_dt(df[row_idx, :issue_time_utc])
                 issue < issue_time || continue
+                if !shadow_trial.legacy
+                    issue>=shadow_trial.start_utc || continue
+                    isequal(df[row_idx,:superlearner_cal_shadow_model_version],shadow_trial.identity) || continue
+                    isequal(df[row_idx,:superlearner_cal_shadow_config_sha256],shadow_trial.config_sha256) || continue
+                end
                 target = _parse_dt(df[row_idx, :target_time_utc])
                 observation = get(current_dst, target,
                                   _optional_float(df, row_idx, :observation_dst_nt))
@@ -4215,7 +4227,11 @@ function issue_forecast(cfg::LiveVerifyConfig;
                         write_trajectory::Bool=false,
                         verbose::Bool=true,
                         interval_policy::Symbol=:auto,
-                        tail_step_fn::Function=step_forecast!)
+                        tail_step_fn::Function=step_forecast!,
+                        shadow_trial=CalibrationShadowTrials.LEGACY_A3,
+                        trial_reference::DateTime=now(UTC))
+    CalibrationShadowTrials.require_started(shadow_trial,trial_reference)
+    shadow_trial.legacy || CalibrationShadowTrials.verify_legacy_seal(cfg.log_path,shadow_trial)
     _assert_issuable_model(cfg.model, cfg.horizon_hours)
     interval_policy = _checked_interval_policy(interval_policy)
     prepared = inputs === nothing ? prepare_issue_inputs(cfg) : inputs
@@ -4226,6 +4242,7 @@ function issue_forecast(cfg::LiveVerifyConfig;
         "prepared issue inputs use a different calibration path",
     ))
     issue_time = prepared.issue_time
+    CalibrationShadowTrials.require_started(shadow_trial,issue_time)
     plasma = prepared.plasma
     mag = prepared.mag
     dst_times, dst_vals = prepared.dst
@@ -4677,19 +4694,22 @@ function issue_forecast(cfg::LiveVerifyConfig;
     served_pred_dst = sub_hourly_pred_dst
     served_ci05_dst = sub_hourly_ci05
     served_ci95_dst = sub_hourly_ci95
-    superlearner_calibration_shadow = if served_tail_version != SUPERLEARNER_SERVED_TAIL_VERSION
+    superlearner_calibration_shadow = if !shadow_trial.legacy && issue_time<shadow_trial.start_utc
+        (status="unavailable:trial_not_started", lo=missing, hi=missing,
+         location=missing, history_n=0)
+    elseif served_tail_version != SUPERLEARNER_SERVED_TAIL_VERSION
         (status="unavailable:served_identity_mismatch", lo=missing, hi=missing,
          location=missing, history_n=0)
     elseif !(superlearner_served.manifest_sha256 isa AbstractString &&
              superlearner_served.manifest_sha256 ==
-                 SUPERLEARNER_CALIBRATION_SHADOW_SERVED_MANIFEST_SHA256)
+                 shadow_trial.served_manifest_sha256)
         (status="unavailable:served_manifest_mismatch", lo=missing, hi=missing,
          location=missing, history_n=0)
     else
         _superlearner_calibration_shadow_from_log(
             cfg.log_path, served_pred_dst, served_ci05_dst, served_ci95_dst,
             model_steps, latest_dst_time, issue_time;
-            dst_times, dst_vals,
+            dst_times, dst_vals, shadow_trial,
         )
     end
     driver_audit = _driver_audit_fields(anchor_drivers, served_target_drivers)
@@ -4823,8 +4843,8 @@ function issue_forecast(cfg::LiveVerifyConfig;
         climatology_pred_dst_nt=[superlearner_served.climatology],
         # Prospective A3 calibration shadow. These endpoints are logged at issuance under a separate
         # immutable identity and never replace the served super-learner interval or enter alerting.
-        superlearner_cal_shadow_model_version=[SUPERLEARNER_CALIBRATION_SHADOW_VERSION],
-        superlearner_cal_shadow_config_sha256=[SUPERLEARNER_CALIBRATION_SHADOW_CONFIG_SHA256],
+        superlearner_cal_shadow_model_version=[shadow_trial.identity],
+        superlearner_cal_shadow_config_sha256=[shadow_trial.config_sha256],
         superlearner_cal_shadow_status=[superlearner_calibration_shadow.status],
         superlearner_cal_shadow_ci05_nt=[superlearner_calibration_shadow.lo],
         superlearner_cal_shadow_ci95_nt=[superlearner_calibration_shadow.hi],

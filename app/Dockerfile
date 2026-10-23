@@ -22,6 +22,7 @@ COPY app/src ./src
 # The depth-safe alerting center has one definition, in the package's src/. The application includes
 # it rather than restating it, so the image must carry that file too.
 COPY src/serving_depth_safe.jl ./src_shared/serving_depth_safe.jl
+COPY src/calibration_shadow_trials.jl ./src_shared/calibration_shadow_trials.jl
 COPY app/public ./public
 COPY app/models ./models
 COPY app/vendor-plotly.sh ./vendor-plotly.sh

@@ -575,3 +575,24 @@ qualification and every actual fit remain pending.
 ## Implementation correctness and independent oracle (20 October 2026)
 
 The published normalization, simultaneous four-state recurrence and output coefficients were verified from Appendix A. The source-bound scalar oracle was frozen before implementation. The package includes 104 assertions against the independent oracle and input/error/prefix/continuation contracts. Focused native Windows runs pass on Julia 1.12.6 and 1.13.1. Mutations, complete Pkg.test(), the actual examples/experiments.jl entry, all native CI axes and the unchanged canonical harness remain qualification gates. No observational skill or novelty verdict is assigned. See docs/LUND_DST_2002_CONTRACT.md and test/lund_dst_2002_oracle.json.
+
+## Separate prospective shadow trials (23 October 2026)
+
+The contract and literal configuration-byte, cold/warm, median and width
+expectations precede this implementation. A shared immutable spec pins an
+explicit new identity, start, config and serving bundle while preserving all
+legacy A3 constants/default routes. New history has no inherited residuals.
+An explicit pre-start operation exclusively seals the locked legacy source,
+including archives, and its assessment; ordinary new audits cannot rewrite it.
+Generation, monitor preflight, separate reports and additive API/dashboard
+display share the spec. No deployment timestamp or active config is chosen.
+The synthetic example parses a spec without activating or writing trial state.
+Complete package/experiment/harness and native CI qualification remain required.
+
+Pre-release controls exposed pre-start issuance, entry-time sealing dates,
+unanchored coherent seal replacement and strict legacy callback incompatibility.
+The implementation now rejects acquisition before start, dates the completed
+snapshot after assessment, requires an independently pinned receipt digest and
+forwards new callback keywords only for explicit new trials. Historical display
+authenticates a sealed snapshot; it does not claim the mutable pre-start scoring
+log is still byte-identical or complete. The old finding set remains separate.

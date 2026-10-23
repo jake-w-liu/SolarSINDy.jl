@@ -521,7 +521,7 @@ function renderCalib(status) {
   const c = (status && status.calibration) || {};
   const el = $("calib");
   if (!status) { el.innerHTML = `<p class="caption">Live verification status unavailable; retrying automatically.</p>`; return; }
-  if (!c || c.n_verified == null || c.n_verified === 0) { el.innerHTML = `<p class="caption">Empirical coverage and matched skill accrue once forecasts are verified.</p>`; return; }
+  if (!c || c.n_verified == null || c.n_verified === 0) { el.innerHTML = `<p class="caption">Empirical coverage and matched skill accrue once forecasts are verified.</p>` + renderVersionedShadowTrial(status.calibration_shadow_trial); return; }
   const bse = (v) => v == null ? "—" : `${fmt(v,2)}`;
   const opRmse = c.operational_rmse_nt != null ? c.operational_rmse_nt : c.rmse_nt;
   const opCov = c.operational_coverage_90 != null ? c.operational_coverage_90 : c.coverage_90;
@@ -601,7 +601,7 @@ function renderCalib(status) {
     html += `</tbody></table>`;
   }
   const shadow = c.calibration_shadow || null;
-  if (shadow && shadow.current_status !== "not_logged") {
+  if (shadow && shadow.current_status !== "not_logged" && !status.calibration_shadow_trial) {
     const active = shadow.collecting === true;
     const marginal = shadow.marginal_minimums || {};
     const storm = shadow.storm_minimums || {};
@@ -629,7 +629,36 @@ function renderCalib(status) {
       html += `<div class="note">The recorded validation assessment is unavailable or stale; collection counts alone do not establish qualification.</div>`;
     }
   }
+  html += renderVersionedShadowTrial(status.calibration_shadow_trial);
   el.innerHTML = html;
+}
+
+function renderVersionedShadowTrial(trial) {
+  if (!trial) return "";
+  let html = "";
+  if (trial.legacy && trial.legacy.assessment) {
+    const old = trial.legacy.assessment;
+    const findings = (old.integrity.violations || []).length;
+    html += `<div class="note"><strong>Sealed legacy A3 assessment.</strong> `
+      + `${esc(findings)} historical integrity findings remain recorded. `
+      + `Sealed at ${esc(trial.legacy.sealed_utc)}; assessed at ${esc(old.generated_utc)}. `
+      + `Its evidence and findings are separate from the new trial.</div>`;
+  }
+  if (!trial.available) {
+    return html + `<div class="note"><strong>Separate calibration trial unavailable.</strong> `
+      + `${esc(trial.reason || "Evidence cannot be verified")}. No qualification is inferred.</div>`;
+  }
+  const assessment = trial.assessment;
+  const collection = trial.collection || {};
+  const findings = (assessment.integrity.violations || []).length;
+  html += `<div class="note"><strong>Separate prospective calibration trial: ${esc(trial.trial_id)}.</strong> `
+    + `Start ${esc(trial.start_utc)}. Current status: ${esc(collection.current_status || "not logged")}. `
+    + `${esc(assessment.marginal.n_rows || 0)} matured trial rows; ${esc(findings)} trial integrity findings. `
+    + `Residual history starts fresh; legacy rows are excluded. `
+    + `Marginal claim: ${assessment.marginal.claim_ready ? "qualified" : "not qualified"}; `
+    + `storm-skill claim: ${assessment.storm.claim_ready ? "qualified" : "not qualified"}. `
+    + `The shadow is not served or used for alerts.</div>`;
+  return html;
 }
 
 function renderUpstream(status) {

@@ -1,0 +1,54 @@
+{
+  "schema": "independent-versioned-shadow-literals-v1",
+  "synthetic_only": true,
+  "config_toml": "schema = 1\ntrial_id = \"synthetic-2027\"\nshadow_identity = \"superlearner-cal-shadow-synthetic-2027+median24+width1h1.50+widthOther1.20+warm30\"\nregistered_utc = \"2026-12-31T00:00:00Z\"\nstart_utc = \"2027-01-01T00:00:00Z\"\nserved_manifest_sha256 = \"a2a1242cbf3688b82b35672e9188abb456b76da1e10eebaba77bef8f4f1ae9e7\"\nalgorithm = \"median24-width1h1.50-widthOther1.20-warm30\"\nhistory_policy = \"cold-exact-trial-issued-since-start\"\n",
+  "config_sha256": "43484625b890d5d79fe767c60c8a58149d0bce909a6979cac61cf2eb85d2b7c9",
+  "legacy_identity": "superlearner_e-cal-shadow-A3+median24+width1h1.50+widthOther1.20+warm30",
+  "legacy_config_sha256": "31d67e5077ae6fe69cee133fa07dceec3aa639903a17861d179d3877ed0c21af",
+  "legacy_manifest_sha256": "057aec0df488314cd682e212e9ba64233e2674a7c641d68b72aa729982093ede",
+  "cases": [
+    {
+      "name": "cold-with-foreign-history",
+      "residual_count": 0,
+      "status": "warmup:0/30",
+      "location": null,
+      "lo": null,
+      "hi": null
+    },
+    {
+      "name": "warm29",
+      "residual_count": 29,
+      "status": "warmup:29/30",
+      "location": null,
+      "lo": null,
+      "hi": null
+    },
+    {
+      "name": "first-ready30",
+      "residual_count": 30,
+      "status": "ok",
+      "location": 18.5,
+      "lo": 5.5,
+      "hi": 13.0
+    },
+    {
+      "name": "median35",
+      "residual_count": 35,
+      "status": "ok",
+      "location": 23.5,
+      "lo": 10.5,
+      "hi": 18.0
+    }
+  ],
+  "point": -10.0,
+  "static_lo": -12.0,
+  "static_hi": -7.0,
+  "step2": {
+    "location": 23.5,
+    "lo": 11.1,
+    "hi": 17.1
+  },
+  "old_snapshot_findings_preserved": 1,
+  "old_source_row_count": 1,
+  "derived_from": "Trailing24 consecutive integer signed residuals. Median(7:30)=18.5; median(12:35)=23.5. Endpoints = point+median -/+ scaled original half-widths2,3."
+}

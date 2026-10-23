@@ -632,3 +632,56 @@ One verified live row proves that the live ingestion, forecast, and observation
 comparison loop worked for that case. General reliability requires many locked
 forecast rows scored the same way, without discarding misses or changing the
 model after seeing the observation.
+
+## Separately registered calibration trials
+
+The original A3 identity, configuration and served-manifest pin remain fixed.
+A changed serving bundle requires a separate prospective trial; numerical
+similarity of artifacts does not transfer old calibration evidence.
+
+New trials use a byte-pinned TOML specification with a unique trial ID,
+identity, registration/start UTC, served-manifest digest, the fixed
+`median24-width1h1.50-widthOther1.20-warm30` algorithm and
+`cold-exact-trial-issued-since-start` history policy. There is no active new
+configuration bundled with the package. Synthetic test/example timestamps do
+not register a deployment.
+
+Before the new start, explicitly seal the complete legacy source and assessment:
+
+```bash
+julia --project=. validation/operational/superlearner_live_claim_audit.jl \
+  --log=/path/to/live_forecast_log.csv --trial-config=/path/to/trial.toml \
+  --trial-sha256=EXPECTED_CONFIG_SHA256 --seal-legacy=true
+```
+
+Sealing takes the existing log lock, includes retained cold archives and creates
+an exclusive `calibration_shadow_trials/<trial-id>/legacy_seal` directory.
+It does not activate a trial or change the original log. It computes a newly
+dated legacy assessment from the complete locked snapshot, retaining the old
+integrity findings; it does not copy the previously persisted status file.
+The source snapshot, assessment and report are hash bound, and an existing or
+incomplete seal is refused. Sealing returns the receipt's SHA-256, which must be
+frozen independently as the expected seal digest. A coherent replacement of
+members and their receipt cannot pass that external pin.
+
+Only after software qualification and an explicit deployment decision, configure
+`SOLARSINDY_SHADOW_TRIAL_CONFIG`, `SOLARSINDY_SHADOW_TRIAL_SHA256` and
+`SOLARSINDY_SHADOW_TRIAL_SEAL_SHA256` for the monitor and dashboard. A
+missing/mismatched seal or a start still in the future fails before monitor
+input acquisition. The standalone new-trial audit requires the same external
+pin through `--trial-seal-sha256=EXPECTED_SEAL_SHA256`.
+New residual history requires matching trial identity, config,
+manifest, causal issue/target geometry and issue at or after the registered
+start. It starts at zero and does not import older same-manifest forecasts.
+
+The new audit writes separate `status.json` and `status.md` files beneath that
+trial directory. The dashboard adds a separate trial panel and displays the
+sealed A3 findings alongside it. Existing default A3 audit/API behavior remains
+available. A restart, more collection days or a new identity cannot erase old
+findings or qualify a calibration or storm-skill claim. Shadow values never
+replace served forecasts, intervals or alert inputs.
+
+The historical display authenticates the separately sealed snapshot. Later
+outcome maturations or revisions in the ordinary scoring log do not amend that
+assessment. Active-trial validation does not authenticate the entire mutable
+pre-start log against the snapshot or certify its historical completeness.
