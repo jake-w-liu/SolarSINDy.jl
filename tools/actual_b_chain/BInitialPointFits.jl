@@ -34,15 +34,7 @@ function _permission(a,permit)
     head=readchomp(Cmd(["git","-C",REPO,"rev-parse","HEAD"]))
     T._need(d.qualified_head==head&&isempty(readchomp(Cmd(["git","-C",REPO,"status","--porcelain"]))),"B actual qualified clean head differs")
     qualification=P._bound(d.qualification_file);T._need(T._sha(qualification)==d.qualification_sha256,"B qualification pin differs")
-    q=JSON3.read(qualification)
-    T._need(q.complete===true&&q.harness.counts.FAIL==0&&!(q.harness.counts.FAIL isa Bool)&&q.harness.all17_independent_workers_complete===true,"B complete canonical harness qualification required")
-    native=collect(q.native_jobs);other=collect(q.docs_and_containers)
-    T._need(length(native)==6&&length(other)==2&&all(x->x.conclusion=="success",vcat(native,other)),"B all native/docs/image cells required")
-    T._need(Set(String(x.name) for x in native)==Set("Julia $v / $os" for v in ("1.12.6","1.13.1") for os in ("ubuntu-latest","windows-latest","macos-latest"))&&Set(String(x.name) for x in other)==Set(("Documentation build","Julia 1.12 deployment images")),"B exact eight qualification cells required")
-    function release_name(name)
-        startswith(name,"src/")||startswith(name,"tools/")||name in ("Project.toml","Manifest.toml") ? name : name in ("duration_conditioned_forcing.jl","duration_current_state_stream.jl") ? "src/"*name : "src/interval_mean_forecaster/"*name
-    end
-    T._need(all(get(q.source_sha256,Symbol(release_name(name)),nothing)==hash for (name,hash) in own),"B qualification does not bind exact execution sources")
+    P._software_qualification(qualification;schema="b_point_execution_software_qualification_v1",evidence_mode="software_qualified",head,sources=own)
     (;path=String(permit.path),sha256=String(permit.sha256),qualification_path=String(d.qualification_file),qualification_sha256=String(d.qualification_sha256),qualified_head=head)
 end
 function _permission_recheck(permission)
@@ -95,7 +87,7 @@ function _tree(root;exclude_completion=true)
     expected_dirs=Set{String}()
     for name in expected
         parent=dirname(name)
-        while parent!="."
+        while !isempty(parent)&&parent!="."
             push!(expected_dirs,replace(parent,'\\'=>'/'));parent=dirname(parent)
         end
     end
@@ -109,6 +101,10 @@ function _point_file(path,rows)
 end
 function _provenance(a,model,panel,permission)
     (;schema="b_point_fit_provenance_v1",stage=:initial_l0,evidence_mode=a.view.evidence_mode,source_sha256=a.view.source_sha256,input_view_id=a.view.view_id,input_admission_sha256=a.view.input_admission_sha256,input_prefix_sha256=a.view.input_prefix_sha256,reference_completion_sha256=a.metadata.reference_completion_sha256,independent_audit_completion_sha256=a.metadata.audit_completion_sha256,training_boundary=a.metadata.training_boundary,validation_start=a.metadata.validation_start,validation_end=a.metadata.validation_end,basis_sha256=panel.basis_sha256,fit_input_manifest_sha256=model.fit_input_manifest_sha256,initial_hazard_fit_count=2,initial_gain_fit_count=36,final_fit_count=0,calibration_fit_count=0,exposed_development_scoring=false,scientific_verdict=false,serving_promotion=false,actual_execution_permit_sha256=permission===nothing ? nothing : permission.sha256)
+end
+function _export_context(a,panel,permission)
+    scope=P._expected_scope(;stage=:initial_l0,evidence_mode=a.view.evidence_mode,source_sha256=a.view.source_sha256,input_view_id=a.view.view_id,input_admission_sha256=a.view.input_admission_sha256,input_prefix_sha256=a.view.input_prefix_sha256,training_boundary=a.metadata.training_boundary,validation_start=a.metadata.validation_start,validation_end=a.metadata.validation_end,reference_completion_sha256=a.metadata.reference_completion_sha256,independent_audit_completion_sha256=a.metadata.audit_completion_sha256,actual_execution_permit_sha256=permission===nothing ? nothing : permission.sha256,delay_hours=a.metadata.delay_hours)
+    P.BFitExportContext(panel.training.binding,a.view,panel,scope)
 end
 function run_initial_l0(a::BInputs.BPrefixAdmission,reference::BSelection.BReferencePanel,directory;execution_permit=nothing,chunk_hours=24)
     sources=P.source_identity();BInputs.recheck(a);_reference(a,reference);permission=_permission(a,execution_permit)
@@ -139,7 +135,7 @@ function run_initial_l0(a::BInputs.BPrefixAdmission,reference::BSelection.BRefer
             panels=ntuple(bi->P._read_verified_panel(proof,a.view,physical,bi),2)
             for eta_index in 1:2,bi in 1:2
                 index=4*(physical-1)+2*(eta_index-1)+bi;s=T.settings()[index];panel=panels[bi]
-                context=P.BFitExportContext(panel.training.binding,a.view,panel)
+                context=_export_context(a,panel,permission)
                 fit=P.export_fit_input(P._member(root,"fits/setting-$index"),context,s;max_chunk_rows=chunk) do consume
                     for first in 1:chunk:length(panel.training.rows);consume(panel.training.rows[first:min(first+chunk-1,end)]);end
                 end
@@ -158,7 +154,7 @@ function run_initial_l0(a::BInputs.BPrefixAdmission,reference::BSelection.BRefer
             panels=ntuple(bi->P._read_verified_panel(proof,a.view,physical,bi),2)
             for eta_index in 1:2,bi in 1:2
                 index=4*(physical-1)+2*(eta_index-1)+bi;panel=panels[bi];model=models[index]
-                context=P.BFitExportContext(panel.training.binding,a.view,panel)
+                context=_export_context(a,panel,permission)
                 pin=P.save_point_bundle(P._member(root,"models/setting-$index"),model,proof.a_checkpoints[physical],proof.wind_checkpoint;provenance=(;data=_provenance(a,model,panel,permission),verification=context))
                 loaded=P.load_point_bundle(pin.directory;expected_manifest_sha256=pin.manifest_sha256,expected_sources=P.source_identity(),expected_binding=context)
                 T._need(loaded.model.model_id==model.model_id,"B immediate bundle readback model differs")
@@ -187,22 +183,32 @@ function verify_initial_l0(directory,a::BInputs.BPrefixAdmission,reference::BSel
     T._need(T._sha(body)==expected_completion_sha256&&d.schema=="source_bound_b_initial_l0_point_stage_v1"&&d.complete===true&&d.stage=="initial_l0"&&d.contract_sha256==T.CONTRACT&&d.input_view_id==a.view.view_id&&d.admitted_input_seal==a.admission_id&&P._sources(d.implementation_sources)==sources,"B stage completion/source differs")
     for (name,value) in ((:initial_hazard_fit_count,2),(:initial_gain_fit_count,36),(:state_schedule_count,9),(:beta_design_count,18),(:final_fit_count,0),(:calibration_fit_count,0),(:delay_hours,0),(:embargo_hours,168));T._need(T._int(getproperty(d,name),0,500000)==value,"B readback scope count differs");end
     for name in (:exposed_development_scoring,:joint_primary_selection,:scientific_verdict,:serving_promotion);T._need(getproperty(d,name)===false,"B readback exceeds stage scope");end
+    expected=(;evidence_mode=a.view.evidence_mode,qualified_head=permission===nothing ? nothing : permission.qualified_head,source_sha256=a.view.source_sha256,input_envelope_sha256=a.envelope_sha256,reference_completion_sha256=a.metadata.reference_completion_sha256,reference_audit_sha256=a.metadata.reference_audit_sha256,input_prefix_sha256=a.view.input_prefix_sha256,training_boundary=a.metadata.training_boundary,validation_start=a.metadata.validation_start,validation_end=a.metadata.validation_end,training_semantics="option_T_in_sample_two_stage_batch_v1",actual_execution_permit_sha256=permission===nothing ? nothing : permission.sha256)
+    for field in keys(expected);T._need(T._bytes(getproperty(d,field))==T._bytes(getproperty(expected,field)),"B completion admitted metadata differs: $field");end
+    for field in (:source_rows,:retained_prefix_rows);T._need(T._int(getproperty(d,field),1,T.MAX_ROWS)==a.view.source_hours,"B completion source row count differs");end
+    for field in (:output_bytes,:output_file_count,:output_directory_count);T._int(getproperty(d,field),0,16*1024^3);end
+    T._fields(d.streams,(:basis_manifest_sha256,:producer_counts,:replay_A_streams,:replay_gain_solves,:terminated_producer_tasks))
+    T._need(T._int(d.streams.replay_A_streams,9,9)==9&&T._int(d.streams.replay_gain_solves,0,0)==0&&T._int(d.streams.terminated_producer_tasks,9,9)==9,"B completion stream scope differs")
+    for field in keys(d.streams.producer_counts);T._int(getproperty(d.streams.producer_counts,field),0,20*T.MAX_ROWS);end
     tree=_tree(root);T._need(tree.sha256==d.output_sha256&&tree.bytes==d.output_bytes&&tree.files==d.output_file_count&&tree.directories==d.output_directory_count,"B stage full output inventory differs")
     T._need(length(d.hazards)==2&&length(d.models)==36,"B stage law/model count differs")
     laws=ntuple(2) do bi
-        entry=d.hazards[bi];T._need(entry.beta==(5,20)[bi]&&entry.directory=="laws/beta-$((5,20)[bi])","B law order differs")
+        entry=d.hazards[bi];T._fields(entry,(:beta,:model_id,:directory,:manifest_sha256));T._need(T._int(entry.beta,1,20)==(5,20)[bi]&&entry.directory=="laws/beta-$((5,20)[bi])","B law order differs")
         law=D.load_model(P._member(root,String(entry.directory));expected_manifest_sha256=String(entry.manifest_sha256))
         T._need(law.model_id==entry.model_id&&law.source_sha256==a.view.source_sha256&&law.boundary==a.metadata.training_boundary,"B loaded law source/boundary differs");law
     end
     basis_pin=String(d.streams.basis_manifest_sha256)
     proof=P._verify_basis(a.view,laws,P._member(root,"basis");expected_manifest_sha256=basis_pin,expected_sources=sources,chunk_hours)
+    T._need(T._bytes(d.streams.producer_counts)==T._bytes(proof.producer_counts),"B completion producer counters differ from independent replay")
     pointpins=BSelection.BPointFilePanel[]
     for physical in 1:9
         panels=ntuple(bi->P._read_verified_panel(proof,a.view,physical,bi),2)
         for eta_index in 1:2,bi in 1:2
             index=4*(physical-1)+2*(eta_index-1)+bi;entry=d.models[index];panel=panels[bi]
+            T._fields(entry,(:setting_index,:directory,:manifest_sha256,:model_id,:fit_directory,:fit_manifest_sha256,:points));T._int(entry.setting_index,1,36)
+            T._fields(entry.points,(:name,:sha256,:bytes,:model_id));T._int(entry.points.bytes,1,T.MAX_FILE)
             T._need(entry.setting_index==index&&entry.directory=="models/setting-$index"&&entry.fit_directory=="fits/setting-$index","B model/fit order differs")
-            context=P.BFitExportContext(panel.training.binding,a.view,panel)
+            context=_export_context(a,panel,permission)
             loaded=P.load_point_bundle(P._member(root,String(entry.directory));expected_manifest_sha256=String(entry.manifest_sha256),expected_sources=sources,expected_binding=context)
             model=loaded.model;T._need(model.model_id==entry.model_id&&model.fit_input_manifest_sha256==entry.fit_manifest_sha256,"B independently loaded fit/model differs")
             fitroot=P._member(root,String(entry.fit_directory));fitmeta,fitbody=P._json(P._member(fitroot,"manifest.json");fields=P.FIT_INPUT_FIELDS)

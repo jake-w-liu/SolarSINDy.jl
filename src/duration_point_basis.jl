@@ -49,11 +49,12 @@ struct BVerifiedBasisSet
     training_mask::BitVector
     forecast_mask::BitVector
     data_sha256::Vector{String}
+    producer_counts::Dict{Symbol,Int}
     certificates::Dict{Int,NamedTuple} # At most36 fixed settings; never an origin cache.
     verification_id::String
 end
 function _verified_data(p::BVerifiedBasisSet)
-    (;schema="b_verified_raw_source_replay_v1",manifest_sha256=p.manifest_sha256,input_view_id=p.view_id,source_hashes=_sources_data(p.source_hashes),law_ids=(p.laws[1].model_id,p.laws[2].model_id),context_ids=(p.bindings[1].context_id,p.bindings[2].context_id),a_checkpoints=[_a_data(x) for x in p.a_checkpoints],wind_checkpoint=merge(C._checkpoint_data(p.wind_checkpoint),(checkpoint_id=p.wind_checkpoint.checkpoint_id,)),training_mask_sha256=_sha(reinterpret(UInt8,collect(p.training_mask))),forecast_mask_sha256=_sha(reinterpret(UInt8,collect(p.forecast_mask))),data_sha256=p.data_sha256)
+    (;schema="b_verified_raw_source_replay_v1",manifest_sha256=p.manifest_sha256,input_view_id=p.view_id,source_hashes=_sources_data(p.source_hashes),law_ids=(p.laws[1].model_id,p.laws[2].model_id),context_ids=(p.bindings[1].context_id,p.bindings[2].context_id),a_checkpoints=[_a_data(x) for x in p.a_checkpoints],wind_checkpoint=merge(C._checkpoint_data(p.wind_checkpoint),(checkpoint_id=p.wind_checkpoint.checkpoint_id,)),training_mask_sha256=_sha(reinterpret(UInt8,collect(p.training_mask))),forecast_mask_sha256=_sha(reinterpret(UInt8,collect(p.forecast_mask))),data_sha256=p.data_sha256,producer_counts=p.producer_counts)
 end
 function _check_verified(p::BVerifiedBasisSet,v::T.PointInputView)
     T._recheck(v);_need(p.view_id==v.view_id&&p.source_hashes==T._hashmap(source_identity())&&p.verification_id==_id(_verified_data(p)),"B raw-source replay proof differs")
@@ -93,7 +94,7 @@ function _verify_basis(v::T.PointInputView,laws,directory;expected_manifest_sha2
     end
     T._raise(errors)
     a_checkpoints=[x.checkpoint for x in result.value.streams]
-    fields=(root,String(expected_manifest_sha256),v.view_id,copy(sources),laws,result.training_bindings,a_checkpoints,result.wind_checkpoint,copy(masks.training),copy(masks.forecast),hashes,Dict{Int,NamedTuple}())
+    fields=(root,String(expected_manifest_sha256),v.view_id,copy(sources),laws,result.training_bindings,a_checkpoints,result.wind_checkpoint,copy(masks.training),copy(masks.forecast),hashes,copy(result.counts),Dict{Int,NamedTuple}())
     provisional=BVerifiedBasisSet(fields...,repeat("0",64));verified=BVerifiedBasisSet(fields...,_id(_verified_data(provisional)))
     _check_verified(verified,v);verified
 end

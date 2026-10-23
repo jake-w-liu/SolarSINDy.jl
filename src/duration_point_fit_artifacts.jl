@@ -1,7 +1,55 @@
+struct BExpectedProvenance
+    stage::Symbol
+    evidence_mode::Symbol
+    source_sha256::String
+    input_view_id::String
+    input_admission_sha256::String
+    input_prefix_sha256::String
+    training_boundary::DateTime
+    validation_start::DateTime
+    validation_end::DateTime
+    reference_completion_sha256::String
+    independent_audit_completion_sha256::String
+    actual_execution_permit_sha256::Union{Nothing,String}
+    delay_hours::Int
+    scope_id::String
+end
+function _scope_data(s::BExpectedProvenance)
+    (;stage=s.stage,evidence_mode=s.evidence_mode,source_sha256=s.source_sha256,input_view_id=s.input_view_id,input_admission_sha256=s.input_admission_sha256,input_prefix_sha256=s.input_prefix_sha256,training_boundary=s.training_boundary,validation_start=s.validation_start,validation_end=s.validation_end,reference_completion_sha256=s.reference_completion_sha256,independent_audit_completion_sha256=s.independent_audit_completion_sha256,actual_execution_permit_sha256=s.actual_execution_permit_sha256,delay_hours=s.delay_hours)
+end
+function _expected_scope(;stage,evidence_mode,source_sha256,input_view_id,input_admission_sha256,input_prefix_sha256,training_boundary,validation_start,validation_end,reference_completion_sha256,independent_audit_completion_sha256,actual_execution_permit_sha256,delay_hours)
+    delay=T._int(delay_hours,0,0)
+    _need(stage===:initial_l0&&evidence_mode in (:synthetic_only,:archival_assumed_completion_research),"B publication scope differs")
+    _need(training_boundary<=validation_start<validation_end,"B expected publication split differs")
+    for hash in (source_sha256,input_view_id,input_admission_sha256,input_prefix_sha256,reference_completion_sha256,independent_audit_completion_sha256);_need(T._hex(hash),"B expected authority digest differs");end
+    _need(evidence_mode==:synthetic_only ? actual_execution_permit_sha256===nothing : T._hex(actual_execution_permit_sha256),"B expected permit/mode differs")
+    fields=(stage,evidence_mode,String(source_sha256),String(input_view_id),String(input_admission_sha256),String(input_prefix_sha256),training_boundary,validation_start,validation_end,String(reference_completion_sha256),String(independent_audit_completion_sha256),actual_execution_permit_sha256===nothing ? nothing : String(actual_execution_permit_sha256),delay)
+    provisional=BExpectedProvenance(fields...,repeat("0",64))
+    BExpectedProvenance(fields...,_id(_scope_data(provisional)))
+end
 struct BFitExportContext
     binding::T.PointTrainingBinding
     view::T.PointInputView
     basis::BVerifiedBasisPanel
+    expected::Union{Nothing,BExpectedProvenance}
+end
+BFitExportContext(binding,view,basis)=BFitExportContext(binding,view,basis,nothing)
+function _expected_provenance(model::T.BPointModel,context::BFitExportContext)
+    s=context.expected;_need(s isa BExpectedProvenance,"B bundle needs independently admitted expected provenance")
+    _need(s.scope_id==_id(_scope_data(s))&&s.stage===:initial_l0&&s.delay_hours==0,"B expected publication scope mutated")
+    b=context.binding;v=context.view;p=context.basis
+    _check_panel(p,v)
+    _need(model.evidence_mode==v.evidence_mode==s.evidence_mode&&model.source_sha256==b.source_sha256==v.source_sha256==s.source_sha256&&model.input_view_id==b.input_view_id==v.view_id==s.input_view_id&&model.input_admission_sha256==b.input_admission_sha256==v.input_admission_sha256==s.input_admission_sha256&&model.input_prefix_sha256==v.input_prefix_sha256==s.input_prefix_sha256,"B expected provenance source authority differs")
+    _need(model.boundary==b.boundary==s.training_boundary&&model.delay_hours==b.delay_hours==s.delay_hours,"B expected provenance model clock differs")
+    manifest,body=_json(_member(p.replay.directory,"manifest.json");fields=BASIS_MANIFEST_FIELDS)
+    _need(_sha(body)==p.replay.manifest_sha256&&T._clock(manifest.boundary)==s.training_boundary&&T._clock(manifest.validation_start)==s.validation_start&&T._clock(manifest.validation_end)==s.validation_end&&T._int(manifest.delay_hours,0,1)==s.delay_hours,"B expected validation authority differs from independently replayed basis")
+    (;schema="b_point_fit_provenance_v1",stage=s.stage,evidence_mode=s.evidence_mode,source_sha256=s.source_sha256,input_view_id=s.input_view_id,input_admission_sha256=s.input_admission_sha256,input_prefix_sha256=s.input_prefix_sha256,reference_completion_sha256=s.reference_completion_sha256,independent_audit_completion_sha256=s.independent_audit_completion_sha256,training_boundary=s.training_boundary,validation_start=s.validation_start,validation_end=s.validation_end,basis_sha256=p.basis_sha256,fit_input_manifest_sha256=model.fit_input_manifest_sha256,initial_hazard_fit_count=2,initial_gain_fit_count=36,final_fit_count=0,calibration_fit_count=0,exposed_development_scoring=false,scientific_verdict=false,serving_promotion=false,actual_execution_permit_sha256=s.actual_execution_permit_sha256)
+end
+function _check_provenance(data,model,context)
+    _fields(data,PROVENANCE_FIELDS)
+    for (field,value) in ((:initial_hazard_fit_count,2),(:initial_gain_fit_count,36),(:final_fit_count,0),(:calibration_fit_count,0));_need(T._int(getproperty(data,field),0,36)==value,"B provenance count differs");end
+    _need(_bytes(data)==_bytes(_expected_provenance(model,context)),"B provenance differs from independently admitted authority")
+    true
 end
 function _check_panel(p::BVerifiedBasisPanel,v)
     _check_verified(p.replay,v);index=2*(p.physical_schedule-1)+p.beta_index
@@ -82,7 +130,7 @@ function fit_point_gains_from_input(directory::AbstractString;expected_manifest_
     _need(b.context_id==basis.training.binding.context_id&&b.context_id==d.context_id&&T._id(T._binding_data(b))==b.context_id,"B expected fit context differs")
     _need(d.evidence_mode==String(view.evidence_mode)&&d.source_sha256==b.source_sha256&&d.input_view_id==view.view_id&&d.input_prefix_sha256==b.input_prefix_sha256&&d.input_admission_sha256==b.input_admission_sha256&&_sources(d.source_hashes)==b.source_hashes,"B fit source/evidence differs")
     _need(d.fold_id==b.fold_id&&T._clock(d.boundary_ms)==b.boundary&&T._clock(d.cutoff_ms)==b.cutoff&&T._int(d.delay_hours,0,1)==b.delay_hours&&d.hazard_model_id==b.hazard_model_id&&d.hazard_training_prefix_sha256==b.hazard_training_prefix_sha256,"B fit law/fold/clock differs")
-    _need(d.a_setting_index==s.a_index&&d.beta==s.beta&&Tuple(T._float.(d.taus_bits))==s.taus&&T._float(d.sigma_bits)==s.sigma&&T._float(d.eta_bits)==s.eta,"B fit setting grammar differs")
+    _need(T._int(d.a_setting_index,1,18)==s.a_index&&d.beta==s.beta&&Tuple(T._float.(d.taus_bits))==s.taus&&T._float(d.sigma_bits)==s.sigma&&T._float(d.eta_bits)==s.eta,"B fit setting grammar differs")
     _need(d.data_member=="joint-fit.bin"&&d.mask_member=="fit-mask.ascii"&&d.basis_member_sha256==basis.basis_sha256,"B fit member identity differs")
     T._int(d.max_source_rows,1,T.MAX_ROWS);T._int(d.max_chunk_rows,1,T.MAX_CHUNK)
     n=T._int(d.joint_origins,1,T.MAX_ROWS)

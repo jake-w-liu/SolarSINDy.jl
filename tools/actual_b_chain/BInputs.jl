@@ -1,5 +1,5 @@
 module BInputs
-using SolarSINDy,Dates,SHA
+using SolarSINDy,Dates,SHA,JSON3
 const T=SolarSINDy.DurationPointTraining
 const P=SolarSINDy.DurationPointArtifacts
 const D=SolarSINDy.DurationConditionedForcing
@@ -62,7 +62,7 @@ function admit_prefix(envelope_path;expected_envelope_sha256,roots,expected_sour
     start=T._clock(d.prefix_start_ms);stop=T._clock(d.prefix_stop_ms);boundary=T._clock(d.training_boundary_ms);first=T._clock(d.validation_start_ms);last=T._clock(d.validation_end_ms);delay=T._int(d.receipt_delay_hours,0,1)
     T._need(floor(start,Hour)==start&&T.Adapter._shift(start,n)==stop&&start<boundary<=first<last<=stop,"B half-open prefix/split clocks differ")
     if mode==:archival_assumed_completion_research
-        T._need(d.source_sha256==ACTUAL_SOURCE&&start==DateTime(1976)&&stop<=DateTime(2023)&&boundary==DateTime(2020)&&first==DateTime(2020)&&last==DateTime(2023),"B initial archival source/split differs")
+        T._need(d.source_sha256==ACTUAL_SOURCE&&start==DateTime(1976,11,1)&&stop<=DateTime(2023)&&boundary==DateTime(2020)&&first==DateTime(2020)&&last==DateTime(2023),"B initial archival source/split differs")
     end
     T._need(P._sources(d.implementation_sources)==sources,"B input implementation source map differs")
     T._fields(d.limits,keys(P.LIMITS))
@@ -124,4 +124,5 @@ function recheck(a::BPrefixAdmission)
     end
     T._recheck(a.view);true
 end
+include("BReferenceAdmission.jl")
 end

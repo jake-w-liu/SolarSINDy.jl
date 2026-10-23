@@ -3,11 +3,42 @@ using SolarSINDy,Dates,SHA,Statistics
 const T=SolarSINDy.DurationPointTraining
 const P=SolarSINDy.DurationPointArtifacts
 export BReferencePanel,BMatchedReference,BL0Panels,BJointPanels,provisional_l0,select_joint_setting
-struct BReferenceAudit
-    path::String
-    sha256::String
-    grid_path::String
+struct BReferencePins
+    completion_sha256::String
+    audit_sha256::String
     grid_sha256::String
+    tuning_sha256::String
+    prediction_sha256::String
+    feature_contract_sha256::String
+    tuning_loss_contract_sha256::String
+    baseline_qualification_sha256::String
+    baseline_sources::T.HashMap
+    baseline_qualified_head::String
+    feature_contract_member::String
+    tuning_loss_contract_member::String
+    pins_id::String
+end
+function _pins_data(p::BReferencePins)
+    (;completion_sha256=p.completion_sha256,audit_sha256=p.audit_sha256,grid_sha256=p.grid_sha256,tuning_sha256=p.tuning_sha256,prediction_sha256=p.prediction_sha256,feature_contract_sha256=p.feature_contract_sha256,tuning_loss_contract_sha256=p.tuning_loss_contract_sha256,baseline_qualification_sha256=p.baseline_qualification_sha256,baseline_sources=T._hashdata(p.baseline_sources),baseline_qualified_head=p.baseline_qualified_head,feature_contract_member=p.feature_contract_member,tuning_loss_contract_member=p.tuning_loss_contract_member)
+end
+function BReferencePins(;completion_sha256,audit_sha256,grid_sha256,tuning_sha256,prediction_sha256,feature_contract_sha256,tuning_loss_contract_sha256,baseline_qualification_sha256,baseline_sources,baseline_qualified_head,feature_contract_member,tuning_loss_contract_member)
+    hashes=(completion_sha256,audit_sha256,grid_sha256,tuning_sha256,prediction_sha256,feature_contract_sha256,tuning_loss_contract_sha256,baseline_qualification_sha256)
+    T._need(all(T._hex,hashes)&&baseline_qualified_head isa AbstractString&&occursin(r"\A[0-9a-f]{40}\z",baseline_qualified_head),"B independently supplied reference pins/head differ")
+    sources=T._hashmap(baseline_sources);mapping=Dict(sources)
+    T._need(get(mapping,feature_contract_member,nothing)==feature_contract_sha256&&get(mapping,tuning_loss_contract_member,nothing)==tuning_loss_contract_sha256,"B feature/loss members absent from independently pinned component sources")
+    fields=(String.(hashes)...,sources,String(baseline_qualified_head),String(feature_contract_member),String(tuning_loss_contract_member))
+    provisional=BReferencePins(fields...,repeat("0",64));BReferencePins(fields...,T._id(_pins_data(provisional)))
+end
+struct BReferenceAudit
+    root::String
+    sha256::String
+    pins::BReferencePins
+    view::T.PointInputView
+    expected_sources::T.HashMap
+    admission_id::String
+end
+function _audit_data(a::BReferenceAudit)
+    (;root=a.root,sha256=a.sha256,pins_id=a.pins.pins_id,input_view_id=a.view.view_id,expected_sources=T._hashdata(a.expected_sources))
 end
 struct BReferencePanel
     metadata::NamedTuple
@@ -36,6 +67,7 @@ end
 function _row_identity(rows)
     T._id([(;issue=x.issue,anchor=isfinite(x.anchor) ? x.anchor : nothing,target=Tuple(isfinite(y) ? y : nothing for y in x.target),source_sha256=x.source_sha256,delay_hours=x.delay_hours) for x in rows])
 end
+_prediction_values_identity(rows)=T._id([(;issue=x.issue,means=x.means,model_available=x.model_available,reason=x.reason) for x in rows])
 function _reference(metadata,rows::Vector{T.BPointPredictionRow};audit=nothing)
     fields=Tuple(k for k in P.REFERENCE_PANEL_FIELDS if k!=:rows)
     T._fields(metadata,fields)
@@ -49,30 +81,17 @@ function _reference(metadata,rows::Vector{T.BPointPredictionRow};audit=nothing)
     T._need(length(rows)<=T.MAX_ROWS&&issorted(getproperty.(rows,:issue))&&allunique(getproperty.(rows,:issue)),"B reference row keys differ")
     for row in rows;T._need(row.source_sha256==metadata.source_sha256&&row.delay_hours==metadata.delay_hours&&all(isfinite,row.means),"B reference row source/prediction differs");end
     audit===nothing||T._need(audit isa BReferenceAudit,"typed source-bound B reference audit required")
-    identity=T._id((;metadata,raw_rows=metadata.raw_row_identity_sha256,audit_sha256=audit===nothing ? nothing : audit.sha256))
+    T._need(metadata.evidence_mode==:synthetic_only||audit isa BReferenceAudit,"actual B references require bounded prediction-file admission")
+    identity=T._id((;metadata,raw_rows=metadata.raw_row_identity_sha256,prediction_values_sha256=_prediction_values_identity(rows),audit_sha256=audit===nothing ? nothing : audit.sha256))
     BReferencePanel(metadata,copy(rows),identity,audit)
 end
-const MATCHED_AUDIT_FIELDS=(:schema,:complete,:evidence_mode,:reference_kind,:source_sha256,:training_boundary,:validation_start,:validation_end,:training_history_start,:delay_hours,:feature_contract_sha256,:fixed_grid_manifest_sha256,:prediction_panel_sha256,:raw_row_identity_sha256,:reference_completion_sha256,:latest_observation_age,:missing_flags,:run_age,:channel_count,:same_history,:same_receipt_prefix,:fixed_grid_count,:initial_only,:audit_id)
 function _check_matched_audit(ref)
-    audit=ref.audit;T._need(audit isa BReferenceAudit,"matched reference needs its independently pinned audit and fixed-grid members")
-    data,body=P._json(audit.path;fields=MATCHED_AUDIT_FIELDS);m=ref.metadata
-    T._need(T._sha(body)==audit.sha256==m.audit_completion_sha256&&data.schema=="matched_information_gbm_audit_v1"&&data.complete===true&&data.reference_kind=="matched_information_gbm_initial_v1"&&data.evidence_mode==String(m.evidence_mode),"B matched audit schema/role/evidence differs")
-    for field in (:source_sha256,:feature_contract_sha256,:fixed_grid_manifest_sha256,:prediction_panel_sha256,:raw_row_identity_sha256,:reference_completion_sha256)
-        T._need(getproperty(data,field)==getproperty(m,field),"B matched audit source/panel differs")
-    end
-    for field in (:training_boundary,:validation_start,:validation_end,:training_history_start);T._need(T._clock(getproperty(data,field))==getproperty(m,field),"B matched audit history/split differs");end
-    T._need(T._int(data.delay_hours,0,1)==m.delay_hours&&T._int(data.channel_count,17,17)==17&&T._int(data.fixed_grid_count,8,8)==8,"B matched audit information/grid differs")
-    for field in (:latest_observation_age,:missing_flags,:run_age,:same_history,:same_receipt_prefix,:initial_only);T._need(getproperty(data,field)===true,"B matched information proof is incomplete");end
-    fields=Tuple(k for k in MATCHED_AUDIT_FIELDS if k!=:audit_id)
-    T._need(T._id(NamedTuple{fields}(Tuple(getproperty(data,k) for k in fields)))==data.audit_id,"B matched audit identity differs")
-    grid,gridbody=P._json(audit.grid_path;fields=(:schema,:complete,:evidence_mode,:feature_contract_sha256,:settings,:grid_id))
-    T._need(T._sha(gridbody)==audit.grid_sha256==m.fixed_grid_manifest_sha256&&grid.schema=="fixed_eight_gbm_settings_v1"&&grid.complete===true&&grid.evidence_mode==String(m.evidence_mode)&&grid.feature_contract_sha256==m.feature_contract_sha256&&length(grid.settings)==8,"B matched fixed-eight-grid proof differs")
-    T._need([T._int(x.index,1,8) for x in grid.settings]==collect(1:8),"B matched grid IDs differ")
-    identity=(;schema=grid.schema,complete=grid.complete,evidence_mode=grid.evidence_mode,feature_contract_sha256=grid.feature_contract_sha256,settings=grid.settings)
-    T._need(T._id(identity)==grid.grid_id,"B matched grid identity differs");true
+    audit=ref.audit;T._need(audit isa BReferenceAudit,"matched reference needs independently pinned full candidate/tuning/prediction admission")
+    getfield(parentmodule(@__MODULE__),:BInputs)._check_reference_admission(ref)
 end
 function _check_reference(ref::BReferencePanel;matched=false)
     checked=_reference(ref.metadata,ref.rows;audit=ref.audit);T._need(checked.admission_id==ref.admission_id,"B reference mutated")
+    if ref.audit!==nothing&&!matched;getfield(parentmodule(@__MODULE__),:BInputs)._check_reference_admission(ref);end
     if matched
         T._need(ref.metadata.reference_kind==:matched_information_gbm_initial_v1,"matched-information GBM reference required")
         # The eight-setting tuning proof is externally pinned, never inferred

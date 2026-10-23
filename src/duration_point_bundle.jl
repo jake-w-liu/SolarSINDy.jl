@@ -78,8 +78,7 @@ end
 function save_point_bundle(directory,model::T.BPointModel,a::Stream.StreamCheckpoint,wind::C.CurrentStateCheckpoint;provenance)
     sources=source_identity();context=provenance.verification
     _need(context isa BFitExportContext,"B bundle requires independently replayed state proof")
-    _check_closures(model,a,wind,context);_fields(provenance.data,PROVENANCE_FIELDS)
-    _need(provenance.data.source_sha256==model.source_sha256&&provenance.data.input_view_id==model.input_view_id&&provenance.data.fit_input_manifest_sha256==model.fit_input_manifest_sha256,"B bundle provenance differs")
+    _check_closures(model,a,wind,context);_check_provenance(provenance.data,model,context)
     root=_root_new(directory);completion=nothing;errors=Any[]
     try
         mkdir(_member(root,"hazard"));_embedded_law(_member(root,"hazard"),model.law)
@@ -115,7 +114,7 @@ function load_point_bundle(directory;expected_manifest_sha256,expected_sources,e
     a=_decode_a(c.a_checkpoint);wind=_decode_wind(c.wind_checkpoint)
     _need(_bytes(_closure_data(model,a,wind,sources))==closurebody,"B closure metadata/identity differs")
     provenance,provenancebody=_json(_member(root,"provenance.json");fields=PROVENANCE_FIELDS)
-    _need(provenance.source_sha256==model.source_sha256&&provenance.input_view_id==model.input_view_id&&provenance.fit_input_manifest_sha256==model.fit_input_manifest_sha256,"B readback provenance differs")
+    _check_provenance(provenance,model,expected_binding)
     _check_closures(model,a,wind,expected_binding)
     for (name,saved) in (("manifest.json",body),("model.json",modelbody),("checkpoints.json",closurebody),("provenance.json",provenancebody));_need(_bound(_member(root,name))==saved,"B bundle changed during readback");end
     _need(T._hashmap(source_identity())==sources,"B bundle readback source differs")

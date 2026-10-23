@@ -12,7 +12,7 @@ const C=DurationCurrentStateStream
 const K=D.K
 const CONTRACT="f0fbbbd3bd7fea2fac983a232c3cbf7265af9524cfb5ad80e45d3ac2610a148b"
 const PACKAGE_ROOT=dirname(@__DIR__)
-const SOURCE_FILES=("src/duration_point_training.jl","src/duration_point_values.jl","src/duration_point_contexts.jl","src/duration_point_coordinator.jl","src/duration_point_fit.jl","src/duration_point_artifacts.jl","src/duration_point_codec.jl","src/duration_point_basis.jl","src/duration_point_fit_artifacts.jl","src/duration_point_bundle.jl","src/duration_point_schema.jl","tools/actual_b_chain/ActualBChain.jl","tools/actual_b_chain/BInputs.jl","tools/actual_b_chain/BInitialPointFits.jl","tools/actual_b_chain/BSelection.jl","src/SolarSINDy.jl","Project.toml","Manifest.toml")
+const SOURCE_FILES=("src/duration_point_training.jl","src/duration_point_values.jl","src/duration_point_contexts.jl","src/duration_point_coordinator.jl","src/duration_point_fit.jl","src/duration_point_artifacts.jl","src/duration_point_codec.jl","src/duration_point_basis.jl","src/duration_point_fit_artifacts.jl","src/duration_point_bundle.jl","src/duration_point_schema.jl","tools/actual_b_chain/ActualBChain.jl","tools/actual_b_chain/BInputs.jl","tools/actual_b_chain/BInitialPointFits.jl","tools/actual_b_chain/BSelection.jl","tools/actual_b_chain/BReferenceAdmission.jl","src/SolarSINDy.jl","Project.toml","Manifest.toml")
 for name in SOURCE_FILES;Base.include_dependency(joinpath(PACKAGE_ROOT,name));end
 const LOADED_FILES=Tuple(name=>bytes2hex(sha256(read(joinpath(PACKAGE_ROOT,name)))) for name in SOURCE_FILES)
 const LOADED_C=C.source_identity()

@@ -46,6 +46,95 @@ function _json(path;fields=nothing)
     fields===nothing||_fields(object,fields)
     object,body
 end
+# Opaque software qualification receipts retain their native pretty formatting.
+# Validate the consumed counter's original JSON token, since JSON3 deliberately
+# normalizes integral Float64 literals (e.g. 0.0) to Int64 by default.
+function _qualification_integer(body,counter_path)
+    _need(length(body)<=T.MAX_META,"qualification metadata bound exceeded")
+    n=length(body);position=Ref(1);path=String[];target=String.(collect(counter_path));found=Ref(false);result=Ref(Int64(0))
+    whitespace()=begin
+        while position[]<=n&&body[position[]] in (0x20,0x09,0x0a,0x0d);position[]+=1;end
+    end
+    function quoted()
+        first=position[];_need(first<=n&&body[first]==0x22,"qualification JSON string required");position[]+=1
+        while position[]<=n
+            byte=body[position[]];position[]+=1
+            if byte==0x22
+                return String(JSON3.read(body[first:position[]-1]))
+            elseif byte==0x5c
+                _need(position[]<=n,"unterminated qualification escape");position[]+=1
+            else
+                _need(byte>=0x20,"qualification string control character")
+            end
+        end
+        throw(ArgumentError("unterminated qualification string"))
+    end
+    function value(depth)
+        _need(depth<=12,"qualification JSON nesting exceeds limit");whitespace();_need(position[]<=n,"incomplete qualification JSON")
+        byte=body[position[]]
+        if byte==0x7b
+            position[]+=1;whitespace();names=Set{String}()
+            if position[]<=n&&body[position[]]==0x7d;position[]+=1;return;end
+            while true
+                whitespace();name=quoted();_need(!(name in names),"duplicate qualification field");push!(names,name)
+                whitespace();_need(position[]<=n&&body[position[]]==0x3a,"qualification colon required");position[]+=1
+                push!(path,name);value(depth+1);pop!(path);whitespace()
+                _need(position[]<=n,"incomplete qualification object");separator=body[position[]];position[]+=1
+                separator==0x7d&&break;_need(separator==0x2c,"qualification object separator differs")
+            end
+        elseif byte==0x5b
+            position[]+=1;whitespace()
+            if position[]<=n&&body[position[]]==0x5d;position[]+=1;return;end
+            while true
+                push!(path,"#");value(depth+1);pop!(path);whitespace()
+                _need(position[]<=n,"incomplete qualification array");separator=body[position[]];position[]+=1
+                separator==0x5d&&break;_need(separator==0x2c,"qualification array separator differs")
+            end
+        elseif byte==0x22
+            quoted();_need(path!=target,"qualification counter must have an unsigned integer token")
+        else
+            first=position[]
+            while position[]<=n&&!(body[position[]] in (0x20,0x09,0x0a,0x0d,0x2c,0x5d,0x7d));position[]+=1;end
+            _need(position[]>first,"qualification scalar missing")
+            if path==target
+                count=position[]-first
+                _need(!found[]&&1<=count<=19&&all(x->0x30<=x<=0x39,@view(body[first:position[]-1]))&&(count==1||body[first]!=0x30),"qualification counter must have a canonical bounded unsigned integer token")
+                result[]=try parse(Int64,String(body[first:position[]-1])) catch;throw(ArgumentError("qualification counter exceeds Int64"));end
+                found[]=true
+            end
+        end
+    end
+    try
+        value(0);whitespace();_need(position[]==n+1&&found[],"qualification counter token absent or trailing data")
+    catch e
+        e isa ArgumentError&&rethrow()
+        throw(ArgumentError("invalid qualification JSON token grammar"))
+    end
+    result[]
+end
+_qualification_counter(body)=(_need(_qualification_integer(body,("harness","counts","FAIL"))==0,"qualification FAIL must be integer token zero");true)
+const SOFTWARE_QUALIFICATION_FIELDS=(:schema,:complete,:evidence_mode,:head,:source_sha256,:harness,:native_jobs,:docs_and_containers,:root_qualification_sha256,:source_proof_sha256,:canonical_harness_sha256,:software_qualification_only,:actual_panel_fit_or_outcome_qualified,:serving_promotion)
+function _software_qualification(body;schema,evidence_mode,head,sources)
+    # Token grammar is checked before JSON3's integer normalization.
+    counts=ntuple(i->_qualification_integer(body,("harness","counts",("PASS","WARN","FAIL")[i])),3)
+    _need(counts[3]==0,"component software qualification has failures")
+    q=try JSON3.read(body) catch;throw(ArgumentError("invalid component software qualification"));end
+    _fields(q,SOFTWARE_QUALIFICATION_FIELDS)
+    _need(q.schema==schema&&q.complete===true&&q.evidence_mode==evidence_mode&&q.head==head&&q.software_qualification_only===true&&q.actual_panel_fit_or_outcome_qualified===false&&q.serving_promotion===false,"component software qualification schema/head/scope differs")
+    _fields(q.harness,(:counts,:all17_independent_workers_complete,:unfiltered_pkg_test_complete,:experiments_entry_complete));_fields(q.harness.counts,(:PASS,:WARN,:FAIL))
+    _need(q.harness.all17_independent_workers_complete===true&&q.harness.unfiltered_pkg_test_complete===true&&q.harness.experiments_entry_complete===true,"component full package/experiments/harness qualification required")
+    for (field,value) in zip((:PASS,:WARN,:FAIL),counts);_need(T._int(getproperty(q.harness.counts,field),0,typemax(Int64))==value,"component qualification counter differs");end
+    _need(q.source_sha256 isa AbstractDict&&T._hashmap(pairs(q.source_sha256))==T._hashmap(sources),"component qualification complete expected source map differs")
+    for field in (:root_qualification_sha256,:source_proof_sha256,:canonical_harness_sha256);hash=getproperty(q,field);_need(T._hex(hash)&&hash!=repeat("0",64),"component raw qualification/source/harness identity link absent");end
+    native=collect(q.native_jobs);other=collect(q.docs_and_containers)
+    _need(length(native)==6&&length(other)==2,"component exact eight qualification cells required")
+    for cell in vcat(native,other)
+        _fields(cell,(:name,:conclusion,:receipt_sha256,:log_sha256))
+        _need(cell.conclusion=="success"&&all(hash->T._hex(hash)&&hash!=repeat("0",64),(cell.receipt_sha256,cell.log_sha256)),"component qualification cell result/raw identity differs")
+    end
+    _need(Set(String(x.name) for x in native)==Set("Julia $v / $os" for v in ("1.12.6","1.13.1") for os in ("ubuntu-latest","windows-latest","macos-latest"))&&Set(String(x.name) for x in other)==Set(("Documentation build","Julia 1.12 deployment images")),"component exact eight qualification cell names required")
+    q
+end
 function _file_sha(path)
     _ordinary(path);_need(isfile(path)&&filesize(path)<=T.MAX_FILE,"bounded B data file required")
     context=SHA.SHA2_256_CTX();total=0
