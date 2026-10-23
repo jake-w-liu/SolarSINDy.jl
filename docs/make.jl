@@ -22,6 +22,7 @@ makedocs(
             "Completed-Source Minute Replay" => "completed-minute-replay.md",
             "Completed-Source dB/dt Replay" => "completed-source-dbdt.md",
             "Shared Completed-Label Events" => "completed-label-events.md",
+            "Completed-Source Refit Artifacts" => "completed-refit-artifacts.md",
             "Forecasting And Alarms" => "forecast-api.md",
             "Operational API" => "operational-api.md",
             "Super-Learner" => "superlearner-api.md",

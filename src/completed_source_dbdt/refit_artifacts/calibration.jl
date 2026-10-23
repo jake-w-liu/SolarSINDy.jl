@@ -58,7 +58,7 @@ end
 
 function _check_cal_rows(rows,sorted,input::FitInput,point::PointHandle,first_issue;reproduce=true)
     require(length(rows)==length(_data_rows(input))>0,"calibration chronology count differs")
-    previous=nothing;ids=String[];inputrows=_data_rows(input)
+    previous=nothing;ids=String[];inputrows=_data_rows(input);parts=_ridge_parts(point)
     for (i,row) in enumerate(rows)
         _schema(row,"cal_row");require(checked_integer(row["ordinal"],1,MAX_ROWS)==i,"calibration ordinal differs")
         issue=read_time_text(row["issue"]);ready=read_time_text(row["label_ready"])
@@ -70,6 +70,13 @@ function _check_cal_rows(rows,sorted,input::FitInput,point::PointHandle,first_is
         end
         y=read_float_bits(row["log_target"]);prediction=read_float_bits(row["prediction"]);scale=read_float_bits(row["scale"])
         require(scale>0 && isfinite(y-prediction) && float_bits((y-prediction)/scale)==row["score"],"saved signed score arithmetic differs")
+        if !reproduce
+            x,z=_prediction_inputs(parts,source["features"])
+            _check_prediction_bound(x,parts.center,parts.scale,parts.beta,z,prediction)
+            # Certify the current rounded implementation separately. Neither
+            # result replaces the authoritative original prediction/score bits.
+            _predict_encoded(parts,source["features"])
+        end
     end
     require(length(unique(ids))==length(ids),"duplicate calibration row id")
     for (i,row) in enumerate(sorted)

@@ -1034,6 +1034,41 @@ export provenance, static UQ/GP/GPD/threshold/UP numerical adapters and matched
 scientific replay remain separate stages; no scientific readiness is claimed.
 
 
-## Completed refit artifacts: verification plan
+## Completed refit artifacts synthetic R0/R1 verification
 
-Pre-edit651 checkout/filter hashes match exact combined6e8f0c46db68ba549d2ad7f7a16fc06564db9230. Independent V1 mathematical oracles and V2 nonzero source/fit/calibration literals are frozen before code. V2 has20 windows (8fit,9cal,3prediction), both layouts and37 observable integration-mutant signatures;20-window erratum7555e25e2368c0bac19a9e171c644fc7378b76a07c47394a220f7617d031fe59 preserves frozen prose bytes. Scalar/canonical/size/schema checks begin first. No new implementation test, native fit, strict-doc or full qualification result is yet claimed. Required later checks retain all original tolerances and prior suites; actual artifacts cannot be qualified by synthetic flags or arbitrary metadata.
+Verification is staged against frozen pre-code V1/V2 literals and independent
+exact-rational/high-precision derivations. Existing487port+541event assertions,
+reference bytes and floating tolerances remain unchanged; tiny numeric oracles
+use atol1e-13,rtol0. No actual data, model selection or scientific verdict is
+part of this verification.
+
+The preserved first ground11 development route genuinely parsed/audited1240
+synthetic vectors, sealed20windows, reconstructed8fit/9cal rows, performed ridge,
+independent QR/directed audits, point/cal publication and fresh complete-score
+load.32owned launches exited0 with exact source/input/runtime controls;682
+independent oracle/member checks pass(max discrepancy9.44e-16). It is not final
+qualification for subsequently corrected source.
+
+After fixes, both native1.12.6/1.13.1 focused runs pass1231assertions after the
+capability-aware test-only amendment:1028unchanged legacy assertions,201additive
+R1checks and2runtime metadata checks. All680source members and executable/BLAS
+pins remain stable. Earlier failures are retained: codec bounds, protocol input
+configuration, cached-kind bypass, foreign-marker cleanup, CLI macro parsing,
+residual feature-count discrimination, mixed wind/summary reason-order mismatch,
+and the warmed FTZ mode switch. The cold-only FTZ3pass did not prove warm-state
+enforcement; the full1215pass/1fail witness is preserved. Explicit dynamic mode
+checks now reject prediction, ridge proof and native creation. Optional hardware
+support is tested through supported rejection and unsupported gradual-positive
+branches with verified reset, without skipped tests or tolerance changes.
+
+Strict Documenter exports/doctests/warnonly=false passes with all14new exports
+documented; five upstream GeometryBasics compiler declaration warnings are
+preserved separately from zero Documenter warning/error lines.
+
+Final pending checks: bothlayout/runtime genuine positive chains and deterministic fit repetition;
+full37semantic fitter mutants with actual native producer/check paths and frozen
+quantitative cal signatures; request/chunk/null/boundary/forbidden-future cases;
+data-only ordinary-session/no-Git/foreign-OS loading; publication interruption and
+tamper matrix; valid scaled DAG/row resource qualification; examples and final
+strict docs. FullPkg,experiments,harness,canonicalH and all8CI are root-owned
+integration gates. Every synthetic provenance flag remains false for actual use.

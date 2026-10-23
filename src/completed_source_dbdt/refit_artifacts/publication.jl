@@ -27,6 +27,82 @@ function _same_common(context,producer::_Bundle)
     native=decode_canonical(producer.context);delete!(native,"kind_context")
     require(current==native,"published scientific common context differs from native producer")
 end
+
+function _validate_schedule_projection(rows,issues,protocol)
+    require(length(rows)==length(issues)>0,"sealed schedule/request issue count differs")
+    p=length(_spec(protocol)["feature_names"]);mixed=_spec(protocol)["layout"]=="mixed8"
+    reasons=("missing_ground_history","invalid_ground_history","missing_omni_history","invalid_omni_history","invalid_feature_summary")
+    for (row,issue) in zip(rows,issues)
+        _schema(row,"schedule_row");accepted=_bool(row["accepted"]);timing=CMR.issue_timing(issue,_policy(protocol))
+        require(row["row_id"]==_row_id(protocol,issue) && row["issue"]==time_text(issue) &&
+            row["ground_anchor"]==time_text(timing.latest_ground_center) && row["label_ready"]==time_text(timing.label_assumed_ready) &&
+            row["first_feedback"]==time_text(timing.first_scheduled_feedback) &&
+            row["omni_anchor_or_null"]==(mixed ? time_text(timing.latest_omni_arrival_start) : nothing),"sealed prospective row identity/clock differs")
+        sha_string(row["source_support_sha256"])
+        if accepted
+            require(row["reason"]=="complete" && length(_array(row["features_or_null"]))==p,"accepted feature projection differs")
+            foreach(read_float_bits,row["features_or_null"])
+        else
+            require(row["reason"] in reasons && row["features_or_null"]===nothing,"rejected feature projection differs")
+        end
+        unhashed=deepcopy(row);delete!(unhashed,"feature_row_sha256")
+        require(row["feature_row_sha256"]==digest(canonical_bytes(unhashed)),"sealed feature row digest differs")
+    end
+    nothing
+end
+
+function _validate_input_projection(protocol,k,accepted,excluded,schedule::ScheduleHandle,checker::_Bundle)
+    split=k["split"]
+    require(split==_split(protocol,split["name"]),"input split is not the exact declared protocol split")
+    start=read_time_text(split["issue_start_inclusive"]);stop=read_time_text(split["issue_stop_exclusive"])
+    boundary=read_time_text(split["label_ready_before"]);asof=read_time_text(split["target_admit_asof"])
+    scheduled=[row for row in _data_rows(schedule) if start<=read_time_text(row["issue"])<stop]
+    require(length(accepted)>=split["min_supervised_rows"] && length(accepted)+length(excluded)==length(scheduled),"input minima/complete cohort partition differs")
+    maps=Dict{String,Tuple{Bool,Any}}()
+    for (isaccepted,rows) in ((true,accepted),(false,excluded))
+        previous=nothing
+        for row in rows
+            _schema(row,isaccepted ? "fit_row" : "excluded_row")
+            id=sha_string(row["row_id"]);issue=read_time_text(row["issue"])
+            require(!haskey(maps,id) && (previous===nothing || previous<issue),"input partition duplicate/backward row")
+            previous=issue;maps[id]=(isaccepted,row)
+        end
+    end
+    eligible=0;notready=0
+    for prospective in scheduled
+        id=prospective["row_id"];require(haskey(maps,id),"scheduled source window was dropped from input")
+        admitted,row=maps[id];require(row["issue"]==prospective["issue"],"input row issue differs from sealed window")
+        feature=prospective["accepted"]===true;ready=read_time_text(prospective["label_ready"])
+        can_query=feature && ready<boundary
+        feature && !can_query && (notready+=1)
+        can_query && (eligible+=1)
+        if admitted
+            require(can_query && ready<=asof && row["label_ready"]==prospective["label_ready"] && row["target_admit_asof"]==split["target_admit_asof"] &&
+                row["feature_row_sha256"]==prospective["feature_row_sha256"] && row["features"]==prospective["features_or_null"],"supervised row violates strict source/feature/readiness identity")
+            sha_string(row["target_support_sha256"])
+            require(read_float_bits(row["target"])>=0 && read_float_bits(row["scale"])>0,"invalid supervised target/scale")
+            read_float_bits(row["log_target"])
+        elseif !feature
+            require(row["feature_status"]=="rejected" && row["label_status"]=="not_queried" && row["reason"]==prospective["reason"],"feature rejection partition differs")
+        elseif !can_query
+            require(row["feature_status"]=="accepted" && row["label_status"]=="not_queried" && row["reason"]=="split_not_strictly_ready","strict-readiness exclusion differs")
+        else
+            require(row["feature_status"]=="accepted" && row["label_status"]=="rejected" && row["reason"] in ("missing_ground_target","invalid_ground_target"),"target exclusion partition differs")
+        end
+    end
+    require(Set(keys(maps))==Set(row["row_id"] for row in scheduled),"input contains an unscheduled/out-of-split row")
+    rowpin=_ordered_digest([row["row_id"] for row in accepted])
+    datapin=_frame_digest("DBDTFITINPUT1",(protocol.sha256,_pin(schedule),_jsontext(split),
+        _frame_digest("DBDTACCEPTED1",_pack_rows(accepted)),_frame_digest("DBDTEXCLUDED1",_pack_rows(excluded))))
+    require(k["row_id_sha256"]==rowpin && k["input_data_sha256"]==datapin,"full supervised/excluded stream digest differs")
+    payload,_=_job_payload(checker);checks=payload["readiness_gate_checks"]
+    require(checks["checked_rows"]==length(scheduled) && checks["eligible_rows"]==length(accepted) && checks["excluded_readiness_rows"]==notready &&
+        checks["post_gate_target_rows"]==eligible && checks["pre_gate_target_lookups"]==0 && checks["failures"]==0,"independent full-cohort readiness counters differ")
+    nothing
+end
+function _validate_input_partition(input::FitInput,schedule::ScheduleHandle,checker::_Bundle)
+    _validate_input_projection(_bundle(input).protocol,_context(input)["kind_context"],_data_rows(input),_data_rows(input,"excluded"),schedule,checker)
+end
 function _referenced_job(reference,protocol,pins;independent=false,operation)
     _schema(reference,independent ? "independent_check_reference" : "native_receipt_reference")
     job=_as_job(reference["native_job_manifest_sha256"],protocol,pins,operation)
@@ -58,7 +134,7 @@ function _publish_native_job(directory,request,payload_chunks,internal,external,
     _publish_bundle(directory,protocol,"native_job",context,members,0;pins=p)
 end
 
-function _draft_from_job(job::_Bundle,pins)
+function _draft_from_job(job::_Bundle,pins;reconstruct_statistics=false)
     metadata,rows=_job_payload(job);require(rows!==nothing,"producer job requires bounded row payload")
     request=_member_json(job,"job.json");op=request["operation"];common=decode_canonical(job.context);delete!(common,"kind_context")
     protocol=job.protocol;members=Pair{String,String}[]
@@ -85,10 +161,15 @@ function _draft_from_job(job::_Bundle,pins)
         end
         push!(members,"fit-receipt.json"=>_jsontext(metadata))
         input=_load_input(_resolve(pins,request["input_manifest_pin_or_null"];directory=true);protocol,pins)
-        values=_input_values(input);Z=_independent_design(values.X,rows[1],rows[2]);A,b,_=_normal_statistics(Z,values.y,rows[1])
-        statistics=_native_statistics_bytes(A,b,_spec(protocol)["layout"])
-        require(digest(statistics)==metadata["diagnostic_payload_sha256"],"native as-solved statistics digest does not reconstruct")
-        chunks=(statistics,);rows=_data_rows(input)
+        if reconstruct_statistics
+            values=_input_values(input);Z=_independent_design(values.X,rows[1],rows[2]);A,b,_=_normal_statistics(Z,values.y,rows[1])
+            statistics=_native_statistics_bytes(A,b,_spec(protocol)["layout"])
+            require(digest(statistics)==metadata["diagnostic_payload_sha256"],"native as-solved statistics digest does not reconstruct")
+            chunks=(statistics,)
+        else
+            chunks=()
+        end
+        rows=_data_rows(input)
     elseif op=="calibrate"
         kind="calibration";_schema(metadata,"input_reference");chunks=_pack_rows(rows)
         pointpin=_deps(request)["point"];point=_load_point(_resolve(pins,pointpin;directory=true);pins,expected_role=nothing)
@@ -108,7 +189,9 @@ function _draft_from_job(job::_Bundle,pins)
     _Draft(_VERIFIED,kind,protocol,_jsontext(common;limit=MAX_METADATA_BYTES),_jsontext(metadata),chunks,Tuple(members),Int64(length(rows)))
 end
 function _producer_matches(draft,job,pins)
-    require(_draft_payload(draft)==_draft_payload(_draft_from_job(job,pins)),"draft differs from genuine native producer payload")
+    original=_draft_from_job(job,pins)
+    require(_draft_payload(draft)==_draft_payload(original),"draft differs from genuine native producer payload")
+    draft.kind=="calibration" && require(draft.members==original.members,"cal point reference/stable projection differs from native producer")
     nothing
 end
 
@@ -126,6 +209,8 @@ function _source_pair(protocol,pins,primary,checker)
         checked_integer(metadata[key],0,MAX_ROWS);checked_integer(payload[key],0,MAX_ROWS)
     end
     approved=[item for item in _spec(protocol)["source_permissions"] if item["disposition"]=="approved"]
+    source_os=_runtime_os(_member_json(producer,"native-receipt.json")["runtime"])
+    require(all(item->_absolute_for_os(item["path_or_null"],source_os),approved),"original source metadata path syntax differs from its producer OS")
     require(metadata["read_body_ids"]==[item["body_id"] for item in approved],"source audit opened-body list differs from approved descriptors")
     lastkey=nothing;ground=0;wind=0
     for row in rows
@@ -196,6 +281,8 @@ end
 function _publish_schedule(directory,draft::_Draft,primary,independent;pins)
     p=_pins(pins);producer,checker,m,rows=_schedule_pair(draft.protocol,p,primary,independent)
     require(draft.kind=="schedule","wrong schedule draft kind");_producer_matches(draft,producer,p)
+    issues=_feature_request(_member_json(producer,"job.json")["input_data_pin"],m["source_audit_pin"],p)
+    _validate_schedule_projection(rows,issues,draft.protocol)
     kind=Dict{String,Any}("issue_start_inclusive"=>first(rows)["issue"],"issue_stop_exclusive"=>time_text(CMR.shift(read_time_text(last(rows)["issue"]),60_000)),
         "scheduled_rows"=>length(rows),"accepted_features"=>m["accepted_features"],"rejected_features"=>m["rejected_features"])
     members=Pair{String,String}[_row_name(i)=>c for (i,c) in enumerate(draft.chunks)]
@@ -211,7 +298,7 @@ function _load_schedule(directory;protocol::RefitProtocol,source::AuditedSources
     _same_common(context,producer)
     handle=ScheduleHandle(_VERIFIED,b);require(_data_rows(handle)==rows && b.rows==length(rows),"schedule row bytes differ from native proof")
     issues=_feature_request(_member_json(producer,"job.json")["input_data_pin"],_pin(source),p)
-    require(_unpack_rows(_seal_schedule(source,issues,protocol;independent=true).chunks)==rows,"loaded schedule does not reconstruct from audited features")
+    _validate_schedule_projection(rows,issues,protocol)
     require(k["scheduled_rows"]==length(rows) && k["accepted_features"]==m["accepted_features"] && k["rejected_features"]==m["rejected_features"] &&
         k["issue_start_inclusive"]==first(rows)["issue"] && k["issue_stop_exclusive"]==time_text(CMR.shift(read_time_text(last(rows)["issue"]),60_000)),"schedule context differs")
     handle
@@ -239,6 +326,10 @@ function _publish_input(directory,draft::_Draft,primary,independent;pins)
     kind=Dict{String,Any}("split"=>m["split"],"input_data_sha256"=>m["input_data_sha256"],"row_id_sha256"=>m["row_id_sha256"],
         "scheduled_split_rows"=>m["supervised_rows"]+m["excluded_rows"],"supervised_rows"=>m["supervised_rows"],"excluded_rows"=>m["excluded_rows"],
         "min_label_ready_or_null"=>(isempty(ready) ? nothing : time_text(minimum(ready))),"max_label_ready_or_null"=>(isempty(ready) ? nothing : time_text(maximum(ready))))
+    source=open_audited_sources(_resolve(p,m["source_audit_pin"];directory=true);protocol=draft.protocol,pins=p)
+    schedule=_load_schedule(_resolve(p,m["schedule_manifest_sha256"];directory=true);protocol=draft.protocol,source,pins=p)
+    exclusions=_unpack_rows([last(pair) for pair in draft.members if startswith(first(pair),"excluded-")])
+    _validate_input_projection(draft.protocol,kind,rows,exclusions,schedule,checker)
     members=Pair{String,String}[_row_name(i)=>c for (i,c) in enumerate(draft.chunks)]
     append!(members,[p for p in draft.members if startswith(first(p),"excluded-")])
     append!(members,["native-input-audit.json"=>_jsontext(_native_reference(producer)),"independent-input-check.json"=>_jsontext(_independent_reference(checker))])
@@ -254,9 +345,10 @@ function _load_input(directory;protocol::RefitProtocol,pins)
     require(k["input_data_sha256"]==m["input_data_sha256"] && k["row_id_sha256"]==m["row_id_sha256"] && k["split"]==m["split"],"input context differs")
     source=open_audited_sources(_resolve(p,context["source_manifest_sha256_or_null"];directory=true);protocol,pins=p)
     schedule=_load_schedule(_resolve(p,context["schedule_manifest_sha256_or_null"];directory=true);protocol,source,pins=p)
-    rebuilt=_build_input(schedule,source,k["split"]["name"],protocol;independent=true)
     handle=FitInput(_VERIFIED,b)
-    require(_data_rows(handle)==_unpack_rows(rebuilt.chunks) && _data_rows(handle,"excluded")==_unpack_rows([last(pair) for pair in rebuilt.members if startswith(first(pair),"excluded-")]),"input partition bytes do not reconstruct")
+    original=_draft_from_job(producer,p)
+    require(_data_rows(handle)==_unpack_rows(original.chunks) && _data_rows(handle,"excluded")==_unpack_rows([last(pair) for pair in original.members if startswith(first(pair),"excluded-")]),"input partition bytes differ from original native producer")
+    _validate_input_partition(handle,schedule,checker)
     require(k["supervised_rows"]==length(_data_rows(handle))==b.rows && k["excluded_rows"]==length(_data_rows(handle,"excluded")) &&
         k["scheduled_split_rows"]==k["supervised_rows"]+k["excluded_rows"],"input context counts differ")
     for key in ("supervised_rows","excluded_rows","scheduled_split_rows");checked_integer(k[key],0,MAX_ROWS);end
@@ -283,6 +375,7 @@ function _point_proof(draft,primary,independent,pins)
         payload["input_data_sha256"]==receipt["input_data_sha256"] && payload["fit_receipt_sha256"]==digest(_jsontext(receipt)) &&
         payload["model_payload_sha256"]==receipt["model_payload_sha256"] && payload["preprocessing_sha256"]==receipt["preprocessing_sha256"],"native independent fit graph differs")
     require(payload["method"]=="augmented_qr_directed_inverse_residual_v1" && payload["precision_bits"]==512 && payload["toy_oracle_sha256"]==_TOY_ORACLE_SHA,"independent fit method/oracle differs")
+    _fit_diagnostic_sanity(payload,draft.rows,length(_spec(protocol)["feature_names"]))
     producer,checker,payload
 end
 
@@ -397,8 +490,7 @@ function load_calibration(directory;point::PointHandle,pins,first_issue)
     handle=CalHandle(_VERIFIED,b);rows=_data_rows(handle);sorted=_data_rows(handle,"sorted")
     require(rows==_unpack_rows(draft.chunks) && b.rows==length(rows) && _member_json(b,"point-reference.json")==_draft_member(draft,"point-reference.json") &&
         _member_json(b,"input-reference.json")==_input_reference(input),"published calibration differs from native producer")
-    current=_draft_common(protocol,"load_cal_check";source=context["source_manifest_sha256_or_null"],schedule=context["schedule_manifest_sha256_or_null"])
-    same_runtime=current["runtime_id"]==context["runtime_id"]
+    same_runtime=_same_numeric_runtime(context)
     _check_cal_rows(rows,sorted,input,point,first_issue;reproduce=same_runtime)
     require(k["chronological_data_sha256"]==payload["chronological_data_sha256"]==_frame_digest("DBDTCALROWS1",draft.chunks) &&
         k["sorted_projection_sha256"]==payload["sorted_projection_sha256"]==_frame_digest("DBDTCALSORTED1",_pack_rows(sorted)) &&

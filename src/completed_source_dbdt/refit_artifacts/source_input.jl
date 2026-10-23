@@ -81,24 +81,39 @@ function _feature_row(source::AuditedSources,index,issue::DateTime;independent=f
             push!(rates,rate)
         end
         if complete
-            average=mean(rates);deviation=std(rates);peak=maximum(rates)
-            if all(isfinite,(average,deviation))
-                ground11=vec(CF.feature_matrix([issue],[last(rates)],[average],[peak],[deviation]))
-                if mode=="ground11"
-                    features=ground11;accepted=true;reason="complete"
-                elseif !haskey(wind,timing.latest_omni_arrival_start)
-                    reason="missing_omni_history"
+            # Match the declared admission order independently: wind presence/
+            # validity precedes summary computation for mixed8. Product overflow
+            # is a feature-summary failure, not an invalid finite wind vector.
+            wind_values=nothing;wind_ready=true
+            if mode=="mixed8"
+                if !haskey(wind,timing.latest_omni_arrival_start)
+                    wind_ready=false;reason="missing_omni_history"
                 else
-                    v,bz,by,n=wind[timing.latest_omni_arrival_start]
-                    if v>=0 && n>=0 && isfinite(v*max(-bz,0.0))
-                        features=[last(rates),average,peak,deviation,v,bz,max(-bz,0.0),v*max(-bz,0.0)]
-                        accepted=true;reason="complete"
+                    wind_values=wind[timing.latest_omni_arrival_start]
+                    v,bz,by,n=wind_values
+                    (v<0 || n<0) && (wind_ready=false;reason="invalid_omni_history")
+                end
+            end
+            if wind_ready
+                average=mean(rates);deviation=std(rates)
+                if !all(isfinite,(average,deviation))
+                    reason="invalid_feature_summary"
+                else
+                    peak=maximum(rates)
+                    if mode=="ground11"
+                        ground11=vec(CF.feature_matrix([issue],[last(rates)],[average],[peak],[deviation]))
+                        features=ground11;accepted=true;reason="complete"
                     else
-                        reason="invalid_omni_history"
+                        v,bz,by,n=wind_values;south=max(-bz,0.0);coupling=v*south
+                        if !isfinite(coupling)
+                            reason="invalid_feature_summary"
+                        else
+                            ground11=vec(CF.feature_matrix([issue],[last(rates)],[average],[peak],[deviation]))
+                            features=[last(rates),average,peak,deviation,v,bz,south,coupling]
+                            accepted=true;reason="complete"
+                        end
                     end
                 end
-            else
-                reason="invalid_feature_summary"
             end
         end
     end
@@ -234,6 +249,7 @@ function _audit_source_bodies(protocol::RefitProtocol;independent=false)
         wind=format=="dbdt_synthetic_arrival_wind_v1"
         require(!wind || spec["layout"]=="mixed8","ground11 source audit cannot open wind")
         path=permission["path_or_null"];pin=permission["sha256_or_null"]
+        require(isabspath(path) && !islink(path) && isfile(path),"active source audit requires an ordinary current-host absolute approved path")
         bytes=_guard_file(path,pin)
         require(length(bytes)==permission["bytes_or_null"],"source descriptor byte count differs")
         controls[path]=pin;body=decode_canonical(bytes)

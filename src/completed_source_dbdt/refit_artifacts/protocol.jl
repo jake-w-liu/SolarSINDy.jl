@@ -34,6 +34,13 @@ _jsonbytes(value) = Vector{UInt8}(codeunits(value))
 _bool(value) = (require(value isa Bool,"expected Bool"); value)
 _nullable_sha(value) = value===nothing ? nothing : sha_string(value)
 _gitsha(value) = (text=bounded_string(value;limit=40);require(occursin(r"^[0-9a-f]{40}$",text),"invalid Git identity");text)
+function _absolute_for_os(path,os)
+    path isa AbstractString || return false
+    all(c->!iscntrl(c),path) || return false
+    os=="NT" ? occursin(r"^[A-Za-z]:[\\/]",path) :
+        os in ("Linux","Darwin") ? (startswith(path,"/") && !startswith(path,"//")) : false
+end
+_portable_absolute(path)=_absolute_for_os(path,"NT") || _absolute_for_os(path,"Linux")
 
 function _array(value;maximum=MAX_ARRAY,nonempty=false)
     require(value isa AbstractVector,"expected array")
@@ -58,7 +65,7 @@ function _permissions(value, station, ground_product, wind_product)
         identifier(item["format"])
         if item["disposition"]=="approved"
             path=bounded_string(item["path_or_null"];nonempty=true)
-            require(isabspath(path),"approved source path must be absolute")
+            require(_portable_absolute(path),"approved source metadata path must have supported absolute syntax")
             checked_integer(item["bytes_or_null"],1,Int64(16)*1024^3)
             sha_string(item["sha256_or_null"])
             require(item["format"] in ("dbdt_synthetic_ground_vectors_v1","dbdt_synthetic_arrival_wind_v1"),"actual source formats are unimplemented")

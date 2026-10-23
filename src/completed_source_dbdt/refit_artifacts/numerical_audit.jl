@@ -61,6 +61,44 @@ function _interval_record(x::_Iv,precision_bits)
     Dict{String,Any}("codec"=>"dyadic_interval_v1","lower_dyadic"=>_dyadic(x.lo),
         "upper_dyadic"=>_dyadic(x.hi),"precision_bits"=>precision_bits)
 end
+function _read_dyadic(value,bits)
+    text=bounded_string(value;limit=160,nonempty=true)
+    text=="0p0" && return BigFloat(0;precision=bits)
+    require(occursin(r"^-?[1-9a-f][0-9a-f]*p-?(0|[1-9][0-9]*)$",text),"invalid dyadic diagnostic grammar")
+    parts=split(text,'p');mantissa_text=first(parts);digits=startswith(mantissa_text,"-") ? mantissa_text[2:end] : mantissa_text
+    require(length(digits)<=128,"diagnostic mantissa bound exceeded")
+    mantissa=parse(BigInt,mantissa_text;base=16);require(isodd(mantissa),"dyadic mantissa must be odd")
+    exponent=tryparse(Int,last(parts));require(exponent!==nothing && abs(BigInt(exponent))<=16384,"diagnostic exponent bound exceeded")
+    number=setprecision(BigFloat,bits) do
+        ldexp(BigFloat(mantissa),exponent)
+    end
+    require(isfinite(number) && _dyadic(number)==text,"noncanonical/nonfinite dyadic diagnostic")
+    number
+end
+function _read_interval_record(value)
+    _schema(value,"dyadic_interval")
+    require(value["codec"]=="dyadic_interval_v1","unsupported diagnostic interval codec")
+    bits=checked_integer(value["precision_bits"],256,512)
+    require(bits in (256,512),"unsupported diagnostic precision")
+    lo=_read_dyadic(value["lower_dyadic"],bits);hi=_read_dyadic(value["upper_dyadic"],bits)
+    require(lo<=hi,"reversed diagnostic interval")
+    _Iv(lo,hi)
+end
+function _fit_diagnostic_sanity(payload,n,p)
+    checked_integer(payload["precision_bits"],512,512)
+    eta=_read_interval_record(payload["backward_eta"]);condition=_read_interval_record(payload["condition_estimate"])
+    forward=_read_interval_record(payload["forward_enclosure"]);residual=_read_interval_record(payload["normal_residual"])
+    require(all(x->x.lo>=0,(eta,condition,forward,residual)) && condition.hi>=1,"invalid nonnegative fit diagnostic bounds")
+    setprecision(BigFloat,512) do
+        u=_iv(BigFloat(2)^(-53));k=n+2p+4
+        limit=_mul(_iv(8),_div(_mul(_iv(k),u),_sub(_iv(1),_mul(_iv(k),u))))
+        require(eta.hi<=limit.lo,"saved backward residual exceeds frozen feature-count gate")
+        product=_mul(condition,eta);require(product.hi<1,"saved condition/residual product is not below1")
+        required=_div(_mul(_iv(2),product),_sub(_iv(1),product))
+        require(forward.hi>=required.hi && forward.hi<=_down(()->BigFloat(1)/BigFloat(10)^6),"saved forward enclosure is insufficient/above frozen cap")
+    end
+    nothing
+end
 
 function _prediction_enclosure(x,mu,scale,beta,z,prediction,bits)
     setprecision(BigFloat,bits) do
@@ -81,6 +119,7 @@ function _prediction_enclosure(x,mu,scale,beta,z,prediction,bits)
     end
 end
 function _check_prediction_bound(x,mu,scale,beta,z,prediction)
+    require(!Base.get_zero_subnormals(),"flush-to-zero arithmetic is unsupported")
     require(nextfloat(0.0)!=0 && nextfloat(0.0)*1.0==nextfloat(0.0),"flush-to-zero arithmetic is unsupported")
     low=_prediction_enclosure(x,mu,scale,beta,z,prediction,256)
     high=_prediction_enclosure(x,mu,scale,beta,z,prediction,512)
@@ -117,6 +156,7 @@ function _directed_system(Z,y,weights)
     A,b
 end
 function _ridge_enclosure(Z,y,weights,beta,independent_qr,bits)
+    require(!Base.get_zero_subnormals(),"ridge proof requires gradual underflow")
     setprecision(BigFloat,bits) do
         A,b=_directed_system(Z,y,weights);p=length(beta);n=length(y)
         midpointA=[(v.lo+v.hi)/2 for v in A];midpointb=[(v.lo+v.hi)/2 for v in b]
@@ -135,7 +175,8 @@ function _ridge_enclosure(Z,y,weights,beta,independent_qr,bits)
             return (;eta=_iv(0),condition,forward=_iv(0),residual)
         end
         require(denominator.lo>0,"backward-error denominator is not positive")
-        eta=_div(residual,denominator);u=_iv(BigFloat(2)^(-53));k=n+2p+4
+        # p here is the feature count; the design has m=p+1 coefficients.
+        eta=_div(residual,denominator);u=_iv(BigFloat(2)^(-53));k=n+2*(p-1)+4
         gamma=_div(_mul(_iv(k),u),_sub(_iv(1),_mul(_iv(k),u)))
         require(eta.hi<=_mul(_iv(8),gamma).lo,"ridge backward error exceeds frozen bound")
         product=_mul(condition,eta);require(product.hi<1,"condition/backward-error product is not below1")

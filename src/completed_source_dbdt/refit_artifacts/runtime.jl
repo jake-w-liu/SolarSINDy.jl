@@ -88,11 +88,14 @@ function _library_text(handle,names)
     end
     fail("BLAS does not expose the required verified identity")
 end
-function _inspect_runtime(argv)
-    require(Threads.nthreads()==1 && BLAS.get_num_threads()==1,"native fitting/checking requires one Julia/BLAS thread")
-    require(get(ENV,"OMP_NUM_THREADS","")=="1","OMP_NUM_THREADS must be explicitly1")
-    require(VERSION in (v"1.12.6",v"1.13.1"),"unsupported synthetic native Julia version")
-    require(Base.JLOptions().use_compiled_modules==0 && Base.JLOptions().use_pkgimages==0,"native job requires compiled-modules=no/pkgimages=no")
+function _inspect_runtime(argv;native=true)
+    if native
+        require(!Base.get_zero_subnormals(),"native job requires gradual underflow")
+        require(Threads.nthreads()==1 && BLAS.get_num_threads()==1,"native fitting/checking requires one Julia/BLAS thread")
+        require(get(ENV,"OMP_NUM_THREADS","")=="1","OMP_NUM_THREADS must be explicitly1")
+        require(VERSION in (v"1.12.6",v"1.13.1"),"unsupported synthetic native Julia version")
+        require(Base.JLOptions().use_compiled_modules==0 && Base.JLOptions().use_pkgimages==0,"native job requires compiled-modules=no/pkgimages=no")
+    end
     libraries=BLAS.get_config().loaded_libs
     active=filter(lib->lib.interface==(Base.USE_BLAS64 ? :ilp64 : :lp64),libraries)
     require(length(active)==1,"native BLAS must have one unambiguous active backend")
@@ -105,21 +108,50 @@ function _inspect_runtime(argv)
     arguments=String[bounded_string(v;nonempty=true) for v in _array(argv;nonempty=true)]
     require(isabspath(first(arguments)) && _stream_sha(first(arguments))==_stream_sha(executable),"native executable argument differs")
     Dict{String,Any}("julia_version"=>string(VERSION),"executable_sha256"=>_stream_sha(executable),
-        "architecture"=>string(Sys.ARCH),"argv"=>arguments,
+        "architecture"=>string(Sys.ARCH)*"/"*string(Sys.KERNEL),"argv"=>arguments,
         "julia_project_sha256"=>_stream_sha(joinpath(_PACKAGE_ROOT,"Project.toml")),
         "julia_manifest_sha256"=>_stream_sha(joinpath(_PACKAGE_ROOT,"Manifest.toml")),
         "blas_vendor"=>"OpenBLAS/"*String(library.interface),"blas_version"=>version*";core="*core,
-        "blas_library_sha256"=>_stream_sha(path),"blas_threads"=>1,"omp_threads"=>1,
-        "rng_kind"=>"none","rng_seed"=>0,"compiled_modules"=>false,"pkgimages"=>false)
+        "blas_library_sha256"=>_stream_sha(path),"blas_threads"=>BLAS.get_num_threads(),
+        "omp_threads"=>something(tryparse(Int,get(ENV,"OMP_NUM_THREADS","")),0),
+        "rng_kind"=>"none","rng_seed"=>0,"compiled_modules"=>Base.JLOptions().use_compiled_modules!=0,
+        "pkgimages"=>Base.JLOptions().use_pkgimages!=0)
+end
+
+function _runtime_os(runtime)
+    tag=bounded_string(runtime["architecture"];nonempty=true)
+    require(tag in ("x86_64/NT","x86_64/Linux","aarch64/Linux","x86_64/Darwin","aarch64/Darwin"),"unsupported/ambiguous recorded architecture and OS")
+    last(split(tag,'/'))
+end
+function _ownership_check(runtime,ownership,cleanup)
+    os=_runtime_os(runtime)
+    expected=os=="NT" ? ("CREATE_SUSPENDED -> AssignProcessToJobObject -> ResumeThread","private Windows Job Object closed with KILL_ON_JOB_CLOSE") :
+        ("start_new_session=True","owned POSIX session killed after stage")
+    require((ownership,cleanup)==expected,"unsupported, mixed, unowned or wrong-OS native ownership tuple")
+    nothing
+end
+function _same_numeric_runtime(context)
+    # This is a diagnostic choice, not a creation credential. A normal loader
+    # can run without Git or native launch flags. Unsupported current identity
+    # selects foreign arithmetic checks, never a fabricated matching runtime.
+    argv=[joinpath(Sys.BINDIR,Sys.iswindows() ? "julia.exe" : "julia")]
+    try
+        runtime=_inspect_runtime(argv;native=false)
+        _runtime_id(runtime)==context["runtime_id"]
+    catch error
+        error isa InterruptException && rethrow()
+        false
+    end
 end
 
 function _validate_runtime(runtime)
     _schema(runtime,"runtime")
     require(runtime["julia_version"] in ("1.12.6","1.13.1"),"unsupported native runtime version")
     for name in ("executable_sha256","julia_project_sha256","julia_manifest_sha256","blas_library_sha256");sha_string(runtime[name]);end
-    identifier(runtime["architecture"]);bounded_string(runtime["blas_vendor"];nonempty=true);bounded_string(runtime["blas_version"];nonempty=true)
+    os=_runtime_os(runtime);bounded_string(runtime["blas_vendor"];nonempty=true);bounded_string(runtime["blas_version"];nonempty=true)
     argv=_array(runtime["argv"];nonempty=true)
-    require(all(v->v isa String && ncodeunits(v)<=MAX_STRING_BYTES,argv) && isabspath(first(argv)),"invalid absolute native argv")
+    require(all(v->v isa String && ncodeunits(v)<=MAX_STRING_BYTES,argv) && _absolute_for_os(first(argv),os),"invalid recorded absolute native argv for its OS")
+    require(os=="NT" ? endswith(lowercase(first(argv)),"julia.exe") : endswith(first(argv),"/julia"),"recorded native executable basename differs")
     for flag in ("--startup-file=no","--compiled-modules=no","--pkgimages=no","--threads=1")
         require(count(==(flag),argv)==1,"native required option is absent/duplicated")
     end
@@ -193,7 +225,7 @@ function _native_receipt_check(bundle::_Bundle,pins)
     require(receipt["runtime"]==request["required_runtime"],"native runtime/argv is not the caller-requested identity")
     require(receipt["argv_sha256"]==digest(canonical_bytes(receipt["runtime"]["argv"])) && receipt["runner_sha256"]==_OWNED_RUNNER_SHA,"native invocation/runner pin differs")
     require(checked_integer(receipt["native_exit"],0,0)==0 && receipt["timed_out"]===false && internal["completed"]===true,"native job did not succeed")
-    require(receipt["ownership"]=="CREATE_SUSPENDED -> AssignProcessToJobObject -> ResumeThread" && receipt["descendant_cleanup"]=="private Windows Job Object closed with KILL_ON_JOB_CLOSE","unsupported or incomplete reviewed ownership receipt")
+    _ownership_check(receipt["runtime"],receipt["ownership"],receipt["descendant_cleanup"])
     require(read_time_text(receipt["started_utc"])<=read_time_text(receipt["finished_utc"]),"native receipt clock runs backwards")
     controls=_controls(receipt["controls_before_sha256"])
     require(controls==_controls(receipt["controls_after_sha256"]),"native guarded inputs/source changed")

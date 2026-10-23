@@ -1,4 +1,4 @@
-function _input_values(input::FitInput)
+function _input_values(input::FitInput;recompute_logs=false)
     rows=_data_rows(input);require(length(rows)==_bundle(input).rows && !isempty(rows),"fit input row count differs")
     p=length(_spec(_bundle(input).protocol)["feature_names"])
     X=Matrix{Float64}(undef,length(rows),p);y=Vector{Float64}(undef,length(rows))
@@ -11,7 +11,7 @@ function _input_values(input::FitInput)
         for j in 1:p;X[i,j]=read_float_bits(values[j]);end
         target=read_float_bits(row["target"]);require(target>=0,"negative target")
         y[i]=read_float_bits(row["log_target"])
-        require(float_bits(log1p(target))==row["log_target"],"supervised log target does not reconstruct")
+        recompute_logs && require(float_bits(log1p(target))==row["log_target"],"supervised log target does not reconstruct")
         require(read_float_bits(row["scale"])>0,"nonpositive score scale")
     end
     require(length(unique(ids))==length(ids),"duplicate supervised row id")
@@ -114,12 +114,16 @@ function _ridge_parts(point::PointHandle)
     (;center,scale,beta)
 end
 
-function _predict_encoded(parts,features)
+function _prediction_inputs(parts,features)
     x=read_float_bits.(_array(features));p=length(parts.center)
     require(length(x)==p,"prediction feature dimension differs")
     differences=x.-parts.center;require(all(isfinite,differences),"prediction subtraction overflow")
     z=differences./parts.scale;require(all(isfinite,z),"prediction normalization overflow")
     products=z.*parts.beta[2:end];require(all(isfinite,products),"prediction product overflow")
+    x,z
+end
+function _predict_encoded(parts,features)
+    x,z=_prediction_inputs(parts,features)
     prediction=dot(vcat(1.0,z),parts.beta)
     require(isfinite(prediction),"prediction reduction overflow")
     _check_prediction_bound(x,parts.center,parts.scale,parts.beta,z,prediction)

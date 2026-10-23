@@ -176,7 +176,7 @@ function _execute_request(request,protocol,pins,runtime)
             return _draft_payload(fit_point(fittedinput,recipe))
         end
         producer=_load_native_job(_resolve(pins,deps["producer"];directory=true);protocol,pins,expected_operation="fit_ridge")
-        draft=_draft_from_job(producer,pins);diagnostics=check_ridge_fit(draft,fittedinput;protocol)
+        draft=_draft_from_job(producer,pins;reconstruct_statistics=true);diagnostics=check_ridge_fit(draft,fittedinput;protocol)
         receipt=_draft_member(draft,"fit-receipt.json")
         payload=Dict{String,Any}("schema"=>"dbdt_completed_fit_independent_check_v1","protocol_sha256"=>protocol.sha256,
             "input_manifest_sha256"=>input,"input_data_sha256"=>datapin,"producer_fit_job_manifest_sha256"=>producer.manifest_sha256,
