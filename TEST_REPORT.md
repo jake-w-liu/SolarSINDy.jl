@@ -829,3 +829,47 @@ scalar predicate produces the exact parent module bytes and is detected by
 the new assertions on both runtimes. Existing tolerances and fixtures remain
 unchanged. These checks precede full package/experiment/harness and native CI
 qualification, and make no forecast-skill or paper-readiness claim.
+
+## Duration forcing independent verification (23 October 2026)
+
+Pre-code oracle SHA256:5d0f7c930b59e7e19d2597bdc4187e34434478ecb3f2d8684e96d0f0a22de344.
+Contract SHA256:c9767df720c48c298ff29493e351cdd7edb32d5acf201a612508d0afd5f187c6.
+
+Initial focused native tests and synthetic fit/save/reload/example pass on both
+Julia1.12.6 and1.13.1. They check literal risk/flip counts, beta hazards, censored
+runs, unknown ages49, mature-receipt equality/+1ms, stable repeated quantile edges,
+duplicate first-S marks, unavailable support, exact rational path mass, Brownian
+mixture moments and explicit target observation noise. A separate100-digit
+Decimal convolution oracle supplies h4/h6 coefficients and synthetic NNLS targets.
+
+The current expanded test source additionally compares all1093 positive leaves
+with direct full-A per-branch moments and the independent hold-q delta formula,
+retaining1639 expanded nodes and four duplicate-centroid mark identities. It also
+checks unequal mark masses, future/current mutation invariance, caller-pinned
+artifact loading, rehashed semantic corruption, failed completion quarantine and
+post-load source mutation. V4 passed all46745 assertions per runtime
+(including the pinned pre-code oracle digest) on Julia1.12.6 and1.13.1; the
+synthetic example passed on both. Independent witnesses detected all13 deliberate
+mutations, and the strict manual passed. The remaining test-only dynamic-module
+binding warning was corrected using invokelatest, requiring the final V5 focused
+run and repeated guarded controls. No numerical contract or tolerance changed.
+
+The new B affine recurrence uses predeclared atol5e-11,rtol5e-14 against full-A
+means/covariances on the declared synthetic range. Original A numerical oracles,
+solver tolerances and actual stage artifacts are unchanged. No actual dataset,
+new held-out outcome, actual fit or calibrated/skill/novelty verdict is involved.
+Full Pkg.test, actual examples/experiments.jl, unchanged canonical harness, strict
+manual and all native CI/image gates remain required before release. Resource
+profiles will use declared synthetic workloads after correctness and scheduling
+clearance; no actual hotspot or optimization claim is made.
+
+An independent artifact review reproduced acceptance of600000 combined risks
+despite the500000-hour source limit. A separately frozen counting proof excludes
+the first unknown-age and final right-censored rows, bounding total risks
+by499998. Model construction, validation, saving and caller-pinned loading now
+apply this bound; direct and self-consistently rehashed artifact regressions
+exercise it. The aggregate check does not certify chronology or provenance.
+The pre-edit literal count oracle is pinned in test/duration_forcing/. Fresh
+focused V6,14 mutation controls and strict manual/resource gates must qualify
+this repaired source; original A and pre-code B numerical expectations remain
+unchanged.

@@ -16,6 +16,7 @@ makedocs(
         "API Reference" => [
             "Core API" => "api.md",
             "Interval-Mean Forecaster" => "interval-mean-forecaster.md",
+            "Duration-Conditioned Forcing" => "duration-conditioned-forcing.md",
             "Published Lund Dst Reference" => "lund-dst-reference.md",
             "Completed-Source Minute Replay" => "completed-minute-replay.md",
             "Forecasting And Alarms" => "forecast-api.md",
