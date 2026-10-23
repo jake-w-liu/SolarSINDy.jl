@@ -199,3 +199,6 @@ include(joinpath(@__DIR__, "lund_dst_2002_reference.jl"))
 run_lund_dst_2002_reference()
 include(joinpath(@__DIR__, "completed_minute_replay_synthetic.jl"))
 run_completed_minute_replay_synthetic()
+
+include(joinpath(@__DIR__, "completed_source_dbdt_synthetic.jl"))
+run_synthetic_completed_source_replay()

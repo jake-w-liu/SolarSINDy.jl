@@ -2,6 +2,7 @@ using Test
 using SolarSINDy
 include("test_lund_dst_2002.jl")
 include("test_completed_minute_replay.jl")
+include("completed_source_dbdt/runtests.jl")
 using LinearAlgebra
 using Statistics
 using Random
