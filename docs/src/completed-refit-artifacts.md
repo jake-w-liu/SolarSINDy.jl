@@ -55,6 +55,9 @@ overflow and timeouts fail the route while retaining bounded logs and owned
 process receipts.
 Partial writes and stream I/O errors also fail the capture process, even if the
 underlying Git command has already exited successfully.
+Native requests also validate every field before use, including the request's
+own runtime types and which recipe/source pins must be null. Data-only loading
+applies the same recorded-field grammar without opening recorded work paths.
 
 Only the two synthetic source formats are accepted. A source audit binds approved
 body bytes, native parsing and an independent parser reconstruction. A feature

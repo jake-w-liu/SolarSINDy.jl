@@ -82,7 +82,7 @@ function _split_request(pin,schedulepin,pins)
 end
 
 function _job_common(request,protocol,pins,runtime)
-    op=request["operation"];input=request["input_manifest_pin_or_null"]
+    op=_validate_job_request(request,protocol;runtime);input=request["input_manifest_pin_or_null"]
     if op in ("source_audit","source_independent_audit")
         return _common_context(protocol,op,runtime)
     end

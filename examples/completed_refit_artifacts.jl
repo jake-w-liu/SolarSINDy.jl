@@ -25,7 +25,9 @@ function run_example(;fixture_root=nothing)
         # Fixed research fixture plumbing attaches the already committed schedule.
         # It adds no public constructor or arbitrary feature/center callback.
         schedule_pin=R._context(point)["schedule_manifest_sha256_or_null"]
-        schedule=R._load_schedule(pins[schedule_pin];protocol,pins)
+        source_pin=R._context(point)["source_manifest_sha256_or_null"]
+        source=R.open_audited_sources(pins[source_pin];protocol,pins)
+        schedule=R._load_schedule(pins[schedule_pin];protocol,source,pins)
         predictions=R.predict_log(point,schedule;protocol)
         bridge=R.completed_calibration(cal;first_issue)
         @assert length(predictions)==20 && all(row->row.accepted,predictions)

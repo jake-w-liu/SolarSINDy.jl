@@ -206,6 +206,41 @@ function _deps(request)
     require(issorted(names),"dependency role map is not canonical")
     result
 end
+function _validate_job_request(request,protocol::RefitProtocol;runtime=nothing)
+    _schema(request,"job_request")
+    require(request["schema"]=="dbdt_completed_job_request_v1","native request schema differs")
+    identifier(request["job_id"])
+    op=bounded_string(request["operation"];nonempty=true)
+    require(op in OPERATIONS && request["evidence_mode"]=="synthetic_only" &&
+        sha_string(request["protocol_pin"])==protocol.sha256,"unsupported native request")
+    input=_nullable_sha(request["input_manifest_pin_or_null"])
+    sha_string(request["input_data_pin"])
+    recipe=_nullable_sha(request["recipe_pin_or_null"])
+    permission=_nullable_sha(request["source_permission_pin_or_null"])
+    require(op=="source_audit" ? input===nothing : input!==nothing,"native input manifest null applicability differs")
+    require(op in ("fit_ridge","fit_independent_check") ? recipe!==nothing : recipe===nothing,
+        "native recipe pin null applicability differs")
+    if op in ("source_audit","source_independent_audit")
+        expected=digest(canonical_bytes(_spec(protocol)["source_permissions"];limit=MAX_METADATA_BYTES))
+        require(permission==expected,"native source permission pin differs")
+    else
+        require(permission===nothing,"native source permission pin must be null for this operation")
+    end
+    required=request["required_runtime"]
+    _validate_runtime(required)
+    if runtime!==nothing
+        _validate_runtime(runtime)
+        require(required==runtime,"native inspected runtime differs from request")
+    end
+    work=bounded_string(request["work_directory"];nonempty=true)
+    require(_absolute_for_os(work,_runtime_os(required)),"invalid recorded native work directory for its OS")
+    deps=_deps(request)
+    expected=op=="fit_independent_check" ? Set(["producer"]) : op=="calibrate" ? Set(["point"]) :
+        op=="cal_independent_check" ? Set(["point","producer"]) : Set{String}()
+    require(Set(keys(deps))==expected,"native dependency roles differ")
+    op
+end
+
 function _guard_file(path,pin;limit=MAX_MEMBER_BYTES)
     bytes=bounded_read(path;limit)
     require(digest(bytes)==sha_string(pin),"caller-pinned file bytes differ")
@@ -214,7 +249,7 @@ end
 
 function _native_receipt_check(bundle::_Bundle,pins)
     require(bundle.kind=="native_job","expected committed native job")
-    request=_member_json(bundle,"job.json");_schema(request,"job_request")
+    request=_member_json(bundle,"job.json");_validate_job_request(request,bundle.protocol)
     receiptbytes=_member(bundle,"native-receipt.json");receipt=decode_canonical(receiptbytes);_schema(receipt,"native_receipt")
     internal=_member_json(bundle,"internal-receipt.json");_schema(internal,"job_internal_receipt")
     context=decode_canonical(bundle.context);k=context["kind_context"];op=k["operation"]

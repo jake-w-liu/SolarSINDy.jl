@@ -427,6 +427,39 @@ _gbm_rmse(a, b) = sqrt(mean(abs2, a .- b))
         end
     end
 
+    @testset "Boosted backend range rejects invalid fits and predictions" begin
+        X = reshape(Float64.(1:128) ./ 128, 128, 1)
+        y = 2 .* vec(X) .- 1
+        options = (max_depth=2, nrounds=2, min_weight=1, nbins=8)
+        model = gbm_fit(X, y; options...)
+        expected = gbm_predict(model, X)
+        @test all(isfinite, expected)
+        @test maximum(expected) > minimum(expected)
+
+        for name in (:eta, :min_weight, :lambda, :L2, :gamma), value in (Inf, -Inf, NaN)
+            invalid = merge(options, NamedTuple{(name,)}((value,)))
+            @test_throws ArgumentError gbm_fit(X, y; invalid...)
+        end
+        @test_throws ArgumentError gbm_fit(X, y; merge(options, (eta=1e100,))...)
+        for factor in (1e40, 1e100, 1e-100)
+            @test_throws ArgumentError gbm_fit(X, y .* factor; options...)
+        end
+        zero_model = gbm_fit(X, zeros(128); options...)
+        @test all(iszero, gbm_predict(zero_model, X))
+
+        nonfinite = deepcopy(model)
+        nonfinite.trees[1].pred[1, 1] = Inf32
+        @test_throws ArgumentError gbm_predict(nonfinite, X)
+
+        overflowing = deepcopy(model)
+        for tree in overflowing.trees
+            tree.pred .= floatmax(Float32)
+        end
+        @test all(tree -> all(isfinite, tree.pred), overflowing.trees)
+        @test_throws ArgumentError gbm_predict(overflowing, X)
+        @test gbm_predict(model, X) == expected
+    end
+
     @testset "Boosted fit and prediction validation" begin
         rng = MersenneTwister(19)
         X = rand(rng, 128, 3)

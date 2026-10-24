@@ -1,5 +1,19 @@
 # Candidate implementation notes
 
+## Boosted numerical range correction (24 October 2026)
+
+The pinned EvoTrees CPU backend stores predictions in Float32. Generated-data
+regressions reproduced accepted fits containing nonfinite leaves for large
+finite learning rates and targets, and nonzero target loss below that range.
+The maintained wrapper now requires finite scalar hyperparameters and targets
+that remain finite and preserve nonzero values in Float32. It rejects nonfinite
+stored predictions after fitting and nonfinite accumulated output at prediction.
+It does not rescale targets, alter binning or change model equations. Independent
+original-source characterization binds the exact trees and all512 predictions
+for each of the eight depth/round/bin configurations on both supported runtimes.
+Full package, experiment, harness, documentation and platform gates remain
+required before integration; these checks make no scientific performance claim.
+
 ## Archival B bridge development ledger
 
 The pre-code contract and independent literal SHA/state/OU oracles preceded this
@@ -873,3 +887,21 @@ and separates unexpected capture-main failures from legitimate command exits.
 All23 control tests pass, including the original21 and seven owned stream-fault
 variants plus an internal launch failure. Fresh final-source graphs and every
 remaining numerical/resource/full software gate are still mandatory.
+
+The repaired529 source completed all four generated layout/runtime routes:
+140 owned native stages,2646 independent unchanged-oracle checks and exact
+identical-runtime fit-payload repetition. They are a positive baseline, rather
+than final qualification after a separate request-shape finding. Both broader
+focused runs preserve1298passes/2errors from the same new example omission:
+its schedule loader lacked the required pinned source handle. The example now
+opens that audited source and supplies it explicitly.
+
+The reviewed shared request validator closes all12 request fields at native
+entry and native-job publication/loading. Nullable source/recipe applicability,
+the request's own runtime wire types, and existing strict dependency rules are
+checked before use. Recorded foreign work paths remain metadata; no caller Git,
+active-project or host-file constraint is added to data-only loading. Both
+runtimes pass172 structural/runtime assertions, including native/load hook
+sensitivity; those structural fixtures grant no execution credentials. The
+qualified479 parent was merged normally at a quiet boundary. Fresh combined
+source graphs, semantic mutations, resources and full gates remain required.

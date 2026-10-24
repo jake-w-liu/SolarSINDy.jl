@@ -1,5 +1,16 @@
 # Receipt-report integration test plan
 
+## Boosted numerical range regression (24 October 2026)
+
+On Julia1.12.6 and1.13.1 the complete maintained analog GBM suite passes165
+assertions, including invalid parameter/target ranges, ordinary zero targets,
+nonfinite copied leaves and overflow from finite copied leaves. A separate
+original-source characterization passes4120 assertions per runtime: all eight
+model-tree digests and all4096 prediction Float64 words are unchanged. Both
+owned native runs exit0 without timeout, changed controls or unsafe runtime
+warnings. No actual archive, forecast skill, serving or paper result is qualified
+by these generated-data tests. Full release gates remain mandatory.
+
 ## Archival B bridge verification contract
 
 The isolated bridge suite pins five independent pre-code oracle files and five
@@ -1108,3 +1119,20 @@ faults, short writes and unexpected child-launch failure produce an explicit
 capture failure; ordinary exits, exact caps, overflow and timeout cleanup remain
 green. All scientific/numerical oracles and tolerances remain unchanged. Fresh
 source-matched native routes and remaining package/resource/CI gates are pending.
+
+Completed529 positive baseline: all140 owned Julia stages across both layouts
+and runtimes exit0, without timeout or changed maps;2646 original independent
+oracle checks pass (maximum error1.33e-15). Both exact actual-fit repetitions
+match payload bytes. The full focused consumer tests then expose the same
+example wiring error on both versions (1298pass/2errors): the private schedule
+loader requires the actual source handle. The routine example repair loads and
+passes its pinned audited source; original tests/oracles are unchanged.
+
+A genuine positive-first load-check probe accepted dictionary-valued nullable
+request pins and published a native job. Root-approved shared12-field validation
+now checks request runtime types before equality, operation-specific null pins,
+and existing strict dependencies in native and data-only load paths. The two
+172-assertion structural/runtime suites pass with unchanged guarded bytes and
+actual owned cleanup; they are not native execution evidence. Parent479 is
+composed normally. Fresh code-matched graphs and public negative probes,
+all37 fitter mutations, resources, package/examples/H/docs/all8CI remain open.
