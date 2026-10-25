@@ -1,5 +1,16 @@
 # Receipt-report integration test plan
 
+## Boosted numerical range regression (24 October 2026)
+
+On Julia1.12.6 and1.13.1 the complete maintained analog GBM suite passes165
+assertions, including invalid parameter/target ranges, ordinary zero targets,
+nonfinite copied leaves and overflow from finite copied leaves. A separate
+original-source characterization passes4120 assertions per runtime: all eight
+model-tree digests and all4096 prediction Float64 words are unchanged. Both
+owned native runs exit0 without timeout, changed controls or unsafe runtime
+warnings. No actual archive, forecast skill, serving or paper result is qualified
+by these generated-data tests. Full release gates remain mandatory.
+
 ## Archival B bridge verification contract
 
 The isolated bridge suite pins five independent pre-code oracle files and five
@@ -1032,6 +1043,51 @@ Full Pkg.test(), full experiment entry, canonical harness and all8 native CI
 cells remain mandatory root-owned combined-head gates. Actual data/refits,
 export provenance, static UQ/GP/GPD/threshold/UP numerical adapters and matched
 scientific replay remain separate stages; no scientific readiness is claimed.
+
+
+## Matched342 independent coverage, tolerance and anti-false-test record
+
+The final computational bytes pass 24727 assertions on each of Windows Julia
+1.12.6 and 1.13.1, including 16494 genuine generated fixed-grid fit/save-load
+checks and 147 direct public resource assertions. Both ordinary synthetic
+examples pass. Exact rational feature/row/encoder expectations, explicit missing
+and receipt-boundary cases, and a separately evaluated variance graph supply
+independent expectations. Floating oracles accept the predeclared coherent
+FMA or unfused evaluation graph; no tolerance was widened to obtain a pass.
+The immutable pre-code fixture and original numerical checks remain unchanged.
+
+Both native versions detect all 17 feature, clock, missingness, encoding,
+tree-order and resource mutations after the correct baseline passes. The public
+1024-row feature collector allocates 22559107 bytes on Julia1.12.6 and 22557379
+on Julia1.13.1 against the frozen 128MiB ceiling. The public maximum-geometry
+128-row tree replay allocates 729102/729134 bytes against 8MiB. These are
+allocation limits, not latency assertions. Original resource failures and the
+rejected slower alternative remain retained in external evidence.
+
+These focused passes do not replace the required final-source unfiltered
+Pkg.test(), complete examples/experiments.jl, canonical harness and eight-job
+cross-platform CI. No actual archive fitting or scientific verdict is reported.
+
+
+## Temporary-root portability correction and independent alias control
+
+The repaired matched342 component passes24739 assertions on each Windows
+Julia1.12.6 and1.13.1, comprising all24727 unchanged numerical/resource checks
+plus12 public filesystem-contract checks. Both ordinary generated examples
+pass. The original numerical oracles,500000-row bound, allocation ceilings and
+tolerances are unchanged. The existing17 semantic/resource mutation records
+retain their scope: production bytes are unchanged, and those old records are
+not relabeled as new runs. The additional alias-guard mutant is run freshly
+on both versions and produces exactly9 passes/3 failures/0 errors after removing
+both alias checks in a private copy. Thus the new control exercises the path
+contract rather than an obsolete source pin, import failure or syntax error.
+
+The f05 full local package log contains24727 matched342 assertions outside the
+original290795-pass/7-conditional-skip root testset, for315522 passes overall.
+Its full canonical audit reports453 passes,3 warnings and0 failures. Native
+macOS CI subsequently rejects the temporary fixture paths, so f05 remains
+ineligible for release. The corrected final source requires a fresh full local
+audit, strict docs and eight-cell CI before publication to main.
 
 
 ## B fixed-header independent coverage and anti-false-test record

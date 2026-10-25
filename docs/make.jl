@@ -19,6 +19,7 @@ makedocs(
             "Duration-Conditioned Forcing" => "duration-conditioned-forcing.md",
             "Archival Current-State Bridge" => "duration-current-state-stream.md",
             "Duration Point Training" => "man/b_duration_point_training.md",
+            "Matched342 Numerical Primitives" => "matched-gbm-primitives.md",
             "Published Lund Dst Reference" => "lund-dst-reference.md",
             "Completed-Source Minute Replay" => "completed-minute-replay.md",
             "Completed-Source dB/dt Replay" => "completed-source-dbdt.md",

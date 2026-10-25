@@ -61,6 +61,7 @@ export IntervalMeanForecaster
 include("duration_conditioned_forcing.jl")
 export DurationConditionedForcing
 include("duration_current_state_stream.jl")
+include("matched_gbm_primitives/MatchedGBMPrimitives342.jl")
 export DurationCurrentStateStream
 include("duration_point_training.jl")
 export DurationPointTraining

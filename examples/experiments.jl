@@ -212,3 +212,5 @@ run_synthetic_completed_label_events()
 run_synthetic_completed_label_events_bounded()
 
 include(joinpath(@__DIR__, "b_point_training_synthetic.jl"))
+include(joinpath(@__DIR__, "matched_gbm_primitives_synthetic.jl"))
+run_matched_gbm_primitives_synthetic()
