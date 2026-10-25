@@ -904,3 +904,15 @@ earlier bbe baseline. Full portable suites and all public alias/slot/container
 controls pass. Full combined-source17 workers, strict docs, resource review,
 unfiltered package/experiments/canonical harness and eight-job CI remain required
 before main promotion. Actual source admission/fitting and holdouts remain open.
+
+
+## Scoped generated-fixture BLAS mode (25 October 2026)
+
+The ordinary full audit inherits four BLAS threads. The generated B fixture
+previously relied on an external single-thread setting, so the unchanged B1
+runtime guard rejected the ordinary example and prevented the unsupported-fit
+test from creating its expected support diagnostic. The shared generated
+fixture now selects one BLAS thread in a try/finally scope and restores the
+caller setting. Its ordinary run and the complete B testset use that scope.
+Production Julia/BLAS guards, fitting code, source identities, numerical
+expectations, resource limits and tolerances are unchanged.

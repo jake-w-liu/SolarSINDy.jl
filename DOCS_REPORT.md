@@ -96,3 +96,12 @@ production modules and exported signatures are byte-identical to f05. Fresh
 strict builds on both final-source native runtimes remain required. The
 documentation-only official Expat_jll2.9.0+0 lock is retained, and no security
 setting or scientific dependency lock is changed.
+
+
+## Generated example runtime scope
+
+The generated B example selects its required one-thread BLAS mode locally and
+restores the caller setting on both normal and exceptional returns. The B1
+production runtime restrictions are retained. Full final-source documentation,
+package, experiment, harness and cross-platform checks remain required; no
+actual-data or predictive-performance qualification follows from this example.

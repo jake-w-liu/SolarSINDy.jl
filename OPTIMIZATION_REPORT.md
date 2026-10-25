@@ -102,3 +102,12 @@ checks and the full500000-row storage bound. The twelve additional checks
 exercise ordinary paths and explicitly rejected aliases; no platform skip is
 introduced. No latency or scientific-performance gain is claimed for this
 filesystem correction. Earlier source profiles retain their original scope.
+
+
+## Preserve the caller BLAS configuration
+
+The generated fixture now scopes its already required one-thread BLAS mode.
+It changes no matrix, solver, arithmetic, resource ceiling or numerical
+tolerance, and claims no speedup. Both native ordinary-caller regressions
+verify restoration after success and injected failure. Full-source integration
+and resource gates remain mandatory before publication.
