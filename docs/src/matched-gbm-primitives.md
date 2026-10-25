@@ -49,6 +49,12 @@ julia> length(SolarSINDy.MatchedGBMPrimitives342.FEATURE_NAMES)
 342
 ```
 
+Artifact readers and writers require physical ordinary paths and reject symbolic
+links and Windows reparse points, including directory ancestors. Resolve a
+newly created, caller-owned temporary directory with `realpath` before writing
+an artifact there. An alias path remains inadmissible even when it points to
+an otherwise valid artifact.
+
 ```@docs
 SolarSINDy.MatchedGBMPrimitives342
 SolarSINDy.MatchedGBMPrimitives342.HourlyInputs342

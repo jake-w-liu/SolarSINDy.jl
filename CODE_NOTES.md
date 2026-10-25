@@ -844,3 +844,26 @@ security policy and scientific dependency locks are unchanged. Full unfiltered
 Pkg.test(), experiments, canonical harness and all eight CI jobs remain required
 on the final committed source before main promotion. Actual archive fitting,
 matched independent holdouts and paper result refresh remain separate gates.
+
+
+## Ordinary temporary artifact paths (25 October 2026)
+
+The first matched342 candidate f05 passes the full local canonical harness,
+unfiltered package suite and experiments, but its two native macOS CI cells
+fail in the ordinary artifact tests. The writer rejects a symlinked ancestor
+of the newly created temporary path, as its closed path contract requires.
+This correction resolves only the four caller-owned test/example temporary
+directories before invoking the artifact APIs. Production sources, symlink and
+Windows reparse guards, numerical expectations, limits and tolerances remain
+byte-identical. The manual now states the physical-path requirement.
+
+A new public regression saves and reloads an encoder through a physical path,
+rejects alias-path reads/writes without creating the rejected file, and accepts
+the same owned directory after explicit resolution. Absolute existing-directory
+aliases exercise Unix symlinks and Windows junctions without privilege changes
+or platform skips. Both complete component suites and examples pass. A separate
+mutant with only the alias guards omitted fails exactly the three alias checks
+on both runtimes while the nine physical-path checks pass. Failed macOS logs
+and original f05 qualification records remain immutable. Fresh final-source
+strict documentation, full canonical package/experiment audit and all eight
+CI cells remain required before main promotion; no scientific verdict follows.

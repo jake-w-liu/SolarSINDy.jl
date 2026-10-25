@@ -48,6 +48,7 @@ function run_tests()
         encoder=M.Encoder342(packed,ntuple(_->0,165),ntuple(_->0.0,165),ntuple(_->0.0,342),ntuple(_->1.0,342),repeat("a",64))
         @test M._check_encoder(encoder)===nothing
         mktempdir() do dir
+            dir=realpath(dir)
             path=joinpath(dir,"encoder.json");saved=M.save_encoder(path,encoder)
             @test saved.bytes<=M.MAX_BYTES
             @test saved.sha256==M.preprocessing_sha256(encoder)

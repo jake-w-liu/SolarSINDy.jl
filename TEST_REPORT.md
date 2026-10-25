@@ -1067,3 +1067,24 @@ rejected slower alternative remain retained in external evidence.
 These focused passes do not replace the required final-source unfiltered
 Pkg.test(), complete examples/experiments.jl, canonical harness and eight-job
 cross-platform CI. No actual archive fitting or scientific verdict is reported.
+
+
+## Temporary-root portability correction and independent alias control
+
+The repaired matched342 component passes24739 assertions on each Windows
+Julia1.12.6 and1.13.1, comprising all24727 unchanged numerical/resource checks
+plus12 public filesystem-contract checks. Both ordinary generated examples
+pass. The original numerical oracles,500000-row bound, allocation ceilings and
+tolerances are unchanged. The existing17 semantic/resource mutation records
+retain their scope: production bytes are unchanged, and those old records are
+not relabeled as new runs. The additional alias-guard mutant is run freshly
+on both versions and produces exactly9 passes/3 failures/0 errors after removing
+both alias checks in a private copy. Thus the new control exercises the path
+contract rather than an obsolete source pin, import failure or syntax error.
+
+The f05 full local package log contains24727 matched342 assertions outside the
+original290795-pass/7-conditional-skip root testset, for315522 passes overall.
+Its full canonical audit reports453 passes,3 warnings and0 failures. Native
+macOS CI subsequently rejects the temporary fixture paths, so f05 remains
+ineligible for release. The corrected final source requires a fresh full local
+audit, strict docs and eight-cell CI before publication to main.

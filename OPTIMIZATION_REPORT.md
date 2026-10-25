@@ -77,3 +77,14 @@ tuple fixture; complete encoder checking costs147.9 versus138.05microseconds.
 The storage change therefore trades some access time for bounded type and
 storage behavior; it is not claimed to improve every operation. Full500000-row
 fitting and actual-panel performance are not measured here.
+
+
+## Temporary-root correction resource scope
+
+Canonicalizing a caller-owned fixture directory repairs portability without
+changing any production algorithm or resource ceiling. The complete repaired
+component passes both runtimes, including ordinary collector/replay allocation
+checks and the full500000-row storage bound. The twelve additional checks
+exercise ordinary paths and explicitly rejected aliases; no platform skip is
+introduced. No latency or scientific-performance gain is claimed for this
+filesystem correction. Earlier source profiles retain their original scope.

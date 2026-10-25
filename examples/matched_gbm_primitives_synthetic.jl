@@ -25,6 +25,7 @@ function run_matched_gbm_primitives_synthetic()
     @assert length(unique(native))>1
     @assert any(any(tree.split[i]&&tree.feature[i]>29 for i in eachindex(tree.feature)) for tree in fitted.capsule.model.trees)
     mktempdir() do root
+        root=realpath(root)
         encoder_member=M.save_encoder(joinpath(root,"encoder.json"),fitted.capsule.encoder)
         model_member=M.save_model(joinpath(root,"model.json"),fitted.capsule;expected_bindings=expected)
         encoder=M.load_encoder(encoder_member.path;expected_sha256=expected.preprocessing_sha256,

@@ -33,6 +33,7 @@ function run_tests()
             @test length(replay)==1024
             for i in eachindex(native);@test bits(native[i])==bits(replay[i]);end
             mktempdir() do dir
+                dir=realpath(dir)
                 saved_encoder=M.save_encoder(joinpath(dir,"encoder.json"),fitted.capsule.encoder)
                 @test saved_encoder.sha256==expected.preprocessing_sha256
                 loaded_encoder=M.load_encoder(saved_encoder.path;expected_sha256=expected.preprocessing_sha256,

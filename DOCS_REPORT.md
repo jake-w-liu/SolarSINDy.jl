@@ -73,3 +73,15 @@ Julia1.12 log SHA256 is
 The blocked original build remains a failed historical attempt, not a waived
 check. Final committed full-package, experiment, harness and CI checks remain
 required before release.
+
+
+## Physical artifact-root clarification
+
+The matched342 manual now states that artifact paths must have ordinary
+physical ancestors and that callers should resolve their own newly created
+temporary directory before writing an artifact. Alias paths remain rejected.
+Only tests, their example and documentation change in this correction; all
+production modules and exported signatures are byte-identical to f05. Fresh
+strict builds on both final-source native runtimes remain required. The
+documentation-only official Expat_jll2.9.0+0 lock is retained, and no security
+setting or scientific dependency lock is changed.

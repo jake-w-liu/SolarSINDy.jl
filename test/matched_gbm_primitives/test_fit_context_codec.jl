@@ -79,6 +79,7 @@ function run_tests()
         x=zeros(342);x[30]=0.5;@test R.predict_delta(model,x)==0.
         x[30]=nextfloat(0.5);@test R.predict_delta(model,x)==4.
         mktempdir() do dir
+            dir=realpath(dir)
             written=M._write_json(joinpath(dir,"model.json"),object)
             loaded=M.load_model(written.path;expected_sha256=written.sha256,expected_bindings=expected)
             @test R.predict_delta(loaded,x)==4.
