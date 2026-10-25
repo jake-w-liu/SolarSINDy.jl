@@ -102,3 +102,15 @@ checks and the full500000-row storage bound. The twelve additional checks
 exercise ordinary paths and explicitly rejected aliases; no platform skip is
 introduced. No latency or scientific-performance gain is claimed for this
 filesystem correction. Earlier source profiles retain their original scope.
+
+
+## Bounded archival raw-row storage
+
+Every admitted raw record occupies 48 immutable bytes; the unchanged 50000-row
+limit bounds one ledger to 2400000 bytes. The selected witness storage remains
+unchanged. Exact binary64 and signed-zero oracles precede implementation.
+Both package-bound ordinary blank-body calls retain the original 16MiB
+allocation ceiling. The SHA reader uses a fixed-buffer IOBuffer route already
+checked against 20 independent byte vectors on both runtimes. Diagnostic
+timings are concurrency-qualified, and no universal latency or global
+multi-station catalog capacity is inferred from these per-body checks.

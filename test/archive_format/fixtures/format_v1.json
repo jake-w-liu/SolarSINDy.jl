@@ -1,0 +1,1062 @@
+{
+  "schema": "generated_R0_format_literal_oracles_v1",
+  "cases": [
+    {
+      "name": "ground_normal",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 1.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "d2ccc351c954d9e21e5589e01514b2221e94a16b493d42e666b2e8a44c5db90f",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "3ff0000000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 3,
+          "reason_bits": 0
+        }
+      ]
+    },
+    {
+      "name": "ground_unobserved_88888",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 88888 2.00 99999.00 99999.00\n",
+      "body_sha256": "8461955a0b83640b648c5b1aed6dbceaa3d77b462b844e96fd2d7e7d60ec25a2",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "0000000000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 2,
+          "reason_bits": 2
+        }
+      ]
+    },
+    {
+      "name": "ground_unobserved_88888.0",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 88888.0 2.00 99999.00 99999.00\n",
+      "body_sha256": "6300003bccb4a1672801fd5fee5fb64b5921c0c321c5f946e7a925c97c1bf616",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "0000000000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 2,
+          "reason_bits": 2
+        }
+      ]
+    },
+    {
+      "name": "ground_unobserved_88888.00",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 88888.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "e591ccde7f7db665bb11d1b83edc12ea220424909afe105ae105487cb631b5a9",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "0000000000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 2,
+          "reason_bits": 2
+        }
+      ]
+    },
+    {
+      "name": "ground_missing",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 99999.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "e3e39901538e41bcfe5cc7f25c89cc852e9dc1f89037cb430452fdb9a2c580f9",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "0000000000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 2,
+          "reason_bits": 1
+        }
+      ]
+    },
+    {
+      "name": "ground_signedzero_decimal",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 -0.00 0.1 99999.00 99999.00\n",
+      "body_sha256": "252a496d2643f866c3676dc3bfab7b24b6c5ad1c0291c5071238789eb02eb65e",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "8000000000000000",
+            "3fb999999999999a",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 3,
+          "reason_bits": 0
+        }
+      ]
+    },
+    {
+      "name": "ground_subnormal",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 4.9406564584124654e-324 2.00 99999.00 99999.00\n",
+      "body_sha256": "94ae24bc9fda99b1d46450ab69acbfa96cd53892807907e12dd6f4d39d023d2d",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "0000000000000001",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 3,
+          "reason_bits": 0
+        }
+      ]
+    },
+    {
+      "name": "ground_neighbor_88887.99",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 88887.99 2.00 99999.00 99999.00\n",
+      "body_sha256": "f45a6499452865e26a3b625a8e9f731649c5ebc14147984f051d7de514da14f5",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "40f5b37fd70a3d71",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 3,
+          "reason_bits": 0
+        }
+      ]
+    },
+    {
+      "name": "ground_neighbor_88888.01",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 88888.01 2.00 99999.00 99999.00\n",
+      "body_sha256": "46839531cd8ecb0b61b971df7a72dfe49bbfed01e7a4628d12a9fc239936bc0b",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "40f5b38028f5c28f",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 3,
+          "reason_bits": 0
+        }
+      ]
+    },
+    {
+      "name": "ground_neighbor_-88888.00",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 -88888.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "29e6f2b688bd1a9be1bd6b67514b7d533b068d1c9954e77369784ca6a37e7ed1",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "c0f5b38000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 3,
+          "reason_bits": 0
+        }
+      ]
+    },
+    {
+      "name": "ground_unusable_NaN",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 NaN 2.00 99999.00 99999.00\n",
+      "body_sha256": "769c0a6b240ef1f616ae9da098e731a02933fe16adff5105cddc05cd98067e3c",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "0000000000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 2,
+          "reason_bits": 3
+        }
+      ]
+    },
+    {
+      "name": "ground_unusable_Inf",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 Inf 2.00 99999.00 99999.00\n",
+      "body_sha256": "ff9db7da619ff9c9eb0e2cfd68da751b6d823333718f0ac0c328cda332ccd5bb",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "0000000000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 2,
+          "reason_bits": 3
+        }
+      ]
+    },
+    {
+      "name": "ground_unusable_90000.0",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 90000.0 2.00 99999.00 99999.00\n",
+      "body_sha256": "56ba52269e77063e847084748a397f27d5cbbfec2b9208ed51f44a645e91c808",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "0000000000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 2,
+          "reason_bits": 3
+        }
+      ]
+    },
+    {
+      "name": "ground_unusable_-90000.0",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 -90000.0 2.00 99999.00 99999.00\n",
+      "body_sha256": "fd0a0ff229ae81479cdb67a2278c34b029b428e730fd93ce7f9e486ad5aef502",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "0000000000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 2,
+          "reason_bits": 3
+        }
+      ]
+    },
+    {
+      "name": "ground_valid_then_placeholder",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 1.00 2.00 99999.00 99999.00\n Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 88888.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "1b87d9a76b21e0251f5f9782cd0b6c27ce849fbb241a446293aa34c6e4a8732d",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "3ff0000000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 3,
+          "reason_bits": 0
+        }
+      ]
+    },
+    {
+      "name": "ground_placeholder_then_valid",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 88888.00 2.00 99999.00 99999.00\n Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 1.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "c2ca1e63a59e9259b89db1936c26b3b9f16cd164291a0992809f1fed2c184f9b",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "3ff0000000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 3,
+          "reason_bits": 0
+        }
+      ]
+    },
+    {
+      "name": "ground_no_partial_stitch",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 1 99999 99999.00 99999.00\n Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 99999 2 99999.00 99999.00\n",
+      "body_sha256": "8a2c68643573e3e87fed1a6c985044f24c0d317bcebfbf1bb79a5f2fd7522f64",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "3ff0000000000000",
+            "0000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 1,
+          "reason_bits": 4
+        }
+      ]
+    },
+    {
+      "name": "ground_conflicting_vector",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 1.00 2.00 99999.00 99999.00\n Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 3 2.00 99999.00 99999.00\n",
+      "body_sha256": "8e496feeb50d4f421b4490ac813de40fe1a1c613ef784ea0368055ff436fd3dd",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "ground_conflicting_partial",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 1.00 2.00 99999.00 99999.00\n Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 3 99999 99999.00 99999.00\n",
+      "body_sha256": "0b9ab1f47459d361a7ce28bfe10e0e9d13907579ad7d6dd2dc8487e1a3bece18",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "ground_inclusive_stop",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:02:00.000 001 1.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "c81ce4c3653ff16dfed0ae5b4648eb4d2ed5e1547c4cbd26be54c8071cd2a864",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228920000,
+          "values_f64_hex": [
+            "3ff0000000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 3,
+          "reason_bits": 0
+        }
+      ]
+    },
+    {
+      "name": "ground_24hour",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 24:00:00.000 001 1.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "92d87a3e6db3c5b9f5bce6d2cb9a83002bbe5469df0cb95b5ec8537e581da031",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T23:59:00",
+        "stop": "2017-01-02T00:01:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483315200000,
+          "values_f64_hex": [
+            "3ff0000000000000",
+            "4000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 3,
+          "reason_bits": 0
+        }
+      ]
+    },
+    {
+      "name": "ground_wrong_station",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              FRD                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     FRDX      FRDY      FRDNUL    FRDNUL |\n2017-01-01 00:00:00.000 001 1.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "0630171006149a48abddbc1e27180cab82ce27568fb3d5a6da84ee3599a62a92",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "ground_wrong_product",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              adjusted                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 1.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "e949c7b2a9a44aed5fffd749eceb1d3bf4915221dce8bdf901d606becaeac91d",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "ground_wrong_columns",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOH      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 1.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "a0cc64510124e2530f484de5aae7d600e3fe69898cb6216a211e3c4231c64924",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "ground_bad_doy",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 002 1.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "7839cf8319137a0b8a46e7e99ef5d0be2f8ce0923c91261d50a1848cfceda4f1",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "ground_bad_decimal",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 1.2.3 2.00 99999.00 99999.00\n",
+      "body_sha256": "5544c661aac8d24ecaf5f4727878a95f35b7b229806d78851bfff55c69342a9e",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "ground_bad_time",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:01.000 001 1.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "f457d223bf0235913c208198cfc074c5d58b420b3af2a0e97c53d8a9d8a44244",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "ground_outside",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:03:00.000 001 1.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "58fade4cea42e0e2378177d6e8e8775df08bc7b4935068fe2b0ab6668cc0bfd2",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "ground_backward_segment",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:01:00.000 001 1.00 2.00 99999.00 99999.00\n2017-01-01 00:00:00.000 001 1.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "c1df6e0fee61dce38c2795e6a1feca37a3df5b0f1d3a9ae33b798335c0958ef6",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "ground_bad_24hour",
+      "kind": "ground",
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 24:01:00.000 001 1.00 2.00 99999.00 99999.00\n",
+      "body_sha256": "3a3622305d4be62b5579b8f32e2e107f31edbb49860ee0fe3ffd3de41bd62429",
+      "metadata": {
+        "station": "CMO",
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "wind_normal",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,1,-2,400,5\n",
+      "body_sha256": "7ccd6108584189dd97c5025729ab9a01892b5fdcde2485ee22d859e4cf48a350",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "4079000000000000",
+            "c000000000000000",
+            "3ff0000000000000",
+            "4014000000000000"
+          ],
+          "valid_mask": 15,
+          "reason_bits": 0
+        }
+      ]
+    },
+    {
+      "name": "wind_quotes",
+      "kind": "wind",
+      "body": "\"2017-01-01T00:00:00.000Z\",\"1\",\"-2\",\"400\",\"5\"\n",
+      "body_sha256": "aa030cd794be2498e7cfe8360c03e3c5ee416f40cab5114d9ea2b6a60696e6e3",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "4079000000000000",
+            "c000000000000000",
+            "3ff0000000000000",
+            "4014000000000000"
+          ],
+          "valid_mask": 15,
+          "reason_bits": 0
+        }
+      ]
+    },
+    {
+      "name": "wind_fill_1",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,9999.99,-2,400,5\n",
+      "body_sha256": "ed699d5c244ecb6cfc46fae0ffbfcb970183c6b2d660c02e322288b2b1cdde89",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "4079000000000000",
+            "c000000000000000",
+            "0000000000000000",
+            "4014000000000000"
+          ],
+          "valid_mask": 11,
+          "reason_bits": 16
+        }
+      ]
+    },
+    {
+      "name": "wind_fill_2",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,1,9999.99,400,5\n",
+      "body_sha256": "e4eb03f3e2ca205b1ddbb40430c9bb08f26607441f4229d379273fc37fd8685b",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "4079000000000000",
+            "0000000000000000",
+            "3ff0000000000000",
+            "4014000000000000"
+          ],
+          "valid_mask": 13,
+          "reason_bits": 4
+        }
+      ]
+    },
+    {
+      "name": "wind_fill_3",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,1,-2,99999.9,5\n",
+      "body_sha256": "92ae511d0b0f9516ef74719f0b5cf21d7dec304a61f66aaa701dc739fe903845",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "0000000000000000",
+            "c000000000000000",
+            "3ff0000000000000",
+            "4014000000000000"
+          ],
+          "valid_mask": 14,
+          "reason_bits": 1
+        }
+      ]
+    },
+    {
+      "name": "wind_fill_4",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,1,-2,400,999.99\n",
+      "body_sha256": "eef14329581c3f64647c7195b9b69fad12666e16f422b854f621701473678a0f",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "4079000000000000",
+            "c000000000000000",
+            "3ff0000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 7,
+          "reason_bits": 64
+        }
+      ]
+    },
+    {
+      "name": "wind_boundary_1_9000",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,9000,-2,400,5\n",
+      "body_sha256": "dd70e41adcb0e4695e03cb626ee9407847c4524c2ef8a7d3c9f8858b9f2ae63c",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "4079000000000000",
+            "c000000000000000",
+            "0000000000000000",
+            "4014000000000000"
+          ],
+          "valid_mask": 11,
+          "reason_bits": 48
+        }
+      ]
+    },
+    {
+      "name": "wind_boundary_2_-9000",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,1,-9000,400,5\n",
+      "body_sha256": "122fc353e14c2726c0426dd5f859ad3f0f70007f5f870e6f09ea8dcbd8382c75",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "4079000000000000",
+            "0000000000000000",
+            "3ff0000000000000",
+            "4014000000000000"
+          ],
+          "valid_mask": 13,
+          "reason_bits": 12
+        }
+      ]
+    },
+    {
+      "name": "wind_boundary_3_100",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,1,-2,100,5\n",
+      "body_sha256": "41763ce89e1ade8bda55dc74e72210053ff6eedeb93c84037a4408313cb4229f",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "0000000000000000",
+            "c000000000000000",
+            "3ff0000000000000",
+            "4014000000000000"
+          ],
+          "valid_mask": 14,
+          "reason_bits": 3
+        }
+      ]
+    },
+    {
+      "name": "wind_boundary_3_90000",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,1,-2,90000,5\n",
+      "body_sha256": "175d1bac858ab90f84c16ec6a0bd0910f3e3c3b2b0580a5dd292b5505a747b88",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "0000000000000000",
+            "c000000000000000",
+            "3ff0000000000000",
+            "4014000000000000"
+          ],
+          "valid_mask": 14,
+          "reason_bits": 3
+        }
+      ]
+    },
+    {
+      "name": "wind_boundary_4_0",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,1,-2,400,0\n",
+      "body_sha256": "aeb23b456dbe10f2921431f5681ac007fc91d5c09758fe38c190e521a542710a",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "4079000000000000",
+            "c000000000000000",
+            "3ff0000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 7,
+          "reason_bits": 192
+        }
+      ]
+    },
+    {
+      "name": "wind_boundary_4_900",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,1,-2,400,900\n",
+      "body_sha256": "7e3c44287a04967f293184098f89d18158c2fe7cec01975ac36f15d830c424ed",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "4079000000000000",
+            "c000000000000000",
+            "3ff0000000000000",
+            "0000000000000000"
+          ],
+          "valid_mask": 7,
+          "reason_bits": 192
+        }
+      ]
+    },
+    {
+      "name": "wind_equal_duplicate",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,1,-2,400,5\n2017-01-01T00:00:00.000Z,1,-2,400,5\n",
+      "body_sha256": "79684791f6b9137c6ae39a24c195bb86bcfe3fd242a72d8cf6f03807d297c102",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": [
+        {
+          "time": 1483228800000,
+          "values_f64_hex": [
+            "4079000000000000",
+            "c000000000000000",
+            "3ff0000000000000",
+            "4014000000000000"
+          ],
+          "valid_mask": 15,
+          "reason_bits": 0
+        }
+      ]
+    },
+    {
+      "name": "wind_conflict",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,1,-2,400,5\n2017-01-01T00:00:00.000Z,1,-2,401,5\n",
+      "body_sha256": "229fe88d58869b7aabbd2198e07945a83c4c247b36bf2a628f8ada716ad89608",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "wind_exclusive_stop",
+      "kind": "wind",
+      "body": "2017-01-01T00:03:00.000Z,1,-2,400,5\n",
+      "body_sha256": "03d897f46fcdcb60e795f57a933d6b916669273161974e6ebaf453dc861614c4",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "wind_extra_column",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,1,-2,400,5,6\n",
+      "body_sha256": "9c3978e2e8d7b91235bfca6598e15a0a073ec704416275ff86bdaaa126e748c7",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "wind_malformed_quote",
+      "kind": "wind",
+      "body": "2017-01-01T00:00:00.000Z,\"1,-2,400,5\n",
+      "body_sha256": "56f41bee00a7395887aad05a085dcb2a6d8bf862a0aa2817e7cc4a76015ac487",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": false,
+      "expected_rows": null
+    },
+    {
+      "name": "wind_empty_support",
+      "kind": "wind",
+      "body": "",
+      "body_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "metadata": {
+        "station": "CMO",
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "accept": true,
+      "expected_rows": []
+    }
+  ],
+  "actual_source_bodies_used": false
+}

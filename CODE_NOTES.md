@@ -904,3 +904,15 @@ earlier bbe baseline. Full portable suites and all public alias/slot/container
 controls pass. Full combined-source17 workers, strict docs, resource review,
 unfiltered package/experiments/canonical harness and eight-job CI remain required
 before main promotion. Actual source admission/fitting and holdouts remain open.
+
+
+## Pure archival formats and complete raw-row provenance (25 October 2026)
+
+The package-bound ArchiveFormatParsers namespace accepts generated or supplied
+IAGA-2002 X/Y and OMNI five-column HAPI text with explicit station, product and
+period declarations. It retains immutable 48-byte selected witnesses and every
+raw source row, including partial duplicates, masks and unavailable-value
+reasons. Separate raw-body, selected-row and raw-row digests preserve the exact
+byte identities. No path, network, provider receipt, archive permission or
+forecast fit is implicit in these readers. Cross-body catalog reconciliation,
+an independent archive reader and actual source admission remain required.

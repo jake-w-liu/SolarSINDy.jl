@@ -96,3 +96,13 @@ production modules and exported signatures are byte-identical to f05. Fresh
 strict builds on both final-source native runtimes remain required. The
 documentation-only official Expat_jll2.9.0+0 lock is retained, and no security
 setting or scientific dependency lock is changed.
+
+
+## Archival source-format namespace
+
+The manual documents the package namespace, explicit inclusive ground and
+half-open wind periods, per-body byte/row limits, raw and selected witnesses,
+validity masks and reasons. Unavailable payload zeros are interpreted only
+through their masks. Body parsing supplies no provider-clock, cross-body,
+source-admission or predictive-performance claim. Strict final-head builds
+remain required before publication; no Documenter setting is weakened.

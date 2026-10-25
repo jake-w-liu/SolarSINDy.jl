@@ -1,0 +1,97 @@
+{
+  "actual_inputs": false,
+  "cases": [
+    {
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 1 99999 99999.00 99999.00\n2017-01-01 00:00:00.000 001 99999 2 99999.00 99999.00\n2017-01-01 00:00:00.000 001 99999 2 99999.00 99999.00\n",
+      "expected": "accept first partial witness, no stitching",
+      "kind": "ground",
+      "metadata": {
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "station": "CMO",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "name": "ground_positive_hidden_partial_equal"
+    },
+    {
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 1 99999 99999.00 99999.00\n2017-01-01 00:00:00.000 001 99999 2 99999.00 99999.00\n2017-01-01 00:00:00.000 001 99999 3 99999.00 99999.00\n",
+      "expected": "ArgumentError; second and third validY disagree",
+      "kind": "ground",
+      "metadata": {
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "station": "CMO",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "name": "ground_hidden_partial_y_conflict"
+    },
+    {
+      "body": " Format                 IAGA-2002                                    |\n Source of Data         Generated independent fixture                |\n Station Name           Generated                                    |\n IAGA CODE              CMO                                          |\n Geodetic Latitude      0                                            |\n Geodetic Longitude     0                                            |\n Elevation              0                                            |\n Reported               XYNULNUL                                     |\n Sensor Orientation     HDZ                                          |\n Digital Sampling       1 second                                     |\n Data Interval Type     1-minute                                     |\n Data Type              quasi-definitive                             |\n # Generated parser fixture only                                     |\nDATE       TIME         DOY     CMOX      CMOY      CMONUL    CMONUL |\n2017-01-01 00:00:00.000 001 1 99999 99999.00 99999.00\n2017-01-01 00:00:00.000 001 99999 2 99999.00 99999.00\n2017-01-01 00:00:00.000 001 1 3 99999.00 99999.00\n",
+      "expected": "ArgumentError; previously discarded validY2 disagrees with completeY3",
+      "kind": "ground",
+      "metadata": {
+        "product": "quasi-definitive",
+        "start": "2017-01-01T00:00:00",
+        "station": "CMO",
+        "stop": "2017-01-01T00:02:00"
+      },
+      "name": "ground_hidden_partial_vs_complete_y_conflict"
+    },
+    {
+      "body": "2017-01-01T00:00:00.000Z,1,-2,400,999.99\n2017-01-01T00:00:00.000Z,9999.99,9999.99,99999.9,5\n2017-01-01T00:00:00.000Z,9999.99,9999.99,99999.9,5\n",
+      "expected": "accept first partial witness, no stitching",
+      "kind": "wind",
+      "metadata": {
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "station": "CMO",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "name": "wind_positive_hidden_partial_equal"
+    },
+    {
+      "body": "2017-01-01T00:00:00.000Z,1,-2,400,999.99\n2017-01-01T00:00:00.000Z,9999.99,9999.99,99999.9,5\n2017-01-01T00:00:00.000Z,9999.99,9999.99,99999.9,6\n",
+      "expected": "ArgumentError; second and third validn disagree",
+      "kind": "wind",
+      "metadata": {
+        "product": "OMNI_HRO_1MIN",
+        "start": "2017-01-01T00:00:00",
+        "station": "CMO",
+        "stop": "2017-01-01T00:03:00"
+      },
+      "name": "wind_hidden_partial_n_conflict"
+    }
+  ],
+  "complete": true,
+  "confirmed_runtime_defect": false,
+  "contract_basis": "Equal valid duplicates allowed; contradictory shared valid components fail; do not stitch partial vectors. This requires conflict detection across raw valid witnesses, independently of selected complete-vector projection.",
+  "created_utc": "2026-10-24T01:00:07.132348+00:00",
+  "files": [
+    {
+      "path": "C:\\Temp\\dbdt-r0-format-parser-peer-20261024-v1\\prepare_readonly_duplicate_candidates_v1.py",
+      "sha256": "ba371c96f49e7c308d6da4005bb6c445af687a2e0482408ce842a26abed80716"
+    },
+    {
+      "path": "C:\\Temp\\dbdt-r0-format-parser-20261024-v1\\ArchiveFormatParsers.jl",
+      "sha256": "05801b4b9c29958ab901fd912ad78e98401f623069a5e23ff15241b7b4534bc6"
+    },
+    {
+      "path": "C:\\Temp\\dbdt-r0-format-parser-20261024-v1\\CONTRACT_V1.md",
+      "sha256": "b05d8f76b1109962f6b01e3620515c514716add060445a8007683cc73487bd54"
+    },
+    {
+      "path": "C:\\Temp\\dbdt-r0-format-parser-20261024-v1\\ORACLES_V1.json",
+      "sha256": "1a5241b30aaf53f948bf880ccff07f67302039ace02548b68c9300a1185fd5be"
+    },
+    {
+      "path": "C:\\Temp\\dbdt-r0-format-parser-20261024-v1\\PRECODE_FROZEN_V1.json",
+      "sha256": "eff144c098bae8fccdcf0ba088b198d580e99bc386bf4fdcd3899394a28e791f"
+    }
+  ],
+  "hypothesis": "_admit! compares only the selected row. An ignored partial witness loses a valid component, so a later partial/complete witness can contradict that component without comparison.",
+  "native_executed_by_peer": false,
+  "required_verification": "Owner-run harmless generated cases after current source guard closes; positive-first equal hidden component, then changed component. Retain exact exception/disposition before any source change.",
+  "schema": "readonly_R0_duplicate_consistency_candidates_v1",
+  "source_or_original_oracle_edited": false,
+  "source_reasoning": "After X1/Ymissing first row, Xmissing/Y2 shares no valid component and is discarded. Third Xmissing/Y3 or completeX1/Y3 is checked only against retained X1, so source appears to accept despite rawY2/Y3 conflict."
+}

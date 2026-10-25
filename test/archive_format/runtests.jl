@@ -1,0 +1,5 @@
+include(joinpath(@__DIR__,"test_formats.jl"))
+include(joinpath(@__DIR__,"test_lines.jl"))
+include(joinpath(@__DIR__,"test_raw_rows.jl"))
+include(joinpath(@__DIR__,"test_hash_vectors.jl"))
+include(joinpath(@__DIR__,"test_hidden_duplicates.jl"))

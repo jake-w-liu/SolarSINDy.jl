@@ -1,0 +1,270 @@
+{
+  "schema": "independent_r0_raw_row_binary_oracles_v1",
+  "complete": true,
+  "generated_only": true,
+  "record_width": 48,
+  "oracle_method": "Python standard struct.pack from explicit hand-declared rows; SHA256 from hashlib; no subject parser used.",
+  "start": "2020-01-01T00:00:00",
+  "stop": "2020-01-01T00:02:00",
+  "station": "CMO",
+  "cases": [
+    {
+      "name": "ground_partial_complete",
+      "kind": "ground",
+      "body": "Format IAGA-2002 |\nSource of Data USGS |\nIAGA CODE CMO |\nReported XYNULNUL |\nData Interval Type 1-minute |\nData Type quasi-definitive |\nDATE TIME DOY CMOX CMOY CMONUL CMONUL |\n2020-01-01 00:00:00.000 001 1 99999 0 0\n2020-01-01 00:00:00.000 001 1 2 0 0\n2020-01-01 00:01:00.000 001 88888 3 0 0\n",
+      "raw_rows": 3,
+      "unique_rows": 2,
+      "raw_ledger_hex": "00e8665e6f0100000800000001040000000000000000f03f00000000000000000000000000000000000000000000000000e8665e6f0100000900000003000000000000000000f03f00000000000000400000000000000000000000000000000060d2675e6f0100000a000000020200000000000000000000000000000000084000000000000000000000000000000000",
+      "raw_ledger_sha256": "533d09f581a1584fee0f390e79eae68fe99f1aefcd50d8c76815ab5fa81869cf",
+      "selected_hex": "00e8665e6f0100000900000003000000000000000000f03f00000000000000400000000000000000000000000000000060d2675e6f0100000a000000020200000000000000000000000000000000084000000000000000000000000000000000",
+      "selected_sha256": "be4d5f85ec8100524db141a9c3d2b54bb3935d9ea7d3a4d339b46031d7df0032",
+      "rows": [
+        {
+          "utc_ms": 1577836800000,
+          "line": 8,
+          "mask": 1,
+          "reasons": 4,
+          "value_words": [
+            "000000000000f03f",
+            "0000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ]
+        },
+        {
+          "utc_ms": 1577836800000,
+          "line": 9,
+          "mask": 3,
+          "reasons": 0,
+          "value_words": [
+            "000000000000f03f",
+            "0000000000000040",
+            "0000000000000000",
+            "0000000000000000"
+          ]
+        },
+        {
+          "utc_ms": 1577836860000,
+          "line": 10,
+          "mask": 2,
+          "reasons": 2,
+          "value_words": [
+            "0000000000000000",
+            "0000000000000840",
+            "0000000000000000",
+            "0000000000000000"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ground_complete_partial",
+      "kind": "ground",
+      "body": "Format IAGA-2002 |\nSource of Data USGS |\nIAGA CODE CMO |\nReported XYNULNUL |\nData Interval Type 1-minute |\nData Type quasi-definitive |\nDATE TIME DOY CMOX CMOY CMONUL CMONUL |\n2020-01-01 00:00:00.000 001 1 2 0 0\n2020-01-01 00:00:00.000 001 1 99999 0 0\n",
+      "raw_rows": 2,
+      "unique_rows": 1,
+      "raw_ledger_hex": "00e8665e6f0100000800000003000000000000000000f03f00000000000000400000000000000000000000000000000000e8665e6f0100000900000001040000000000000000f03f000000000000000000000000000000000000000000000000",
+      "raw_ledger_sha256": "90b82ad942bfdee074d32aa6d10ccd6571de60f1b6104d338d85eb434a025a0d",
+      "selected_hex": "00e8665e6f0100000800000003000000000000000000f03f000000000000004000000000000000000000000000000000",
+      "selected_sha256": "963fdcbc620deae2be577adc6b87fd1e22caf99214aa0dc6c9e7498816c3bf17",
+      "rows": [
+        {
+          "utc_ms": 1577836800000,
+          "line": 8,
+          "mask": 3,
+          "reasons": 0,
+          "value_words": [
+            "000000000000f03f",
+            "0000000000000040",
+            "0000000000000000",
+            "0000000000000000"
+          ]
+        },
+        {
+          "utc_ms": 1577836800000,
+          "line": 9,
+          "mask": 1,
+          "reasons": 4,
+          "value_words": [
+            "000000000000f03f",
+            "0000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ground_no_partial_stitching",
+      "kind": "ground",
+      "body": "Format IAGA-2002 |\nSource of Data USGS |\nIAGA CODE CMO |\nReported XYNULNUL |\nData Interval Type 1-minute |\nData Type quasi-definitive |\nDATE TIME DOY CMOX CMOY CMONUL CMONUL |\n2020-01-01 00:00:00.000 001 1 99999 0 0\n2020-01-01 00:00:00.000 001 99999 2 0 0\n",
+      "raw_rows": 2,
+      "unique_rows": 1,
+      "raw_ledger_hex": "00e8665e6f0100000800000001040000000000000000f03f00000000000000000000000000000000000000000000000000e8665e6f01000009000000020100000000000000000000000000000000004000000000000000000000000000000000",
+      "raw_ledger_sha256": "1753711b7a809c1b20aa8e2f140ee09eaa2cee2c8cefe8cca561709d5d33dd5d",
+      "selected_hex": "00e8665e6f0100000800000001040000000000000000f03f000000000000000000000000000000000000000000000000",
+      "selected_sha256": "38b11df85f30f456f80a869fcde32c2c94c143c84a7ab4447908eb9ac0302772",
+      "rows": [
+        {
+          "utc_ms": 1577836800000,
+          "line": 8,
+          "mask": 1,
+          "reasons": 4,
+          "value_words": [
+            "000000000000f03f",
+            "0000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ]
+        },
+        {
+          "utc_ms": 1577836800000,
+          "line": 9,
+          "mask": 2,
+          "reasons": 1,
+          "value_words": [
+            "0000000000000000",
+            "0000000000000040",
+            "0000000000000000",
+            "0000000000000000"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ground_repeated_segment",
+      "kind": "ground",
+      "body": "Format IAGA-2002 |\nSource of Data USGS |\nIAGA CODE CMO |\nReported XYNULNUL |\nData Interval Type 1-minute |\nData Type quasi-definitive |\nDATE TIME DOY CMOX CMOY CMONUL CMONUL |\n2020-01-01 00:00:00.000 001 1 2 0 0\nFormat IAGA-2002 |\nSource of Data USGS |\nIAGA CODE CMO |\nReported XYNULNUL |\nData Interval Type 1-minute |\nData Type quasi-definitive |\nDATE TIME DOY CMOX CMOY CMONUL CMONUL |\n2020-01-01 00:00:00.000 001 1 99999 0 0\n",
+      "raw_rows": 2,
+      "unique_rows": 1,
+      "raw_ledger_hex": "00e8665e6f0100000800000003000000000000000000f03f00000000000000400000000000000000000000000000000000e8665e6f0100001000000001040000000000000000f03f000000000000000000000000000000000000000000000000",
+      "raw_ledger_sha256": "da0ffc07aaa23c83fa73f424ea28647480a9c32b9d840a2a9679da50199e33d3",
+      "selected_hex": "00e8665e6f0100000800000003000000000000000000f03f000000000000004000000000000000000000000000000000",
+      "selected_sha256": "963fdcbc620deae2be577adc6b87fd1e22caf99214aa0dc6c9e7498816c3bf17",
+      "rows": [
+        {
+          "utc_ms": 1577836800000,
+          "line": 8,
+          "mask": 3,
+          "reasons": 0,
+          "value_words": [
+            "000000000000f03f",
+            "0000000000000040",
+            "0000000000000000",
+            "0000000000000000"
+          ]
+        },
+        {
+          "utc_ms": 1577836800000,
+          "line": 16,
+          "mask": 1,
+          "reasons": 4,
+          "value_words": [
+            "000000000000f03f",
+            "0000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "wind_order_fills",
+      "kind": "wind",
+      "body": "2020-01-01T00:00:00.000Z,1,2,400,5\n2020-01-01T00:00:00.000Z,1,2,400,5\n2020-01-01T00:01:00.000Z,9999.99,-3,99999.9,999.99\n",
+      "raw_rows": 3,
+      "unique_rows": 2,
+      "raw_ledger_hex": "00e8665e6f010000010000000f00000000000000000079400000000000000040000000000000f03f000000000000144000e8665e6f010000020000000f00000000000000000079400000000000000040000000000000f03f000000000000144060d2675e6f0100000300000002510000000000000000000000000000000008c000000000000000000000000000000000",
+      "raw_ledger_sha256": "eb23e22f4167befe22cc53b852f0e97256f6afb2803c5aa321f7d12902744712",
+      "selected_hex": "00e8665e6f010000010000000f00000000000000000079400000000000000040000000000000f03f000000000000144060d2675e6f0100000300000002510000000000000000000000000000000008c000000000000000000000000000000000",
+      "selected_sha256": "c06dbd7cb6bf496bdb87a543bd9a5dfcfd5818922f1771529ed42e1ae67a88f8",
+      "rows": [
+        {
+          "utc_ms": 1577836800000,
+          "line": 1,
+          "mask": 15,
+          "reasons": 0,
+          "value_words": [
+            "0000000000007940",
+            "0000000000000040",
+            "000000000000f03f",
+            "0000000000001440"
+          ]
+        },
+        {
+          "utc_ms": 1577836800000,
+          "line": 2,
+          "mask": 15,
+          "reasons": 0,
+          "value_words": [
+            "0000000000007940",
+            "0000000000000040",
+            "000000000000f03f",
+            "0000000000001440"
+          ]
+        },
+        {
+          "utc_ms": 1577836860000,
+          "line": 3,
+          "mask": 2,
+          "reasons": 81,
+          "value_words": [
+            "0000000000000000",
+            "00000000000008c0",
+            "0000000000000000",
+            "0000000000000000"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "wind_signed_zero",
+      "kind": "wind",
+      "body": "2020-01-01T00:00:00.000Z,-0.0,0.1,400,5\n2020-01-01T00:00:00.000Z,0.0,0.1,400,5\n",
+      "raw_rows": 2,
+      "unique_rows": 1,
+      "raw_ledger_hex": "00e8665e6f010000010000000f00000000000000000079409a9999999999b93f0000000000000080000000000000144000e8665e6f010000020000000f00000000000000000079409a9999999999b93f00000000000000000000000000001440",
+      "raw_ledger_sha256": "1d4dfa16c99668d8290321ac877197c1a95317121be1c5a4535ec29617ff6d5d",
+      "selected_hex": "00e8665e6f010000010000000f00000000000000000079409a9999999999b93f00000000000000800000000000001440",
+      "selected_sha256": "9dd4cd87dc75580abce9f68fbc8dd537616bfe1f75cb5dc52a95a30586eaab88",
+      "rows": [
+        {
+          "utc_ms": 1577836800000,
+          "line": 1,
+          "mask": 15,
+          "reasons": 0,
+          "value_words": [
+            "0000000000007940",
+            "9a9999999999b93f",
+            "0000000000000080",
+            "0000000000001440"
+          ]
+        },
+        {
+          "utc_ms": 1577836800000,
+          "line": 2,
+          "mask": 15,
+          "reasons": 0,
+          "value_words": [
+            "0000000000007940",
+            "9a9999999999b93f",
+            "0000000000000000",
+            "0000000000001440"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "wind_empty",
+      "kind": "wind",
+      "body": "\n\r\n",
+      "raw_rows": 0,
+      "unique_rows": 0,
+      "raw_ledger_hex": "",
+      "raw_ledger_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "selected_hex": "",
+      "selected_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "rows": []
+    }
+  ]
+}

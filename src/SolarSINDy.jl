@@ -67,6 +67,8 @@ include("duration_point_training.jl")
 export DurationPointTraining
 include("duration_point_artifacts.jl")
 export DurationPointArtifacts
+include("archive_format/ArchiveFormatParsers.jl")
+export ArchiveFormatParsers
 
 export # Utils
        numerical_derivative, smooth_moving_average, pressure_correct_dst,

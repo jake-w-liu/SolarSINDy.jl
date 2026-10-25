@@ -1117,3 +1117,17 @@ All pre-fix native failures remain retained. The newly passing focused/portable
 records do not replace final-source mandatory17 workers, docs, resources,
 unfiltered Pkg.test(), full experiments, canonical harness and all eight CI jobs.
 No actual archive fit, novelty, superiority or paper-readiness verdict follows.
+
+
+## Package-bound archival-format and raw-ledger verification
+
+Both native Julia versions pass the independent generated format, line,
+binary-row and SHA controls through SolarSINDy.ArchiveFormatParsers and the
+ordinary generated example. The 271 raw-ledger assertions include all 50000
+raw duplicate rows, exact masks/reasons/line positions, signed zero, no partial
+stitching and immutable APIs. The original 522 format assertions and 2012 line
+checks retain their expectations. A prior-witness replacement mutant passes
+the original format suite and fails the new raw-ledger byte controls on both
+runtimes; source-pin, syntax and import failures do not count as detection.
+Full unfiltered package, experiments, canonical harness, platform CI and final
+combined-source checks remain required. No actual archive fit is qualified.
