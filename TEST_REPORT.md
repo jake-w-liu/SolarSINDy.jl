@@ -1248,3 +1248,18 @@ and existing strict dependencies in native and data-only load paths. The two
 actual owned cleanup; they are not native execution evidence. Parent479 is
 composed normally. Fresh code-matched graphs and public negative probes,
 all37 fitter mutations, resources, package/examples/H/docs/all8CI remain open.
+
+
+## Package-bound catalog and complete raw-witness checks
+
+Both native runtimes pass all 1592 added catalog assertions through the package
+namespaces, including the complete 32-body, 1600000-raw-row maximum geometry.
+All 1428481 selected records and metadata agree between both implementations;
+four fresh processes independently agree on 15 generated cases, including five
+required rejections. Twelve deliberate raw-iteration, mask and original-line
+faults fail the frozen semantic controls after four valid positive controls.
+Original primary and independent reader checks and the ordinary example remain.
+The prior combined full-harness failure is retained: its qualification clone
+had a local upstream that the native fixture correctly refused. No source guard
+or canonical audit is relaxed. Final combined package, experiments, harness,
+documentation and all native platform checks remain required.

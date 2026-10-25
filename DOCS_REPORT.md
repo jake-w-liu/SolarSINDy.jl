@@ -123,3 +123,12 @@ restores the caller setting on both normal and exceptional returns. The B1
 production runtime restrictions are retained. Full final-source documentation,
 package, experiment, harness and cross-platform checks remain required; no
 actual-data or predictive-performance qualification follows from this example.
+
+
+## Cross-body catalog API and boundaries
+
+The archival manual documents canonical identities, original witnesses, all-raw
+consistency, no partial stitching, exact-minute lookups and separate missing
+coverage versus uncovered gaps. Source authority and provider clock assumptions
+are excluded explicitly. The generated example compares both package catalogs.
+Strict final-source documentation builds remain pending.

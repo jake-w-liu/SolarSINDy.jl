@@ -1,0 +1,259 @@
+{
+  "schema": "precode_literal_catalog_oracles_v1",
+  "bodies": [
+    {
+      "name": "A",
+      "kind": "ground",
+      "station": "CMO",
+      "product": "quasi-definitive",
+      "start_minute": 0,
+      "stop_minute": 2,
+      "text": " Format                 IAGA-2002 |\n Source of Data         USGS |\n IAGA CODE              CMO |\n Reported               XYZF |\n Data Interval Type     Filtered 1-minute |\n Data Type              quasi-definitive |\nDATE       TIME         DOY     CMOX CMOY CMOZ CMOF |\n2020-01-01 00:00:00.000 001 1 99999 0 0\n2020-01-01 00:01:00.000 001 3 4 0 0\n",
+      "raw_hex": [
+        "00e8665e6f0100000800000001040000000000000000f03f000000000000000000000000000000000000000000000000",
+        "60d2675e6f01000009000000030000000000000000000840000000000000104000000000000000000000000000000000"
+      ],
+      "id": "ee67434514ab4fd00eaa3e0443c320542c8ad2ffaae0b9ec7afaebd527ad5b3e"
+    },
+    {
+      "name": "B",
+      "kind": "ground",
+      "station": "CMO",
+      "product": "quasi-definitive",
+      "start_minute": 0,
+      "stop_minute": 2,
+      "text": " Format                 IAGA-2002 |\n Source of Data         USGS |\n IAGA CODE              CMO |\n Reported               XYZF |\n Data Interval Type     Filtered 1-minute |\n Data Type              quasi-definitive |\nDATE       TIME         DOY     CMOX CMOY CMOZ CMOF |\n2020-01-01 00:00:00.000 001 99999 2 0 0\n2020-01-01 00:02:00.000 001 5 6 0 0\n",
+      "raw_hex": [
+        "00e8665e6f01000008000000020100000000000000000000000000000000004000000000000000000000000000000000",
+        "c0bc685e6f01000009000000030000000000000000001440000000000000184000000000000000000000000000000000"
+      ],
+      "id": "ba23b812a1da4ad0b2fa223aec8523f5a82acb4ade8cc40701a89ff159a8d84f"
+    },
+    {
+      "name": "C",
+      "kind": "ground",
+      "station": "CMO",
+      "product": "quasi-definitive",
+      "start_minute": 0,
+      "stop_minute": 2,
+      "text": " Format                 IAGA-2002 |\n Source of Data         USGS |\n IAGA CODE              CMO |\n Reported               XYZF |\n Data Interval Type     Filtered 1-minute |\n Data Type              quasi-definitive |\nDATE       TIME         DOY     CMOX CMOY CMOZ CMOF |\n2020-01-01 00:00:00.000 001 1 2 0 0\n",
+      "raw_hex": [
+        "00e8665e6f0100000800000003000000000000000000f03f000000000000004000000000000000000000000000000000"
+      ],
+      "id": "afce23029e6f60f4ceabdd5d652efca502dc148aef9024eeaad8d08a961f3a0f"
+    },
+    {
+      "name": "D",
+      "kind": "ground",
+      "station": "CMO",
+      "product": "quasi-definitive",
+      "start_minute": 0,
+      "stop_minute": 2,
+      "text": " Format                 IAGA-2002 |\n Source of Data         USGS |\n IAGA CODE              CMO |\n Reported               XYZF |\n Data Interval Type     Filtered 1-minute |\n Data Type              quasi-definitive |\nDATE       TIME         DOY     CMOX CMOY CMOZ CMOF |\n2020-01-01 00:00:00.000 001 99999 9 0 0\n",
+      "raw_hex": [
+        "00e8665e6f01000008000000020100000000000000000000000000000000224000000000000000000000000000000000"
+      ],
+      "id": "84980e3c9eb793c26f8a77a1522f3a4c9cbdeb1018095341880081f22535e2ad"
+    },
+    {
+      "name": "Zminus",
+      "kind": "ground",
+      "station": "CMO",
+      "product": "quasi-definitive",
+      "start_minute": 0,
+      "stop_minute": 2,
+      "text": " Format                 IAGA-2002 |\n Source of Data         USGS |\n IAGA CODE              CMO |\n Reported               XYZF |\n Data Interval Type     Filtered 1-minute |\n Data Type              quasi-definitive |\nDATE       TIME         DOY     CMOX CMOY CMOZ CMOF |\n2020-01-01 00:00:00.000 001 -0.0 2 0 0\n",
+      "raw_hex": [
+        "00e8665e6f01000008000000030000000000000000000080000000000000004000000000000000000000000000000000"
+      ],
+      "id": "97d3de342019d54497421b0cf7bcc5dde5f47e68b667d806ae0e0f391b9c8223"
+    },
+    {
+      "name": "Zplus",
+      "kind": "ground",
+      "station": "CMO",
+      "product": "quasi-definitive",
+      "start_minute": 0,
+      "stop_minute": 2,
+      "text": " Format                 IAGA-2002 |\n Source of Data         USGS |\n IAGA CODE              CMO |\n Reported               XYZF |\n Data Interval Type     Filtered 1-minute |\n Data Type              quasi-definitive |\nDATE       TIME         DOY     CMOX CMOY CMOZ CMOF |\n2020-01-01 00:00:00.000 001 0.0 2 0 0\n",
+      "raw_hex": [
+        "00e8665e6f01000008000000030000000000000000000000000000000000004000000000000000000000000000000000"
+      ],
+      "id": "f31452533294bd1dd6f4f866d78228ae9098bbd328807be7c31301bdb5e5f9ce"
+    }
+  ],
+  "cases": [
+    {
+      "name": "complementary_partials",
+      "bodies": [
+        "A",
+        "B"
+      ],
+      "expected": {
+        "accepted": true,
+        "canonical_ids": [
+          "ba23b812a1da4ad0b2fa223aec8523f5a82acb4ade8cc40701a89ff159a8d84f",
+          "ee67434514ab4fd00eaa3e0443c320542c8ad2ffaae0b9ec7afaebd527ad5b3e"
+        ],
+        "raw_count": 4,
+        "unique_count": 3,
+        "duplicate_count": 1,
+        "complete_count": 2,
+        "declared_minutes": 3,
+        "missing_minutes": 0,
+        "uncovered_minutes": 0,
+        "selected_hex": "00e8665e6f01000008000000020100000000000000000000000000000000004000000000000000000000000000000000ba23b812a1da4ad0b2fa223aec8523f5a82acb4ade8cc40701a89ff159a8d84f60d2675e6f01000009000000030000000000000000000840000000000000104000000000000000000000000000000000ee67434514ab4fd00eaa3e0443c320542c8ad2ffaae0b9ec7afaebd527ad5b3ec0bc685e6f01000009000000030000000000000000001440000000000000184000000000000000000000000000000000ba23b812a1da4ad0b2fa223aec8523f5a82acb4ade8cc40701a89ff159a8d84f",
+        "selected_sha256": "6f6526dbbb30400117100de4be4f5c52eb6931af21e75844e5fc276e0e60e516",
+        "raw_catalog_sha256": "1c327329cb9a951bf35410e226f2fc8b46b2a67db50b7817992a5fc7202caf5c"
+      },
+      "permutations": [
+        [
+          "A",
+          "B"
+        ],
+        [
+          "B",
+          "A"
+        ]
+      ]
+    },
+    {
+      "name": "complete_original_wins",
+      "bodies": [
+        "A",
+        "B",
+        "C"
+      ],
+      "expected": {
+        "accepted": true,
+        "canonical_ids": [
+          "afce23029e6f60f4ceabdd5d652efca502dc148aef9024eeaad8d08a961f3a0f",
+          "ba23b812a1da4ad0b2fa223aec8523f5a82acb4ade8cc40701a89ff159a8d84f",
+          "ee67434514ab4fd00eaa3e0443c320542c8ad2ffaae0b9ec7afaebd527ad5b3e"
+        ],
+        "raw_count": 5,
+        "unique_count": 3,
+        "duplicate_count": 2,
+        "complete_count": 3,
+        "declared_minutes": 3,
+        "missing_minutes": 0,
+        "uncovered_minutes": 0,
+        "selected_hex": "00e8665e6f0100000800000003000000000000000000f03f000000000000004000000000000000000000000000000000afce23029e6f60f4ceabdd5d652efca502dc148aef9024eeaad8d08a961f3a0f60d2675e6f01000009000000030000000000000000000840000000000000104000000000000000000000000000000000ee67434514ab4fd00eaa3e0443c320542c8ad2ffaae0b9ec7afaebd527ad5b3ec0bc685e6f01000009000000030000000000000000001440000000000000184000000000000000000000000000000000ba23b812a1da4ad0b2fa223aec8523f5a82acb4ade8cc40701a89ff159a8d84f",
+        "selected_sha256": "058a6111394aedb7cce0ebb2ababee010d9af3f44134f3df1ffc40559cb163a5",
+        "raw_catalog_sha256": "ebcc8c420bd620e4b64e97f654cb84fde3ccc076f6dc3b995063d7b2e35bd3e2"
+      },
+      "permutations": [
+        [
+          "A",
+          "B",
+          "C"
+        ],
+        [
+          "A",
+          "C",
+          "B"
+        ],
+        [
+          "B",
+          "A",
+          "C"
+        ],
+        [
+          "B",
+          "C",
+          "A"
+        ],
+        [
+          "C",
+          "A",
+          "B"
+        ],
+        [
+          "C",
+          "B",
+          "A"
+        ]
+      ]
+    },
+    {
+      "name": "hidden_cross_body_conflict",
+      "bodies": [
+        "A",
+        "B",
+        "D"
+      ],
+      "expected": {
+        "accepted": false
+      },
+      "permutations": [
+        [
+          "A",
+          "B",
+          "D"
+        ],
+        [
+          "A",
+          "D",
+          "B"
+        ],
+        [
+          "B",
+          "A",
+          "D"
+        ],
+        [
+          "B",
+          "D",
+          "A"
+        ],
+        [
+          "D",
+          "A",
+          "B"
+        ],
+        [
+          "D",
+          "B",
+          "A"
+        ]
+      ]
+    },
+    {
+      "name": "signed_zero_equal_original",
+      "bodies": [
+        "Zminus",
+        "Zplus"
+      ],
+      "expected": {
+        "accepted": true,
+        "canonical_ids": [
+          "97d3de342019d54497421b0cf7bcc5dde5f47e68b667d806ae0e0f391b9c8223",
+          "f31452533294bd1dd6f4f866d78228ae9098bbd328807be7c31301bdb5e5f9ce"
+        ],
+        "raw_count": 2,
+        "unique_count": 1,
+        "duplicate_count": 1,
+        "complete_count": 1,
+        "declared_minutes": 3,
+        "missing_minutes": 2,
+        "uncovered_minutes": 0,
+        "selected_hex": "00e8665e6f0100000800000003000000000000000000008000000000000000400000000000000000000000000000000097d3de342019d54497421b0cf7bcc5dde5f47e68b667d806ae0e0f391b9c8223",
+        "selected_sha256": "d6a15b56da1047408766aefe642a800dba25fae033f09a1caa64f6e221a88e2a",
+        "raw_catalog_sha256": "5543403335f445e71cf7849d7126cf70c5568453d13f870322f08815b059af1b"
+      },
+      "permutations": [
+        [
+          "Zminus",
+          "Zplus"
+        ],
+        [
+          "Zplus",
+          "Zminus"
+        ]
+      ]
+    }
+  ],
+  "binary_row_bytes": 48,
+  "selected_witness_bytes": 80,
+  "actual_data": false
+}

@@ -35,3 +35,21 @@ records. `selected_records` and `raw_records` retain their packed bytes, while
 `selected_digest` and `raw_digest` bind those bytes. Both readers preserve
 provider tags; support clocks, cross-body catalog reconciliation and archive
 source admission require separate checks.
+
+## Cross-body catalogs
+
+```@docs
+SolarSINDy.ArchiveSourceCatalog
+SolarSINDy.ArchiveCatalogAudit
+```
+
+`build_catalog` and `audit_catalog` accept one declared stream with at most32
+bodies and1600000 raw rows. Canonical body identities make selected original
+witnesses independent of input enumeration order. Every raw row participates
+in duplicate-consistency checks. A selected witness is an actual complete row
+when available, or an original incomplete row; partial rows are never combined.
+`witness` and `audit_witness` retain the original line and body identity.
+`locate` and `audit_locate` require exact-minute tags and return `nothing` for
+absent rows. Missing declared minutes differ from uncovered gaps between bodies.
+The catalog retains every original immutable body ledger. It grants no file
+permission, provider-clock interpretation, archive admission or forecast claim.

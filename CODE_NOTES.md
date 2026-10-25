@@ -1031,3 +1031,13 @@ runtimes pass172 structural/runtime assertions, including native/load hook
 sensitivity; those structural fixtures grant no execution credentials. The
 qualified479 parent was merged normally at a quiet boundary. Fresh combined
 source graphs, semantic mutations, resources and full gates remain required.
+
+
+## Canonical cross-body source catalogs (25 October 2026)
+
+ArchiveSourceCatalog and ArchiveCatalogAudit bind a single declared stream to
+canonical body identities and original source-line witnesses. Both check all
+raw rows across bodies, reject conflicting valid components and never stitch
+partial measurements. The independent catalog uses separate identity encoding,
+batch grouping and serialization. File access, provider support clocks, actual
+archive admission, model fitting and predictive skill remain separate gates.

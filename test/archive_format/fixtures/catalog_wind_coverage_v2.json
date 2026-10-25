@@ -1,0 +1,380 @@
+{
+  "schema": "frozen_wind_coverage_catalog_oracles_v2",
+  "bodies": [
+    {
+      "name": "W1",
+      "kind": "wind",
+      "station": "CMO",
+      "product": "OMNI_HRO_1MIN",
+      "start_minute": 0,
+      "stop_minute": 3,
+      "text": "2020-01-01T00:00:00.000Z,9999.99,-1,400,5\n2020-01-01T00:01:00.000Z,2,-2,401,6\n",
+      "raw_hex": [
+        "00e8665e6f010000010000000b1000000000000000007940000000000000f0bf00000000000000000000000000001440",
+        "60d2675e6f010000020000000f000000000000000010794000000000000000c000000000000000400000000000001840"
+      ],
+      "id": "c2e2406f962d2f02670b0485b549dcf91b7bf2f2f9f743244939307ca45ed17d"
+    },
+    {
+      "name": "W2",
+      "kind": "wind",
+      "station": "CMO",
+      "product": "OMNI_HRO_1MIN",
+      "start_minute": 0,
+      "stop_minute": 3,
+      "text": "2020-01-01T00:00:00.000Z,1,-1,400,5\n2020-01-01T00:02:00.000Z,-0.0,2,402,7\n",
+      "raw_hex": [
+        "00e8665e6f010000010000000f0000000000000000007940000000000000f0bf000000000000f03f0000000000001440",
+        "c0bc685e6f010000020000000f0000000000000000207940000000000000004000000000000000800000000000001c40"
+      ],
+      "id": "c1066cb24fa743abd44ba0260eaaa88c70cd688bc4a0a0f28f5c3e7c7b3ac7a3"
+    },
+    {
+      "name": "W3",
+      "kind": "wind",
+      "station": "CMO",
+      "product": "OMNI_HRO_1MIN",
+      "start_minute": 0,
+      "stop_minute": 3,
+      "text": "2020-01-01T00:00:00.000Z,9,-1,400,5\n",
+      "raw_hex": [
+        "00e8665e6f010000010000000f0000000000000000007940000000000000f0bf00000000000022400000000000001440"
+      ],
+      "id": "35c36b94b2746930dfac61ace7681fbb3927e739d4b294f708cc5e7619eed982"
+    },
+    {
+      "name": "W4",
+      "kind": "wind",
+      "station": "CMO",
+      "product": "OMNI_HRO_1MIN",
+      "start_minute": 0,
+      "stop_minute": 3,
+      "text": "2020-01-01T00:00:00.000Z,1,9999.99,400,5\n",
+      "raw_hex": [
+        "00e8665e6f010000010000000d04000000000000000079400000000000000000000000000000f03f0000000000001440"
+      ],
+      "id": "b2a518a374e1372376a2f3cce453f65685016fefd4c5e186bc41b0bb61d0b1d2"
+    },
+    {
+      "name": "G1",
+      "kind": "ground",
+      "station": "CMO",
+      "product": "quasi-definitive",
+      "start_minute": 0,
+      "stop_minute": 2,
+      "text": " Format                 IAGA-2002 |\n Source of Data         USGS |\n IAGA CODE              CMO |\n Reported               XYZF |\n Data Interval Type     Filtered 1-minute |\n Data Type              quasi-definitive |\nDATE       TIME         DOY     CMOX CMOY CMOZ CMOF |\n2020-01-01 00:00:00.000 001 1 2 0 0\n2020-01-01 00:02:00.000 001 3 4 0 0\n",
+      "raw_hex": [
+        "00e8665e6f0100000800000003000000000000000000f03f000000000000004000000000000000000000000000000000",
+        "c0bc685e6f01000009000000030000000000000000000840000000000000104000000000000000000000000000000000"
+      ],
+      "id": "9aa1982bcc6e06055607d656bcd9aa97742a4bdf12652dcc1d992ac18ca346ca"
+    },
+    {
+      "name": "G2",
+      "kind": "ground",
+      "station": "CMO",
+      "product": "quasi-definitive",
+      "start_minute": 10,
+      "stop_minute": 12,
+      "text": " Format                 IAGA-2002 |\n Source of Data         USGS |\n IAGA CODE              CMO |\n Reported               XYZF |\n Data Interval Type     Filtered 1-minute |\n Data Type              quasi-definitive |\nDATE       TIME         DOY     CMOX CMOY CMOZ CMOF |\n2020-01-01 00:10:00.000 001 5 6 0 0\n",
+      "raw_hex": [
+        "c00f705e6f01000008000000030000000000000000001440000000000000184000000000000000000000000000000000"
+      ],
+      "id": "632ae20f2fa44183ca83599d3e9dad57663c70b8b8ca917178d9b6a0770b46f2"
+    },
+    {
+      "name": "GO",
+      "kind": "ground",
+      "station": "CMO",
+      "product": "quasi-definitive",
+      "start_minute": 2,
+      "stop_minute": 4,
+      "text": " Format                 IAGA-2002 |\n Source of Data         USGS |\n IAGA CODE              CMO |\n Reported               XYZF |\n Data Interval Type     Filtered 1-minute |\n Data Type              quasi-definitive |\nDATE       TIME         DOY     CMOX CMOY CMOZ CMOF |\n2020-01-01 00:02:00.000 001 3 4 0 0\n2020-01-01 00:04:00.000 001 7 8 0 0\n",
+      "raw_hex": [
+        "c0bc685e6f01000008000000030000000000000000000840000000000000104000000000000000000000000000000000",
+        "80916a5e6f01000009000000030000000000000000001c40000000000000204000000000000000000000000000000000"
+      ],
+      "id": "483a5e109f8cb1f5b6d6adf82fb9cb625c695295f8154d898afe18969085c44d"
+    },
+    {
+      "name": "OTHER",
+      "kind": "ground",
+      "station": "FRD",
+      "product": "quasi-definitive",
+      "start_minute": 0,
+      "stop_minute": 2,
+      "text": " Format                 IAGA-2002 |\n Source of Data         USGS |\n IAGA CODE              FRD |\n Reported               XYZF |\n Data Interval Type     Filtered 1-minute |\n Data Type              quasi-definitive |\nDATE       TIME         DOY     FRDX FRDY FRDZ FRDF |\n2020-01-01 00:00:00.000 001 1 2 0 0\n",
+      "raw_hex": [
+        "00e8665e6f0100000800000003000000000000000000f03f000000000000004000000000000000000000000000000000"
+      ],
+      "id": "7c08f0c44e4813f1f5c8e7a859fbcfac6f8a2650348d60133a24bc1dea20ddb4"
+    },
+    {
+      "name": "EMPTY",
+      "kind": "wind",
+      "station": "CMO",
+      "product": "OMNI_HRO_1MIN",
+      "start_minute": 20,
+      "stop_minute": 22,
+      "text": "",
+      "raw_hex": [],
+      "id": "36bba8294023637c2dfc7f65db3882cf8673c31692bc0f1ebcd9c61c81789d35"
+    }
+  ],
+  "cases": [
+    {
+      "name": "wind_complete_original",
+      "bodies": [
+        "W1",
+        "W2"
+      ],
+      "permutations": [
+        [
+          "W1",
+          "W2"
+        ],
+        [
+          "W2",
+          "W1"
+        ]
+      ],
+      "expected": {
+        "accepted": true,
+        "canonical_ids": [
+          "c1066cb24fa743abd44ba0260eaaa88c70cd688bc4a0a0f28f5c3e7c7b3ac7a3",
+          "c2e2406f962d2f02670b0485b549dcf91b7bf2f2f9f743244939307ca45ed17d"
+        ],
+        "raw_count": 4,
+        "unique_count": 3,
+        "duplicate_count": 1,
+        "complete_count": 3,
+        "declared_minutes": 3,
+        "missing_minutes": 0,
+        "uncovered_minutes": 0,
+        "selected_hex": "00e8665e6f010000010000000f0000000000000000007940000000000000f0bf000000000000f03f0000000000001440c1066cb24fa743abd44ba0260eaaa88c70cd688bc4a0a0f28f5c3e7c7b3ac7a360d2675e6f010000020000000f000000000000000010794000000000000000c000000000000000400000000000001840c2e2406f962d2f02670b0485b549dcf91b7bf2f2f9f743244939307ca45ed17dc0bc685e6f010000020000000f0000000000000000207940000000000000004000000000000000800000000000001c40c1066cb24fa743abd44ba0260eaaa88c70cd688bc4a0a0f28f5c3e7c7b3ac7a3",
+        "selected_sha256": "ee6461d868eebbe0d993baf8941570566c8e9c8bdadad3ce8004a7d0c45e233b",
+        "raw_catalog_sha256": "30f34cba62867e939d94a51c2dc6182a7ca5cc82c238631a8b7538a58614f28c"
+      }
+    },
+    {
+      "name": "wind_conflicting_cross_body",
+      "bodies": [
+        "W1",
+        "W2",
+        "W3"
+      ],
+      "permutations": [
+        [
+          "W1",
+          "W2",
+          "W3"
+        ],
+        [
+          "W1",
+          "W3",
+          "W2"
+        ],
+        [
+          "W2",
+          "W1",
+          "W3"
+        ],
+        [
+          "W2",
+          "W3",
+          "W1"
+        ],
+        [
+          "W3",
+          "W1",
+          "W2"
+        ],
+        [
+          "W3",
+          "W2",
+          "W1"
+        ]
+      ],
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "wind_complementary_partials",
+      "bodies": [
+        "W1",
+        "W4"
+      ],
+      "permutations": [
+        [
+          "W1",
+          "W4"
+        ],
+        [
+          "W4",
+          "W1"
+        ]
+      ],
+      "expected": {
+        "accepted": true,
+        "canonical_ids": [
+          "b2a518a374e1372376a2f3cce453f65685016fefd4c5e186bc41b0bb61d0b1d2",
+          "c2e2406f962d2f02670b0485b549dcf91b7bf2f2f9f743244939307ca45ed17d"
+        ],
+        "raw_count": 3,
+        "unique_count": 2,
+        "duplicate_count": 1,
+        "complete_count": 1,
+        "declared_minutes": 3,
+        "missing_minutes": 1,
+        "uncovered_minutes": 0,
+        "selected_hex": "00e8665e6f010000010000000d04000000000000000079400000000000000000000000000000f03f0000000000001440b2a518a374e1372376a2f3cce453f65685016fefd4c5e186bc41b0bb61d0b1d260d2675e6f010000020000000f000000000000000010794000000000000000c000000000000000400000000000001840c2e2406f962d2f02670b0485b549dcf91b7bf2f2f9f743244939307ca45ed17d",
+        "selected_sha256": "738bf621ebdcd170ab8b1f738eb583d1482bb2532f8e9b784f50ffdb1f0c48f6",
+        "raw_catalog_sha256": "bc5dd2f709aaeead14e8e52f1d51d2cc83c675bf1f1c00247381c90650ba6433"
+      }
+    },
+    {
+      "name": "declared_gap_kept_separate",
+      "bodies": [
+        "G1",
+        "G2"
+      ],
+      "permutations": [
+        [
+          "G1",
+          "G2"
+        ],
+        [
+          "G2",
+          "G1"
+        ]
+      ],
+      "expected": {
+        "accepted": true,
+        "canonical_ids": [
+          "632ae20f2fa44183ca83599d3e9dad57663c70b8b8ca917178d9b6a0770b46f2",
+          "9aa1982bcc6e06055607d656bcd9aa97742a4bdf12652dcc1d992ac18ca346ca"
+        ],
+        "raw_count": 3,
+        "unique_count": 3,
+        "duplicate_count": 0,
+        "complete_count": 3,
+        "declared_minutes": 6,
+        "missing_minutes": 3,
+        "uncovered_minutes": 7,
+        "selected_hex": "00e8665e6f0100000800000003000000000000000000f03f0000000000000040000000000000000000000000000000009aa1982bcc6e06055607d656bcd9aa97742a4bdf12652dcc1d992ac18ca346cac0bc685e6f010000090000000300000000000000000008400000000000001040000000000000000000000000000000009aa1982bcc6e06055607d656bcd9aa97742a4bdf12652dcc1d992ac18ca346cac00f705e6f01000008000000030000000000000000001440000000000000184000000000000000000000000000000000632ae20f2fa44183ca83599d3e9dad57663c70b8b8ca917178d9b6a0770b46f2",
+        "selected_sha256": "306c24b8953ae9e5e4bfd32f61a61b317cb8c13a5e2e482d499129ee4649a999",
+        "raw_catalog_sha256": "4308f31b52e4bc8ab5982d08ae0259687e674b73e6c62d04c7a841f69bce3ee3"
+      }
+    },
+    {
+      "name": "inclusive_ground_endpoint",
+      "bodies": [
+        "G1",
+        "GO"
+      ],
+      "permutations": [
+        [
+          "G1",
+          "GO"
+        ],
+        [
+          "GO",
+          "G1"
+        ]
+      ],
+      "expected": {
+        "accepted": true,
+        "canonical_ids": [
+          "483a5e109f8cb1f5b6d6adf82fb9cb625c695295f8154d898afe18969085c44d",
+          "9aa1982bcc6e06055607d656bcd9aa97742a4bdf12652dcc1d992ac18ca346ca"
+        ],
+        "raw_count": 4,
+        "unique_count": 3,
+        "duplicate_count": 1,
+        "complete_count": 3,
+        "declared_minutes": 5,
+        "missing_minutes": 2,
+        "uncovered_minutes": 0,
+        "selected_hex": "00e8665e6f0100000800000003000000000000000000f03f0000000000000040000000000000000000000000000000009aa1982bcc6e06055607d656bcd9aa97742a4bdf12652dcc1d992ac18ca346cac0bc685e6f01000008000000030000000000000000000840000000000000104000000000000000000000000000000000483a5e109f8cb1f5b6d6adf82fb9cb625c695295f8154d898afe18969085c44d80916a5e6f01000009000000030000000000000000001c40000000000000204000000000000000000000000000000000483a5e109f8cb1f5b6d6adf82fb9cb625c695295f8154d898afe18969085c44d",
+        "selected_sha256": "a3df44fc19a496835bd32aa262a42c4b033f93e98d0558ec2c6f50e7a9b655c4",
+        "raw_catalog_sha256": "baf2d2309cb57376be50debdc7ba365e2a69e76c1521cb94956de69eaf104655"
+      }
+    },
+    {
+      "name": "mixed_station_rejected",
+      "bodies": [
+        "G1",
+        "OTHER"
+      ],
+      "permutations": [
+        [
+          "G1",
+          "OTHER"
+        ],
+        [
+          "OTHER",
+          "G1"
+        ]
+      ],
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "mixed_product_rejected",
+      "bodies": [
+        "G1",
+        "W1"
+      ],
+      "permutations": [
+        [
+          "G1",
+          "W1"
+        ],
+        [
+          "W1",
+          "G1"
+        ]
+      ],
+      "expected": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "empty_body_declared_coverage",
+      "bodies": [
+        "W1",
+        "EMPTY"
+      ],
+      "permutations": [
+        [
+          "W1",
+          "EMPTY"
+        ],
+        [
+          "EMPTY",
+          "W1"
+        ]
+      ],
+      "expected": {
+        "accepted": true,
+        "canonical_ids": [
+          "36bba8294023637c2dfc7f65db3882cf8673c31692bc0f1ebcd9c61c81789d35",
+          "c2e2406f962d2f02670b0485b549dcf91b7bf2f2f9f743244939307ca45ed17d"
+        ],
+        "raw_count": 2,
+        "unique_count": 2,
+        "duplicate_count": 0,
+        "complete_count": 1,
+        "declared_minutes": 5,
+        "missing_minutes": 3,
+        "uncovered_minutes": 17,
+        "selected_hex": "00e8665e6f010000010000000b1000000000000000007940000000000000f0bf00000000000000000000000000001440c2e2406f962d2f02670b0485b549dcf91b7bf2f2f9f743244939307ca45ed17d60d2675e6f010000020000000f000000000000000010794000000000000000c000000000000000400000000000001840c2e2406f962d2f02670b0485b549dcf91b7bf2f2f9f743244939307ca45ed17d",
+        "selected_sha256": "a5550aaf9f37d9c8b9bbcec76b1f90948074c0d2e3669c7d266732b86f02dd56",
+        "raw_catalog_sha256": "22a1b4d2d8863418d33da3829ce52689dc215fa72054f39a3fc693250fbcc963"
+      }
+    }
+  ],
+  "actual_data": false
+}

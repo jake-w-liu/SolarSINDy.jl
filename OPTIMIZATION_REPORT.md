@@ -133,3 +133,14 @@ It changes no matrix, solver, arithmetic, resource ceiling or numerical
 tolerance, and claims no speedup. Both native ordinary-caller regressions
 verify restoration after success and injected failure. Full-source integration
 and resource gates remain mandatory before publication.
+
+
+## Full generated catalog resource geometry
+
+The original 4GiB warm cumulative-allocation ceiling is retained. Separate
+prototype checks on both runtimes reconstruct 32 generated bodies containing
+1600000 raw rows and 1428481 distinct selected minutes. Packed selected storage
+occupies exactly 114278480 bytes; the retained original raw ledgers occupy
+76800000 bytes per reader. Measured catalog allocations are approximately
+1.784GB primary and1.625GB independent, with full byte equality and no universal
+latency claim. Both package-bound maximum checks pass the same original ceiling.

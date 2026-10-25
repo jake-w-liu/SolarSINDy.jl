@@ -1,0 +1,57 @@
+{
+  "schema": "frozen_hidden_raw_catalog_oracle_v3",
+  "bodies": [
+    {
+      "name": "H",
+      "kind": "ground",
+      "station": "CMO",
+      "product": "quasi-definitive",
+      "start_minute": 0,
+      "stop_minute": 2,
+      "text": " Format                 IAGA-2002 |\n Source of Data         USGS |\n IAGA CODE              CMO |\n Reported               XYZF |\n Data Interval Type     Filtered 1-minute |\n Data Type              quasi-definitive |\nDATE       TIME         DOY     CMOX CMOY CMOZ CMOF |\n2020-01-01 00:00:00.000 001 1 99999 0 0\n2020-01-01 00:00:00.000 001 99999 2 0 0\n",
+      "raw_hex": [
+        "00e8665e6f0100000800000001040000000000000000f03f000000000000000000000000000000000000000000000000",
+        "00e8665e6f01000009000000020100000000000000000000000000000000004000000000000000000000000000000000"
+      ],
+      "id": "0493fe95fc8f49b286b049313c7869d3a435a3f4bb96a56bf571b1d67dfd54fc"
+    },
+    {
+      "name": "D",
+      "kind": "ground",
+      "station": "CMO",
+      "product": "quasi-definitive",
+      "start_minute": 0,
+      "stop_minute": 2,
+      "text": " Format                 IAGA-2002 |\n Source of Data         USGS |\n IAGA CODE              CMO |\n Reported               XYZF |\n Data Interval Type     Filtered 1-minute |\n Data Type              quasi-definitive |\nDATE       TIME         DOY     CMOX CMOY CMOZ CMOF |\n2020-01-01 00:00:00.000 001 99999 9 0 0\n",
+      "raw_hex": [
+        "00e8665e6f01000008000000020100000000000000000000000000000000224000000000000000000000000000000000"
+      ],
+      "id": "84980e3c9eb793c26f8a77a1522f3a4c9cbdeb1018095341880081f22535e2ad"
+    },
+    {
+      "name": "C",
+      "kind": "ground",
+      "station": "CMO",
+      "product": "quasi-definitive",
+      "start_minute": 0,
+      "stop_minute": 2,
+      "text": " Format                 IAGA-2002 |\n Source of Data         USGS |\n IAGA CODE              CMO |\n Reported               XYZF |\n Data Interval Type     Filtered 1-minute |\n Data Type              quasi-definitive |\nDATE       TIME         DOY     CMOX CMOY CMOZ CMOF |\n2020-01-01 00:00:00.000 001 1 2 0 0\n",
+      "raw_hex": [
+        "00e8665e6f0100000800000003000000000000000000f03f000000000000004000000000000000000000000000000000"
+      ],
+      "id": "afce23029e6f60f4ceabdd5d652efca502dc148aef9024eeaad8d08a961f3a0f"
+    }
+  ],
+  "expected": {
+    "H_selected_hex": "00e8665e6f0100000800000001040000000000000000f03f0000000000000000000000000000000000000000000000000493fe95fc8f49b286b049313c7869d3a435a3f4bb96a56bf571b1d67dfd54fc",
+    "H_selected_sha256": "456e34c01a4eae16f2c413300333ad18d899c68b06a4e3748c983b2ccf86e298",
+    "H_raw_catalog_sha256": "dd65c0da8541da814f97fe35543be96c679dca3b0db3aad3f688037f2c652705",
+    "H_raw_count": 2,
+    "H_unique_count": 1,
+    "H_complete_count": 0,
+    "H_mask": 1,
+    "H_source_line": 8,
+    "H_plus_D_rejected": true
+  },
+  "actual_data": false
+}

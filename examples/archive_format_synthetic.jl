@@ -15,6 +15,12 @@ function run_archive_format_synthetic()
         start=DateTime(2020),stop=DateTime(2020)+Minute(2))
     @assert independent.raw_records==source.raw_storage
     @assert independent.selected_records==source.storage
+    catalog=SolarSINDy.ArchiveSourceCatalog.build_catalog([source])
+    catalog_audit=SolarSINDy.ArchiveCatalogAudit.audit_catalog([independent])
+    @assert catalog.raw_rows==2 && length(catalog)==1 && catalog.complete_vectors==1
+    @assert catalog.selected_storage==catalog_audit.selected_storage
+    @assert catalog.raw_catalog_sha256==catalog_audit.raw_catalog_sha256
+    @assert SolarSINDy.ArchiveSourceCatalog.locate(catalog,DateTime(2020)).source_line==1
     println("Generated archive format example passed")
     source
 end

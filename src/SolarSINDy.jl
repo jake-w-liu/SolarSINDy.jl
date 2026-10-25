@@ -71,6 +71,10 @@ include("archive_format/ArchiveFormatParsers.jl")
 export ArchiveFormatParsers
 include("archive_format/ArchiveFormatAudit.jl")
 export ArchiveFormatAudit
+include("archive_format/ArchiveSourceCatalog.jl")
+export ArchiveSourceCatalog
+include("archive_format/ArchiveCatalogAudit.jl")
+export ArchiveCatalogAudit
 
 export # Utils
        numerical_derivative, smooth_moving_average, pressure_correct_dst,
