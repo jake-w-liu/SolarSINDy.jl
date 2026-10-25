@@ -20,7 +20,10 @@ include("reference_checks.jl")
 include("selector_checks.jl")
 include("qualification_checks.jl")
 include("tree_checks.jl")
+include("fixture_runtime_checks.jl")
+F.with_single_blas() do
 @testset "B point training, source replay and separate codecs" begin
+    @test fixture_runtime_checks()
     println("B_POINT_STAGE core");flush(stdout)
     @test core_checks()
     println("B_POINT_STAGE nnls_literals");flush(stdout)
@@ -61,5 +64,6 @@ include("tree_checks.jl")
         @test consistency_checks(root,result)
         @test result.verified.selected_index===nothing
     end
+end
 end
 end

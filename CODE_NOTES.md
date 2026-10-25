@@ -926,3 +926,15 @@ and explicit little-endian serialization. It does not call the primary
 reader. Both namespaces retain complete immutable raw-row provenance.
 Provider tag interpretation, cross-body reconciliation, actual source
 admission and archive fitting remain separate unqualified stages.
+
+
+## Scoped generated-fixture BLAS mode (25 October 2026)
+
+The ordinary full audit inherits four BLAS threads. The generated B fixture
+previously relied on an external single-thread setting, so the unchanged B1
+runtime guard rejected the ordinary example and prevented the unsupported-fit
+test from creating its expected support diagnostic. The shared generated
+fixture now selects one BLAS thread in a try/finally scope and restores the
+caller setting. Its ordinary run and the complete B testset use that scope.
+Production Julia/BLAS guards, fitting code, source identities, numerical
+expectations, resource limits and tolerances are unchanged.

@@ -1,11 +1,21 @@
 module BPointSyntheticFixture
 using SolarSINDy,Dates,SHA,JSON3
+using LinearAlgebra: BLAS
 const T=SolarSINDy.DurationPointTraining
 const P=SolarSINDy.DurationPointArtifacts
 const REPO=normpath(joinpath(@__DIR__,"..",".."))
 include(joinpath(REPO,"tools","actual_b_chain","ActualBChain.jl"))
 const B=ActualBChain
 const S=B.BSelection
+function with_single_blas(f::Function)
+    caller_threads=BLAS.get_num_threads()
+    try
+        BLAS.set_num_threads(1)
+        f()
+    finally
+        BLAS.set_num_threads(caller_threads)
+    end
+end
 function fixture(root,n=1024)
     mkdir(root);t0=DateTime(1900);boundary=t0+Hour(n÷2);stop=t0+Hour(n)
     raw=ones(17,n)
@@ -44,11 +54,13 @@ function fixture(root,n=1024)
     admission,S._reference(meta,rows)
 end
 function run_stage(root;chunk_hours=7)
-    root=realpath(root)
-    admission,reference=fixture(joinpath(root,"input"))
-    stage=B.BInitialPointFits.run_initial_l0(admission,reference,joinpath(root,"stage");chunk_hours)
-    verified=B.BInitialPointFits.verify_initial_l0(stage.directory,admission,reference;expected_completion_sha256=stage.completion_sha256,expected_sources=P.source_identity(),chunk_hours=2)
-    T._need(stage.gain_fit_count==36&&verified.complete&&verified.model_count==36&&verified.certificate_count==36&&verified.gain_fit_calls==0&&verified.hazard_fit_calls==0,"generated B stage/readback differs")
-    (;admission,reference,stage,verified)
+    with_single_blas() do
+        root=realpath(root)
+        admission,reference=fixture(joinpath(root,"input"))
+        stage=B.BInitialPointFits.run_initial_l0(admission,reference,joinpath(root,"stage");chunk_hours)
+        verified=B.BInitialPointFits.verify_initial_l0(stage.directory,admission,reference;expected_completion_sha256=stage.completion_sha256,expected_sources=P.source_identity(),chunk_hours=2)
+        T._need(stage.gain_fit_count==36&&verified.complete&&verified.model_count==36&&verified.certificate_count==36&&verified.gain_fit_calls==0&&verified.hazard_fit_calls==0,"generated B stage/readback differs")
+        (;admission,reference,stage,verified)
+    end
 end
 end

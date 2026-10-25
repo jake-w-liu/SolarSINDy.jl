@@ -1143,3 +1143,15 @@ primary reader checks and ordinary example. Separate process evidence compares
 mutants are detected on both runtimes. The initial blank-line allocation
 failure is retained; the repaired iterator passes the original ceiling.
 These are component checks, not full package, platform or archive-fit verdicts.
+
+
+## Ordinary caller thread-state regression
+
+Both native versions start with an explicit four-thread BLAS caller, execute
+the complete portable B suite and its ordinary example with all 36 genuine
+gain fits and independent readback, and restore the caller to four threads.
+Separate nested controls verify success and thrown-error restoration. All
+original assertions remain, and the all-36 unsupported-support diagnostic is
+still required. The earlier full unfiltered package/experiment failures and
+their blocked CI publication remain retained. A fresh final-source full audit,
+strict docs and eight native CI jobs are required before main publication.

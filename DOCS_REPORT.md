@@ -114,3 +114,12 @@ The archival-format manual and namespace docstring describe independent
 reconstruction, immutable selected and raw records, digests and the remaining
 support-clock and catalog boundaries. The example compares both readers on
 generated text. Strict final-source documentation builds are still required.
+
+
+## Generated example runtime scope
+
+The generated B example selects its required one-thread BLAS mode locally and
+restores the caller setting on both normal and exceptional returns. The B1
+production runtime restrictions are retained. Full final-source documentation,
+package, experiment, harness and cross-platform checks remain required; no
+actual-data or predictive-performance qualification follows from this example.

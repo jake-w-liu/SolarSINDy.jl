@@ -124,3 +124,12 @@ construction. The replacement iterator uses Base.eachsplit, preserves literal
 and Base.eachline boundary oracles, and consumes approximately 15KiB in the
 same bounded case on both runtimes. The original primary 16MiB and independent
 512MiB ceilings remain unchanged; no global catalog resource claim follows.
+
+
+## Preserve the caller BLAS configuration
+
+The generated fixture now scopes its already required one-thread BLAS mode.
+It changes no matrix, solver, arithmetic, resource ceiling or numerical
+tolerance, and claims no speedup. Both native ordinary-caller regressions
+verify restoration after success and injected failure. Full-source integration
+and resource gates remain mandatory before publication.
