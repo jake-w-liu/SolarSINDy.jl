@@ -18,6 +18,7 @@ makedocs(
             "Interval-Mean Forecaster" => "interval-mean-forecaster.md",
             "Duration-Conditioned Forcing" => "duration-conditioned-forcing.md",
             "Archival Current-State Bridge" => "duration-current-state-stream.md",
+            "Matched342 Numerical Primitives" => "matched-gbm-primitives.md",
             "Published Lund Dst Reference" => "lund-dst-reference.md",
             "Completed-Source Minute Replay" => "completed-minute-replay.md",
             "Completed-Source dB/dt Replay" => "completed-source-dbdt.md",

@@ -51,3 +51,25 @@ The consolidated 21-export manual at 8d13a3b passed strict Ubuntu CI run
 The later acaf046f recipe repair adds explicit numeric-representation semantics
 to the manual. A fresh strict build is required for that final committed source;
 the 8d13a3b pass is retained as historical evidence only.
+
+
+## Matched342 API and official Expat documentation lock update
+
+The additive matched342 manual, implementation docstrings and generated
+doctest build under both Windows Julia1.12.6 and1.13.1 with
+checkdocs=:exports, doctest=true and warnonly=false unchanged. The 1.13 build
+initially failed because Application Control blocked the installed official
+Expat_jll2.7.3+0 DLL. A byte-for-byte comparison with its official archive ruled
+out local corruption. The current official2.9.0+0 update changes exactly that
+dependency's version and tree hash in docs/Manifest.toml. In an isolated exact
+source copy, strict1.13 and1.12 builds exit0 without Documenter errors or warnings.
+Their raw logs retain the upstream compiler/import warnings. No security setting
+was changed, and no scientific Project.toml or Manifest.toml was modified.
+
+The updated-lock Julia1.13 log SHA256 is
+fed299f6573ea0e928539249b2be5dcc5e817d8b345405a9bc4975748e54fcf7;
+Julia1.12 log SHA256 is
+9e579b209dadfab7063412ac126e8e9747afbf7c22450b084f976756926621da.
+The blocked original build remains a failed historical attempt, not a waived
+check. Final committed full-package, experiment, harness and CI checks remain
+required before release.

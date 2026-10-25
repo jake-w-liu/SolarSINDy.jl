@@ -54,3 +54,26 @@ Type diagnostics show the deliberate widened evaluator result boundary; no
 universal type-stability or full-optimization claim is made. Output containers
 are immutable; local Dict/Vector workspaces are call-owned, and the unchanged A
 precision lock guards BigFloat operations.
+
+
+## Matched342 collector, replay and row-storage resource checks
+
+The original public collector allocated about1.456GB for1024 rows through
+repeated concatenation; the original maximum-tree replay allocated about739.65MB
+at1024 rows through repeated tuple boxing. A preallocated feature matrix and a
+per-call typed edge table preserve the exact feature values, bins, Float32
+accumulation order and outputs. Paired original/corrected controls pass3030
+comparisons plus74 edge cases on both runtimes before adoption. A tested vector
+of vectors alternative was rejected after its measured latency regression.
+
+Final Julia1.12 component measurements give a1024-row feature median17.327ms
+with22558931 allocated bytes and maximum-geometry1024-row replay median7.976ms
+with736245 bytes. These are concurrency-qualified synthetic measurements, not
+full-archive fitting times or a universal latency guarantee. Final Julia1.13
+storage controls include the full500000-row bound. Its immutable packed row
+index allocates about4.00MB to construct and avoids sample-count specialization.
+Ordered4096-index access costs5.5microseconds versus0.1microsecond for the old
+tuple fixture; complete encoder checking costs147.9 versus138.05microseconds.
+The storage change therefore trades some access time for bounded type and
+storage behavior; it is not claimed to improve every operation. Full500000-row
+fitting and actual-panel performance are not measured here.

@@ -812,3 +812,35 @@ by the explicit one-based entry guard, which preserves admissible arrays.
 The external source freeze records all receipts and the two permitted post-run
 ledger-only changes. Full root-owned qualification and scientific stages remain
 open; this synthetic stage makes no provenance, coverage or skill verdict.
+
+
+## Matched-information boosted-tree primitives Development Ledger (25 October 2026)
+
+The additive matched342 namespace implements the fixed 29 original, 136 lag,
+165 missingness and 12 clock/run features. Independent pre-code rational
+feature/encoder oracles and a separately specified variance graph determine the
+expected values. Causal completed-hour anchors, group boundaries, receipt
+delays, missing runs and training-only imputation/scaling are explicit inputs.
+The immutable row index supports the fixed 500000-row ceiling without encoding
+sample count in a tuple type. The separate exact scalar tree codec preserves
+Float64 bins and ordered Float32 leaf accumulation before restoring the anchor.
+Its genuine generated example fits all eight fixed EvoTrees settings and checks
+native prediction/save-load parity. Synthetic admission cannot authorize actual
+archive execution or forecast-skill claims.
+
+Two directly reproduced resource defects were corrected: repeated concatenation
+in the public feature collector and per-row boxing of tree edge tuples. The
+collector now allocates its output once; replay prepares a typed local edge table
+once per call. Paired exact numerical checks precede the fixes; thresholds,
+tree order, scientific oracles, tolerances and source validation are unchanged.
+The public ordinary-call resource regressions retain the failing originals.
+
+Focused tests, ordinary generated examples, 17 meaningful mutations on both
+Julia versions, and strict documentation are qualified by external receipts.
+The documentation lock alone updates official Expat_jll 2.7.3+0 to 2.9.0+0:
+the former DLL was blocked by local Application Control despite matching its
+official archive. Both native strict builds pass with the official update;
+security policy and scientific dependency locks are unchanged. Full unfiltered
+Pkg.test(), experiments, canonical harness and all eight CI jobs remain required
+on the final committed source before main promotion. Actual archive fitting,
+matched independent holdouts and paper result refresh remain separate gates.

@@ -1,0 +1,7 @@
+include("test_features_encoder.jl")
+include("test_tree_replay.jl")
+include("test_codec_storage.jl")
+include("test_fit_context_codec.jl")
+include("test_generated_fit.jl")
+include("test_resource_regressions.jl")
+Matched342ResourceRegressionTests.run_tests()
