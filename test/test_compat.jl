@@ -18,11 +18,49 @@ module CompatContractTests
 using Test
 using TOML
 using Pkg
+using SolarSINDy
 
 const PACKAGE_ROOT = normpath(joinpath(@__DIR__, ".."))
 const PROJECT = TOML.parsefile(joinpath(PACKAGE_ROOT, "Project.toml"))
 const DEPS = PROJECT["deps"]
 const COMPAT = get(PROJECT, "compat", Dict{String,Any}())
+
+# Derive the required image inputs from the package's actual load-time source
+# contract. This is deliberately limited to this image's literal COPY layout.
+function _monitor_copies_point_sources_before_precompile(source)
+    copies=Tuple{String,String}[];precompile_seen=false
+    for raw in split(source,'\n')
+        line=strip(raw)
+        if startswith(line,"RUN ") && occursin("Pkg.precompile()",line)
+            precompile_seen=true;break
+        end
+        startswith(line,"COPY ") || continue
+        words=split(line);length(words)>=3 || return false
+        any(w->startswith(w,"--"),words[2:end]) && return false
+        destination=replace(normpath(words[end]),'\\'=>'/')
+        for original in words[2:end-1]
+            push!(copies,(replace(normpath(original),'\\'=>'/'),destination))
+        end
+    end
+    function supplies(name,original,destination)
+        if isdir(joinpath(PACKAGE_ROOT,original))
+            if original=="."
+                relative=name
+            elseif startswith(name,original*"/")
+                relative=name[length(original)+2:end]
+            else
+                return false
+            end
+            target=joinpath(destination,relative)
+        else
+            name==original || return false
+            target=joinpath(destination,basename(original))
+        end
+        replace(normpath(target),'\\'=>'/')==name
+    end
+    precompile_seen && all(name->any(pair->supplies(name,pair...),copies),
+        SolarSINDy.DurationPointTraining.SOURCE_FILES)
+end
 
 """
 Standard libraries this package depends on. Their versions track the Julia release, so a `[compat]`
@@ -154,6 +192,11 @@ end
         end
         monitor = read(joinpath(PACKAGE_ROOT,"deploy/Dockerfile.monitor"),String)
         @test first(findfirst("COPY src ./src",monitor)) < first(findfirst("Pkg.precompile()",monitor))
+        @test _monitor_copies_point_sources_before_precompile(monitor)
+        point_copy="COPY tools/actual_b_chain ./tools/actual_b_chain"
+        without_point_copy=replace(monitor,point_copy=>"";count=1)
+        @test !_monitor_copies_point_sources_before_precompile(without_point_copy)
+        @test !_monitor_copies_point_sources_before_precompile(without_point_copy*"\n"*point_copy*"\n")
         @test occursin("COPY data ./data",monitor)
         @test occursin("COPY validation/operational/superlearner_live_claim_audit.jl",monitor)
         compose = read(joinpath(PACKAGE_ROOT,"deploy/docker-compose.yml"),String)

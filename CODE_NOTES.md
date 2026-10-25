@@ -1041,3 +1041,13 @@ raw rows across bodies, reject conflicting valid components and never stitch
 partial measurements. The independent catalog uses separate identity encoding,
 batch grouping and serialization. File access, provider support clocks, actual
 archive admission, model fitting and predictive skill remain separate gates.
+
+
+## Monitor image load-time source closure (25 October 2026)
+
+The monitor image now copies the five tracked actual_b_chain source-identity
+dependencies before package precompilation. The package already hashes these
+files at load time; the previous image omitted them. No algorithm, immutable
+source-pin contract or runtime guard changes. The compatibility test derives
+required inputs from the package source-file contract and the precompile COPY
+boundary; removing the input or moving it after precompilation fails.

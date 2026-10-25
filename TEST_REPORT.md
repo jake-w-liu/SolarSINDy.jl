@@ -1263,3 +1263,15 @@ The prior combined full-harness failure is retained: its qualification clone
 had a local upstream that the native fixture correctly refused. No source guard
 or canonical audit is relaxed. Final combined package, experiments, harness,
 documentation and all native platform checks remain required.
+
+
+## Monitor source-closure red/green verification
+
+The actual deployment-image CI log retains the missing ActualBChain source
+failure. Two independent native projections of the declared precompile-stage
+files reproduce it on Julia1.12.6 and1.13.1. Both corrected projections load the
+staged package, verify source identities and pass the full compatibility suite,
+including removed/late-copy regression controls. Local checks do not claim a
+Docker-engine build; final real image builds and runtime-user checks remain
+mandatory in CI. Full combined package, experiments, canonical audit and strict
+documentation checks will run on the final committed source.

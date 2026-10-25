@@ -132,3 +132,11 @@ consistency, no partial stitching, exact-minute lookups and separate missing
 coverage versus uncovered gaps. Source authority and provider clock assumptions
 are excluded explicitly. The generated example compares both package catalogs.
 Strict final-source documentation builds remain pending.
+
+
+## Monitor image source-identity inputs
+
+The image definition explains why the separate B executor source files are
+required during package precompilation even though the forecast daemon does not
+execute that research path. Package and forecast behavior remain unchanged.
+Final committed-source strict documentation remains required.

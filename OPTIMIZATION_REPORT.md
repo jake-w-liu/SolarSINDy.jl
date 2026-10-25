@@ -144,3 +144,12 @@ occupies exactly 114278480 bytes; the retained original raw ledgers occupy
 76800000 bytes per reader. Measured catalog allocations are approximately
 1.784GB primary and1.625GB independent, with full byte equality and no universal
 latency claim. Both package-bound maximum checks pass the same original ceiling.
+
+
+## Minimal monitor precompile dependency copy
+
+The added image input is limited to the five tracked actual_b_chain source
+files. It adds no archive body, fitted result or research output. The original
+precompile task limit, non-root runtime user, depot ownership, health checks and
+full container CI checks are preserved. No image-size or build-time performance
+claim follows from the source-closure repair.
