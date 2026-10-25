@@ -53,3 +53,58 @@ when available, or an original incomplete row; partial rows are never combined.
 absent rows. Missing declared minutes differ from uncovered gaps between bodies.
 The catalog retains every original immutable body ledger. It grants no file
 permission, provider-clock interpretation, archive admission or forecast claim.
+
+## Completed-source catalog windows
+
+`ArchiveCompletedWindows` admits features through bounded views of the original
+catalog witnesses. A feature request reads31completed ground vectors and, for
+mixed8, one completed wind vector. Ground11 ignores the wind argument. Partial
+selected vectors remain unavailable; the adapter never stitches measurements.
+
+Target access checks strict split readiness and assumed label maturity before
+creating its31-vector target view. An immature or split-ineligible request has
+an empty source query trace. Window iteration, scans, off-minute queries, queries
+outside the declared support and more than256calls per view are rejected.
+
+Returned feature vectors and ordered read traces are immutable tuples. The
+independent route uses the independently reconstructed catalog and a separate
+window implementation; both share the feature primitive whose numerical
+expectations are frozen separately. Source pins retain assumed availability,
+unknown historical receipts and false source-bound provenance. These adapters
+grant no file permission, actual-source artifact, fit or forecasting qualification.
+
+```@docs
+SolarSINDy.ArchiveCompletedWindows
+SolarSINDy.ArchiveCompletedWindows.prepare_catalog_issue
+SolarSINDy.ArchiveCompletedWindows.evaluate_catalog_label
+SolarSINDy.ArchiveCompletedWindowAudit
+SolarSINDy.ArchiveCompletedWindowAudit.audit_catalog_issue
+SolarSINDy.ArchiveCompletedWindowAudit.audit_catalog_label
+```
+
+## Pinned source reconstruction
+
+The offline source job accepts a canonical request with an explicit file list,
+byte sizes, SHA256 pins, stream declarations and source intervals. It checks
+request shape, paths, stream membership and bounded minute intervals before
+reading dataset bytes. Ground-only requests reject wind descriptors. Generated
+requests admit only generated fixture files under their own input directory.
+
+Actual-cache execution also requires four caller-supplied path/hash pairs:
+authorization, frozen source-admission plan, exact package source proof and
+completed software qualification. The loaded worker must occur in that proof.
+Recorded paths never launch code or discover additional datasets. Historical
+provider receipt availability remains false for this archival-cache route.
+
+Each fresh snapshot preserves original text,48-byte raw records and selected
+80-byte catalog witnesses in shards of at most8192rows. Members are bounded by
+8MiB, the snapshot by1GiB and the member count by1024. The completion marker is
+written last; failed attempts remain incomplete. Primary and independent jobs
+reconstruct separately. A completed single-role snapshot grants no independent
+source qualification, eligible-case count, fit or forecasting verdict.
+
+```@docs
+SolarSINDy.ArchiveCatalogSourceJob
+SolarSINDy.ArchiveCatalogSourceJob.Authority
+SolarSINDy.ArchiveCatalogSourceJob.reconstruct
+```

@@ -170,7 +170,7 @@ end
         @test !_cross_platform_ci_contract(replace(workflow, "fail-fast: false" => "fail-fast: true"; count=1))
         @test !_cross_platform_ci_contract(replace(workflow, "julia-actions/julia-runtest@v1" => "omitted-package-tests"; count=1))
         @test !_cross_platform_ci_contract(replace(workflow, "examples/experiments.jl" => "omitted-experiments.jl"; count=1))
-        @test !_cross_platform_ci_contract(replace(workflow, "    timeout-minutes: 120" => "    timeout-minutes: 120\n    continue-on-error: true"; count=1))
+        @test !_cross_platform_ci_contract(replace(workflow, "    strategy:" => "    continue-on-error: true\n    strategy:"; count=1))
         @test !occursin("1.10", workflow)
         @test !occursin("mv Manifest.toml", workflow)
     end

@@ -75,6 +75,12 @@ include("archive_format/ArchiveSourceCatalog.jl")
 export ArchiveSourceCatalog
 include("archive_format/ArchiveCatalogAudit.jl")
 export ArchiveCatalogAudit
+include("archive_format/ArchiveCompletedWindows.jl")
+export ArchiveCompletedWindows
+include("archive_format/ArchiveCompletedWindowAudit.jl")
+export ArchiveCompletedWindowAudit
+include("archive_format/ArchiveCatalogSourceJob.jl")
+export ArchiveCatalogSourceJob
 
 export # Utils
        numerical_derivative, smooth_moving_average, pressure_correct_dst,

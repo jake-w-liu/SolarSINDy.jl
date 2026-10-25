@@ -12,23 +12,24 @@ const ZERO_DATE = DateTime(1970)
 reject(message) = throw(ArgumentError(message))
 check(condition, message) = condition ? nothing : reject(message)
 
-struct _AuditLines{T}
-    parts::T
-    bytes::Int
+struct _AuditLines
+    raw::String
 end
-_AuditLines(raw::String) = _AuditLines(eachsplit(raw, '\n'; keepempty=true), ncodeunits(raw))
-Base.IteratorSize(::Type{<:_AuditLines}) = Base.SizeUnknown()
-Base.eltype(::Type{<:_AuditLines}) = SubString{String}
-@inline function _line_item(lines::_AuditLines, item, consumed::Int)
-    (item === nothing || consumed >= lines.bytes) && return nothing
-    fragment, following = item
-    width = ncodeunits(fragment)
-    terminated = consumed + width < lines.bytes
-    record = terminated && endswith(fragment, '\r') ? chop(fragment; tail=1) : fragment
-    (record, (following, consumed + width + 1))
+Base.IteratorSize(::Type{_AuditLines}) = Base.SizeUnknown()
+Base.eltype(::Type{_AuditLines}) = SubString{String}
+@inline function Base.iterate(lines::_AuditLines, offset::Int=1)
+    raw = lines.raw; bytes = ncodeunits(raw)
+    offset > bytes && return nothing
+    cursor = offset
+    # Scan ASCII delimiter bytes independently of the production reader's
+    # string-search iterator. A single integer carries the next byte boundary.
+    while cursor <= bytes && codeunit(raw,cursor) != 0x0a; cursor += 1; end
+    last = prevind(raw,cursor)
+    if cursor <= bytes && last >= offset && codeunit(raw,last) == 0x0d
+        last = prevind(raw,last)
+    end
+    (SubString(raw,offset,last),cursor+1)
 end
-@inline Base.iterate(lines::_AuditLines) = _line_item(lines, iterate(lines.parts), 0)
-@inline Base.iterate(lines::_AuditLines, state) = _line_item(lines, iterate(lines.parts, state[1]), state[2])
 
 struct AuditBody
     kind::Symbol

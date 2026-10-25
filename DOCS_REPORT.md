@@ -140,3 +140,17 @@ The image definition explains why the separate B executor source files are
 required during package precompilation even though the forecast daemon does not
 execute that research path. Package and forecast behavior remain unchanged.
 Final committed-source strict documentation remains required.
+
+## Completed catalog-window integration
+
+Documents bounded support, strict maturity/split ordering, query traces, independent lookup scope and truthful provenance flags. Release qualification requires strict package documentation builds.
+
+The source-job documentation specifies canonical requests, explicit path/hash
+authority, the qualified-worker requirement, offline source reconstruction and
+snapshot limits. It distinguishes single-role completion from independent
+source qualification and preserves unknown historical receipt availability.
+
+
+The dashboard caption describes this system actual L1-input nowcast. It makes
+no universal claim that confident magnetic-severity information is available
+only at L1. No forecast values, lead calculation or served artifact changed.

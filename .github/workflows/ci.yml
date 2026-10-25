@@ -16,7 +16,8 @@ jobs:
   test:
     name: Julia ${{ matrix.julia-version }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
+    # Allow the expanded cold native controls, full package suite and experiments.
+    timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:

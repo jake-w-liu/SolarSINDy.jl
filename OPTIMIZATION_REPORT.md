@@ -153,3 +153,25 @@ files. It adds no archive body, fitted result or research output. The original
 precompile task limit, non-root runtime user, depot ownership, health checks and
 full container CI checks are preserved. No image-size or build-time performance
 claim follows from the source-closure repair.
+
+## Completed catalog-window integration
+
+At1.6million generated raw rows the prototype warm-call allocation maxima were82672bytes for the primary route and1066288bytes for the independent route, below the frozen8MiBceiling on Julia1.12.6and1.13.1. These are per-call cumulative allocation checks, not whole-year runtime, peak-memory or forecasting claims. Release qualification requires the unchanged package resource checks.
+
+## Independent reader line cursor
+
+The macOS1.12 CI job measured1207974800allocated bytes for an allowed8MiB blank
+body, exceeding the unchanged536870912byte ceiling. The independent iterator
+now scans ASCII delimiters with one integer byte offset; the production reader
+still uses its separate string-search iterator. Local prototype probes measured
+15397bytes on Julia1.12 and14933bytes on Julia1.13 for the replacement blank-body
+parse and retained every old/new AuditBody field. Local Windows probes do not
+reproduce the macOS allocation failure; the actual macOS job remains decisive.
+No cumulative-allocation measurement is presented as peak memory or a universal
+runtime improvement.
+
+
+The native matrix job deadline changes from120to180minutes to complete the
+expanded verification sequence on Windows. This scheduling change is not a
+software speedup or a relaxed numerical/resource threshold. The original512MiB
+blank-body and4GiB catalog cumulative-allocation checks remain in force.

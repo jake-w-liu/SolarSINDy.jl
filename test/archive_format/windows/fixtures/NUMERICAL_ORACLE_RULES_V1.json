@@ -1,0 +1,10 @@
+{
+  "schema": "catalog_window_numerical_rules_v1",
+  "before_first_native_test": true,
+  "exact_bits": ["mixed8 features", "target maximum", "raw source and witness identities"],
+  "ground11_absolute_tolerance": 2e-15,
+  "ground11_relative_tolerance": 0.0,
+  "ground11_reason": "Independent Python log and trigonometric literals are compared at a fixed Float64 absolute allowance. Primary and audit routes must additionally agree in every feature bit within the same runtime.",
+  "clock_and_query_metadata": "exact",
+  "existing_package_tolerances_changed": false
+}

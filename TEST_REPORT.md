@@ -1275,3 +1275,35 @@ including removed/late-copy regression controls. Local checks do not claim a
 Docker-engine build; final real image builds and runtime-user checks remain
 mandatory in CI. Full combined package, experiments, canonical audit and strict
 documentation checks will run on the final committed source.
+
+## Completed catalog-window integration
+
+Prototype: four fresh native positive roles,42matched cases,16semantic negatives and both runtime resource probes passed. Package integration retains every numerical/rejection assertion and adds maximum-size window checks to the existing real generated catalog. Release qualification requires full package, harness and cross-platform checks on the final committed source.
+
+## Pinned archive reconstruction and line resources
+
+Generated source-job contracts compare original bodies,48-byte raw ledgers,
+80-byte selected witnesses and canonical body identities against independent
+binary hash oracles frozen before implementation. Fresh primary/independent
+jobs on both runtimes compare every payload hash for ground-only and mixed
+layouts. Rejection cases cover canonical JSON, path/type/count/clock guards,
+changed source pins, conflicting overlaps, existing destinations and missing
+actual-source authority. A33-day declaration regression checks rejection before
+output creation. These fixtures never authorize or fit actual archive data.
+
+The independent reader retains its original512MiB allocation ceiling for an
+8MiB blank body and for50000raw rows. The integer byte cursor is checked against
+literal CR/LF/Unicode cases and2000seeded Base.eachline comparisons. Separate
+old/new native probes retain identical complete AuditBody fields and exact raw
+and selected digests on both local Julia versions. A macOS1.12 resource failure
+must be reverified through the full unchanged platform job before release.
+
+
+## CI execution and dashboard scope
+
+The Windows1.13 job cancellation is retained as incomplete verification, with
+experiments unexecuted. The whole-job budget is180minutes; the same unfiltered
+package and ordinary experiment entries remain mandatory on all six native
+axes. The existing continue-on-error mutation remains a real failure control
+and no longer depends on a particular deadline literal. Frontend tests and HTML
+structure/render checks cover the narrow caption correction.

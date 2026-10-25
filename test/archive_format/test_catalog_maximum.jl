@@ -2,6 +2,7 @@ module ArchiveCatalogMaximumTests
 using Dates,Printf,SHA,JSON3,Test,SolarSINDy
 const P=SolarSINDy.ArchiveFormatParsers;const A=SolarSINDy.ArchiveFormatAudit
 const C=SolarSINDy.ArchiveSourceCatalog;const I=SolarSINDy.ArchiveCatalogAudit
+include(joinpath(@__DIR__,"windows","maximum_support.jl"))
 function maximum_inputs()
     firstday=DateTime(2020);primary=P.ParsedBody[];independent=A.AuditBody[]
     frozen=JSON3.read(read(joinpath(@__DIR__,"fixtures","catalog_v1.json"),String),Any)
@@ -64,6 +65,7 @@ allocated_independent,a=measured_catalog(I.audit_catalog,independent)
     @test_throws ArgumentError C.build_catalog([primary;first(primary)])
     @test_throws ArgumentError I.audit_catalog([independent;first(independent)])
 end
+check_completed_window_maximum(p,a)
 record=(;complete=true,runtime=string(VERSION),body_count=32,raw_rows=1_600_000,selected_rows=length(p),selected_bytes=ncodeunits(p.selected_storage),primary_cumulative_allocated_bytes=allocated_primary,independent_cumulative_allocated_bytes=allocated_independent,unchanged_allocation_ceiling_bytes=4*1024^3,selected_digest=p.selected_sha256,raw_catalog_digest=p.raw_catalog_sha256,actual_data=false,actual_fits=0)
 return record
 end

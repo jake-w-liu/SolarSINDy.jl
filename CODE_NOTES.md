@@ -1051,3 +1051,37 @@ files at load time; the previous image omitted them. No algorithm, immutable
 source-pin contract or runtime guard changes. The compatibility test derives
 required inputs from the package source-file contract and the precompile COPY
 boundary; removing the input or moving it after precompilation fails.
+
+## Completed catalog-window integration
+
+Adds two pure catalog-window namespaces; computational bodies match the checked prototype after package-relative imports and audit docstrings. No actual-source authority or legacy synthetic protocol change.
+
+## Pinned archive reconstruction
+
+The source-only worker validates a caller's explicit canonical request before
+reading dataset bytes. It admits bounded generated fixtures or separately
+authorized pinned archival inputs, reconstructs one native role and preserves
+original text, raw records and catalog witnesses. Actual execution requires the
+worker in the exact fully qualified source inventory. No request launches code,
+downloads data, discovers neighboring files, evaluates features or fits models.
+Exclusive publication writes a completion marker last and retains failed partial
+attempts. Independent reconstruction and provider receipt availability remain
+separate evidence gates. The earlier synthetic protocol and row cap are intact.
+
+The declaration validator enforces the existing32-day parser bound before
+dataset access, following a generated regression that exposed late rejection.
+The independent line reader uses an integer byte cursor to address the macOS1.12
+blank-input allocation regression; all remaining parser bytes and original
+resource ceilings are preserved.
+
+
+## Release integration corrections
+
+The native CI matrix retains its full controls, package tests and experiments
+with a180-minute scheduling deadline. The previous120-minute Windows1.13 job
+was interrupted during package testing after its native artifact controls had
+completed. Unit resource ceilings and the cold public-API, image and docs
+deadlines are unchanged. The CI negative control injects error suppression at
+the strategy boundary independently of the scheduling budget. The dashboard
+caption now states the actual L1-input nowcast scope without asserting that
+magnetic severity can only be known at L1.
