@@ -1,0 +1,747 @@
+{
+  "schema": "dbdt_refit_chain_independent_precode_oracles_v1",
+  "pre_implementation": true,
+  "actual_source_reads": false,
+  "production_fit_helpers_called": false,
+  "native_probe_scope": "stdlib RNG indices only, no fit",
+  "ridge": {
+    "input": {
+      "X": [
+        [
+          0,
+          5
+        ],
+        [
+          1,
+          5
+        ],
+        [
+          2,
+          5
+        ]
+      ],
+      "log_targets": [
+        1,
+        2,
+        3
+      ],
+      "penalty": 1,
+      "sample_std_denominator": 2
+    },
+    "ground11_primitive": {
+      "mean": [
+        1,
+        5
+      ],
+      "scale": [
+        1,
+        1
+      ],
+      "coefficients": [
+        "2/1",
+        "2/3",
+        "0/1"
+      ],
+      "predictions": [
+        "4/3",
+        "2/1",
+        "8/3"
+      ],
+      "intercept_penalized": false
+    },
+    "mixed8_primitive": {
+      "mean": [
+        1,
+        5
+      ],
+      "scale_bits": [
+        "3ff000000044b830",
+        "3e112e0be826d695"
+      ],
+      "constant_column_scale_bits": "3e112e0be826d695",
+      "coefficients_fraction": [
+        "3/2",
+        "158456325186985013326351695872/237684487701249350999123821833",
+        "0/1"
+      ],
+      "coefficients_decimal": [
+        "1.5",
+        "0.666666666888888906905267568311163721490865178889161006080340902985970304863900144042767305",
+        "0"
+      ],
+      "predictions_decimal": [
+        "0.833333333777777814477201913165048784390682951463553006098340617070777050512213934122770425",
+        "1.5",
+        "2.16666666622222218552279808683495121560931704853644699390165938292922294948778606587722958"
+      ],
+      "intercept_penalized": true
+    },
+    "scope": "private primitive p2+constant oracle; public actual artifact layout remains exactly mixed8 or ground11",
+    "tolerance": {
+      "atol": "1e-13",
+      "rtol": "0",
+      "reason": "three well-conditioned rows; sample normalization and 3x3 solve perturbations are far below1e-13; omitted1e-9 changes prediction by about4e-10"
+    }
+  },
+  "bins": {
+    "X": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "nbins": 4,
+    "R7_cuts": [
+      "3/4",
+      "3/2",
+      "9/4"
+    ],
+    "bins": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "equal_cut_value": "3/4",
+    "equal_cut_bin": 1,
+    "above_cut_bin": 2,
+    "constant_column": [
+      5,
+      5,
+      5,
+      5
+    ],
+    "constant_unique_cuts": [
+      5
+    ],
+    "constant_bins": [
+      1,
+      1,
+      1,
+      1
+    ]
+  },
+  "tree": {
+    "B": [
+      [
+        1,
+        1
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        2,
+        2
+      ],
+      [
+        2,
+        2
+      ]
+    ],
+    "targets": [
+      0,
+      0,
+      2,
+      2
+    ],
+    "maxdepth": 1,
+    "minleaf": 1,
+    "root_mean": "1/1",
+    "parent_sse": "4/1",
+    "candidate_splits": [
+      {
+        "feature": 1,
+        "threshold": 1,
+        "left_count": 2,
+        "right_count": 2,
+        "split_sse": "0/1",
+        "gain": "4/1"
+      },
+      {
+        "feature": 2,
+        "threshold": 1,
+        "left_count": 2,
+        "right_count": 2,
+        "split_sse": "0/1",
+        "gain": "4/1"
+      }
+    ],
+    "selected_feature": 1,
+    "selected_threshold": 1,
+    "node_feature": [
+      1,
+      0,
+      0
+    ],
+    "node_threshold": [
+      1,
+      0,
+      0
+    ],
+    "left": [
+      2,
+      0,
+      0
+    ],
+    "right": [
+      3,
+      0,
+      0
+    ],
+    "values": [
+      "1/1",
+      "0/1",
+      "2/1"
+    ],
+    "predictions": [
+      "0/1",
+      "0/1",
+      "2/1",
+      "2/1"
+    ],
+    "threshold_gap": {
+      "bins": [
+        1,
+        1,
+        3,
+        3
+      ],
+      "equal_gain_thresholds": [
+        1,
+        2
+      ],
+      "selected_threshold": 1
+    },
+    "stop_cases": [
+      {
+        "reason": "maxdepth0",
+        "leaf": "1/1"
+      },
+      {
+        "reason": "minleaf3_with_n4",
+        "leaf": "1/1"
+      },
+      {
+        "reason": "strict_zero_gain_y_constant1",
+        "leaf": "1/1"
+      }
+    ]
+  },
+  "forest": {
+    "seed": 20171001,
+    "rng": "Julia1.12.6 MersenneTwister",
+    "nb_features": 1,
+    "mtry": 1,
+    "feature_rng_draws": 0,
+    "primitive_overrides": {
+      "ntrees": 2,
+      "sample_rows": 4,
+      "maxdepth": 1,
+      "minleaf": 1
+    },
+    "B": [
+      1,
+      1,
+      2,
+      2
+    ],
+    "targets": [
+      0,
+      2,
+      4,
+      6
+    ],
+    "trees": [
+      {
+        "rows": [
+          1,
+          3,
+          2,
+          1
+        ],
+        "root": "3/2",
+        "left": "2/3",
+        "right": "4/1",
+        "parent_sse": "11/1",
+        "split_sse": "8/3"
+      },
+      {
+        "rows": [
+          2,
+          3,
+          2,
+          1
+        ],
+        "root": "2/1",
+        "left": "4/3",
+        "right": "4/1",
+        "parent_sse": "8/1",
+        "split_sse": "8/3"
+      }
+    ],
+    "predictions": [
+      "1/1",
+      "1/1",
+      "4/1",
+      "4/1"
+    ],
+    "scope": "private tiny primitive overrides only; actual protocol remains64 trees/samplemin20000/minleaf32/depth6or9"
+  },
+  "boost": {
+    "B": [
+      1,
+      1,
+      2,
+      2
+    ],
+    "targets": [
+      0,
+      0,
+      2,
+      2
+    ],
+    "intercept": "1/1",
+    "rate": "1/20",
+    "ntrees": 2,
+    "maxdepth": 1,
+    "minleaf": 1,
+    "first_leaf_values": [
+      "-1/1",
+      "1/1"
+    ],
+    "prediction_after_first": [
+      "19/20",
+      "19/20",
+      "21/20",
+      "21/20"
+    ],
+    "second_leaf_values": [
+      "-19/20",
+      "19/20"
+    ],
+    "final_prediction": [
+      "361/400",
+      "361/400",
+      "439/400",
+      "439/400"
+    ],
+    "actual_protocol": "rate1/20 unchanged; tiny depth/count/leaf overrides are primitive-only"
+  },
+  "selection": {
+    "ridge_grid": [
+      "0.01",
+      "0.1",
+      "1",
+      "10",
+      "100"
+    ],
+    "boost_order": [
+      [
+        2,
+        50
+      ],
+      [
+        2,
+        100
+      ],
+      [
+        2,
+        200
+      ],
+      [
+        3,
+        50
+      ],
+      [
+        3,
+        100
+      ],
+      [
+        3,
+        200
+      ],
+      [
+        4,
+        50
+      ],
+      [
+        4,
+        100
+      ],
+      [
+        4,
+        200
+      ]
+    ],
+    "forest_order": [
+      6,
+      9
+    ],
+    "exact_tie_examples": [
+      {
+        "family": "ridge",
+        "losses": [
+          "1/4",
+          "1/4",
+          "1/4",
+          "1/4",
+          "1/4"
+        ],
+        "selected_index": 1,
+        "selected_penalty": "0.01"
+      },
+      {
+        "family": "boost",
+        "losses": [
+          "1/4",
+          "1/4",
+          "1/4",
+          "1/4",
+          "1/4",
+          "1/4",
+          "1/4",
+          "1/4",
+          "1/4"
+        ],
+        "selected_index": 1,
+        "selected_depth": 2,
+        "selected_trees": 50
+      },
+      {
+        "family": "forest",
+        "losses": [
+          "1/4",
+          "1/4"
+        ],
+        "selected_index": 1,
+        "selected_depth": 6
+      }
+    ],
+    "primary_tie": {
+      "family_order": [
+        "ridge",
+        "boost",
+        "forest"
+      ],
+      "losses": [
+        "1/4",
+        "1/4",
+        "1/4"
+      ],
+      "selected": "ridge"
+    },
+    "forbidden_years": [
+      2018,
+      2023,
+      2024,
+      2025
+    ],
+    "required_failure": "fail the required selection job; retain all candidates; never silently skip or select from heldout"
+  },
+  "calibration": {
+    "scope": "primitive projection uses predictions from the nonzero ground ridge oracle at X=1, not a supplied prediction API for actual cal",
+    "log_targets": [
+      0,
+      4,
+      1,
+      2,
+      2,
+      6,
+      0,
+      4,
+      2
+    ],
+    "physical_targets_decimal": [
+      "0",
+      "53.5981500331442390781102612028608784027907370386140687258265939585536620999358694816769806",
+      "1.71828182845904523536028747135266249775724709369995957496696762772407663035354759457138218",
+      "6.38905609893065022723042746057500781318031557055184732408712782252257379607905776338431249",
+      "6.38905609893065022723042746057500781318031557055184732408712782252257379607905776338431249",
+      "402.428793492735122608387180543388279605899897357129202613967188325151180633993498305178887",
+      "0",
+      "53.5981500331442390781102612028608784027907370386140687258265939585536620999358694816769806",
+      "6.38905609893065022723042746057500781318031557055184732408712782252257379607905776338431249"
+    ],
+    "prediction_from_ridge": 2,
+    "scales": [
+      1,
+      2,
+      1,
+      1,
+      1,
+      2,
+      2,
+      2,
+      1
+    ],
+    "chronological_scores": [
+      "-2/1",
+      "1/1",
+      "-1/1",
+      "0/1",
+      "0/1",
+      "2/1",
+      "-1/1",
+      "1/1",
+      "0/1"
+    ],
+    "sorted_scores": [
+      "-2/1",
+      "-1/1",
+      "-1/1",
+      "0/1",
+      "0/1",
+      "0/1",
+      "1/1",
+      "1/1",
+      "2/1"
+    ],
+    "sorted_chronological_ordinals": [
+      1,
+      3,
+      7,
+      4,
+      5,
+      9,
+      2,
+      8,
+      6
+    ],
+    "rank_cases": [
+      {
+        "alpha": "1/10",
+        "rank": 9,
+        "score": "2/1"
+      },
+      {
+        "alpha": "1/5",
+        "rank": 8,
+        "score": "1/1"
+      },
+      {
+        "alpha": "0/1",
+        "bound_state": "full",
+        "rank": null
+      },
+      {
+        "alpha": "1/1",
+        "bound_state": "empty",
+        "rank": null
+      }
+    ],
+    "center0_scale1_q2_bound_decimal": "6.38905609893065022723042746057500781318031557055184732408712782252257379607905776338431249",
+    "signed_zero_sorted_bits": [
+      "8000000000000000",
+      "0000000000000000"
+    ],
+    "underflow_nonzero_decimal": "1e-400",
+    "underflow_result": "reject beforeFloat64 conversion"
+  },
+  "synthetic_end_to_end": {
+    "evidence_mode": "synthetic_only",
+    "layout": "ground11",
+    "minima_mode": "synthetic_oracle",
+    "fit_issues": [
+      "2017-01-01T00:00:00",
+      "2017-01-01T00:01:00",
+      "2017-01-01T00:02:00"
+    ],
+    "fit_ground_vectors": "zero vectors fromfit issue-31m through finalfit issue+30m",
+    "fit_targets": [
+      0,
+      0,
+      0
+    ],
+    "fit_coefficients": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "cal_issues": [
+      "2017-10-01T00:00:00",
+      "2017-10-01T00:01:00",
+      "2017-10-01T00:02:00",
+      "2017-10-01T00:03:00",
+      "2017-10-01T00:04:00",
+      "2017-10-01T00:05:00",
+      "2017-10-01T00:06:00",
+      "2017-10-01T00:07:00",
+      "2017-10-01T00:08:00"
+    ],
+    "cal_ground_vectors": "zero prefix; X stepsfrom0to1 at2017-10-01T00:01:00 and remains1 through00:38; Y0",
+    "cal_targets": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "cal_log_centers": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "cal_score_first_decimal": "0.693147180559945309417232121458176568075500134360255254120680009493393621969694715605863327",
+    "cal_scores_remaining": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "sorted_score_last_decimal": "0.693147180559945309417232121458176568075500134360255254120680009493393621969694715605863327",
+    "sorted_chronological_ordinals": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      1
+    ],
+    "source_bound_provenance_verified": false,
+    "actual_data": false,
+    "required_receipt_edges": [
+      "sourceaudit->schedule",
+      "schedule->fitinput",
+      "fitinput->nativefit",
+      "nativefit->independentfit",
+      "all->pointmanifest",
+      "pointmanifest->cal",
+      "cal->nativeloadcheck",
+      "all->calmanifest"
+    ]
+  },
+  "strict_boundary": [
+    {
+      "issue": "2017-06-30T23:29:00",
+      "ground_extra_ms": 14999,
+      "label_extra_ms": 0,
+      "omni_extra_ms": 0,
+      "label_ready": "2017-06-30T23:59:59.999",
+      "ready_offset_ms": -1,
+      "eligible": true,
+      "target_lookups": 1
+    },
+    {
+      "issue": "2017-06-30T23:29:00",
+      "ground_extra_ms": 15000,
+      "label_extra_ms": 0,
+      "omni_extra_ms": 0,
+      "label_ready": "2017-07-01T00:00:00.000",
+      "ready_offset_ms": 0,
+      "eligible": false,
+      "target_lookups": 0
+    },
+    {
+      "issue": "2017-06-30T23:29:00",
+      "ground_extra_ms": 15001,
+      "label_extra_ms": 0,
+      "omni_extra_ms": 0,
+      "label_ready": "2017-07-01T00:00:00.001",
+      "ready_offset_ms": 1,
+      "eligible": false,
+      "target_lookups": 0
+    }
+  ],
+  "codec": {
+    "canonical_tiny_bytes_utf8": "{\"a\":1,\"b\":\"3ff0000000000000\"}\n",
+    "canonical_tiny_sha256": "5a87a869282fc8b8d3e930ab9de332b31d83e9efdf942472acee5182b21b361b",
+    "noncanonical_rejections": [
+      "{\"a\":1,\"a\":2,\"b\":\"3ff0000000000000\"}\n",
+      "{\"b\":\"3ff0000000000000\",\"a\":1}\n",
+      "{ \"a\":1,\"b\":\"3ff0000000000000\"}\n",
+      "{\"a\":true,\"b\":\"3ff0000000000000\"}\n"
+    ],
+    "valid_float_bits": [
+      "0000000000000000",
+      "8000000000000000",
+      "0000000000000001",
+      "7fefffffffffffff"
+    ],
+    "invalid_float_bits": [
+      "7ff0000000000000",
+      "fff0000000000000",
+      "7ff8000000000000"
+    ],
+    "publication_failpoints": [
+      "beforemkdir",
+      "aftereachmember",
+      "beforemanifest",
+      "aftermanifest_beforeCOMMIT",
+      "afterCOMMIT_beforefinalcheck"
+    ],
+    "required_failure_state": "no loadable committed bundle; preserve original/incomplete bytes; no overwrite or automatic repair",
+    "rejection_cases": [
+      "missing/extra/duplicate member",
+      "symlink or traversal",
+      "byte/chunk/graph-depth bounds",
+      "bad model/input/native/check/source/protocol pin",
+      "hash-consistent but missing trusted receipt chain",
+      "wrong layout/feature order/cohort/policy",
+      "missing chronological rows/sorted projection mismatch",
+      "October-vs-final purpose mismatch",
+      "source/input changes during fit",
+      "legacy schema/compressed1000 scores"
+    ]
+  },
+  "numerical_check": {
+    "diagonal_A": [
+      "1/1",
+      "1/1000000000000"
+    ],
+    "b": [
+      "1/1",
+      "1/1000000000000"
+    ],
+    "exact_beta": [
+      "1/1",
+      "1/1"
+    ],
+    "perturbed_beta": [
+      "1/1",
+      "500001/500000"
+    ],
+    "condition_infinity": "1000000000000/1",
+    "backward_eta": "1/1000001000000000000",
+    "combined_A_b_forward_bound": "1/500000",
+    "coefficient_relative_error": "1/500000",
+    "forward_cap": "1/1000000",
+    "result": "reject",
+    "reason": "combined relative A,b backward error needs factor2; a one-factor bound is false"
+  },
+  "forbidden_access": {
+    "fit_normalization_reads": "only accepted designated fit/refit rows",
+    "target_reads": "only after feature and strict readiness gates",
+    "selection_reads": "2017 only; forbidden containers for all2023/24/25 bodies",
+    "ground11_wind_reads": 0,
+    "future_feature_mutation": "model payload and fit preprocessing unchanged; irrelevant feature schedule hash may change, no target lookup permitted",
+    "lineage_mutation": "any sealed row/input/native/payload identity change rejects even if a constant model prediction is unchanged"
+  }
+}

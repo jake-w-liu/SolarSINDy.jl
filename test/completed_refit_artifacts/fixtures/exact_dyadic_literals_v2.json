@@ -1,0 +1,11 @@
+{
+  "schema": "independent_exact_dyadic_codec_literals_v2",
+  "before_source_repair": true,
+  "ambient_precision": 256,
+  "input_precision": 512,
+  "positive_exact": "100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001p-500",
+  "negative_exact": "-100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001p-500",
+  "construction": "At512bits create exactly1+2^-500, leave precision scope, encode at ambient256; no production helper generates expected mantissa.",
+  "expected": "Exact odd dyadics roundtrip at original precision under ambient256, including negative signs; genuine fresh512 diagnostic endpoints retain their exact bits and satisfy unchanged publication gate.",
+  "preserve_old_payload": "Existing rounded256 diagnostic artifact remains rejected if its saved forward enclosure is insufficient; repair must regenerate genuine new native fit/check receipts."
+}

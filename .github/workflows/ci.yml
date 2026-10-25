@@ -90,6 +90,15 @@ jobs:
           name: initial-a-executor-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/initial-a-chain
           if-no-files-found: ignore
+      - name: Verify generated completed-source ridge artifacts
+        run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/completed_refit_artifacts/run_ci_native_chain.jl
+      - name: Retain generated ridge failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: completed-ridge-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/solarsindy-r1-native-*
+          if-no-files-found: ignore
       # The suite reports which local-artifact oracles are unavailable in a clean clone.
       - uses: julia-actions/julia-runtest@v1
       - name: Run the research experiments

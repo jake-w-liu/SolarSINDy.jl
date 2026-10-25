@@ -216,3 +216,6 @@ include(joinpath(@__DIR__, "matched_gbm_primitives_synthetic.jl"))
 run_matched_gbm_primitives_synthetic()
 include(joinpath(@__DIR__, "archive_format_synthetic.jl"))
 run_archive_format_synthetic()
+
+include(joinpath(@__DIR__, "completed_refit_artifacts.jl"))
+CompletedRefitArtifactsExample.run_example()

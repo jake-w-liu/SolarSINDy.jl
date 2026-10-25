@@ -1155,3 +1155,96 @@ original assertions remain, and the all-36 unsupported-support diagnostic is
 still required. The earlier full unfiltered package/experiment failures and
 their blocked CI publication remain retained. A fresh final-source full audit,
 strict docs and eight native CI jobs are required before main publication.
+
+
+## Completed refit artifacts synthetic R0/R1 verification
+
+Verification is staged against frozen pre-code V1/V2 literals and independent
+exact-rational/high-precision derivations. Existing487port+541event assertions,
+reference bytes and floating tolerances remain unchanged; tiny numeric oracles
+use atol1e-13,rtol0. No actual data, model selection or scientific verdict is
+part of this verification.
+
+The preserved first ground11 development route genuinely parsed/audited1240
+synthetic vectors, sealed20windows, reconstructed8fit/9cal rows, performed ridge,
+independent QR/directed audits, point/cal publication and fresh complete-score
+load.32owned launches exited0 with exact source/input/runtime controls;682
+independent oracle/member checks pass(max discrepancy9.44e-16). It is not final
+qualification for subsequently corrected source.
+
+After fixes, both native1.12.6/1.13.1 focused runs pass1231assertions after the
+capability-aware test-only amendment:1028unchanged legacy assertions,201additive
+R1checks and2runtime metadata checks. All680source members and executable/BLAS
+pins remain stable. Earlier failures are retained: codec bounds, protocol input
+configuration, cached-kind bypass, foreign-marker cleanup, CLI macro parsing,
+residual feature-count discrimination, mixed wind/summary reason-order mismatch,
+and the warmed FTZ mode switch. The cold-only FTZ3pass did not prove warm-state
+enforcement; the full1215pass/1fail witness is preserved. Explicit dynamic mode
+checks now reject prediction, ridge proof and native creation. Optional hardware
+support is tested through supported rejection and unsupported gradual-positive
+branches with verified reset, without skipped tests or tolerance changes.
+
+Strict Documenter exports/doctests/warnonly=false passes with all14new exports
+documented; five upstream GeometryBasics compiler declaration warnings are
+preserved separately from zero Documenter warning/error lines.
+
+Final pending checks: bothlayout/runtime genuine positive chains and deterministic fit repetition;
+full37semantic fitter mutants with actual native producer/check paths and frozen
+quantitative cal signatures; request/chunk/null/boundary/forbidden-future cases;
+data-only ordinary-session/no-Git/foreign-OS loading; publication interruption and
+tamper matrix; valid scaled DAG/row resource qualification; examples and final
+strict docs. FullPkg,experiments,harness,canonicalH and all8CI are root-owned
+integration gates. Every synthetic provenance flag remains false for actual use.
+
+The a72 prepackage checkpoint subsequently passed1297 focused assertions per
+runtime, including66 independent dyadic-precision checks, and all four native
+layout/runtime routes. Their136 owned launches exited0 without timeout or
+changed controls;2646 independent original-oracle checks passed at the unchanged
+atol1e-13,rtol0. The ambient-precision dyadic codec failure and original same-
+payload red/green witnesses are retained. Those graphs are historical positives,
+not final packaged-source qualification.
+
+A genuine positive-first public publication probe then exposed an unbound
+requested receipt manifest. The narrow fix compares the loaded receipt to the
+actual argument pin; fresh String/Bundle and fit/calibration regressions are
+required on the packaged graph. Synthetic packaging preserves the raw pinned
+owned runner and numerical flags, adds the fixed generated-only source factory,
+and records an explicit source/lock test descendant without original writes.
+The21-case Python support regression passes with exact source controls stable:
+ordinary source/Manifest projections, forbidden modifications, concurrent source
+change, link-flag rejection, optimized-Python rejection, pre-read size caps,
+bounded dual-stream Git capture, overflow and actual timeout descendant cleanup.
+This is bounded Windows controller evidence. All24 predeclared portable cases,
+actual POSIX numerical execution, full-project resolve compatibility, final four
+native routes,37 quantitative fitter mutants, resources and full software gates
+remain open.
+
+The following bounded controller audit confirmed partial-output acceptance after
+a thread writer exception or short write. Its ordinary emitter succeeds first;
+the unchanged old capture then returns one byte with exit0 under either fault.
+The initial text-emitter LF/CRLF mismatch is retained as a probe configuration
+failure. Only the two verified self-owned route wrappers were cancelled; native
+interruption, private Job cleanup and unchanged source maps are retained, with
+no final-route success claim. The repaired capture passes23 control tests with
+all guarded source bytes stable. Open/read/write/flush/file-close/pipe-close
+faults, short writes and unexpected child-launch failure produce an explicit
+capture failure; ordinary exits, exact caps, overflow and timeout cleanup remain
+green. All scientific/numerical oracles and tolerances remain unchanged. Fresh
+source-matched native routes and remaining package/resource/CI gates are pending.
+
+Completed529 positive baseline: all140 owned Julia stages across both layouts
+and runtimes exit0, without timeout or changed maps;2646 original independent
+oracle checks pass (maximum error1.33e-15). Both exact actual-fit repetitions
+match payload bytes. The full focused consumer tests then expose the same
+example wiring error on both versions (1298pass/2errors): the private schedule
+loader requires the actual source handle. The routine example repair loads and
+passes its pinned audited source; original tests/oracles are unchanged.
+
+A genuine positive-first load-check probe accepted dictionary-valued nullable
+request pins and published a native job. Root-approved shared12-field validation
+now checks request runtime types before equality, operation-specific null pins,
+and existing strict dependencies in native and data-only load paths. The two
+172-assertion structural/runtime suites pass with unchanged guarded bytes and
+actual owned cleanup; they are not native execution evidence. Parent479 is
+composed normally. Fresh code-matched graphs and public negative probes,
+all37 fitter mutations, resources, package/examples/H/docs/all8CI remain open.

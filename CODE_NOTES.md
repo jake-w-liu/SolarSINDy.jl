@@ -938,3 +938,96 @@ fixture now selects one BLAS thread in a try/finally scope and restores the
 caller setting. Its ordinary run and the complete B testset use that scope.
 Production Julia/BLAS guards, fitting code, source identities, numerical
 expectations, resource limits and tolerances are unchanged.
+
+
+## Completed refit artifacts: authorized synthetic R0/R1 implementation
+
+The child namespace implements a typed synthetic source audit, feature-only
+schedule, complete supervised/excluded split, actual native ridge calculation,
+independent input reconstruction and augmented-QR/directed256/512 checks, exclusive
+point/calibration publication and data-only pinned loading. The14public child
+APIs add no parent export. The immutable reference,487port tests,541event tests,
+earlier B/mean tests and existing numerical tolerances are preserved.
+
+The exact V1/V2 pre-code contracts and20-window erratum bind implementation.
+Mixed8 retains sample std+1e-9,penalty1 including bias; ground11 candidates retain
+sample std zero/nonfinite-to-one and unpenalized bias. FitDraft copies actual
+as-solved A,b into private immutable canonical bytes before solving; their digest
+does not replace genuine native execution or independent numerical checks.
+Residual p counts features8/11; portable prediction encloses weighted
+normalization loss and dot/reduction error against the exact-real encoded model.
+Actual flush-to-zero mode rejects before prediction/proof/native creation.
+
+Original native code/runtime/full source inventories and externally trusted
+receipts stay mandatory. Current relevant-code whitelists are fixed by role.
+Data-only loaders neither require current clean Git/native launch flags nor
+replace authoritative features/log-targets/scores with foreign libm results.
+Recorded paths are metadata; only caller-local resolution paths are opened.
+Source creation still requires current-host approved ordinary files and all
+source/input/runtime controls. Recorded OS tags and complete ownership tuples
+do not establish unexecuted platform qualification.
+
+The first ground11 development checkpoint completed32 genuinely owned launches
+through point/calibration/fresh-load proof;682independent frozen-oracle/member
+checks pass. That older checkpoint remains preserved as development evidence.
+After residual/OS/data-only/mixed-reconstruction/warm-FTZ corrections, both native
+Julia1.12.6/1.13.1 passed1231focused assertions including the optional-hardware
+capability-aware test amendment. All red/cold/green witnesses remain retained. Final exact-source
+reruns, corrected positive chains for both layouts/runtimes,37semantic full-route
+fit mutants, negative fixture matrix, large valid generated resource cases,
+synthetic examples and final strict docs remain required before freeze.
+
+Only synthetic source formats are supported and every handle's actual-source
+provenance flag stays false. R0actual parsers, R2tree/grid/2017selection, R3strongest
+matched baselines/common-case proof, actual scientific execution and serving
+remain separate mandatory work. Cohort labels alone do not prove intersection.
+Root owns fullPkg/examples/harness/native-platform CI on the integrated head;
+software tests do not waive novelty, proper-loss or venue evidence gates.
+
+The later a72 development checkpoint passes1297 focused assertions on each
+runtime and four genuine ground11/mixed8 native routes with136 owned launches
+and2646 independent frozen-oracle checks. These remain prepackage historical
+evidence: a subsequently confirmed public receipt-argument identity gap requires
+an exact loaded-manifest comparison and fresh code-matched route regressions.
+The original source/input/fit/calibration numerical bytes and tolerances remain
+unchanged by that identity correction.
+
+The fixed synthetic source factory and raw owned native runner are now shipped
+with a strict clean-checkout route and an explicit test-descendant wrapper.
+Only an actual tracked Manifest delta can be projected into a fresh private
+no-local clone; all other source bytes and the original checkout are preserved.
+Artifacts identify the truthful child checkpoint. Optimized Python is rejected
+before entry/factory actions. Manifest reads and both Git-output streams are
+bounded before full buffering; the unchanged owner cleans overflow/timeout
+descendants. The21-case filesystem/control regression passes on Windows, with
+all earlier failures preserved. Packaged-source native routes, full-project
+dependency resolution, all37 semantic mutants, resources and final gates remain
+pending; this controller result is not numerical or cross-platform qualification.
+
+An independent partial-write fault probe then confirmed that a drain-thread I/O
+failure could leave truncated Git output with exit0. The two owned candidate
+route controllers were deliberately cancelled; their source guards and cleanup
+remain preserved, without a qualification claim. The narrow capture repair now
+propagates every stream/open/read/write/flush/close failure, rejects short writes
+and separates unexpected capture-main failures from legitimate command exits.
+All23 control tests pass, including the original21 and seven owned stream-fault
+variants plus an internal launch failure. Fresh final-source graphs and every
+remaining numerical/resource/full software gate are still mandatory.
+
+The repaired529 source completed all four generated layout/runtime routes:
+140 owned native stages,2646 independent unchanged-oracle checks and exact
+identical-runtime fit-payload repetition. They are a positive baseline, rather
+than final qualification after a separate request-shape finding. Both broader
+focused runs preserve1298passes/2errors from the same new example omission:
+its schedule loader lacked the required pinned source handle. The example now
+opens that audited source and supplies it explicitly.
+
+The reviewed shared request validator closes all12 request fields at native
+entry and native-job publication/loading. Nullable source/recipe applicability,
+the request's own runtime wire types, and existing strict dependency rules are
+checked before use. Recorded foreign work paths remain metadata; no caller Git,
+active-project or host-file constraint is added to data-only loading. Both
+runtimes pass172 structural/runtime assertions, including native/load hook
+sensitivity; those structural fixtures grant no execution credentials. The
+qualified479 parent was merged normally at a quiet boundary. Fresh combined
+source graphs, semantic mutations, resources and full gates remain required.

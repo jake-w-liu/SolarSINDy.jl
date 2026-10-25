@@ -9,6 +9,7 @@ include("test_duration_mean_compatibility.jl")
 include("completed_source_dbdt/runtests.jl")
 include("completed_label_events/runtests.jl")
 include("matched_gbm_primitives/runtests.jl")
+include("completed_refit_artifacts/runtests.jl")
 using LinearAlgebra
 using Statistics
 using Random

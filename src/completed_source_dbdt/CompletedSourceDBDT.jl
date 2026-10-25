@@ -68,4 +68,5 @@ include("adapter.jl")
 include("controllers.jl")
 include("maximum.jl")
 include("label_events/CompletedLabelEvents.jl")
+include("refit_artifacts/CompletedRefitArtifacts.jl")
 end
