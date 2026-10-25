@@ -1032,3 +1032,32 @@ Full Pkg.test(), full experiment entry, canonical harness and all8 native CI
 cells remain mandatory root-owned combined-head gates. Actual data/refits,
 export provenance, static UQ/GP/GPD/threshold/UP numerical adapters and matched
 scientific replay remain separate stages; no scientific readiness is claimed.
+
+
+## B fixed-header independent coverage and anti-false-test record
+
+The final689-file computational candidate passes the complete portable B suite:
+1967 assertions on Windows Julia1.12.6 and16629 on1.13.1. Both native exits are0
+without timeout or source/control/runtime drift. Each version also completes a
+fresh4096-row/full36 generated positive, independent raw readback with0 reader
+fits and36 certificates, and bit-for-bit comparison of all90 generated numerical
+files against the earlier bbe baseline. Those numerical expectations and all
+original tolerances are unchanged.
+
+The new tests cover all41 completed-fit fields with matching rehashed fit pins
+and model identities, so an obsolete pin cannot reject a malformed field. All13
+integer fields receive Boolean, floating, string, below-bound and above-bound
+requests at the actual public fit entry after a fresh independent replay. Its
+certificate ledger starts empty and remains empty after all65 rejected requests.
+Independent proof and pending-container checks retain genuine decoder positives.
+Separate public full-stage native controls reproduce the correct full36 positive
+before coherently rehashed a-index Bool, storm Bool and wrong-role negatives.
+A genuine model3 copied into slot1 is rejected on both versions. The zero-storm
+probe first returns a genuine integer-zero model, then rejects false after a new
+raw replay; it never clears the certificate ledger or counts a stale source pin
+as a semantic rejection. Every expected rejection is controlled ArgumentError.
+
+All pre-fix native failures remain retained. The newly passing focused/portable
+records do not replace final-source mandatory17 workers, docs, resources,
+unfiltered Pkg.test(), full experiments, canonical harness and all eight CI jobs.
+No actual archive fit, novelty, superiority or paper-readiness verdict follows.

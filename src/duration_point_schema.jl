@@ -11,3 +11,17 @@ const SELECTION_FIELDS = (:schema,:status,:selected_index,:provisional_index,:ce
 const STATE_CLOSURE_FIELDS = (:schema,:role,:model_id,:source_sha256,:input_admission_sha256,:a_checkpoint_type,:a_checkpoint,:wind_checkpoint_type,:wind_checkpoint,:closure_issue,:a_prefix_sha256,:wind_prefix_sha256,:source_hashes,:state_closure_id,)
 # Fixed contract ceilings for the initial executor.
 const LIMITS=(;chunk_rows=4096,fit_scalar_rows=1000000,hash_read_chunk_bytes=65536,horizon=6,json_depth=12,metadata_bytes=2097152,min_informative_joint_origins=100,ordinary_file_bytes=536870912,source_map_entries=2048,source_name_bytes=256,source_rows=500000,stage_bytes=17179869184,stage_directories=256,stage_files=2048)
+
+# JSON numeric equality admits Boolean aliases unless integer grammar is checked
+# before comparing the independently reconstructed metadata.
+function _fit_input_integer_grammar(d)
+    for (field,lo,hi) in ((:setting_index,1,36),(:a_setting_index,1,18),
+            (:beta,5,20),(:delay_hours,0,1),(:max_source_rows,1,T.MAX_ROWS),
+            (:max_chunk_rows,1,T.MAX_CHUNK),(:total_source_rows,1,T.MAX_ROWS),
+            (:joint_origins,1,T.MAX_ROWS),(:informative_origins,0,T.MAX_ROWS),
+            (:fit_scalar_rows,0,2*T.MAX_ROWS),(:storm_scalar_rows,0,2*T.MAX_ROWS),
+            (:data_bytes,16,T.MAX_FILE),(:mask_bytes,1,T.MAX_FILE))
+        T._int(getproperty(d,field),lo,hi)
+    end
+    nothing
+end

@@ -48,6 +48,7 @@ function _proof(path,pin,envelope,mode)
     T._need(T._hex(pin)&&P._file_sha(path)[1]==pin,"B independent admission proof pin differs")
     d,_=P._json(path;fields=PROOF_FIELDS)
     T._need(d.schema=="independently_audited_b_prefix_v1"&&d.complete===true&&d.evidence_mode==String(mode),"new independent B admission proof required")
+    T._int(d.prefix_rows,1,T.MAX_ROWS);T._int(d.receipt_delay_hours,0,1)
     for key in PROOF_FIELDS
         key in (:schema,:complete,:evidence_mode)||T._need(isequal(getproperty(d,key),getproperty(envelope,key)),"B independent admission/envelope field differs: $key")
     end

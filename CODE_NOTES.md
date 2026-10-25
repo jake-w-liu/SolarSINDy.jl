@@ -798,3 +798,40 @@ by the explicit one-based entry guard, which preserves admissible arrays.
 The external source freeze records all receipts and the two permitted post-run
 ledger-only changes. Full root-owned qualification and scientific stages remain
 open; this synthetic stage makes no provenance, coverage or skill verdict.
+
+
+## B point-fit and completed-reader Development Ledger (25 October 2026)
+
+The additive B namespace implements the fixed36 two-stage point settings,
+source-bound joint h4/h6 gain designs, immutable fit/basis/model/state artifacts,
+independent raw replay and the initial L0 executor. A completed readback performs
+no gain or hazard fits. The fixed18 physical/beta designs and36 gain settings,
+in-sample batch semantics,168h embargo, raw source/receipt clocks, causal cohort
+and original numerical oracles remain unchanged. Synthetic admission cannot
+authorize actual archival execution or a scientific verdict. Matched-reference
+admission retains its strong fixed-grid and independent cohort requirements.
+
+Independent positive-first native witnesses reproduced Boolean aliases in a
+zero-storm fit count and admission delay, unverified completed-fit header fields,
+and a genuine eta=.25 model3 presented in eta=0 slot1 with only35 distinct
+certificates. A malformed nonnull pending driver also escaped the declared
+controlled error class. Frozen pre-code field/oracle matrices preceded the
+correction. The public fit reader and completed reader now share strict bounded
+non-Boolean integer grammar for13 header fields. Completed readback reconstructs
+all41 header fields from the independently raw-verified model, basis, fixed
+setting, binding and actual data/mask bytes. Historical batch maxima remain
+bounded declarations rather than invented replay measurements. Proof row/delay
+counts are strict integers; model identity must match its fixed slot, and the
+successful reader requires certificate keys exactly1:36. Nonnull pending driver
+values must be objects before field access. No general codec, solver, tree,
+numeric prefix, tolerance or original field set was weakened.
+
+The private header helper was extracted from the initially green completed
+reader without changing its validation logic. It supports a genuine raw-verified
+panel regression for every header field while public whole-stage negatives
+remain required. Both native runtimes pass fresh4096-row/full36 stages with
+zero reader fits,36 certificates and all90 numerical files identical to the
+earlier bbe baseline. Full portable suites and all public alias/slot/container
+controls pass. Full combined-source17 workers, strict docs, resource review,
+unfiltered package/experiments/canonical harness and eight-job CI remain required
+before main promotion. Actual source admission/fitting and holdouts remain open.

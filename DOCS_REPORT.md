@@ -51,3 +51,14 @@ The consolidated 21-export manual at 8d13a3b passed strict Ubuntu CI run
 The later acaf046f recipe repair adds explicit numeric-representation semantics
 to the manual. A fresh strict build is required for that final committed source;
 the 8d13a3b pass is retained as historical evidence only.
+
+
+## B reader correction documentation checkpoint
+
+The fixed-header, slot/certificate and pending-container corrections preserve
+the existing public exports, field sets and numerical semantics. Added helpers
+are private. Both portable suites and positive-first public regressions pass on
+the current computational bytes. Fresh strict documentation builds on the final
+combined source are still required; prior documentation receipts are not relabeled
+as runs on this correction. Actual archival admission and forecast-skill claims
+remain outside this component checkpoint.

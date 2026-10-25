@@ -54,7 +54,8 @@ function _decode_a(d)
     sealed=D.R.Checkpoint(T._clock(d.sealed.boundary),T._float.(d.sealed.mean),[T._float(d.sealed.covariance[i][j]) for i in 1:2,j in 1:2])
     pending=if d.pending===nothing;nothing
     else
-        p=d.pending;_fields(p,(:index,:start,:stop,:q,:pressure));Stream.PendingDriver(T._int(p.index,1,T.MAX_ROWS),T._clock(p.start),T._clock(p.stop),T._float(p.q),T._float(p.pressure))
+        p=d.pending;_need(p isa AbstractDict||p isa NamedTuple,"B pending A driver must be an object")
+        _fields(p,(:index,:start,:stop,:q,:pressure));Stream.PendingDriver(T._int(p.index,1,T.MAX_ROWS),T._clock(p.start),T._clock(p.stop),T._float(p.q),T._float(p.pressure))
     end
     _need(d.active isa Bool&&length(d.taus)==2,"B A checkpoint grammar differs")
     Stream.StreamCheckpoint(T._int(d.last_index,0,T.MAX_ROWS),T._clock(d.last_issue),String(d.source_sha256),String(d.prefix_sha256),T._int(d.delay_hours,0,1),Tuple(T._float.(d.taus)),T._float(d.sigma),sealed,ntuple(i->ntuple(j->T._float(d.basis[i][j]),2),2),pending,d.active,T._int(d.consecutive_valid,0,T.MAX_ROWS),T._clock(d.reset_tag))

@@ -54,3 +54,17 @@ Type diagnostics show the deliberate widened evaluator result boundary; no
 universal type-stability or full-optimization claim is made. Output containers
 are immutable; local Dict/Vector workspaces are call-owned, and the unchanged A
 precision lock guards BigFloat operations.
+
+
+## B schema correction resource scope
+
+The verified correction strengthens metadata grammar and independent readback;
+it is not presented as a performance optimization. Fresh4096-row/full36 runs on
+both runtimes preserve all90 numerical binary files exactly and retain zero
+reader fits. Repeated full-source validation and panel encoding remain measured
+work. Earlier counter-only comparisons establish repeated linear-sized work,
+not a complete complexity or bottleneck attribution. The actual72-panel joint
+selector profile remains required before choosing resource changes or scaling
+to the archival training population. Full combined-source resource and startup
+checks remain open; concurrency-qualified timings are not universal latency
+guarantees. No actual archival fits were started through these checks.

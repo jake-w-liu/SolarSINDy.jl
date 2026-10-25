@@ -177,6 +177,25 @@ function run_initial_l0(a::BInputs.BPrefixAdmission,reference::BSelection.BRefer
     end
     T._raise(errors);answer
 end
+function _verify_fit_input_readback(fitroot,model,panel,view,setting)
+    fitmeta,fitbody=P._json(P._member(fitroot,"manifest.json");fields=P.FIT_INPUT_FIELDS)
+    P._fit_input_integer_grammar(fitmeta)
+    T._need(view.source_hours<=fitmeta.max_source_rows,"B fit resource declaration cannot hold admitted source")
+    data_hash,data_bytes=P._file_sha(P._member(fitroot,"joint-fit.bin"));mask_hash,mask_bytes=P._file_sha(P._member(fitroot,"fit-mask.ascii"))
+    b=panel.training.binding;s=setting;n=length(panel.training.rows)
+    expected_fit=(;schema="b_point_fit_input_v1",complete=true,evidence_mode=view.evidence_mode,role=:in_sample_two_stage_gain_design,
+        contract_sha256=T.CONTRACT,fold_id=b.fold_id,context_id=b.context_id,boundary_ms=b.boundary,cutoff_ms=b.cutoff,delay_hours=b.delay_hours,
+        source_sha256=b.source_sha256,input_prefix_sha256=b.input_prefix_sha256,input_view_id=b.input_view_id,input_admission_sha256=b.input_admission_sha256,
+        source_hashes=T._hashdata(b.source_hashes),hazard_model_id=b.hazard_model_id,hazard_training_prefix_sha256=b.hazard_training_prefix_sha256,
+        setting_index=s.index,a_setting_index=s.a_index,beta=s.beta,taus_bits=s.taus,sigma_bits=s.sigma,eta_bits=s.eta,
+        max_source_rows=Int(fitmeta.max_source_rows),max_chunk_rows=Int(fitmeta.max_chunk_rows),total_source_rows=view.source_hours,
+        joint_origins=n,informative_origins=model.informative_count,fit_scalar_rows=2n,storm_scalar_rows=model.storm_scalar_count,
+        data_member="joint-fit.bin",data_bytes,data_sha256=data_hash,mask_member="fit-mask.ascii",mask_bytes,fit_mask_sha256=mask_hash,fit_data_sha256=data_hash,
+        basis_member_sha256=panel.basis_sha256,max_fit_issue_ms=model.max_fit_issue,max_target_complete_ms=model.max_target_complete,max_label_receipt_ms=model.max_label_receipt)
+    T._need(T._bytes(expected_fit)==fitbody,"B fit header differs from independent model/source replay")
+    T._need(T._sha(fitbody)==model.fit_input_manifest_sha256&&data_hash==model.fit_data_sha256&&mask_hash==model.fit_mask_sha256,"B serialized fit readback differs")
+    nothing
+end
 function verify_initial_l0(directory,a::BInputs.BPrefixAdmission,reference::BSelection.BReferencePanel;expected_completion_sha256,expected_sources,execution_permit=nothing,chunk_hours=7)
     sources=P._source(expected_sources);BInputs.recheck(a);_reference(a,reference);permission=_permission(a,execution_permit);root=P._ordinary(directory)
     d,body=P._json(P._member(root,"completion.json");fields=P.COMPLETION_FIELDS)
@@ -217,20 +236,22 @@ function verify_initial_l0(directory,a::BInputs.BPrefixAdmission,reference::BSel
             T._need(entry.setting_index==index&&entry.directory=="models/setting-$index"&&entry.fit_directory=="fits/setting-$index","B model/fit order differs")
             context=_export_context(a,panel,permission)
             loaded=P.load_point_bundle(P._member(root,String(entry.directory));expected_manifest_sha256=String(entry.manifest_sha256),expected_sources=sources,expected_binding=context)
-            model=loaded.model;T._need(model.model_id==entry.model_id&&model.fit_input_manifest_sha256==entry.fit_manifest_sha256,"B independently loaded fit/model differs")
+            model=loaded.model;T._need(model.setting_index==index,"B loaded model differs from fixed setting slot")
+            T._need(model.model_id==entry.model_id&&model.fit_input_manifest_sha256==entry.fit_manifest_sha256,"B independently loaded fit/model differs")
             T._need(entry.points.model_id==model.model_id,"B point sidecar model identity differs from verified model")
             T._need(P._bound(P._member(root,"gain-journal/setting-$index.json"))==T._bytes(T._model_data(model;identity=true)),"B gain journal differs from verified model")
             # load_point_bundle has just recomputed and checked this informative
             # count against the independent raw-replayed panel. Reuse that
             # checked scalar rather than scanning the N-row panel a second time.
             push!(expected_support,(;setting_index=index,joint_origins=length(panel.training.rows),informative_origins=model.informative_count,supported=model.informative_count>=100))
-            fitroot=P._member(root,String(entry.fit_directory));fitmeta,fitbody=P._json(P._member(fitroot,"manifest.json");fields=P.FIT_INPUT_FIELDS)
-            T._need(T._sha(fitbody)==entry.fit_manifest_sha256&&T._sha(P._bound(P._member(fitroot,"joint-fit.bin"),T.MAX_FILE))==model.fit_data_sha256&&T._sha(P._bound(P._member(fitroot,"fit-mask.ascii"),T.MAX_FILE))==model.fit_mask_sha256,"B serialized fit readback differs")
+            fitroot=P._member(root,String(entry.fit_directory))
+            _verify_fit_input_readback(fitroot,model,panel,a.view,T.settings()[index])
             predictions=T.predict_point_rows(model,panel.forecast);io=IOBuffer();P._header(io,"SSBPPTS1",16);for row in predictions,x in row.means;P._put_float(io,x);end;expected=take!(io)
             point=entry.points;T._need(point.name=="points/setting-$index.bin"&&P._bound(P._member(root,String(point.name)),T.MAX_FILE)==expected&&T._sha(expected)==point.sha256&&length(expected)==point.bytes,"B points differ from independent model/source replay")
             push!(pointpins,BSelection.BPointFilePanel(P._member(root,String(point.name)),String(point.sha256),reference))
         end
     end
+    T._need(Set(keys(proof.certificates))==Set(1:36),"B readback requires all36 distinct fixed-setting certificates")
     expected_support_record=(;schema="b_all36_support_preflight_v1",all36_checked=true,accepted=true,selected_index=nothing,gain_fit_count=0,settings=expected_support)
     T._need(T._bytes(expected_support_record)==support_body&&P._bound(P._member(root,"support.json"))==support_body,"B all36 support differs from independently replayed panel counts")
     descriptors=Union{Vector{T.BPointPredictionRow},BSelection.BPointFilePanel}[x for x in pointpins]

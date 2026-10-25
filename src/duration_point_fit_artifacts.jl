@@ -125,6 +125,7 @@ function fit_point_gains_from_input(directory::AbstractString;expected_manifest_
     sources=_source(expected_sources);_check_panel(basis,view);root=_ordinary(directory)
     _need(isdir(root)&&sort(readdir(root))==["fit-mask.ascii","joint-fit.bin","manifest.json"],"B fit-input membership differs")
     d,body=_json(_member(root,"manifest.json");fields=FIT_INPUT_FIELDS)
+    _fit_input_integer_grammar(d)
     _need(T._hex(expected_manifest_sha256)&&_sha(body)==expected_manifest_sha256&&d.schema=="b_point_fit_input_v1"&&d.complete===true&&d.role=="in_sample_two_stage_gain_design"&&d.contract_sha256==T.CONTRACT,"B fit-input schema/completion differs")
     b=expected_context;s=T.settings()[T._int(d.setting_index,1,36)]
     _need(b.context_id==basis.training.binding.context_id&&b.context_id==d.context_id&&T._id(T._binding_data(b))==b.context_id,"B expected fit context differs")
