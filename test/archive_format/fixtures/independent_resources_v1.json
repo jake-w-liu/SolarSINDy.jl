@@ -1,0 +1,60 @@
+{
+  "complete": true,
+  "body_line": "2017-01-01T00:00:00.000Z,1,-2,400,5\n",
+  "metadata": {
+    "station": "CMO",
+    "product": "OMNI_HRO_1MIN",
+    "start": "2017-01-01T00:00:00",
+    "stop": "2017-01-01T00:03:00"
+  },
+  "records": [
+    {
+      "rows": 1,
+      "body_sha256": "7ccd6108584189dd97c5025729ab9a01892b5fdcde2485ee22d859e4cf48a350",
+      "raw_digest": "3d8ce4995525863b9acb515da28bbc9e6d494d527cca2299595dd8ad0256fc45",
+      "selected_digest": "3d8ce4995525863b9acb515da28bbc9e6d494d527cca2299595dd8ad0256fc45",
+      "retained_raw_bytes": 48,
+      "retained_selected_bytes": 48,
+      "last_source_line": 1
+    },
+    {
+      "rows": 64,
+      "body_sha256": "4186f2e32e19c63c519d866773da2742bdfec82a0c9e22e4dc9b8939d30e8e3f",
+      "raw_digest": "bad345848effd75ffffbc01b795500a36153ab1786d3e85ceac1539f61effdd1",
+      "selected_digest": "3d8ce4995525863b9acb515da28bbc9e6d494d527cca2299595dd8ad0256fc45",
+      "retained_raw_bytes": 3072,
+      "retained_selected_bytes": 48,
+      "last_source_line": 64
+    },
+    {
+      "rows": 512,
+      "body_sha256": "fd5742ed7d3dc02a40830ad10f6500e5b803f86f1c3593212ce35a9370676757",
+      "raw_digest": "0d6a9743de980e7061009cf662f564f6434b64943f9081b2674ee18a83e72fe5",
+      "selected_digest": "3d8ce4995525863b9acb515da28bbc9e6d494d527cca2299595dd8ad0256fc45",
+      "retained_raw_bytes": 24576,
+      "retained_selected_bytes": 48,
+      "last_source_line": 512
+    },
+    {
+      "rows": 4096,
+      "body_sha256": "eb27515a20fb0ac77fa5773ab4e79d3435f4336012e93d85d6eb0aed597aab26",
+      "raw_digest": "fe0db98f3dc8e5b0aef728e8bd6d126e48e954ac5b39cacafb448a7e197de004",
+      "selected_digest": "3d8ce4995525863b9acb515da28bbc9e6d494d527cca2299595dd8ad0256fc45",
+      "retained_raw_bytes": 196608,
+      "retained_selected_bytes": 48,
+      "last_source_line": 4096
+    },
+    {
+      "rows": 50000,
+      "body_sha256": "73f6808ca8d263ed7fc1498f5469c3079e1108757d2667ee84623d741f1e7429",
+      "raw_digest": "c333749638fa056a7c7e6935832807c01999ed98c4ad58a74726f968d36d9226",
+      "selected_digest": "3d8ce4995525863b9acb515da28bbc9e6d494d527cca2299595dd8ad0256fc45",
+      "retained_raw_bytes": 2400000,
+      "retained_selected_bytes": 48,
+      "last_source_line": 50000
+    }
+  ],
+  "maximum_blank_sha256": "de17c9003877ef557ee21033d7cb839c4ea64cc3365f26f7ec429c428d269050",
+  "empty_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "method": "Independent Python struct/hashlib from already frozen decimal/time literals; never a production or audit parser output."
+}

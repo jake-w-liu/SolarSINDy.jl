@@ -1131,3 +1131,15 @@ the original format suite and fails the new raw-ledger byte controls on both
 runtimes; source-pin, syntax and import failures do not count as detection.
 Full unfiltered package, experiments, canonical harness, platform CI and final
 combined-source checks remain required. No actual archive fit is qualified.
+
+
+## Independent archive-reader package checks
+
+Both package-bound runtimes pass 1253 frozen independent format and binary
+assertions, 2012 line controls, 32 intermediate resource assertions, 19 maximum
+resource assertions and 80 frozen SHA assertions, together with the unchanged
+primary reader checks and ordinary example. Separate process evidence compares
+60 generated cases across both readers and both runtimes. Three semantic
+mutants are detected on both runtimes. The initial blank-line allocation
+failure is retained; the repaired iterator passes the original ceiling.
+These are component checks, not full package, platform or archive-fit verdicts.

@@ -11,6 +11,10 @@ function run_archive_format_synthetic()
     @assert parser.raw_row(source,2).valid_mask==11
     @assert parser.raw_row(source,2).source_line==2
     @assert ncodeunits(source.raw_storage)==96
+    independent=SolarSINDy.ArchiveFormatAudit.audit_wind(body;station="CMO",product="OMNI_HRO_1MIN",
+        start=DateTime(2020),stop=DateTime(2020)+Minute(2))
+    @assert independent.raw_records==source.raw_storage
+    @assert independent.selected_records==source.storage
     println("Generated archive format example passed")
     source
 end

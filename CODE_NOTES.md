@@ -916,3 +916,13 @@ reasons. Separate raw-body, selected-row and raw-row digests preserve the exact
 byte identities. No path, network, provider receipt, archive permission or
 forecast fit is implicit in these readers. Cross-body catalog reconciliation,
 an independent archive reader and actual source admission remain required.
+
+
+## Independent archival-format reconstruction (25 October 2026)
+
+ArchiveFormatAudit independently reconstructs generated ground and wind text
+with a decimal lexer, batch duplicate grouping, an independent line iterator
+and explicit little-endian serialization. It does not call the primary
+reader. Both namespaces retain complete immutable raw-row provenance.
+Provider tag interpretation, cross-body reconciliation, actual source
+admission and archive fitting remain separate unqualified stages.

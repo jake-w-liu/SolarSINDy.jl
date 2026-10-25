@@ -114,3 +114,13 @@ allocation ceiling. The SHA reader uses a fixed-buffer IOBuffer route already
 checked against 20 independent byte vectors on both runtimes. Diagnostic
 timings are concurrency-qualified, and no universal latency or global
 multi-station catalog capacity is inferred from these per-body checks.
+
+
+## Independent blank-line resource correction
+
+The first independent line iterator exceeded its frozen 512MiB allocation
+ceiling on an 8MiB blank body. Allocation profiling identified per-line IOBuffer
+construction. The replacement iterator uses Base.eachsplit, preserves literal
+and Base.eachline boundary oracles, and consumes approximately 15KiB in the
+same bounded case on both runtimes. The original primary 16MiB and independent
+512MiB ceilings remain unchanged; no global catalog resource claim follows.

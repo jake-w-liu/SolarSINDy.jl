@@ -69,6 +69,8 @@ include("duration_point_artifacts.jl")
 export DurationPointArtifacts
 include("archive_format/ArchiveFormatParsers.jl")
 export ArchiveFormatParsers
+include("archive_format/ArchiveFormatAudit.jl")
+export ArchiveFormatAudit
 
 export # Utils
        numerical_derivative, smooth_moving_average, pressure_correct_dst,

@@ -21,3 +21,17 @@ complete vector, and conflicting valid duplicate components reject the body.
 The body, selected-record and raw-record digests bind exact bytes. The readers
 accept text and declarations; archive source admission, provider support clocks,
 cross-body reconciliation and forecast performance require separate checks.
+
+## Independent reconstruction
+
+```@docs
+SolarSINDy.ArchiveFormatAudit
+```
+
+`ArchiveFormatAudit.audit_ground` and `audit_wind` reconstruct the same raw
+source text through a separate decimal lexer, grouped duplicate checks and
+binary encoding. `record` and `raw_record` expose immutable selected and raw
+records. `selected_records` and `raw_records` retain their packed bytes, while
+`selected_digest` and `raw_digest` bind those bytes. Both readers preserve
+provider tags; support clocks, cross-body catalog reconciliation and archive
+source admission require separate checks.

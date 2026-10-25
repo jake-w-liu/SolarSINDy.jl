@@ -106,3 +106,11 @@ validity masks and reasons. Unavailable payload zeros are interpreted only
 through their masks. Body parsing supplies no provider-clock, cross-body,
 source-admission or predictive-performance claim. Strict final-head builds
 remain required before publication; no Documenter setting is weakened.
+
+
+## Independent reader API documentation
+
+The archival-format manual and namespace docstring describe independent
+reconstruction, immutable selected and raw records, digests and the remaining
+support-clock and catalog boundaries. The example compares both readers on
+generated text. Strict final-source documentation builds are still required.
