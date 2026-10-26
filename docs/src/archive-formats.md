@@ -163,6 +163,9 @@ The reader recomputes and compares every feature and label byte before returning
 before each persisted target access. It returns owned arrays and performs no fit.
 
 ```@docs
+SolarSINDy.ArchiveCatalogSnapshotFilesystem
+SolarSINDy.ArchiveCatalogCaseAuthority
+SolarSINDy.ArchiveCatalogSnapshotValues
 SolarSINDy.ArchiveCatalogCaseJob
 SolarSINDy.ArchiveCatalogCaseJob.Authority
 SolarSINDy.ArchiveCatalogCaseJob.VerifiedCases
@@ -237,3 +240,115 @@ SolarSINDy.ArchivePointNumericTrees.from_native
 SolarSINDy.ArchivePointNumericTrees.encode_model
 SolarSINDy.ArchivePointNumericTrees.decode_model
 ```
+
+
+## Reverification across package versions
+
+A producer qualification binds the complete source inventory that created its
+sealed case artifacts. The ordinary case reader requires that exact inventory
+to be loaded. A newer package therefore needs a separately qualified read
+admission to reverify those existing artifacts.
+
+`ArchiveCatalogCaseReader` preserves the original producer authority in the
+artifact. Its independent read-only grant binds the original request, manifest,
+completion marker and producer evidence together with the current reader's
+qualified source inventory. The reader recomputes every feature and label byte
+from the original sealed source snapshots. Any drift fails before a verified
+capsule is returned. The capsule owns a canonical admission receipt recording
+both software identities. It authorizes neither new case generation nor fitting.
+
+Generated rereads accept no archival authorities. Actual rereads require a
+genuine producer qualification and a distinct genuine qualification of the
+loaded reader, including the complete source inventory. These software checks
+do not establish historical provider receipt times or forecast accuracy.
+
+```@docs
+SolarSINDy.ArchiveCatalogCaseReader
+SolarSINDy.ArchiveCatalogCaseReader.ReaderAuthority
+SolarSINDy.ArchiveCatalogCaseReader.ReverifiedCases
+SolarSINDy.ArchiveCatalogCaseReader.read_reverified
+SolarSINDy.ArchiveCatalogCaseReader.admission_bytes
+```
+
+
+## Retained baseline numeric values
+
+The original ridge, histogram boosting and bootstrapped histogram forest
+training algorithms are retained in a compatibility module. Explicit recipes
+bound their geometry and random seeds. Immutable model values own the cut
+points, regression coefficients and tree fields. Their canonical codec records
+floating-point bits and validates finite values, tree depth and reachability.
+Raw numerical fitting does not certify the source or authorize archival work.
+
+```@docs
+SolarSINDy.ArchiveClassicPointModels
+SolarSINDy.ArchiveClassicPointModels.RetainedClassicTraining
+SolarSINDy.ArchiveClassicPointModels.Recipe
+SolarSINDy.ArchiveClassicPointModels.NumericTree
+SolarSINDy.ArchiveClassicPointModels.NumericModel
+SolarSINDy.ArchiveClassicPointModels.fit_numeric
+SolarSINDy.ArchiveClassicPointModels.predict
+SolarSINDy.ArchiveClassicPointModels.encode_model
+SolarSINDy.ArchiveClassicPointModels.decode_model
+```
+
+## Source-bound point fitting and publication
+
+Point fitting binds the exact case request and artifact pins, strict training
+split, recipe, transformed target input bytes, runtime and loaded numerical
+source closure. It supports the retained baseline families and the separate
+CPU EvoTrees comparator. Every fitted numeric value must reproduce all native
+training predictions exactly in its producing runtime before publication.
+
+Generated cases consume no archival permission. Archival fits require a
+reverified case capsule and a distinct fixed-recipe fit grant, tied to the
+complete genuine software qualification. Training issues and label readiness
+remain within a strict 2017 split. Each grant names its execution directory;
+an exclusive attempt marker consumes it before fitting. Failed attempts remain
+recorded and cannot silently retry. The library is research infrastructure:
+none of these checks establish historical provider receipt times or skill.
+
+Publication writes five ordinary files with the completion marker last. Reload
+requires outside context, recipe, source, library, model, receipt and completion
+pins; it validates the complete fileset and reconstructs owned numeric values.
+A published model grants no permission to refit. The loaded numerical source
+closure must match the fit's expected closure.
+
+```@docs
+SolarSINDy.ArchiveSourceBoundPointFit
+SolarSINDy.ArchiveSourceBoundPointFit.BoostRecipe
+SolarSINDy.ArchiveSourceBoundPointFit.ExpectedFit
+SolarSINDy.ArchiveSourceBoundPointFit.BoundFit
+SolarSINDy.ArchiveSourceBoundPointFit.FitAuthority
+SolarSINDy.ArchiveSourceBoundPointFit.prepare_expected
+SolarSINDy.ArchiveSourceBoundPointFit.fit_generated
+SolarSINDy.ArchiveSourceBoundPointFit.fit_archival
+SolarSINDy.ArchiveSourceBoundPointFit.predict_log
+SolarSINDy.ArchiveSourceBoundPointFit.receipt_bytes
+SolarSINDy.ArchiveSourceBoundPointFit.publish_fit
+SolarSINDy.ArchiveSourceBoundPointFit.read_published
+```
+## Source-bound calibration publications
+
+The offline `research/dbdt_completed_source/source_bound_calibration.jl` module
+provides a calibration bridge for immutable source-bound ridge, histogram boost,
+bootstrap forest and CPU EvoTrees point models. Include that file explicitly
+after loading SolarSINDy. `prepare_expected` and `calibrate_generated` operate on
+generated verified cases. `calibrate_archival` instead requires reverified
+archival cases, a distinct score-only `CalibrationAuthority`, and the original
+point-fit producer evidence. A case-read or point-fit permit cannot authorize a
+calibration job.
+
+`publish_calibration` writes bounded chronological score shards, stable rank
+indices and canonical metadata to a fresh directory. `read_calibration` requires
+external context/input, manifest, receipt and completion pins and checks every
+member. Each record retains its case row, issue/readiness clocks, target,
+prediction, scale and signed score. `completed_calibration` checks the artifact
+and projects its scores into the existing completed-source replay interface.
+This conversion supplies no new fit permission, source access or performance
+claim. Generated artifacts retain their synthetic purpose.
+
+Run `examples/archive_source_bound_calibration_synthetic.jl` and
+`run_archive_source_bound_calibration_synthetic()` for a generated four-family
+publication/reload example. It uses the default 31-phase completion clock.
+

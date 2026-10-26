@@ -104,6 +104,13 @@ jobs:
       - uses: julia-actions/julia-runtest@v1
       - name: Run the research experiments
         run: julia --startup-file=no --project=. examples/experiments.jl
+      - name: Retain full package support failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: completed-support-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/solarsindy-r1-support-log-*
+          if-no-files-found: ignore
 
   docs:
     name: Documentation build

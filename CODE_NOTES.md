@@ -1195,3 +1195,62 @@ checks followed by full package, experiments, canonical harness, both strict
 manual builds and all eight native CI/raw gates. A source-bound refit job is
 still missing. No actual archive fit, source authority, novelty or skill result
 is supplied by these numeric values or their generated example.
+
+
+The existing-case reader transition closes an implementation gap between an
+immutable producer package and a later qualified reader. Default case admission
+still checks the full loaded producer inventory. A distinct read-only authority
+binds both software qualifications and the immutable case pins; the shared
+bounded reader recomputes all feature and label bytes before returning a capsule.
+Producer artifacts and metadata remain unchanged. The capsule grants no fit or
+new-case permission. Generated positives, strict clock oracles, rehashed payload
+corruptions, read-permit negatives and loaded-inventory rejection checks precede
+native focused verification. No positive archival qualification is fabricated
+for tests. Genuine actual transition verification remains required after full
+package, experiment, canonical harness, strict manual and native CI/raw gates.
+
+Strict documentation CI on the case worker reported three module docstrings
+missing from the manual: snapshot values, snapshot filesystem and case authority.
+The integrated manual includes all three existing module entries. Documenter
+strictness, exports, numerical code and CI requirements remain unchanged. The
+failed candidate and its raw log are retained; this combined source requires
+fresh complete qualification before any archival feature or fit grant.
+
+
+The integrated point-fit adapter retains the paper baseline training body byte
+for byte, alongside the independently checked EvoTrees numeric primitive. It
+adds bounded immutable baseline values, explicit recipe and data/source/clock
+bindings, separate actual fit authority, an atomic one-attempt marker in the
+grant-pinned execution directory, and five-file data-only publication/reload.
+Actual fits remain restricted to strict 2017 training splits. A read grant or a
+published model does not authorize a fit. Closed-form ridge, exact two-round
+boost, bootstrap-mean forest, alias, rehashed publication, strict-boundary and
+permit-negative tests precede native verification. No positive qualification
+or archival permit is fabricated for tests. Genuine actual execution and
+scientific claims still require the full unchanged qualification chain.
+## Source-bound signed calibration artifacts
+
+The offline `research/dbdt_completed_source/source_bound_calibration.jl` job
+supports the four immutable point-model families. It preserves the existing
+completed-source signed-score formula and replay policy. Training ends before
+calibration begins; calibration labels must be strictly ready before the
+calibration stop, which precedes or equals the first declared evaluation issue.
+The archival route restricts calibration to 2017 and checks distinct score-only
+permission, current whole-package qualification, and original point-fit producer
+qualification. It performs no new fit or model selection.
+
+Calibration publications contain bounded little-endian chronological records,
+stable rank indices, canonical metadata and a completion marker written last.
+Readers require external context, input, manifest, receipt and completion pins.
+The score records bind case rows, issue/readiness times, targets, point
+predictions and case scales. The job closure includes both implementation files.
+Conversion to `CompletedCalibration` supplies the existing replay interface and
+grants no source access or empirical coverage claim.
+
+Generated regressions use zero-target training followed by exact integer
+ground-rate regimes, signed negative residuals, strict equality/1ms readiness
+boundaries, all four families, both layouts and parser roles, corrupted/rehashed
+payloads, and invalid permits rejected before absent qualification files.
+The full package and cross-platform qualification of this combined change is
+still required before archival execution or release.
+

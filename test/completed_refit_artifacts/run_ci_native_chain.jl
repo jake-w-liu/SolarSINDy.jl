@@ -69,14 +69,34 @@ function ensure_root()
     destination
 end
 
+function _run_support_command(command,parent)
+    logpath=joinpath(parent,"native.log")
+    try
+        open(logpath,"w") do log
+            run(pipeline(command;stdout=log,stderr=log))
+        end
+    catch
+        println(stderr,"SUPPORT_TEST_FAILURE_RAW=",logpath)
+        try
+            open(logpath,"r") do log
+                seekend(log);bytes=position(log);seek(log,max(0,bytes-65536))
+                write(stderr,read(log,65536));println(stderr)
+            end
+        catch diagnostic_error
+            println(stderr,"Support diagnostic read failed: ",typeof(diagnostic_error))
+        end
+        rethrow()
+    end
+    nothing
+end
 function run_support_tests()
     python=choose_python()
     script=joinpath(@__DIR__,"test_portable_support.py")
-    parent=realpath(mktempdir(;prefix="solarsindy-r1-support-log-",cleanup=false))
-    open(joinpath(parent,"native.log"),"w") do log
-        run(pipeline(Cmd([python,"-B",script]);stdout=log,stderr=log))
-    end
-    nothing
+    base=haskey(ENV,"RUNNER_TEMP") ? realpath(ENV["RUNNER_TEMP"]) : realpath(tempdir())
+    isdir(base)&&!islink(base) || error("support diagnostic parent must be ordinary")
+    parent=realpath(mktempdir(base;prefix="solarsindy-r1-support-log-",cleanup=false))
+    command=addenv(Cmd([python,"-B",script]),"TMP"=>parent,"TEMP"=>parent,"TMPDIR"=>parent)
+    _run_support_command(command,parent)
 end
 end
 

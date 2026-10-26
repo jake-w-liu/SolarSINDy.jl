@@ -232,3 +232,12 @@ run_archive_case_job_synthetic()
 
 include(joinpath(@__DIR__,"archive_point_numeric_synthetic.jl"))
 run_archive_point_numeric_synthetic()
+
+include(joinpath(@__DIR__,"archive_case_reader_synthetic.jl"))
+run_archive_case_reader_synthetic()
+
+include(joinpath(@__DIR__,"archive_source_bound_point_fit_synthetic.jl"))
+run_archive_source_bound_point_fit_synthetic()
+
+include(joinpath(@__DIR__,"archive_source_bound_calibration_synthetic.jl"))
+run_archive_source_bound_calibration_synthetic()

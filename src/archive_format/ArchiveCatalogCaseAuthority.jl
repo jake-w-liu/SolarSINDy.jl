@@ -45,7 +45,7 @@ function _project_table(table)
         "label_asof"=>_plan_clock(table["label_asof"]))
 end
 
-function _qualification(proof,qualification,authority,grant)
+function _qualification_evidence(proof,qualification,authority,grant)
     need(get(qualification,"complete",false)===true && get(proof,"complete",false)===true &&
         qualification["head"]==proof["head"]==grant["head"] &&
         qualification["source_proof"]["sha256"]==authority.source_proof_sha256 &&
@@ -67,6 +67,10 @@ function _qualification(proof,qualification,authority,grant)
         need(job["job_id"] isa Integer && !(job["job_id"] isa Bool) && job["job_id"]>0,"case feature CI job id")
         for key in ("log","receipt","original_log","original_receipt");J._sha(job[key]["sha256"]);end
     end
+    nothing
+end
+
+function _qualification_loaded(proof)
     # The root grant pins a genuine qualification. The loaded package must also
     # contain this worker and its complete checked dependency inventory.
     root=realpath(pkgdir(parentmodule(@__MODULE__)))
@@ -80,6 +84,11 @@ function _qualification(proof,qualification,authority,grant)
     end
     J._source_inventory(proof)
     nothing
+end
+
+function _qualification(proof,qualification,authority,grant)
+    _qualification_evidence(proof,qualification,authority,grant)
+    _qualification_loaded(proof)
 end
 
 function _declarations(request,plan,agreement,grant)
@@ -117,11 +126,8 @@ function _declarations(request,plan,agreement,grant)
 end
 
 """Validate authority before the case worker reads any source member bodies."""
-function authorize(request,request_sha256,authority)
-    if request["evidence_mode"]=="generated"
-        need(authority===nothing,"generated case jobs cannot consume actual feature authority")
-        return nothing
-    end
+function _evidence(request,request_sha256,authority)
+    need(request["evidence_mode"]=="actual_archival_cache","actual case producer evidence required")
     need(authority isa Authority,"actual case job requires caller-pinned feature authority")
     grant=_pinned(authority.grant_path,authority.grant_sha256;canonical=true,limit=131072)
     J._object(grant,Set(("schema","operation","request_sha256","plan_sha256","agreement_sha256",
@@ -155,10 +161,21 @@ function authorize(request,request_sha256,authority)
         "case feature pre-actual floating policy differs")
     proof=_pinned(authority.source_proof_path,authority.source_proof_sha256;limit=1048576)
     qualification=_pinned(authority.qualification_path,authority.qualification_sha256;limit=1048576)
-    _qualification(proof,qualification,authority,grant)
-    Dict("operation"=>grant["operation"],"request_sha256"=>request_sha256,"grant_sha256"=>authority.grant_sha256,
+    _qualification_evidence(proof,qualification,authority,grant)
+    binding=Dict("operation"=>grant["operation"],"request_sha256"=>request_sha256,"grant_sha256"=>authority.grant_sha256,
         "plan_sha256"=>authority.plan_sha256,"agreement_sha256"=>authority.agreement_sha256,"R0_context"=>key,
         "source_proof_sha256"=>authority.source_proof_sha256,"qualification_sha256"=>authority.qualification_sha256,
         "floating_policy_sha256"=>authority.floating_policy_sha256,"head"=>proof["head"],"actual_model_fit_authorized"=>false)
+    (;proof,qualification,grant,binding)
+end
+
+function authorize(request,request_sha256,authority)
+    if request["evidence_mode"]=="generated"
+        need(authority===nothing,"generated case jobs cannot consume actual feature authority")
+        return nothing
+    end
+    evidence=_evidence(request,request_sha256,authority)
+    _qualification_loaded(evidence.proof)
+    evidence.binding
 end
 end

@@ -152,6 +152,11 @@ support hashes cannot pass merely by making member hashes self-consistent.
 function read_verified(request_path,directory;request_sha256,manifest_sha256,complete_sha256,authority=nothing)
     request,request_bytes,request_identity=_request(request_path,request_sha256)
     binding=ArchiveCatalogCaseAuthority.authorize(request,request_sha256,authority)
+    _read_verified_bound(request_path,directory,request_sha256,manifest_sha256,complete_sha256,
+        request,request_bytes,request_identity,binding)
+end
+function _read_verified_bound(request_path,directory,request_sha256,manifest_sha256,complete_sha256,
+                              request,request_bytes,request_identity,binding)
     archival=binding!==nothing
     J._ordinary(directory;directory=true)
     names=readdir(directory);need(2<=length(names)<=1024,"case reader filesystem member bound")

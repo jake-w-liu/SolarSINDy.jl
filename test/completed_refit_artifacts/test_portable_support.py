@@ -23,6 +23,33 @@ def source(name):
     command(path,'commit','-m','Synthetic source fixture')
     return path
 
+def assert_posix_descendant_stopped(testcase,pid):
+    try:os.kill(pid,0)
+    except ProcessLookupError:return
+    result=subprocess.run(['ps','-o','stat=','-p',str(pid)],capture_output=True,timeout=10)
+    if result.returncode==0 and result.stdout.strip().startswith(b'Z'):return
+    if result.returncode==1 and not result.stdout.strip() and not result.stderr.strip():
+        # The process may disappear after the first probe. Require a fresh
+        # authoritative absence check; an empty ps result alone is insufficient.
+        try:os.kill(pid,0)
+        except ProcessLookupError:return
+    testcase.fail('owned descendant remains live or process status could not be verified')
+
+class PosixProbeRaceTests(unittest.TestCase):
+    def test_disappearance_between_probes_is_accepted_only_after_absence(self):
+        result=subprocess.CompletedProcess([],1,b'',b'')
+        with mock.patch.object(os,'kill',side_effect=[None,ProcessLookupError()]),mock.patch.object(subprocess,'run',return_value=result):
+            assert_posix_descendant_stopped(self,12345)
+    def test_missing_process_and_zombie_are_stopped(self):
+        with mock.patch.object(os,'kill',side_effect=ProcessLookupError()):assert_posix_descendant_stopped(self,12345)
+        with mock.patch.object(os,'kill',return_value=None),mock.patch.object(subprocess,'run',return_value=subprocess.CompletedProcess([],0,b'Z+\n',b'')):
+            assert_posix_descendant_stopped(self,12345)
+    def test_live_process_and_failed_status_remain_failures(self):
+        for result in (subprocess.CompletedProcess([],0,b'S\n',b''),subprocess.CompletedProcess([],1,b'',b''),
+                       subprocess.CompletedProcess([],1,b'',b'permission denied'),subprocess.CompletedProcess([],2,b'',b'bad status')):
+            with mock.patch.object(os,'kill',return_value=None),mock.patch.object(subprocess,'run',return_value=result):
+                with self.assertRaises(AssertionError):assert_posix_descendant_stopped(self,12345)
+
 class ProjectionTests(unittest.TestCase):
     def test_owned_capture_rejects_partial_and_other_stream_io_failures(self):
         command=[sys.executable,'-B','-c',"import os;os.write(1,b'complete expected stdout\\n');os.write(2,b'complete expected stderr\\n')"]
@@ -164,13 +191,7 @@ subprocess.Popen=injected_popen
                     self.assertNotEqual(exitcode.value,259)
                 finally:kernel.CloseHandle(handle)
         else:
-            # A killed process can briefly remain a zombie until its parent is
-            # reaped; neither a live process nor a live owned session may remain.
-            try:os.kill(pid,0)
-            except ProcessLookupError:pass
-            else:
-                result=subprocess.run(['ps','-o','stat=','-p',str(pid)],capture_output=True,timeout=10)
-                self.assertTrue(result.stdout.strip().startswith(b'Z'))
+            assert_posix_descendant_stopped(self,pid)
 
     def test_git_diff_output_overflow_rejects_before_buffering(self):
         src=source('git-overflow')
@@ -301,6 +322,7 @@ subprocess.Popen=injected_popen
 
 if __name__=='__main__':
     suite=unittest.defaultTestLoader.loadTestsFromTestCase(ProjectionTests)
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(PosixProbeRaceTests))
     result=unittest.TextTestRunner(verbosity=2).run(suite)
     record={'schema':'synthetic_portable_support_controls_v1','complete':result.wasSuccessful(),'tests':result.testsRun,
         'failures':len(result.failures),'errors':len(result.errors),'output_directory':str(OUT),'native_fit_claim':False,
