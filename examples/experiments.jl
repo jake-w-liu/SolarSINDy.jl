@@ -224,3 +224,6 @@ include(joinpath(@__DIR__,"archive_completed_windows_synthetic.jl"))
 run_archive_completed_windows_synthetic()
 include(joinpath(@__DIR__,"archive_source_job_synthetic.jl"))
 run_archive_source_job_synthetic()
+
+include(joinpath(@__DIR__,"archive_catalog_cases_synthetic.jl"))
+run_archive_catalog_cases_synthetic()

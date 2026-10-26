@@ -161,9 +161,10 @@ function audit_locate(c::CatalogAudit,tag::DateTime)
     require(floor(tag,Minute)==tag,"audit lookup minute precision")
     target=_stamp(tag);a=1;b=length(c)
     while a<=b
-        center=(a+b)÷2;row=audit_witness(c,center)
-        row.tag==tag&&return row
-        if _stamp(row.tag)<target;a=center+1;else;b=center-1;end
+        center=(a+b)÷2
+        stamp=reinterpret(Int64,_decode_unsigned(c.selected_storage,(center-1)*80+1,8))
+        stamp==target&&return audit_witness(c,center)
+        if stamp<target;a=center+1;else;b=center-1;end
     end
     nothing
 end

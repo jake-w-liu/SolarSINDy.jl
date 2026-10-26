@@ -1,0 +1,4 @@
+{
+  "empty_support_sha256": "95d97f78883dfc5501032b54983c65306f1e807afaa3948fd17f03d7013bd8ab",
+  "role": "Independent Python literal empty-support oracle; no source read or implementation import."
+}

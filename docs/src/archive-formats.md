@@ -108,3 +108,35 @@ SolarSINDy.ArchiveCatalogSourceJob
 SolarSINDy.ArchiveCatalogSourceJob.Authority
 SolarSINDy.ArchiveCatalogSourceJob.reconstruct
 ```
+
+## Sealed case schedules
+
+`ArchiveCatalogCases` retains every explicitly scheduled issue, including
+feature and label exclusions. Features are sealed before labels are requested.
+The caller's issue vector is copied before validation and source access.
+Schedules contain at most600000 exact-minute, strictly increasing issues.
+
+Each160-byte feature record carries issue and readiness clocks, admission
+status, reason, numerical values and the ordered source-support digest. Each
+64-byte label record carries the matching clocks, independent admission status,
+target and support digest. Rejected rows expose no numerical values. Mixed8
+records use zero-filled unused feature columns. Payloads are immutable strings;
+`case_arrays` returns separate caller-owned arrays for the accepted intersection.
+
+The label audit checks the sealed ground-source hashes, station, strict split
+readiness and assumed maturity. Labels may be available for a feature-rejected
+issue; `case_counts` reports those exclusions separately. Joining labels from
+another schedule is rejected. These pure APIs perform no file access or model
+fit and retain false measured-receipt and source-bound-provenance flags.
+
+```@docs
+SolarSINDy.ArchiveCatalogCases
+SolarSINDy.ArchiveCatalogCases.CatalogFeatureSchedule
+SolarSINDy.ArchiveCatalogCases.CatalogLabelAudit
+SolarSINDy.ArchiveCatalogCases.seal_catalog_features
+SolarSINDy.ArchiveCatalogCases.audit_catalog_labels
+SolarSINDy.ArchiveCatalogCases.feature_row
+SolarSINDy.ArchiveCatalogCases.label_row
+SolarSINDy.ArchiveCatalogCases.case_counts
+SolarSINDy.ArchiveCatalogCases.case_arrays
+```

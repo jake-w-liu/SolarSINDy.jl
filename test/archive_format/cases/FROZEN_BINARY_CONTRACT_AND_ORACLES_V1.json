@@ -1,0 +1,67 @@
+{
+  "created_utc": "2026-10-25T19:03:16.314096+00:00",
+  "planning_contract_sha256": "335ee187c995846853609200e99cef66335729468e191a8412e7462419194080",
+  "generated_fixture_path": "C:\\Temp\\solarsindy-completed-catalog-windows-20261025\\SolarSINDy.jl\\test\\archive_format\\windows\\fixtures\\FROZEN_INPUTS_AND_ORACLES_V1.json",
+  "generated_fixture_sha256": "da6a84baecc17879de70cfde03686e3d2e36c8a5bd4bf35dff1a52c7d3a7f281",
+  "feature_record": {
+    "bytes": 160,
+    "layout": "issue_i64,ready_i64,accepted_u8,reason_u8,pad6,raw_now_f64,scale_f64,features11_f64,support_sha256_32",
+    "all_integers_and_float_bit_patterns_little_endian": true,
+    "unused_mixed8_features9through11": "positive_zero",
+    "rejected_numeric_payloads": "positive_zero",
+    "reason_codes": [
+      "complete",
+      "missing_ground_history",
+      "invalid_ground_history",
+      "missing_omni_history",
+      "invalid_omni_history",
+      "invalid_feature_summary"
+    ]
+  },
+  "label_record": {
+    "bytes": 64,
+    "layout": "issue_i64,ready_i64,accepted_u8,reason_u8,pad6,target_f64,support_sha256_32",
+    "reason_codes": [
+      "complete",
+      "split_not_strictly_ready",
+      "label_not_ready",
+      "missing_ground_target",
+      "invalid_ground_target"
+    ]
+  },
+  "support_frame": "DBDTCASUPPORT1 NUL; group1u8+count_u32+ground_records; group2u8+count_u32+wind_records. Each48byte query is operation_u8,unix_ms_i64,present_u8,body_exists_u8,body_id32,source_line_u32,valid_mask_u8. Missing body IDs and source lines are zero. Operation0=haskey,1=getindex.",
+  "mixed8_issue32_feature_hex": "0034845e6f010000085ba05e6f01000001000000000000000000000000001440011015fd855506400000000000001440000000000000144000000000000014400000000000000000000000000000794000000000000000c000000000000000400000000000008940000000000000000000000000000000000000000000000000b646045393ed23978cf301ca069eb758937da3e9af3ef02bcd26b9b9f64e249b",
+  "mixed8_issue32_feature_sha256": "f922940ca08fc48ce98c3143d22c74aa3eaccf4122b8e85202eef0834c9b3740",
+  "mixed8_issue32_support_sha256": "b646045393ed23978cf301ca069eb758937da3e9af3ef02bcd26b9b9f64e249b",
+  "ground11_issue32_support_sha256": "e79d457fb2db0de31555865b45ac228eded70f4c1056faa5e00a90364db22e1b",
+  "generated_ground_body_identity": "c446a0765ad8de315912b8ce81e4968e43f4992caeda843928d37ae47040ca58",
+  "generated_wind_body_identity": "32fb3088fb1d41d711c71804da87e3184a2b33fd79e0f685c381ef42ee944050",
+  "literal_counts_for_complete_fixture_issues0through90": {
+    "scheduled": 91,
+    "features_accepted": 60,
+    "labels_accepted_at_final_maturity": 61,
+    "supervised_intersection": 30
+  },
+  "implementation_bounds": {
+    "maximum_scheduled_rows": 600000,
+    "feature_payload_maximum_bytes": 96000000,
+    "label_payload_maximum_bytes": 38400000
+  },
+  "pure_scope": "No filesystem access, authority grant, actual-source qualification, fit, calibration or scientific verdict. Feature and label payloads are immutable binary Strings; every scheduled issue remains represented.",
+  "required_tests": [
+    "external binary oracle",
+    "all scheduled rows retained",
+    "every exclusion code",
+    "future-value perturbation does not alter numerical features",
+    "readiness before target reads",
+    "strict split equality exclusion",
+    "primary/audit exact agreement",
+    "caller issue array mutation after sealing has no effect",
+    "ground-only wind never inspected",
+    "typed invalid inputs and overflow",
+    "full annual generated scale before actual execution"
+  ],
+  "actual_source_access": false,
+  "actual_fits": 0,
+  "publication_ready": false
+}

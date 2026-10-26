@@ -1085,3 +1085,33 @@ deadlines are unchanged. The CI negative control injects error suppression at
 the strategy boundary independently of the scheduling budget. The dashboard
 caption now states the actual L1-input nowcast scope without asserting that
 magnetic severity can only be known at L1.
+
+
+## Sealed catalog case schedules (26 October 2026)
+
+The pure ArchiveCatalogCases API preserves all scheduled issues, including
+independent feature and label rejection states. An owned DateTime vector is
+validated before source queries; the former standalone prototype reread a
+mutable caller vector after validation, which an independent changing-view
+regression exposed. Source-support digests, exact clocks and numerical payloads
+are sealed in immutable strings. The label audit binds ground-catalog identity
+and checks strict split readiness and maturity before target access. Matched
+arrays own their storage and retain false fit/receipt/provenance flags.
+
+Literal binary expectations and every floating field in the generated91-issue
+schedule come from independent frozen oracles. Both catalog roles exercise the
+same public API. The focused tests retain the original absolute1e-13/rtol0
+tolerance; integer-looking JSON target values are converted to Float64 before
+bit-exact comparison. Cross-runtime floating reductions may differ by one ULP;
+status, clocks, source support and labels remain exact. A complete generated
+year additionally checks all525600 scheduled rows and exclusion counts on both
+runtimes and both roles before release qualification. Semantic mutation controls
+and full package/experiments/harness/docs/native CI remain mandatory.
+
+The independent lookup candidate compares only timestamps at binary-search
+midpoints, decoding a full witness only at a match. It keeps the independent
+decoder, identity encoder, parser, serializer and all original limits. Paired
+generated-catalog measurements, profiles and full annual regeneration are
+required before this resource correction is considered verified. No actual
+data-derived eligible count, fitted forecast or scientific conclusion follows
+from these generated controls.

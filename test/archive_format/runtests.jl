@@ -15,3 +15,5 @@ include(joinpath(@__DIR__,"test_catalog_maximum.jl"))
 
 include(joinpath(@__DIR__,"windows","runtests.jl"))
 include(joinpath(@__DIR__,"source_job","runtests.jl"))
+
+include(joinpath(@__DIR__,"cases","runtests.jl"))
