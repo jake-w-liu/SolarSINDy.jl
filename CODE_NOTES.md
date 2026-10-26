@@ -1115,3 +1115,20 @@ generated-catalog measurements, profiles and full annual regeneration are
 required before this resource correction is considered verified. No actual
 data-derived eligible count, fitted forecast or scientific conclusion follows
 from these generated controls.
+
+
+## Strict documentation on both supported runtimes
+
+The documentation job now pins Julia1.12.6 and1.13.1 and builds the same strict
+manual sequentially on Ubuntu. Each build checks its actual VERSION before
+including the maintained make entry. The existing six OS/runtime package and
+experiment cells, deployment-image job and all job deadlines remain intact.
+Independent contract mutations reject missing or comment-only builds, wrong
+runtime pairing, skipped builds, ignored failures and relaxed Documenter flags.
+
+The local Windows1.12 documentation attempt remains a recorded failure: App
+Control blocked the unsigned Expat2.9.0 DLL. Its bytes match the pinned official
+Julia artifact archive. This change does not alter Windows security, relocate
+the DLL or downgrade dependencies. Release qualification still requires both
+actual strict native documentation builds and all other software gates; neither
+the local failure nor configured CI steps are reported as executed success.

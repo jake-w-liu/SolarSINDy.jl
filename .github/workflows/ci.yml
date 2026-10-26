@@ -113,14 +113,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
         with:
-          version: '1.12'
+          version: '1.12.6'
       - uses: julia-actions/cache@v2
       - name: Instantiate the documentation environment
         run: julia --project=docs -e 'using Pkg; Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate()'
-      - name: Build the manual
-        # `docs/make.jl` runs with checkdocs=:exports, doctest=true and warnonly=false, so this step
-        # fails on a missing manual entry or a stale doctest, not only on a broken page.
-        run: julia --project=docs docs/make.jl
+      - name: Build the manual (Julia 1.12.6)
+        # Both builds retain the same strict exports, doctests and warning gate.
+        run: julia --startup-file=no --project=docs -e 'VERSION == v"1.12.6" || error("unexpected documentation runtime"); include("docs/make.jl")'
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.13.1'
+      - name: Build the manual (Julia 1.13.1)
+        # Reuse the already instantiated, portable documentation environment.
+        run: julia --startup-file=no --project=docs -e 'VERSION == v"1.13.1" || error("unexpected documentation runtime"); include("docs/make.jl")'
 
   containers:
     name: Julia 1.12 deployment images
