@@ -996,3 +996,5 @@ include(joinpath(@__DIR__, "archive_format", "runtests.jl"))
 include(joinpath(@__DIR__, "test_documentation_ci_contract.jl"))
 
 include("archive_format/case_job/runtests.jl")
+
+include(joinpath(@__DIR__,"archive_point_models","runtests.jl"))

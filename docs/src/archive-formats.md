@@ -212,3 +212,28 @@ julia --project=. examples/archive_case_job_scale_synthetic.jl /fresh/output pri
 Use `independent` for the other parser role and `mixed` for the wind-assisted
 layout. The output directory must not already exist. This optional scale check
 is separate from the short generated example in `examples/experiments.jl`.
+
+
+## Numeric point-model values
+
+The numeric tree values support the eleven-column ground and eight-column
+mixed layouts. They own their edge and leaf data and reproduce Float64 numeric
+bin decisions, followed by ordered Float32 tree addition. The data-only codec
+uses explicit floating-point bits and bounded tree geometry. It rejects malformed
+values and arbitrary serialized objects.
+
+A numeric value carries no source or fit authority. Source-bound training,
+recipe publication and independent fit verification require a separate adapter.
+External expected model pins remain necessary: a different well-formed numeric
+model is still a well-formed value. These interfaces alone do not establish
+forecast accuracy or historical provider receipt times.
+
+```@docs
+SolarSINDy.ArchivePointNumericTrees
+SolarSINDy.ArchivePointNumericTrees.NumericTree
+SolarSINDy.ArchivePointNumericTrees.NumericModel
+SolarSINDy.ArchivePointNumericTrees.predict
+SolarSINDy.ArchivePointNumericTrees.from_native
+SolarSINDy.ArchivePointNumericTrees.encode_model
+SolarSINDy.ArchivePointNumericTrees.decode_model
+```

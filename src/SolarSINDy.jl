@@ -89,6 +89,8 @@ include("archive_format/ArchiveCatalogCaseComparison.jl")
 export ArchiveCatalogCaseComparison
 include("archive_format/ArchiveCatalogCaseAuthority.jl")
 include("archive_format/ArchiveCatalogCaseJob.jl")
+include("archive_point_models/ArchivePointNumericTrees.jl")
+export ArchivePointNumericTrees
 export ArchiveCatalogCaseJob
 
 export # Utils

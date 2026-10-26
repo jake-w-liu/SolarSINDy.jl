@@ -1181,3 +1181,17 @@ Each job has an8GiB peak process RSS bound and a separate7200s full-size budget;
 existing focused and CI budgets remain unchanged. At implementation time these
 scale runs and the final full software qualification remain pending. Generated
 resource checks do not establish observational eligibility or forecast skill.
+
+
+The archive point numeric primitive supports a verified stronger-comparator
+foundation while retaining the locked ridge and uncertainty baselines. Its
+standalone generated chain passed61assertions on each native runtime, including
+the joint600000row/400round/depth6/255bin boundary, and four genuine semantic
+mutants. Two-bin EvoTrees matrix edges use an explicit minimum-value rule; an
+initial median-cutoff fixture was corrected from the pinned source without
+changing numeric code, manual0.5-edge oracles or tolerances. Loaded source paths
+and hashes are checked explicitly. Package integration requires fresh focused
+checks followed by full package, experiments, canonical harness, both strict
+manual builds and all eight native CI/raw gates. A source-bound refit job is
+still missing. No actual archive fit, source authority, novelty or skill result
+is supplied by these numeric values or their generated example.
