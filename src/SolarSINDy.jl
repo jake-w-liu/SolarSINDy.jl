@@ -83,6 +83,13 @@ include("archive_format/ArchiveCatalogSourceJob.jl")
 export ArchiveCatalogSourceJob
 include("archive_format/ArchiveCatalogCases.jl")
 export ArchiveCatalogCases
+include("archive_format/ArchiveCatalogSnapshotValues.jl")
+include("archive_format/ArchiveCatalogSnapshotFilesystem.jl")
+include("archive_format/ArchiveCatalogCaseComparison.jl")
+export ArchiveCatalogCaseComparison
+include("archive_format/ArchiveCatalogCaseAuthority.jl")
+include("archive_format/ArchiveCatalogCaseJob.jl")
+export ArchiveCatalogCaseJob
 
 export # Utils
        numerical_derivative, smooth_moving_average, pressure_correct_dst,

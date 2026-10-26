@@ -140,3 +140,75 @@ SolarSINDy.ArchiveCatalogCases.label_row
 SolarSINDy.ArchiveCatalogCases.case_counts
 SolarSINDy.ArchiveCatalogCases.case_arrays
 ```
+
+## Source-bound case artifacts
+
+The case job publishes a complete feature schedule before requesting any labels.
+It retains every issue and each separate exclusion. Its bounded snapshot reader
+checks canonical metadata, ordinary paths, exact membership, sizes and hashes,
+then reconstructs the catalogs from preserved original text. Recorded cache
+paths are never opened. Feature and label members have at most8192rows; the
+existing8MiB/member,1GiB/artifact and1024-member limits remain in force.
+
+Generated requests accept generated snapshots and no actual authority. Archival
+requests require a distinct feature-only grant bound to the exact request,
+locked schedule plan, eight-job source agreement, loaded package inventory,
+complete software qualification and a predeclared floating comparison policy.
+A source-reconstruction grant does not authorize features. Neither grant
+authorizes model fitting or historical provider receipt claims.
+
+Publication uses fresh exclusive files and writes its completion marker last.
+The reader recomputes and compares every feature and label byte before returning
+`VerifiedCases`. Split projection checks issue membership and strict readiness
+before each persisted target access. It returns owned arrays and performs no fit.
+
+```@docs
+SolarSINDy.ArchiveCatalogCaseJob
+SolarSINDy.ArchiveCatalogCaseJob.Authority
+SolarSINDy.ArchiveCatalogCaseJob.VerifiedCases
+SolarSINDy.ArchiveCatalogCaseJob.publish
+SolarSINDy.ArchiveCatalogCaseJob.read_verified
+SolarSINDy.ArchiveCatalogCaseJob.split_arrays
+```
+
+## Comparing native artifact outputs
+
+The pure comparison reader checks caller-supplied binary records across native
+jobs. It owns its buffers, validates the entire default-policy issue schedule,
+and requires exact status, exclusion, padding, unused-column and support bytes.
+Direct wind fields remain bit exact. Other accepted values use a fixed
+generated-tested rounding criterion. Its admitted coordinate bound comes from
+the archival parser and is not a natural physical maximum.
+
+The canonical policy describes roundoff with an explicit Float64 bit string
+and integral bounds with integers, retaining the data-only metadata contract.
+
+The criterion has independent Decimal and MPFR regression checks. It is not a
+universal floating-point proof, a source-provenance certificate, or permission
+to use an unverified artifact for fitting. The native artifact reader and outer
+source/grant bindings remain required. Comparison results contain diagnostics
+and exclusion counts, with false authority, provenance and fit flags.
+
+```@docs
+SolarSINDy.ArchiveCatalogCaseComparison
+SolarSINDy.ArchiveCatalogCaseComparison.comparison_policy
+SolarSINDy.ArchiveCatalogCaseComparison.policy_digest
+SolarSINDy.ArchiveCatalogCaseComparison.compare_case_bytes
+```
+
+## Optional generated scale check
+
+`examples/archive_case_job_scale_synthetic.jl` exercises eight generated tables:
+two stations, each with a full year and three separate 31-day periods. It checks
+every scheduled row against closed-form periodic increments and records phase
+times and native peak process RSS. It retains all inputs, artifacts and partial
+failures in a fresh output directory. It reads no observational data and fits no
+forecast model.
+
+```sh
+julia --project=. examples/archive_case_job_scale_synthetic.jl /fresh/output primary ground-only
+```
+
+Use `independent` for the other parser role and `mixed` for the wind-assisted
+layout. The output directory must not already exist. This optional scale check
+is separate from the short generated example in `examples/experiments.jl`.

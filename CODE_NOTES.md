@@ -1132,3 +1132,52 @@ Julia artifact archive. This change does not alter Windows security, relocate
 the DLL or downgrade dependencies. Release qualification still requires both
 actual strict native documentation builds and all other software gates; neither
 the local failure nor configured CI steps are reported as executed success.
+
+## Source-bound archival case artifacts and comparison
+
+The common case worker adds bounded source-snapshot reconstruction, exclusive
+completion-last feature/label publication, full native recomputation on reading,
+and strict issue-domain/readiness projection of persisted labels. It preserves
+the160/64-byte row formats and all original independent numerical expectations.
+The snapshot decoder also admits separately labeled generated wind bodies;
+the earlier redundant both-station condition rejected those valid declarations.
+
+Actual requests require a separate typed feature-only authority. Its exact
+request, locked schedule, source agreement, full loaded source proof, genuine
+software qualification and pre-actual floating-policy pins must agree before
+source bodies are read. A source-only grant cannot authorize this route. Frozen
+plan clocks with and without millisecond text share one canonical request form.
+The new authority never authorizes fitting, source discovery or provider receipt
+claims. Generated paths reject actual authority and cannot read actual snapshots.
+
+The pure cross-native comparison checks full schedule membership, default
+readiness, status/reason consistency, separate exclusions, padding, unused fields
+and source support. Its fixed rounding description has a canonical digest.
+Accepted coordinate ranges follow the existing archival parser; they are not
+asserted as natural physical limits. Independent Decimal100/180-digit and
+MPFR256-bit generated oracles cover42cases and preserve all prior1e-13/rtol0
+tests. An initial Decimal reference lost tiny log1p inputs through addition to1;
+a cancellation-safe series corrected that oracle without changing Julia math.
+
+The generated artifact/authority component passed both native runtimes before
+comparison integration. The final combined comparison, portable oracle fixture,
+manual and generated example require focused positives and semantic controls,
+then full package, experiments, unchanged harness, both strict manual builds and
+all eight native CI jobs with retained raw evidence. No actual feature grant,
+archive fit, corrected case count or scientific result follows from these
+generated components.
+
+The first combined comparison run rejected a floating policy value in the
+data-only canonical codec. The policy now records roundoff as explicit Float64
+bits and the integral coordinate cap as Int. An independent canonical digest
+regression binds that encoding. No codec relaxation or numerical-rule change
+was made; the initial failure remains part of the development evidence.
+
+The optional generated scale example has a frozen contract before execution:
+1,319,040 scheduled rows across eight tables, no additional endpoint vectors,
+and independent reset-pattern feature, label and exclusion oracles. Both parser
+roles, both layouts and both native Julia versions require separate executions.
+Each job has an8GiB peak process RSS bound and a separate7200s full-size budget;
+existing focused and CI budgets remain unchanged. At implementation time these
+scale runs and the final full software qualification remain pending. Generated
+resource checks do not establish observational eligibility or forecast skill.

@@ -1,0 +1,38 @@
+{
+  "schema": "generated_snapshot_multishard_oracles_v1",
+  "start": "2020-01-01T00:00:00.000Z",
+  "stop": "2020-01-06T18:19:00.000Z",
+  "rows": 8300,
+  "fixtures": [
+    {
+      "station": "CMO",
+      "path": "ground-CMO.txt",
+      "bytes": 326716,
+      "sha256": "ad81760e070e9330c8b3156ca07d8f9e4ac4ce5aa8f5928bc80e81aaca49e846",
+      "rows": 8300,
+      "raw_bytes": 398400,
+      "raw_sha256": "32e8e0f42983ccc31bc6534763376fb8aed6fbb787beddf34b146cae3c636545",
+      "body_id": "d437986c3b21f0d9be84c0020f827e488b465daf48f2b2ce05bb7b9da9f6b348",
+      "selected_bytes": 664000,
+      "selected_sha256": "777747d02bddb12380ff707218cb9852dd6e2a4fd92a747633570eb608bfbff4",
+      "first_raw_hex": "00e8665e6f01000008000000030000000000000000000000000000000000000000000000000000000000000000000000",
+      "last_raw_hex": "20de147c6f010000732000000300000000000000009072400000000000c0784000000000000000000000000000000000"
+    },
+    {
+      "station": "FRD",
+      "path": "ground-FRD.txt",
+      "bytes": 326716,
+      "sha256": "ab39b9ac7b9a59d2c6942977b84c16332473945f4e0163cba1ea4be8625f06ff",
+      "rows": 8300,
+      "raw_bytes": 398400,
+      "raw_sha256": "32e8e0f42983ccc31bc6534763376fb8aed6fbb787beddf34b146cae3c636545",
+      "body_id": "767c1f41a0a8610f27937f817106ddb54df68c6f3c2af1dd172ba2eba62f5c24",
+      "selected_bytes": 664000,
+      "selected_sha256": "f84f311bb6209218fea7ef69890dc8583c70ec300d1c133b08f351d3ba302f37",
+      "first_raw_hex": "00e8665e6f01000008000000030000000000000000000000000000000000000000000000000000000000000000000000",
+      "last_raw_hex": "20de147c6f010000732000000300000000000000009072400000000000c0784000000000000000000000000000000000"
+    }
+  ],
+  "actual_data": false,
+  "actual_fits": 0
+}
