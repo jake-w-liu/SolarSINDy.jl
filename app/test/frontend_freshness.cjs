@@ -82,11 +82,19 @@ test("source names come from the feed and are escaped", () => {
 test("partial sources cannot imply quiet geomagnetic conditions", () => {
   const { context, element } = dashboard();
   const payload = upstream();
+  // A fresh observation clock can contain the same digits as the stale Kp.
+  const freshStamp = new Date(Date.now() - 60_000);
+  freshStamp.setUTCSeconds(8, 700);
+  payload.upstream.solar_wind.mag_time_utc = freshStamp.toISOString();
+  payload.upstream.solar_wind.plasma_time_utc = freshStamp.toISOString();
   payload.upstream_status.kp_stale = payload.upstream_status.scales_stale = true;
   context.renderUpstream(payload);
   assert.equal(element("upstream-badge").textContent, "partial");
   assert.ok(!element("upstream-caption").innerHTML.includes("G4"));
-  assert.ok(!element("upstream-caption").innerHTML.includes("8.7"));
+  const captionHTML = element("upstream-caption").innerHTML;
+  assert.ok(captionHTML.includes("8.7"), "regression timestamp must contain the stale Kp digits");
+  assert.ok(!captionHTML.replace(/<[^>]*>/g, "").includes("8.7"));
+  assert.ok(!element("upstream-stats").innerHTML.includes("8.7"));
   payload.upstream_status.elevated = true;
   payload.upstream_status.reasons = ["L1 wind 800 km/s"];
   context.renderUpstream(payload);
