@@ -1419,3 +1419,21 @@ Child Python processes use explicit UTF-8 mode;hosted/native process environment
 propagate PYTHONUTF8=1. The first Windows checkpoint preserved a passing child
 log that could not be decoded under the parent UTF-8 contract;the corrected
 checkpoint retains that failure and verifies newly encoded raw logs.
+
+## Byte ownership regressions awaiting native qualification (2026-10-28)
+
+Both retained Julia1.13 Linux/macOS jobs pass all41zero-column static assertions
+and then fail the source-bound calibration bridge at its external-pin check.
+Installed primary Julia source for1.12.6 and1.13.1 confirms that String(Vector)
+empties its input. Static and separate-evaluation expected hashes are now bound
+before that ownership transfer. Explicit retained-byte hashes and the original
+separate-evaluation oracle test the resulting public metadata.
+
+The same review found artifact member sizes counted after the consumed buffer
+was empty. The reader now counts before transfer. Its regression uses ordinary
+fixture file sizes as an independent oracle and tests the unchanged graph limit
+at exact equality and one byte over, without large fixtures or modified limits.
+These new Julia assertions have not run locally. Full before/after native,
+unfiltered Pkg.test(), complete examples/experiments.jl, unchanged canonical
+audit, actual strict docs and all18CI/resource gates must verify this source.
+The running predecessor is unchanged and is not qualified by these edits.

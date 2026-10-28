@@ -19,3 +19,23 @@
     write(joinpath(directory,"COMMIT.json"),original)
     @test R._read_bundle(directory,protocol,pins;graph)===graph.cache[bundle.manifest_sha256]
 end
+
+@testset "bundle graph accounts every retained byte before ownership transfer" begin
+    directory=joinpath(CODEC_TEST_DIRECTORY,"counted-structural-native")
+    protocol,bundle,pins=structural_native_bundle(directory)
+    names=readdir(directory)
+    # Independent filesystem sizes include both metadata files and every
+    # payload. No reader counter or manifest-declared size is the oracle.
+    exact_bytes=sum(filesize(joinpath(directory,name)) for name in names)
+    graph=R._Graph()
+    @test R._read_bundle(directory,protocol,pins;graph).kind=="native_job"
+    @test graph.bytes==exact_bytes
+    @test graph.files==length(names)
+    @test R._read_bundle(directory,protocol,pins;graph)===graph.cache[bundle.manifest_sha256]
+    @test graph.bytes==exact_bytes && graph.files==length(names)
+    boundary=R._Graph();boundary.bytes=R.MAX_GRAPH_BYTES-exact_bytes
+    @test R._read_bundle(directory,protocol,pins;graph=boundary).kind=="native_job"
+    @test boundary.bytes==R.MAX_GRAPH_BYTES
+    over=R._Graph();over.bytes=R.MAX_GRAPH_BYTES-exact_bytes+1
+    @test_throws ArgumentError R._read_bundle(directory,protocol,pins;graph=over)
+end

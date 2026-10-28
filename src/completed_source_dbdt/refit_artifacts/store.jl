@@ -181,8 +181,8 @@ function _read_bundle(directory::AbstractString,protocol::RefitProtocol,pins;
         data=bounded_read(joinpath(directory,name);limit=_member_limit(name))
         require(length(data)==count && digest(data)==pin,"artifact member bytes differ")
         name!="native.log" && decode_canonical(data;limit=_member_limit(name))
-        push!(headernames,name);push!(members,name=>String(data))
         total=Base.Checked.checked_add(total,length(data));require(total<=MAX_BUNDLE_BYTES,"bundle total byte bound exceeded")
+        push!(headernames,name);push!(members,name=>String(data))
     end
     require(length(unique(headernames))==length(headernames) && headernames==_catalog(kind,headernames),"member grammar/order differs")
     require(Set(names)==Set(vcat(headernames,["manifest.json","COMMIT.json"])),"extra/missing artifact member")

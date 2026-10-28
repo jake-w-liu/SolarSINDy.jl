@@ -1414,3 +1414,20 @@ Child Python processes use explicit UTF-8 mode;hosted/native process environment
 propagate PYTHONUTF8=1. The first Windows checkpoint preserved a passing child
 log that could not be decoded under the parent UTF-8 contract;the corrected
 checkpoint retains that failure and verifies newly encoded raw logs.
+
+## Byte ownership at external pins and resource accounting (2026-10-28)
+
+The Julia String constructor consumes a byte Vector and empties that Vector.
+Static calibration and separate evaluation now compute their immutable external
+pins before transferring those bytes into strings. The original static binding
+failure is retained from both Linux and macOS Julia1.13 CI logs; its preceding
+41 zero-column numeric controls passed. Returned capsule hashes must describe
+their retained nonempty bytes. No numeric calculation or pin check is weakened.
+
+The artifact reader now accounts verified member bytes before transferring them
+to retained strings. Independent filesystem-size and graph-limit boundary
+oracles cover exact accounting, one-byte overflow rejection and cache reuse.
+The existing bundle and graph limits remain unchanged. Native before/after
+controls, full package tests, complete experiments, the unchanged canonical
+harness, both strict documentation builds and all18CI jobs remain pending on
+this private source. No actual source access, fits or scientific verdict follows.
