@@ -347,8 +347,14 @@ def capture(output, claimed_head=None):
     directory.mkdir()
     started = now()
     deadline = time.monotonic() + CAPTURE_SECONDS
+    items = []
     with ThreadPoolExecutor(max_workers=2) as pool:
-        items = list(pool.map(lambda resource: _run_resource_owned(*resource, directory, deadline), RESOURCES))
+        # Do not queue a later batch before both current owners finish. If a
+        # worker cannot be reaped, its occupied slot must never be reused.
+        for offset in range(0, len(RESOURCES), 2):
+            futures = [pool.submit(_run_resource_owned, *resource, directory, deadline)
+                       for resource in RESOURCES[offset:offset+2]]
+            items.extend(future.result() for future in futures)
     records = [item[0] for item in items]
     usable = lambda item: (item['response_complete'] and item.get('http_status') == 200
                            and item.get('body', {}).get('bytes', 0) > 0)

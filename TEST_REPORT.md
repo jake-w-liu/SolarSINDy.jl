@@ -1527,3 +1527,12 @@ one overflow byte. An independent owned oracle first observed read arguments
 [1048577, -1] in the prior implementation; the corrected regression requires
 [1048577, 1048577], incomplete admission, reaped ownership and retained failure
 evidence. This adds a subcase without reducing or changing the 25 test methods.
+
+
+The unreaped-worker test additionally covers aggregate queue ownership. In
+three independent mock-process subcases, a hard reap failure must launch at
+most two workers, must never request resource index two or three, and must
+call kill on every launched fixture. The prior independent ten-case oracle
+observed three launches each time. These fixtures create no actual child
+orphans and make no network request. Full four-resource success and ordinary
+launch-failure aggregate cases remain separate positive controls.

@@ -1555,3 +1555,13 @@ The independent regression grows the file by 3 MiB and observes two bounded
 read calls of 1,048,577 bytes each. It remains a subcase of the existing strict
 receipt test, so the complete method count remains 25. No evidence is admitted
 on growth, and an authoritative incomplete receipt remains available.
+
+
+The aggregate cleanup audit independently reproduced an executor queue gap:
+when an owned worker could not be reaped, a queued later resource could start
+after the failed owner released its Python thread. Ten controlled mock cases
+each launched three simulated workers. No actual orphan or network was used.
+Only the current batch of two resources is now submitted. A hard reap failure
+aborts before any later batch; ordinary failures still produce all four
+resource receipts and an aggregate terminal record. The existing unreaped-child
+test includes aggregate launch/kill checks and retains the 25-method count.

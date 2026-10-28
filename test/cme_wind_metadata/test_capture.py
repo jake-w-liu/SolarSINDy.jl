@@ -431,6 +431,24 @@ class WindMetadataOwnershipTests(unittest.TestCase):
                 M._run_resource_owned(*M.RESOURCES[0], directory, time.monotonic()+60)
             process.kill.assert_called_once()
             self.assertFalse((directory/'master.skt.receipt.json').exists())
+        # An executor slot freed by an unreaped-child exception cannot be
+        # reused to launch the third or fourth resource.
+        for attempt in range(3):
+            created = []
+            indices = []
+            def launch(arguments, **kwargs):
+                failed = Mock(pid=90000+len(created), returncode=None)
+                failed.poll.return_value = None
+                failed.wait.side_effect = subprocess.TimeoutExpired('unreapable fixture', 1)
+                created.append(failed)
+                indices.append(arguments[arguments.index('--worker-resource')+1])
+                return failed
+            with self.subTest(attempt=attempt), tempfile.TemporaryDirectory() as raw, patch.object(M.subprocess, 'Popen', side_effect=launch):
+                with self.assertRaisesRegex(RuntimeError, 'could not be reaped'):
+                    M.capture(Path(raw).resolve()/'capture')
+                self.assertLessEqual(len(created), 2)
+                self.assertTrue(all(index in ('0', '1') for index in indices))
+                self.assertTrue(all(failed.kill.call_count==1 for failed in created))
 
     def test_read_before_deadline_and_close_after_deadline_is_incomplete(self):
         clock = [0.0]
