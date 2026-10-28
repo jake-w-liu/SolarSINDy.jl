@@ -29,3 +29,12 @@ qualified case reread, the exact whole-package qualification, and the qualified
 exporter path and hash. It does not grant fitting, discovery, case generation,
 provider-receipt claims, or scientific qualification. Generated positive tests
 cannot substitute for actual admission or full-size qualification.
+
+`evaluation_binding.py` independently reconstructs the generated-only metadata
+connection from a fixed point/calibration pair to a separately sealed evaluation
+case. It checks externally pinned opaque model and recipe bytes, training and
+evaluation case identities, station, layout, role, runtime, split order and the
+eight research helper files. It never loads a model or opens source paths.
+This metadata check does not reconstruct source numbers, validate calibration
+values, grant archival access, or establish scientific performance. The native
+future-source tests separately recompute features and source completion events.

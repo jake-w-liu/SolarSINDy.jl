@@ -17,9 +17,10 @@ const C=SolarSINDy.ArchiveCatalogCases
 const D=SolarSINDy.CompletedSourceDBDT
 const E=D.CompletedLabelEvents
 const R=D.CompletedRefitArtifacts
-export replay_generated
+export replay_generated,ExpectedEvaluation,prepare_evaluation_binding
 need(ok,message)=ok || throw(ArgumentError(message))
 digest(bytes)=bytes2hex(sha256(bytes))
+include("source_bound_evaluation_binding.jl")
 mutable struct _GroundView{T} <: AbstractDict{DateTime,NTuple{2,Float64}}
     catalog::T
     first::DateTime
@@ -41,7 +42,7 @@ function Base.getindex(view::_GroundView,tag)
 end
 Base.length(::_GroundView)=throw(ArgumentError("replay rate source scans are forbidden"))
 Base.iterate(::_GroundView)=throw(ArgumentError("replay rate source scans are forbidden"))
-function _inputs(value::Q.VerifiedCases,index,point,calibration,expected,start,stop,asof)
+function _inputs(value::Q.VerifiedCases,index,point,calibration,expected,start,stop,asof;evaluation_binding=nothing)
     need(value.actual_source_authority_granted===false && value.actual_fit_performed===false,"generated replay cannot consume actual source authority")
     need(F.isint(index)&&1<=index<=length(value.features),"replay table index")
     need(all(t->t isa DateTime && D.whole(t),(start,stop,asof)) && start<stop<=asof,"replay split clocks")
@@ -51,8 +52,14 @@ function _inputs(value::Q.VerifiedCases,index,point,calibration,expected,start,s
     need(digest(codeunits(value.request_json))==value.request_sha256 && request["evidence_mode"]=="generated" &&
         request["runtime"]==string(VERSION),"replay source request differs")
     table=request["tables"][index];features=value.features[index]
-    need(pc.context["case_request_sha256"]==value.request_sha256 && pc.context["case_manifest_sha256"]==value.manifest_sha256 &&
-        pc.context["case_complete_sha256"]==value.complete_sha256 && pc.context["role"]==request["role"] &&
+    binding_pin=if evaluation_binding===nothing
+        need(pc.context["case_request_sha256"]==value.request_sha256 && pc.context["case_manifest_sha256"]==value.manifest_sha256 &&
+            pc.context["case_complete_sha256"]==value.complete_sha256,"separate evaluation case requires explicit binding")
+        nothing
+    else
+        _verify_evaluation_binding(evaluation_binding,value,index,point,calibration,expected,start,stop,asof,pc,kc)
+    end
+    need(pc.context["role"]==request["role"] &&
         pc.context["layout"]==request["layout"] && pc.context["table"]["station"]==table["station"]==features.station,
         "replay point/case/station identity differs")
     need(F._fit_clock(kc.context["stop_exclusive"])<=start && kc.first_issue<=start &&
@@ -91,7 +98,7 @@ function _inputs(value::Q.VerifiedCases,index,point,calibration,expected,start,s
         need(length(predicted)==length(accepted) && all(isfinite,predicted),"replay fixed point prediction domain")
         centers[accepted]=predicted
     end
-    (;pc,kc,cal,ground,prepared,row_ids,accepted,centers,scales,peaks,matrix,reasons,features,table)
+    (;pc,kc,cal,ground,prepared,row_ids,accepted,centers,scales,peaks,matrix,reasons,features,table,binding_pin)
 end
 """Run fixed consumers and both publisher variants on generated verified sources.
 
@@ -99,9 +106,9 @@ The final label cache does not determine issuance or provide replay feedback.
 Missing-source targets remain unknown in the common event engine.
 """
 function replay_generated(value::Q.VerifiedCases,index,point,calibration,expected;
-        start,stop,asof,subscribers,nominal,grace_ms=0,warmup=true,static_calibration=nothing)
+        start,stop,asof,subscribers,nominal,grace_ms=0,warmup=true,static_calibration=nothing,evaluation_binding=nothing)
     need(warmup isa Bool,"replay warmup selector must be Boolean")
-    input=_inputs(value,index,point,calibration,expected,start,stop,asof)
+    input=_inputs(value,index,point,calibration,expected,start,stop,asof;evaluation_binding)
     alpha=D.nominal_value(nominal);need(0<alpha<1,"publisher comparison requires interior nominal")
     if static_calibration!==nothing
         need(static_calibration isa NamedTuple && keys(static_calibration)==(:capsule,:expected),"static calibration and external pins required")
@@ -112,8 +119,8 @@ function replay_generated(value::Q.VerifiedCases,index,point,calibration,expecte
     audit=(;scheduled=length(input.prepared),features_accepted=length(input.accepted),features_rejected=length(input.prepared)-length(input.accepted),
         rejection_reasons=copy(input.reasons),source_bound_provenance_verified=false,scientific_coverage_qualified=false,
         measured_receipts_available=false,actual_source_authority_granted=false,actual_fits=0,
-        mandatory_static_inventory_complete=static_calibration!==nothing)
-    isempty(input.accepted) && return (;status=:no_feature_eligible,audit,shared=nothing,publisher_upper=nothing,publisher_absolute=nothing,static_bounds=nothing,study_pass=false)
+        mandatory_static_inventory_complete=static_calibration!==nothing,explicit_evaluation_binding_matched=input.binding_pin!==nothing)
+    isempty(input.accepted) && return (;status=:no_feature_eligible,audit,shared=nothing,publisher_upper=nothing,publisher_absolute=nothing,static_bounds=nothing,study_pass=false,evaluation_binding_sha256=input.binding_pin)
     fixed=static_calibration===nothing ? nothing : B.predict_upper(static_calibration.capsule,input.matrix,input.centers[input.accepted],
         input.scales[input.accepted],input.peaks;point,calibration,expected,expected_static=static_calibration.expected,start)
     last_center=input.prepared[end].issue+Minute(30)
@@ -129,7 +136,10 @@ function replay_generated(value::Q.VerifiedCases,index,point,calibration,expecte
     absolute=U.project_shared(shared,input.cal,records;start,asof,nominal=alpha,score_kind=:symmetric_absolute,grace_ms)
     need(shared.source.attempted==upper.attempted==absolute.attempted==length(input.accepted),"replay comparison denominator differs")
     need(F._check_capsule(point).context==input.pc.context && K._checked(calibration,point,expected).context==input.kc.context,"replay fitted inputs changed")
-    (;status=:replayed,audit,shared,publisher_upper=upper,publisher_absolute=absolute,static_bounds=fixed,
+    if evaluation_binding!==nothing
+        _verify_evaluation_binding(evaluation_binding,value,index,point,calibration,expected,start,stop,asof,input.pc,input.kc)
+    end
+    (;status=:replayed,audit,shared,evaluation_binding_sha256=input.binding_pin,publisher_upper=upper,publisher_absolute=absolute,static_bounds=fixed,
       source_reads=source.reads,receipt_rejections=receipts.rejections,receipt_pending=receipts.pending,
       study_pass=fixed!==nothing && fixed.all_bounds_finite_nonempty && shared.study_pass && upper.own_numeric_study_pass && absolute.own_numeric_study_pass,
       row_ids=copy(input.row_ids),accepted_rows=input.row_ids[input.accepted],centers=copy(input.centers),scales=copy(input.scales))

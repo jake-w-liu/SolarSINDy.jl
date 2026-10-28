@@ -74,6 +74,15 @@ jobs:
           if-no-files-found: ignore
       - name: Verify generated complete static and shared replay comparisons
         run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/publisher_up_values/source_bound_tests.jl
+      - name: Verify frozen models on separately sealed generated future sources
+        run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/publisher_up_values/separate_evaluation_tests.jl
+      - name: Retain separate evaluation verification failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: separate-evaluation-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/solarsindy-separate-evaluation-*
+          if-no-files-found: ignore
       - name: Verify independent artifact replay and corruption rejection
         # Standard-library Python and data-only Julia replay; no author model
         # loader, new fitting, network data or scientific acceptance verdict.
@@ -120,7 +129,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: completed-support-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/solarsindy-r1-support-log-*
+          path: |
+            ${{ runner.temp }}/solarsindy-r1-support-log-*
+            ${{ runner.temp }}/solarsindy-separate-evaluation-*
           if-no-files-found: ignore
 
   canonical-harness:

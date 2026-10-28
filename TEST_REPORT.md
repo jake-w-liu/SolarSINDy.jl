@@ -1340,3 +1340,23 @@ existing 38 checks, and adds exact prediction invariance under an evaluation-onl
 shift in an inactive feature. Exact Fraction algebra establishes objective
 separation and the zero inactive coefficients independently. Native execution,
 complete package/experiments/harness and the full CI matrix are still pending.
+
+
+### Separate-source generated evaluation controls (2026-10-28; partial)
+
+Five independent Python tests passed for both runtime declarations, roles and
+layouts. They reject incompatible station/role/layout/timing even with updated
+hashes, changed opaque-model pins, malformed indices, semantic context changes,
+extra files and noncanonical bytes. A read trace permits only the nine metadata/
+opaque-model members and eight helper files. The bounded report driver also
+passed on four literal contexts per runtime declaration. This is Python metadata
+evidence; no native Julia execution or source-number qualification is claimed.
+
+The added native tests fit/calibrate generated 2020 sources before creating
+separately sealed 2021 sources, require 16 attempts/one completed target/15
+censored targets, exercise all four static bounds and delayed consumers, preserve
+point-model bytes and remove cached target values from replay input. These tests
+and the complete future-source experiment are wired into the mandatory suites
+but have not yet executed. Local native admission still requires 8 GiB free
+physical memory. Original assertions, tolerances, full suites, canonical audit,
+both strict documentation builds and nine hosted CI jobs remain required.

@@ -250,3 +250,6 @@ SourceBoundStaticSynthetic.run_example()
 
 include(joinpath(@__DIR__,"point_input_export_synthetic.jl"))
 PointInputExportSynthetic.run_example()
+
+include(joinpath(@__DIR__,"separate_evaluation_synthetic.jl"))
+SeparateEvaluationSynthetic.run_example()

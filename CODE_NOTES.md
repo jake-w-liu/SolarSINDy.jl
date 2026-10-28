@@ -1325,3 +1325,19 @@ recipe changes, and no test tolerance changes. The prior large-shift QR stabilit
 case remains mandatory. Native diagnostics retain both full and reduced QR values;
 the previously failing composite oracle must pass before this correction is called
 verified. Exact Fraction objective separation is the independent planning oracle.
+
+
+### Generated separate-source evaluation candidate (2026-10-28)
+
+The shared replay keeps its same-case default and accepts a distinct generated
+case only through an immutable explicit evaluation-context hash. The context
+binds the frozen point and calibration, both case identities, station, role,
+layout, runtime, chronological split and eight helper-file hashes. Evaluation
+features and completion feedback still come from the sealed source; final cached
+targets are not feedback inputs. No actual-data replay authority is added.
+
+The new independent metadata oracle loads no model and opens no source path.
+Five Python controls and the report driver passed on eight literal metadata
+contexts. Native Julia future-source tests, complete experiments, full package
+tests, unchanged canonical audit, all nine CI jobs and resource qualification
+remain pending; this local candidate is not a scientific result or main release.
