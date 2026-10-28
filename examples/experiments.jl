@@ -247,3 +247,6 @@ PublisherUPProjectionSynthetic.run_example()
 
 include(joinpath(@__DIR__,"source_bound_static_synthetic.jl"))
 SourceBoundStaticSynthetic.run_example()
+
+include(joinpath(@__DIR__,"point_input_export_synthetic.jl"))
+PointInputExportSynthetic.run_example()

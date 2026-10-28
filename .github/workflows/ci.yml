@@ -63,6 +63,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Verify portable source-bound point input exports
+        run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/point_input_export/runtests.jl
+      - name: Retain portable input verification failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-input-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/solarsindy-point-input-*
+          if-no-files-found: ignore
       - name: Verify generated complete static and shared replay comparisons
         run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/publisher_up_values/source_bound_tests.jl
       - name: Verify independent artifact replay and corruption rejection

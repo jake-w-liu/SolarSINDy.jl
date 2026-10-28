@@ -1307,3 +1307,25 @@ package and ordinary experiment entries remain mandatory on all six native
 axes. The existing continue-on-error mutation remains a real failure control
 and no longer depends on a particular deadline literal. Frontend tests and HTML
 structure/render checks cover the narrow caption correction.
+
+
+## Portable point-input coverage
+
+`test/point_input_export/test_input_values.py` checks both input widths, 22 literal
+selected rows, a separately derived Rata Die epoch, 100-digit Decimal transforms,
+strict boundary membership, corrupt coordinates, duplicates, permutation, malformed
+geometry, Boolean indices and nonfinite transforms. The fixed transform comparison
+remains absolute 2e-15 plus relative 2e-15; native bits remain unchanged in the hash.
+
+`test/point_input_export/test_bundle_reader.py` covers all eight generated contexts,
+complete record scans, rehashed semantic and permission attacks, external pins,
+filesets and link/reparse rejection. A read trace permits only fixture members and
+the verifier's own hash; the declared source catalogue is never opened. Synthetic
+metadata is not evidence of original-source reconstruction or actual permission.
+
+`test/point_input_export/runtests.jl` and the complete experiment invoke both roles,
+both layouts and both stations with independent data-only verification of all 400
+exported rows. Qualified-path membership and copied/unqualified caller rejection
+are separate from actual authority. Native execution, realistic full-size bounds,
+complete package/experiment/harness and the full CI matrix remain required for
+this revision before any actual-data planning or research verdict.

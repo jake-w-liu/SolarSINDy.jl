@@ -1291,3 +1291,25 @@ Its wrapper requires a clean exact-source checkout, eight GiB physical/disk
 admission and a finite owned execution, preserving all package, experiment and
 generated-support raw logs outside the checkout. The original eight CI jobs and
 strict documentation steps remain; an additional harness job strengthens them.
+
+
+## Portable fixed-split point-input export
+
+The exporter now lives at its predeclared qualified package path. Its numerical
+body is byte-identical to the independently tested prototype. The data-only case,
+input-value and chunked-bundle readers use adjacent pinned helpers and the Python
+standard library; no workstation temporary path is required. Their function ASTs
+are unchanged by the import relocation.
+
+The contract remains strict completed-label split membership, exact source input
+coordinates and Julia epoch conversion, independently checked transformed targets,
+600000 rows, 128 MiB per stream and 8 MiB chunks. Generated cases grant no actual
+authority; archival planning requires a distinct exact-source 2017 read-only grant,
+case reread and whole-package qualification. Fitting and discovery remain forbidden.
+
+The tests use literal independently selected rows and Decimal transforms, rehashed
+semantic attacks, all role/layout/runtime contexts, both native source-bound station
+exports and denial of unqualified callers. The experiment verifies eight generated
+exports independently. Full native, resource and whole-package qualification are
+pending for this new source revision; no actual input or scientific claim follows
+from the portable Python tests alone.
