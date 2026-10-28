@@ -52,6 +52,7 @@ end
         @test evaluation.request_sha256!=value.request_sha256
         binding=S.prepare_evaluation_binding(evaluation,1,point,calibration,expected;start,stop,asof)
         @test digest(codeunits(binding.context))==binding.expected.context_sha256
+        @test binding.expected.context_sha256!="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         call(v,b;index=1,begin_at=start)=S.replay_generated(v,index,point,calibration,expected;
             start=begin_at,stop,asof,subscribers=T.specs(),nominal=.1,static_calibration=static,evaluation_binding=b)
         @test_throws ArgumentError call(evaluation,nothing)

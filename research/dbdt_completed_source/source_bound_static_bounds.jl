@@ -177,8 +177,10 @@ function calibrate_generated(value::Q.VerifiedCases,index,point,calibration,expe
     receipt=R.canonical_bytes(Dict("schema"=>"generated_static_calibration_receipt_v1","complete"=>true,"context_sha256"=>digest(context_bytes),
         "numeric_sha256"=>digest(bytes),"generated_uncertainty_parameter_fits"=>1,"actual_source_access"=>false,"actual_point_model_fits"=>0,
         "software_qualification"=>false,"scientific_coverage_qualified"=>false);limit=4096)
+    # String(Vector{UInt8}) consumes its buffer; bind hashes before transfer.
+    static_expected=ExpectedStatic(digest(context_bytes),digest(bytes))
     (;capsule=StaticCalibration(String(context_bytes),String(bytes),String(receipt),_Token()),
-      expected=ExpectedStatic(digest(context_bytes),digest(bytes)))
+      expected=static_expected)
 end
 function check_calibration(value::StaticCalibration,point,calibration,expected;expected_static::ExpectedStatic)
     kc=K._checked(calibration,point,expected);pc=F._check_capsule(point)

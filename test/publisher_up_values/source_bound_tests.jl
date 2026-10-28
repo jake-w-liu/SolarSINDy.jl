@@ -39,6 +39,12 @@ end
             directory=joinpath(root,role*"-"*layout);mkdir(directory)
             value=make_cases(realpath(directory),role,layout)
             point,calibration,expected,static=fitted(value);before=F.model_bytes(point.model)
+            # The external pins identify the retained nonempty bytes, not a
+            # vector emptied by conversion to String during construction.
+            @test static.expected.context_sha256==digest(codeunits(static.capsule.context))
+            @test static.expected.numeric_sha256==digest(codeunits(static.capsule.numeric))
+            @test static.expected.context_sha256!="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            @test static.expected.numeric_sha256!="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
             result=replay(value,point,calibration,expected;static_calibration=static)
             @test result.status===:replayed && result.audit.scheduled==result.audit.features_accepted==16
             @test result.audit.features_rejected==0 && isempty(result.audit.rejection_reasons)

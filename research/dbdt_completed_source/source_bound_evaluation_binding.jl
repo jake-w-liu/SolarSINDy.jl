@@ -68,7 +68,9 @@ qualification. Data-only context reconstruction and native tests are separate.
 function prepare_evaluation_binding(value::Q.VerifiedCases,index,point,calibration,expected;start,stop,asof)
     pc=F._check_capsule(point);kc=K._checked(calibration,point,expected)
     bytes=_evaluation_context(value,index,point,calibration,expected,start,stop,asof,pc,kc)
-    (;context=String(bytes),expected=ExpectedEvaluation(digest(bytes)))
+    # Bind the external hash before String(Vector{UInt8}) consumes its buffer.
+    evaluation_expected=ExpectedEvaluation(digest(bytes))
+    (;context=String(bytes),expected=evaluation_expected)
 end
 function _verify_evaluation_binding(binding,value,index,point,calibration,expected,start,stop,asof,pc,kc)
     need(binding isa ExpectedEvaluation,"separate evaluation requires immutable external context pin")
