@@ -1,5 +1,13 @@
 const SB=S.B
 @testset "Locked static quantiles, independent ridge oracles and boundary accounting" begin
+    # The numeric capsule accepts encoded String bytes and owns mutable input bytes.
+    literal=String(UInt8[0x00,0x01,0x02])
+    capsule=SB.StaticCalibration("context",literal,"receipt",SB._Token())
+    @test collect(codeunits(capsule.numeric))==UInt8[0x00,0x01,0x02]
+    mutable_bytes=UInt8[0x00,0x01,0x02]
+    owned=SB.StaticCalibration("context",mutable_bytes,"receipt",SB._Token())
+    mutable_bytes[1]=0xff
+    @test collect(codeunits(owned.numeric))==UInt8[0x00,0x01,0x02]
     @test SB._quantile(collect(1.:9.),.1)==9.
     @test SB._quantile(collect(1.:9.),.09)==Inf
     @test SB._normal_quantile(.5)==0.

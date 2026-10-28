@@ -38,7 +38,8 @@ struct StaticCalibration
     numeric::String
     receipt::String
     function StaticCalibration(context,numeric,receipt,::_Token)
-        new(String(context),String(copy(numeric)),String(receipt))
+        owned=numeric isa AbstractString ? String(copy(codeunits(numeric))) : String(copy(numeric))
+        new(String(context),owned,String(receipt))
     end
 end
 function job_identity()
