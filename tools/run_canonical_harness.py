@@ -84,10 +84,11 @@ def main():
     wrapper.write_text('#!/bin/bash\nset -euo pipefail\n'+
         "julia() { "+shlex.quote(shell_path(julia))+" --pkgimages=no \"$@\"; }\nexport -f julia\n"+
         'exec '+shlex.quote(shell_path(bash))+' '+shlex.quote(shell_path(audit))+' '+shlex.quote(shell_path(root))+'\n',encoding='utf8',newline='\n')
-    controls={str(path):pin(path) for path in (Path(__file__).resolve(),audit,owner,julia,bash,wrapper,out/'SOURCE_PROOF.json')}
+    evidence_helper=root/'tools/harness_evidence.py'
+    controls={str(path):pin(path) for path in (Path(__file__).resolve(),audit,owner,evidence_helper,julia,bash,wrapper,out/'SOURCE_PROOF.json')}
     environment=dict(os.environ,PATH=str(julia.parent)+os.pathsep+str(bash.parent)+os.pathsep+os.environ.get('PATH',''),
         TMP=str(raw),TEMP=str(raw),TMPDIR=str(raw),RUNNER_TEMP=str(raw),JULIA_NUM_THREADS='1',JULIA_PKG_PRECOMPILE_AUTO='0',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',
-        SOLARSINDY_TEST_BASH=str(bash),SOLARSINDY_NO_OPEN='1',SOLARSINDY_OPERATIONAL_OUTPUT_DIR=str(operational))
+        SOLARSINDY_TEST_BASH=str(bash),SOLARSINDY_NO_OPEN='1',SOLARSINDY_OPERATIONAL_OUTPUT_DIR=str(operational),PYTHONUTF8='1')
     # Every generated native/support proof belongs to this invocation's retained
     # raw tree;never inherit an earlier diagnostic or synthetic-chain directory.
     for key in ('SOLARSINDY_SYNTHETIC_REFIT_TEST_ROOT','SOLARSINDY_CLI_TEST_LOG_DIR','SOLARSINDY_CALIBRATION_TEST_OUTPUT'):
@@ -129,17 +130,27 @@ def main():
     except BaseException as error:record['failure']=dict(type=type(error).__name__,message=str(error),traceback=traceback.format_exc())
     finally:
         delta=differences();record.update(delta);record['complete']=record['complete'] and not any(delta.values())
-        inventory={};inventory_errors=[]
-        for parent in (raw,operational):
-            try:
-                for path in parent.rglob('*'):
-                    if link_path(path):inventory_errors.append(dict(path=str(path),error='Evidence link forbidden'));continue
-                    if path.is_file():inventory[path.relative_to(out).as_posix()]=dict(bytes=path.stat().st_size,sha256=pin(path))
-            except OSError as error:inventory_errors.append(dict(path=str(parent),error=repr(error)))
-        record['complete']=record['complete'] and not inventory_errors
+        inventory={};inventory_errors=[];snapshot=out/'artifact'
+        try:
+            spec=importlib.util.spec_from_file_location('canonical_audit_evidence_snapshot',evidence_helper)
+            capture=importlib.util.module_from_spec(spec);spec.loader.exec_module(capture)
+            captured=capture.snapshot_members(raw,operational,snapshot)
+            inventory=captured['members']
+            for name in ('SOURCE_PROOF.json','PREEXECUTION.json','harness.log','run-harness.sh','WAITING_ADMISSION.json'):
+                path=out/name
+                if path.exists():capture.checked_copy(path,snapshot/name)
+            record.update(fixture_metadata_sha256=captured['fixture_metadata_sha256'],
+                special_fixture_objects=captured['special_fixture_objects'],
+                artifact_snapshot_ordinary_files_only=True,fixture_targets_followed=False,
+                snapshot_source_identities_and_bytes_reverified=captured['source_identities_unchanged'])
+            record.update(differences())
+        except BaseException as error:inventory_errors.append(dict(path=str(snapshot),error=repr(error)))
+        record['complete']=record['complete'] and not inventory_errors and not any(record[key] for key in
+            ('changed_sources','changed_controls','guard_read_errors','git_status','head_changed'))
         record.update(raw_and_operational_members=inventory,inventory_errors=inventory_errors,finished_utc=now())
         log=out/'harness.log';record['harness_log_sha256']=pin(log) if log.exists() else None
         write_new(out/'TERMINAL.json',record)
+        if snapshot.is_dir():write_new(snapshot/'TERMINAL.json',record)
         print(json.dumps({k:v for k,v in record.items() if k not in ('source_sha256','controls_sha256','raw_and_operational_members')}),flush=True)
     return 0 if record['complete'] else 1
 if __name__=='__main__':raise SystemExit(main())
