@@ -1,5 +1,39 @@
 # Candidate implementation notes
 
+## Archival shared replay implementation (28 October 2026)
+
+The new source_bound_archival_replay module connects separately reverified
+fitting/evaluation cases and fixed actual point/calibration/static capsules to
+the existing common event engine. Its request uses metadata only and binds every
+model/source/output pin, evaluation interval, subscriber, gain, nominal, grace
+and warmup choice. A distinct current whole-source-qualified replay-only permit
+and the original point, score and static producer evidence must agree before
+evaluation arrays are read. An exclusive attempt precedes replay; source,
+producer, attempt and numeric output bindings are rechecked afterwards.
+
+The generated and archival entries share the factored feature/prediction and
+event/publisher numerical bodies. All existing source clocks, source/label
+exclusions, completion/censoring order, warmup and consumer calculations remain
+unchanged. Generated calls retain their exact old receipt identities. Archival
+receipt identities bind the source snapshot manifest and station. The four
+static methods and mandatory phase/FIFO consumers are required before archival
+execution. Additional diagnostics cannot replace that paper inventory.
+
+The typed incremental trace binds scheduled feature admissions, every returned
+array, event, certificate, final numeric owner and publisher state. It frames
+data row by row and preserves nonfinite floating words, unsigned raw words and
+signed zero without Julia object deserialization or metadata-directed paths.
+The completion receipt grants no fitting, source discovery, scientific coverage,
+independent confirmation or live permission. Paper CSV publication and genuine
+archival positive execution remain separate required followthrough.
+
+The full pre-refactor generated worker is retained only as a pinned test oracle.
+The independent literal frame/unsigned oracles preceded their implementations.
+Native comparisons, mutation controls, unfiltered package tests, complete
+experiments, exact canonical harness, both strict docs and all18CI/full-size
+resource/agreement gates remain pending. Actual archival source accesses,
+fitting and replays on this source are zero; no scientific verdict follows.
+
 ## Archival static-bound implementation (28 October 2026)
 
 The existing four-static-bound entry supported generated cases only. The new

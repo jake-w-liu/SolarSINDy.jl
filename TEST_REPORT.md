@@ -1,5 +1,33 @@
 # Receipt-report integration test plan
 
+## Archival shared replay verification contract (28 October 2026)
+
+The complete prior generated worker is frozen by SHA256
+a3a13cd6f2f3cc50e907c6d9931c7b7edd3e0342193af3a9e5d5c413c3e762f8.
+Native controls must match its full source/subscriber events, issue records,
+certificates, four static bounds, point/scales, publisher issued/updated records
+and final numeric trace on both roles/layouts and both warmup settings. Existing
+independent completion counts and final-label-cache isolation tests remain
+mandatory. An all-feature-rejected case must retain every scheduled exclusion.
+
+Independent pre-code canonical frames include UTC timestamps, symbols, Inf,
+negative zero and missing values; the literal digest is
+0117e921a7e64b3a4a9c0f2fbf54ea6b2262773ff91a20a79b53560a173953f5.
+Separate literal unsigned-word frames cover zero, the sign-bit word and UInt64
+maximum. Native tests must reproduce the exact frames and reject changed order,
+request, values, unsupported types and oversized nested arrays. Numeric trace
+mutations cover returned point arrays, static bounds, publisher bounds and final
+owner state. A generated named-source control must change only receipt identity
+metadata while retaining the original numerical events and outputs.
+
+Generated cases, invalid read wrappers and missing replay-only authority reject
+before evaluation source access. No positive archival grant or qualification is
+fabricated by these tests. The new Julia controls and maintained numeric-only
+example have not executed yet. Full unfiltered Pkg.test(), complete experiments,
+unchanged canonical harness, both strict docs, all18CI jobs and original full-size
+resource/agreement checks remain required on this final source. Genuine archival
+positive execution and independently checked paper tables remain incomplete.
+
 ## Archival static-bound verification contract (28 October 2026)
 
 An independent pre-code fixture specifies all186 numeric frame bytes and the

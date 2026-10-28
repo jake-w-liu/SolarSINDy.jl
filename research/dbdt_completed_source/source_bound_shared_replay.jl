@@ -59,6 +59,11 @@ function _inputs(value::Q.VerifiedCases,index,point,calibration,expected,start,s
     else
         _verify_evaluation_binding(evaluation_binding,value,index,point,calibration,expected,start,stop,asof,pc,kc)
     end
+    _common_inputs(value,index,point,calibration,expected,start,stop,asof,pc,kc,request,table,binding_pin)
+end
+"""Evaluate matching metadata and source rows after the caller admits its evidence mode."""
+function _common_inputs(value,index,point,calibration,expected,start,stop,asof,pc,kc,request,table,binding_pin)
+    features=value.features[index]
     need(pc.context["role"]==request["role"] &&
         pc.context["layout"]==request["layout"] && pc.context["table"]["station"]==table["station"]==features.station,
         "replay point/case/station identity differs")
@@ -123,11 +128,23 @@ function replay_generated(value::Q.VerifiedCases,index,point,calibration,expecte
     isempty(input.accepted) && return (;status=:no_feature_eligible,audit,shared=nothing,publisher_upper=nothing,publisher_absolute=nothing,static_bounds=nothing,study_pass=false,evaluation_binding_sha256=input.binding_pin)
     fixed=static_calibration===nothing ? nothing : B.predict_upper(static_calibration.capsule,input.matrix,input.centers[input.accepted],
         input.scales[input.accepted],input.peaks;point,calibration,expected,expected_static=static_calibration.expected,start)
+    result=_execute_common(input;start,stop,asof,specs,alpha,grace_ms,warmup,fixed,audit,protocol_id="generated-source-bound-shared31-v1")
+    need(F._check_capsule(point).context==input.pc.context && K._checked(calibration,point,expected).context==input.kc.context,"replay fitted inputs changed")
+    if evaluation_binding!==nothing
+        _verify_evaluation_binding(evaluation_binding,value,index,point,calibration,expected,start,stop,asof,input.pc,input.kc)
+    end
+    result
+end
+"""Run the unchanged numeric event and publisher engines on admitted prepared inputs."""
+function _execute_common(input;start,stop,asof,specs,alpha,grace_ms,warmup,fixed,audit,protocol_id,source_id=nothing)
+    need(source_id===nothing || (source_id isa String && 0<ncodeunits(source_id)<=512),"replay receipt source identity")
     last_center=input.prepared[end].issue+Minute(30)
     source=_GroundView(input.ground,start,last_center,asof,input.features.policy,0)
     receipts=D.materialize_receipts(source,start+Minute(1):Minute(1):last_center;policy=input.features.policy,asof,scheduled=false)
-    shared=E.replay_shared(input.prepared,input.centers,input.scales,receipts.batches,input.cal;
-        subscribers=specs,stream_id=input.table["id"],protocol_id="generated-source-bound-shared31-v1",asof,grace_ms)
+    batches=source_id===nothing ? receipts.batches : ((;received=batch.received,
+        observations=[(;row...,source_id) for row in batch.observations]) for batch in receipts.batches)
+    shared=E.replay_shared(input.prepared,input.centers,input.scales,batches,input.cal;
+        subscribers=specs,stream_id=input.table["id"],protocol_id,asof,grace_ms)
     period=E.base_period(start,input.cal.policy)
     records=warmup ? [(;id=i,issue=input.kc.arrays.issues[i],label_ready=input.kc.arrays.ready[i],completed_at=input.kc.arrays.ready[i],
         phase_period_minutes=period,point_model_sha256=input.cal.point_model_sha256,policy=input.cal.policy,mode=input.cal.mode,
@@ -135,10 +152,6 @@ function replay_generated(value::Q.VerifiedCases,index,point,calibration,expecte
     upper=U.project_shared(shared,input.cal,records;start,asof,nominal=alpha,score_kind=:upper_positive,grace_ms)
     absolute=U.project_shared(shared,input.cal,records;start,asof,nominal=alpha,score_kind=:symmetric_absolute,grace_ms)
     need(shared.source.attempted==upper.attempted==absolute.attempted==length(input.accepted),"replay comparison denominator differs")
-    need(F._check_capsule(point).context==input.pc.context && K._checked(calibration,point,expected).context==input.kc.context,"replay fitted inputs changed")
-    if evaluation_binding!==nothing
-        _verify_evaluation_binding(evaluation_binding,value,index,point,calibration,expected,start,stop,asof,input.pc,input.kc)
-    end
     (;status=:replayed,audit,shared,evaluation_binding_sha256=input.binding_pin,publisher_upper=upper,publisher_absolute=absolute,static_bounds=fixed,
       source_reads=source.reads,receipt_rejections=receipts.rejections,receipt_pending=receipts.pending,
       study_pass=fixed!==nothing && fixed.all_bounds_finite_nonempty && shared.study_pass && upper.own_numeric_study_pass && absolute.own_numeric_study_pass,

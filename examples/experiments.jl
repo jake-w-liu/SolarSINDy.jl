@@ -256,3 +256,6 @@ SeparateEvaluationSynthetic.run_example()
 
 include(joinpath(@__DIR__,"archival_static_codec_synthetic.jl"))
 ArchivalStaticCodecSynthetic.run_example()
+
+include(joinpath(@__DIR__,"archival_replay_trace_synthetic.jl"))
+ArchivalReplayTraceSynthetic.run_example()
