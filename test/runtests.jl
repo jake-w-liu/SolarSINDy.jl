@@ -1005,3 +1005,8 @@ include(joinpath(@__DIR__,"archive_point_models","classic_tests.jl"))
 include(joinpath(@__DIR__,"archive_source_bound_fit","runtests.jl"))
 
 include(joinpath(@__DIR__,"archive_source_bound_calibration","runtests.jl"))
+
+include(joinpath(@__DIR__,"publisher_up_values","runtests.jl"))
+include(joinpath(@__DIR__,"publisher_up_values","projection_tests.jl"))
+
+include(joinpath(@__DIR__,"publisher_up_values","source_bound_tests.jl"))

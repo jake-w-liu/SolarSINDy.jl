@@ -63,6 +63,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Verify generated complete static and shared replay comparisons
+        run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/publisher_up_values/source_bound_tests.jl
       - name: Verify independent artifact replay and corruption rejection
         # Standard-library Python and data-only Julia replay; no author model
         # loader, new fitting, network data or scientific acceptance verdict.
@@ -111,6 +113,38 @@ jobs:
           name: completed-support-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/solarsindy-r1-support-log-*
           if-no-files-found: ignore
+
+  canonical-harness:
+    name: Canonical development harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.13.1'
+          arch: 'default'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: julia-actions/cache@v2
+      - name: Verify canonical audit wrapper controls
+        run: python -B test/completed_refit_artifacts/test_hosted_harness.py
+      - name: Instantiate the committed environment
+        run: julia --startup-file=no --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.instantiate()'
+      - name: Run unchanged canonical audit with full tests and experiments
+        run: python -B tools/run_canonical_harness.py --evidence-dir "$RUNNER_TEMP/canonical-harness"
+      - name: Retain canonical source proof and every raw verification log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-harness-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/canonical-harness
+          if-no-files-found: error
+          compression-level: 6
 
   docs:
     name: Documentation build

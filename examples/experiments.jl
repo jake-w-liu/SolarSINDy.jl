@@ -241,3 +241,9 @@ run_archive_source_bound_point_fit_synthetic()
 
 include(joinpath(@__DIR__,"archive_source_bound_calibration_synthetic.jl"))
 run_archive_source_bound_calibration_synthetic()
+
+include(joinpath(@__DIR__,"publisher_up_projection_synthetic.jl"))
+PublisherUPProjectionSynthetic.run_example()
+
+include(joinpath(@__DIR__,"source_bound_static_synthetic.jl"))
+SourceBoundStaticSynthetic.run_example()

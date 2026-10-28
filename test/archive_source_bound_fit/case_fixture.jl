@@ -7,8 +7,9 @@ function make_cases(root,role,layout;profile=:pulse)
             "DATE TIME DOY $(station)X $(station)Y $(station)Z $(station)F |"]
         for i in 0:180
             # Difference89->90 changes from(3,4) to(6,8), continuously.
-            if profile===:pulse
+            if profile in (:pulse,:pulse_eval_missing)
                 x=i<90 ? 3i : 3*89+6*(i-89);y=i<90 ? 4i : 4*89+8*(i-89)
+                if profile===:pulse_eval_missing && i>=145;x=99999;y=99999;end
             elseif profile===:zero_then_10_then_20
                 x=10000+(i<90 ? 0 : i<140 ? 6*(i-89) : 6*50+12*(i-139))
                 y=1000+(i<90 ? 0 : i<140 ? 8*(i-89) : 8*50+16*(i-139))

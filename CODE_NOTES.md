@@ -1267,3 +1267,27 @@ updated to the reviewed owner bytes. Thirty portable support tests pass, includi
 independent old-fails/new-passes lifecycle checks. Full Julia package, experiment,
 harness and cross-platform qualification of this revision remain required before
 release or archival authorization. No scientific result is changed or inferred.
+
+## Complete generated static/shared comparison and hosted audit (2026-10-28)
+
+The generated source-bound bridge now accepts a frozen four-method uncertainty
+calibration: heteroscedastic Gaussian, raw and normalized split, and fixed-edge
+regime split. All use the same point and calibration cohort. Raw regime maxima
+are reconstructed from completed source support rather than inverted logarithms.
+An absent static inventory cannot pass the complete comparison. Gaussian ridge
+keeps penalty one including intercept; augmented QR avoids the independently
+demonstrated loss of that penalty in large rounded normal equations. Immutable
+numeric capsules require external context/numeric pins. Actual uncertainty-fit
+authority, data publication/readers and full scientific verification remain pending.
+
+Independent fraction/closed-form quantile, bin, ridge and conditioning oracles
+are retained. Eight hosted-wrapper controls pass. Native Julia verification of
+this revision, full package/experiment/harness execution, semantic/resource
+checks and complete cross-platform CI remain required. The source-bound example
+is generated-only and carries no empirical performance claim.
+
+The hosted audit copy matches the canonical development audit byte for byte.
+Its wrapper requires a clean exact-source checkout, eight GiB physical/disk
+admission and a finite owned execution, preserving all package, experiment and
+generated-support raw logs outside the checkout. The original eight CI jobs and
+strict documentation steps remain; an additional harness job strengthens them.

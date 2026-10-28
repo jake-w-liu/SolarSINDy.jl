@@ -91,12 +91,14 @@ function _run_support_command(command,parent)
 end
 function run_support_tests()
     python=choose_python()
-    script=joinpath(@__DIR__,"test_portable_support.py")
     base=haskey(ENV,"RUNNER_TEMP") ? realpath(ENV["RUNNER_TEMP"]) : realpath(tempdir())
     isdir(base)&&!islink(base) || error("support diagnostic parent must be ordinary")
-    parent=realpath(mktempdir(base;prefix="solarsindy-r1-support-log-",cleanup=false))
-    command=addenv(Cmd([python,"-B",script]),"TMP"=>parent,"TEMP"=>parent,"TMPDIR"=>parent)
-    _run_support_command(command,parent)
+    for name in ("test_portable_support.py","test_hosted_harness.py")
+        script=joinpath(@__DIR__,name)
+        parent=realpath(mktempdir(base;prefix="solarsindy-r1-support-log-",cleanup=false))
+        command=addenv(Cmd([python,"-B",script]),"TMP"=>parent,"TEMP"=>parent,"TMPDIR"=>parent)
+        _run_support_command(command,parent)
+    end
 end
 end
 
