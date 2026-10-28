@@ -35,6 +35,14 @@ function docs_contract(workflow,makefile)
         occursin(r"warnonly\s*=\s*false",makefile)
 end
 
+function change_docs_setup(workflow,before,after)
+    section=match(r"(?ms)^  docs:\n.*?(?=^  [A-Za-z_][A-Za-z0-9_-]*:\n|\z)",workflow)
+    section===nothing && error("documentation section missing from mutation fixture")
+    occursin(before,section.match) || error("documentation setup mutation did not match")
+    changed=replace(section.match,before=>after;count=1)
+    replace(workflow,section.match=>changed;count=1)
+end
+
 @testset "Both supported runtimes execute the strict manual" begin
     root=normpath(joinpath(@__DIR__,".."))
     workflow=read(joinpath(root,".github","workflows","ci.yml"),String)
@@ -46,7 +54,11 @@ end
     @test occursin(marker,workflow)
     without_setup=replace(workflow,marker=>"";count=1)
     @test !docs_contract(without_setup,makefile)
-    @test !docs_contract(replace(workflow,"version: '1.13.1'"=>"version: '1.12.6'";count=1),makefile)
+    @test !docs_contract(change_docs_setup(workflow,"version: '1.13.1'","version: '1.12.6'"),makefile)
+    # An unrelated earlier setup must neither satisfy nor intercept the docs mutation.
+    unrelated="  unrelated:\n    steps:\n      - uses: julia-actions/setup-julia@v3\n        with:\n          version: '1.13.1'\n"
+    @test docs_contract(unrelated*workflow,makefile)
+    @test !docs_contract(change_docs_setup(unrelated*workflow,"version: '1.13.1'","version: '1.12.6'"),makefile)
     @test !docs_contract(replace(workflow,"VERSION == v\"1.13.1\""=>"VERSION == v\"1.12.6\"";count=1),makefile)
     @test !docs_contract(replace(workflow,"VERSION == v\"1.13.1\""=>"VERSION == v\"1.14.0\"";count=1),makefile)
     @test !docs_contract(replace(workflow,"    name: Documentation build\n"=>"    name: Documentation build\n    if: false\n";count=1),makefile)
