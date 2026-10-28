@@ -152,7 +152,10 @@ jobs:
           python-version: '3.12'
       - uses: julia-actions/cache@v2
       - name: Verify canonical audit wrapper controls
-        run: python -B test/completed_refit_artifacts/test_hosted_harness.py
+        run: |
+          python -B test/completed_refit_artifacts/test_hosted_harness.py
+          python -B test/completed_refit_artifacts/test_harness_evidence.py
+          python -B test/completed_refit_artifacts/test_canonical_harness_artifact.py
       - name: Instantiate the committed environment
         run: julia --startup-file=no --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.instantiate()'
       - name: Run unchanged canonical audit with full tests and experiments
@@ -162,9 +165,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: canonical-harness-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/canonical-harness
+          path: ${{ runner.temp }}/canonical-harness/artifact
           if-no-files-found: error
           compression-level: 6
+          include-hidden-files: true
 
   docs:
     name: Documentation build
@@ -218,3 +222,84 @@ jobs:
           test "$ready" = 1
           test "$(docker exec solarsindy-dashboard-ci id -u)" = 10001
           curl --fail --silent --max-time 5 http://127.0.0.1:8723/ >/dev/null
+
+  full-scale-generated:
+    name: Full-scale ${{ matrix.julia-version }} / ${{ matrix.role }} / ${{ matrix.layout }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+    strategy:
+      fail-fast: false
+      matrix:
+        julia-version: ['1.12.6', '1.13.1']
+        role: [primary, independent]
+        layout: [ground-only, mixed]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ matrix.julia-version }}
+          arch: 'default'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: julia-actions/cache@v2
+      - name: Verify full-size contracts and corruption rejection
+        run: python -B test/completed_refit_artifacts/test_full_scale_generated.py
+      - name: Instantiate the committed environment
+        run: julia --startup-file=no --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.instantiate()'
+      - name: Execute whole-schedule oracles and full input resource checks
+        run: >-
+          python -B tools/run_full_scale_generated.py --mode workload
+          --runtime '${{ matrix.julia-version }}' --role '${{ matrix.role }}' --layout '${{ matrix.layout }}'
+          --evidence-dir "$RUNNER_TEMP/full-scale-${{ matrix.julia-version }}-${{ matrix.role }}-${{ matrix.layout }}"
+      - name: Retain full-size generated outputs and every raw stage log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-scale-${{ matrix.julia-version }}-${{ matrix.role }}-${{ matrix.layout }}
+          path: ${{ runner.temp }}/full-scale-${{ matrix.julia-version }}-${{ matrix.role }}-${{ matrix.layout }}
+          if-no-files-found: error
+          compression-level: 6
+          include-hidden-files: true
+
+  full-scale-agreement:
+    name: Full-scale cross-runtime agreement
+    needs: full-scale-generated
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1.13.1'
+          arch: 'default'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: julia-actions/cache@v2
+      - name: Instantiate the committed environment
+        run: julia --startup-file=no --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.instantiate()'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: full-scale-*
+          path: ${{ runner.temp }}/full-scale-inputs
+      - name: Verify all eight source proofs and all 48 native table comparisons
+        run: >-
+          python -B tools/run_full_scale_generated.py --mode agreement --runtime '1.13.1'
+          --input-directory "$RUNNER_TEMP/full-scale-inputs"
+          --evidence-dir "$RUNNER_TEMP/full-scale-agreement"
+      - name: Retain agreement source proof and raw evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-scale-agreement
+          path: ${{ runner.temp }}/full-scale-agreement
+          if-no-files-found: error
+          compression-level: 6
+          include-hidden-files: true

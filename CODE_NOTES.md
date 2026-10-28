@@ -1341,3 +1341,76 @@ Five Python controls and the report driver passed on eight literal metadata
 contexts. Native Julia future-source tests, complete experiments, full package
 tests, unchanged canonical audit, all nine CI jobs and resource qualification
 remain pending; this local candidate is not a scientific result or main release.
+
+
+## Portable full-size generated qualification
+
+The full-size CI path executes eight independent runtime/role/layout jobs, each
+with 1,319,040 scheduled rows and the existing BigFloat whole-schedule oracles.
+Primary jobs also export the 600,000-row numeric primitive and both full-2017
+station inputs. A separate standard-library reader checks every input coordinate
+and every export against all scheduled sealed case records. A final native job
+compares all 48 matched tables across roles and runtimes (7,914,240 scheduled
+rows). This supplies implementation/resource evidence, not actual-source grants
+or forecast-performance claims.
+
+The source and all original nine CI jobs are retained. Each resource process
+requires 8 GiB available physical memory and 16 GiB free disk, a 7,200-second
+full-size stage bound, and the existing 8 GiB native RSS limit. The exact native
+runner, clean Git checkout filters and complete source proof are checked. Raw
+logs and full outputs are retained on failures as well as success.
+
+Independent contracts: 2017 contains 525,600 minutes; the three selected months
+contain 44,640 minutes each; default feature/label losses are 31 and 30 per table.
+The two full-2017 fixed inputs must each contain exactly 525,539 rows. A
+compensating count mutation, changed clock, changed role/layout/runtime, Boolean
+integer, duplicate/nonfinite metadata, linked/escaped output, extra artifact, or
+weaker admission fails. The original nine-job workflow prefix is byte-pinned.
+
+Status at implementation: Python contract checks must pass separately; native
+full-size jobs, full Pkg.test(), complete examples/experiments.jl, unchanged
+canonical harness, all 18 jobs and both actual strict documentation builds
+remain required before qualification or main promotion. No numerical method,
+source/target clock, tolerance or scientific threshold was changed.
+
+
+## Completed hosted failure audit and integrated corrections
+
+The completed predecessor run disclosed five static exact-zero oracle failures,
+one timestamp/HTML freshness-test false positive, a documentation setup-mutation
+false positive, and a StaticCalibration String-copy MethodError in the complete
+experiments. The integrated source retains the original numerical tolerances and
+adds direct capsule-byte ownership tests. Documentation mutations now target the
+actual docs section even when an unrelated runtime setup appears earlier.
+The freshness regression forces an observation timestamp containing8.7 and checks
+visible caption/statistics text rather than treating an HTML attribute as Kp.
+
+Canonical evidence previously omitted602hidden members and dereferenced fixture
+links into7unreported payloads. The unchanged canonical shell audit now has an
+ordinary-file artifact snapshot: every regular raw byte,including hidden files,
+is copied and rehashed;special test objects are bounded metadata and their targets
+are never followed. Source trees and opened identities are rechecked. Windows
+path/descriptor ctime observations are compared within the same API,with file ID,
+mode,size,mtime and attributes checked across APIs. Raw bytes are independently
+rehashed after copying so directory-cache timestamps cannot conceal a change.
+The artifact verifier rejects missing hidden members and dereferenced link bytes.
+
+The original nine jobs retain their full tests,complete experiments,unchanged
+canonical audit and both strict manuals. Their only workflow-body changes add
+evidence controls and publish the complete ordinary snapshot including hidden
+members. Nine additional generated resource/agreement jobs make18required jobs.
+All three artifact publishers include hidden files. A real OS-link control is
+explicitly skipped where the OS denies creation;the modelled no-follow control
+remains mandatory,and Linux CI must run the real link/FIFO case.
+
+Focused Python/JavaScript controls are separate from native Julia qualification.
+No full Julia or scientific verdict is inherited from these controls. Both
+runtimes,full Pkg.test(),complete examples/experiments.jl,the unchanged harness,
+all18jobs and their full raw/artifact verification remain mandatory before main
+promotion. No archival source was accessed,no actual model was fitted,and no
+forecast superiority or novelty claim is established by this checkpoint.
+
+Child Python processes use explicit UTF-8 mode;hosted/native process environments
+propagate PYTHONUTF8=1. The first Windows checkpoint preserved a passing child
+log that could not be decoded under the parent UTF-8 contract;the corrected
+checkpoint retains that failure and verifies newly encoded raw logs.

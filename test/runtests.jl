@@ -1014,3 +1014,4 @@ include(joinpath(@__DIR__,"publisher_up_values","source_bound_tests.jl"))
 include(joinpath(@__DIR__,"point_input_export","runtests.jl"))
 
 include(joinpath(@__DIR__,"publisher_up_values","separate_evaluation_tests.jl"))
+include(joinpath(@__DIR__,"full_scale_generated_controls.jl"))

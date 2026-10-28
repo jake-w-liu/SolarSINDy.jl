@@ -1360,3 +1360,62 @@ and the complete future-source experiment are wired into the mandatory suites
 but have not yet executed. Local native admission still requires 8 GiB free
 physical memory. Original assertions, tolerances, full suites, canonical audit,
 both strict documentation builds and nine hosted CI jobs remain required.
+
+
+## Full-size generated CI and independent input resources
+
+New entry points preserve the existing 1,319,040-row case workload and portable
+input exporter. The full-size primitive verifies 600,000 rows at both feature
+widths; the two station exports verify every coordinate against 525,600 scheduled
+case rows and require exactly 525,539 retained rows per station. Native agreement
+uses the existing fixed comparison policy on all 48 tables.
+
+The short standard-library control suite tests independent calendar counts,
+compensating per-table mutations, physical/disk boundaries, Boolean and metadata
+rejection, fresh external paths, artifact membership and preservation of all
+original nine CI jobs. These controls execute in the unfiltered package suite.
+They do not substitute for either native workload, actual data qualification or
+scientific comparison. Full native and all-18-job qualification are pending until
+their retained terminal evidence passes; local low-memory standby is not a pass.
+
+
+## Completed hosted failure audit and integrated corrections
+
+The completed predecessor run disclosed five static exact-zero oracle failures,
+one timestamp/HTML freshness-test false positive, a documentation setup-mutation
+false positive, and a StaticCalibration String-copy MethodError in the complete
+experiments. The integrated source retains the original numerical tolerances and
+adds direct capsule-byte ownership tests. Documentation mutations now target the
+actual docs section even when an unrelated runtime setup appears earlier.
+The freshness regression forces an observation timestamp containing8.7 and checks
+visible caption/statistics text rather than treating an HTML attribute as Kp.
+
+Canonical evidence previously omitted602hidden members and dereferenced fixture
+links into7unreported payloads. The unchanged canonical shell audit now has an
+ordinary-file artifact snapshot: every regular raw byte,including hidden files,
+is copied and rehashed;special test objects are bounded metadata and their targets
+are never followed. Source trees and opened identities are rechecked. Windows
+path/descriptor ctime observations are compared within the same API,with file ID,
+mode,size,mtime and attributes checked across APIs. Raw bytes are independently
+rehashed after copying so directory-cache timestamps cannot conceal a change.
+The artifact verifier rejects missing hidden members and dereferenced link bytes.
+
+The original nine jobs retain their full tests,complete experiments,unchanged
+canonical audit and both strict manuals. Their only workflow-body changes add
+evidence controls and publish the complete ordinary snapshot including hidden
+members. Nine additional generated resource/agreement jobs make18required jobs.
+All three artifact publishers include hidden files. A real OS-link control is
+explicitly skipped where the OS denies creation;the modelled no-follow control
+remains mandatory,and Linux CI must run the real link/FIFO case.
+
+Focused Python/JavaScript controls are separate from native Julia qualification.
+No full Julia or scientific verdict is inherited from these controls. Both
+runtimes,full Pkg.test(),complete examples/experiments.jl,the unchanged harness,
+all18jobs and their full raw/artifact verification remain mandatory before main
+promotion. No archival source was accessed,no actual model was fitted,and no
+forecast superiority or novelty claim is established by this checkpoint.
+
+Child Python processes use explicit UTF-8 mode;hosted/native process environments
+propagate PYTHONUTF8=1. The first Windows checkpoint preserved a passing child
+log that could not be decoded under the parent UTF-8 contract;the corrected
+checkpoint retains that failure and verifies newly encoded raw logs.
