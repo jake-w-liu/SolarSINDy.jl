@@ -1307,3 +1307,14 @@ package and ordinary experiment entries remain mandatory on all six native
 axes. The existing continue-on-error mutation remains a real failure control
 and no longer depends on a particular deadline literal. Frontend tests and HTML
 structure/render checks cover the narrow caption correction.
+
+
+## Static zero-column correction candidate
+
+The existing native oracle failed on the expanded candidate at the joint intercept
+25/11 and exact-zero coefficient check. Its tolerance remains unchanged. The next
+native run prints the original full augmented QR and reduced solution, retains all
+existing 38 checks, and adds exact prediction invariance under an evaluation-only
+shift in an inactive feature. Exact Fraction algebra establishes objective
+separation and the zero inactive coefficients independently. Native execution,
+complete package/experiments/harness and the full CI matrix are still pending.

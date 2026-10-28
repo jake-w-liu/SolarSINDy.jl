@@ -80,8 +80,14 @@ function _fit_numeric(train::AbstractMatrix{Float64},features::AbstractMatrix{Fl
     need(all(isfinite,Z),"static standardized calibration overflow")
     # The same penalty1 objective,including intercept. Forming Z'Z can round
     # away the unit penalty when a constant training feature shifts at calibration.
-    augmented=vcat(Z,Matrix{Float64}(I,p+1,p+1))
-    weights=qr(augmented)\vcat(abs.(residuals),zeros(p+1))
+    # An exactlyzero design column contributes only its ridge penalty. Its
+    # unique coefficient is exactlyzero,including when that feature later
+    # changes at evaluation. Remove these columns before the numerical solve
+    # so roundoff cannot create a spurious coefficient on an inactive feature.
+    active=[j for j in axes(Z,2) if any(x->!iszero(x),view(Z,:,j))]
+    weights=zeros(p+1)
+    augmented=vcat(Z[:,active],Matrix{Float64}(I,length(active),length(active)))
+    weights[active]=qr(augmented)\vcat(abs.(residuals),zeros(length(active)))
     need(all(isfinite,weights),"Gaussian uncertainty ridge overflow")
     raw=_quantile(sort(residuals),alpha);normalized=_quantile(sort(scores),alpha)
     edges=quantile(peaks,[0.,.5,.8,.95,1.]);bins=binof.(Ref(edges),peaks)

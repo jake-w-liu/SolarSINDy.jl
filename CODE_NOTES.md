@@ -1291,3 +1291,15 @@ Its wrapper requires a clean exact-source checkout, eight GiB physical/disk
 admission and a finite owned execution, preserving all package, experiment and
 generated-support raw logs outside the checkout. The original eight CI jobs and
 strict documentation steps remain; an additional harness job strengthens them.
+
+
+## Exact inactive columns in the static uncertainty ridge
+
+The same unit-penalty ridge objective is reduced to its nonzero design columns
+before augmented QR. An exactlyzero column contributes only its coefficient's
+squared penalty, so its unique optimum is exactlyzero. Those coefficients are
+inserted as exact zeros; no threshold is applied to nonzero columns, no statistical
+recipe changes, and no test tolerance changes. The prior large-shift QR stability
+case remains mandatory. Native diagnostics retain both full and reduced QR values;
+the previously failing composite oracle must pass before this correction is called
+verified. Exact Fraction objective separation is the independent planning oracle.
