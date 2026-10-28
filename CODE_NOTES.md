@@ -1,5 +1,34 @@
 # Candidate implementation notes
 
+## Archival static-bound implementation (28 October 2026)
+
+The existing four-static-bound entry supported generated cases only. The new
+source_bound_archival_static research module adds a distinct archival capsule,
+metadata-only request, separate single-use uncertainty-fit authority, and bounded
+data-only publication/reading. It reuses the exact existing numerical kernel
+and the same point-training/calibration cohorts, signed quantiles, Gaussian
+parameter fit, calibration edges and nominal. The generated entry retains its
+strict evidence-mode boundary. The extracted numerical helper grants no public
+source authority; the archival entry checks current whole-source qualification,
+case-reader admission and both original producers before source array access.
+It checks the retained score-calibration attempt and consumes its own exclusive
+attempt before the uncertainty fit. Reuse and changed source/admissions fail.
+
+Requests bind strict 2017 training/calibration splits and the first evaluation
+issue without preview-fitting an output. Numeric artifacts have fixed filenames,
+byte limits, external hashes, exact file sets and identity rechecks. Completion
+is exclusive and last. Reading frozen data grants no new source or fit access.
+The context, numeric payload and receipt own their bytes before any transfer to
+String. The standalone codec fixture is explicitly opaque and grants no archival
+authority. No positive archival provenance is fabricated by its tests.
+
+The independent literal codec oracle predates implementation. Its Julia checks
+and the maintained codec-only example have been added to the unfiltered suite
+and complete experiments. Native execution, full software qualification,
+genuine archival positive execution and the separate actual shared replay remain
+pending. Actual archival source accesses/fits on this source are zero; no
+scientific coverage, skill, novelty, paper result or live permission follows.
+
 ## Boosted numerical range correction (24 October 2026)
 
 The pinned EvoTrees CPU backend stores predictions in Float32. Generated-data

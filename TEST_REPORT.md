@@ -1,5 +1,26 @@
 # Receipt-report integration test plan
 
+## Archival static-bound verification contract (28 October 2026)
+
+An independent pre-code fixture specifies all186 numeric frame bytes and the
+SHA2561449b3e36a0d75a728654e0b5229a351ba2c88ae280b3c5a49bbaa10ed0e65aa.
+It uses literal dyadic weights, edges, quantiles and independent bound outputs.
+Tests cover decode/encode, immutable ownership, fresh-path publication,
+completion absence before commit, exact roundtrip, preserved existing outputs,
+all external pins, changed/truncated payloads, extra files, bounds, and malformed
+metadata with correctly recomputed outer pins. Generated cases/models, opaque
+codec fixtures, missing inputs and missing authority must fail closed. None of
+these controls fabricates an authorized archival fit or passes such a verdict.
+
+Existing generated numeric, case/point/calibration and common replay tests
+remain unchanged and mandatory after extracting the shared numeric helper.
+The new tests and codec-only maintained experiment have not yet run in Julia.
+Unfiltered Pkg.test(), complete examples/experiments.jl, the unchanged canonical
+harness, both strict docs and all18CI jobs, full-size resource and agreement
+gates remain required on the final source. Genuine archival positive execution
+and the separate archival common replay must follow full qualification.
+Actual source accesses/fits remain zero and no holdout result is asserted.
+
 ## Boosted numerical range regression (24 October 2026)
 
 On Julia1.12.6 and1.13.1 the complete maintained analog GBM suite passes165

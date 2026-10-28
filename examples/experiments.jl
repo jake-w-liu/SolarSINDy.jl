@@ -253,3 +253,6 @@ PointInputExportSynthetic.run_example()
 
 include(joinpath(@__DIR__,"separate_evaluation_synthetic.jl"))
 SeparateEvaluationSynthetic.run_example()
+
+include(joinpath(@__DIR__,"archival_static_codec_synthetic.jl"))
+ArchivalStaticCodecSynthetic.run_example()

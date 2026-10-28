@@ -136,13 +136,8 @@ function _raw_peak(ground,issue,policy)
     end
     peak
 end
-"""Fit the locked uncertainty comparisons on generated calibration rows only.
-
-All four methods use the same fixed point model and score cohort. Actual-source
-uncertainty fitting requires a distinct qualified authority not granted here.
-"""
-function calibrate_generated(value::Q.VerifiedCases,index,point,calibration,expected;nominal=.1)
-    kc=K._checked(calibration,point,expected);pc=_case_binding(value,index,point,kc)
+"""Compute locked values after the caller has admitted matching case/model inputs."""
+function _calibration_values(value::Q.VerifiedCases,index,point,pc,kc;nominal)
     c=kc.context;model=pc.context
     cal=Q.split_arrays(value,index;start=F._fit_clock(c["start_inclusive"]),stop=F._fit_clock(c["stop_exclusive"]),asof=F._fit_clock(c["target_asof"]))
     input,_=F._data_sha(cal)
@@ -165,12 +160,23 @@ function calibrate_generated(value::Q.VerifiedCases,index,point,calibration,expe
     residuals=log1p.(kc.arrays.targets).-kc.arrays.predictions
     need(residuals./kc.arrays.scales==kc.arrays.scores,"static signed score definition differs")
     numeric=_fit_numeric(train.features,cal.features,residuals,kc.arrays.scores,peaks,nominal);bytes=_encode(numeric)
+    (;numeric,bytes,training_input_sha256=train_pin,training_rows=length(train.rows),calibration_rows=length(cal.rows))
+end
+"""Fit the locked uncertainty comparisons on generated calibration rows only.
+
+All four methods use the same fixed point model and score cohort. Actual-source
+uncertainty fitting requires a distinct qualified authority not granted here.
+"""
+function calibrate_generated(value::Q.VerifiedCases,index,point,calibration,expected;nominal=.1)
+    kc=K._checked(calibration,point,expected);pc=_case_binding(value,index,point,kc)
+    values=_calibration_values(value,index,point,pc,kc;nominal)
+    numeric=values.numeric;bytes=values.bytes;c=kc.context
     context=Dict("schema"=>"generated_source_bound_static_calibration_v1","evidence_mode"=>"generated","runtime"=>string(VERSION),"job_sha256"=>job_identity(),
         "point_context_sha256"=>point.expected.context_sha256,"point_model_sha256"=>c["point_model_sha256"],"point_receipt_sha256"=>c["point_receipt_sha256"],
         "point_source_sha256"=>point.expected.source_sha256,"calibration_context_sha256"=>expected.context_sha256,"calibration_input_sha256"=>expected.input_sha256,
         "case_request_sha256"=>value.request_sha256,"case_manifest_sha256"=>value.manifest_sha256,"case_complete_sha256"=>value.complete_sha256,
-        "table_index"=>Int(index),"role"=>c["role"],"layout"=>c["layout"],"table"=>c["table"],"training_input_sha256"=>train_pin,
-        "training_rows"=>length(train.rows),"calibration_rows"=>length(cal.rows),"calibration_stop_exclusive"=>c["stop_exclusive"],
+        "table_index"=>Int(index),"role"=>c["role"],"layout"=>c["layout"],"table"=>c["table"],"training_input_sha256"=>values.training_input_sha256,
+        "training_rows"=>values.training_rows,"calibration_rows"=>values.calibration_rows,"calibration_stop_exclusive"=>c["stop_exclusive"],
         "first_evaluation_issue"=>c["first_evaluation_issue"],"numeric_sha256"=>digest(bytes),"regime_bin_counts"=>numeric.counts,
         "empty_regime_bins"=>findall(==(0),numeric.counts),"convention"=>"locked_heteroGaussian_raw_normalized_fixedCalibrationEdge_split_v1")
     context_bytes=R.canonical_bytes(context;limit=32768)
