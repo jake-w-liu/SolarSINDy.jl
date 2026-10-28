@@ -1495,3 +1495,7 @@ the valid agreement/replay headers;they remain unchanged. Native controls
 execute actual preludes including those positive controls; these and both
 full-size input/agreement workloads still require native verification. No
 resource limit, calendar count, numeric oracle or fullCI gate was relaxed.
+
+## Wind metadata capture controls
+
+Independent stdlib transport fixtures cover raw hashes and terminal receipts, HTTP errors/timeouts, bounded/truncated/rewritten bodies, allowed/forbidden redirects, default TLS checks, header redaction, exclusive output and false source/scientific authority. The maintained Julia test entry executes these network-free controls. Full Julia tests, complete experiments, unchanged canonical harness, both strict docs, all18 CI jobs and the real hosted metadata capture remain pending for this source revision. No magnetic observations or scientific results are supplied by fixtures.

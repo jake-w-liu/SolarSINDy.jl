@@ -1,0 +1,33 @@
+name: Wind metadata capture
+
+on:
+  push:
+    branches: [main, codex/catalog-calibration-integration-20261027]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    name: Native Wind metadata transport
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify independent metadata transport controls
+        run: python -B -X utf8 test/cme_wind_metadata/test_capture.py
+      - name: Capture fixed NASA metadata resources
+        run: python -B -X utf8 tools/capture_wind_metadata.py --output "${{ runner.temp }}/wind-metadata" --source-head "$GITHUB_SHA"
+      - name: Retain raw metadata and all transport receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wind-metadata-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/wind-metadata
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14

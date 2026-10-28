@@ -1019,3 +1019,5 @@ include(joinpath(@__DIR__,"full_scale_generated_controls.jl"))
 include(joinpath(@__DIR__,"publisher_up_values","archival_static_tests.jl"))
 
 include(joinpath(@__DIR__,"publisher_up_values","archival_replay_tests.jl"))
+# Network-free metadata transport controls.
+include("cme_wind_metadata_tests.jl")

@@ -1505,3 +1505,7 @@ Full input and agreement execution, their original sizes, independent oracles
 and admission limits remain mandatory. The failed job's full retained ZIP is
 verified against the GitHub API digest; no resource pass is inferred from this
 header correction or from the successful preceding case stage.
+
+## Wind metadata transport
+
+The fixed NASA Wind metadata capture uses verified HTTPS, bounded raw retention, same-resource redirects, whitelisted headers and received-byte hashes. It requests master/HAPI info resources only and grants no model, source or scientific authority. A separate hosted workflow provides another network environment while the original18-job CI remains unchanged. Native response semantics, Time-only phase and pre-value bootstrap indices require independent admission before magnetic values.
