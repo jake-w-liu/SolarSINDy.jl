@@ -75,7 +75,7 @@ class EvaluationBindingTests(unittest.TestCase):
             for role in ('primary', 'independent'):
                 for layout in ('ground-only', 'mixed'):
                     for runtime in ('1.12.6', '1.13.1'):
-                        directory = Path(root)/f'{role}-{layout}-{runtime}'
+                        directory = Path(root).resolve(strict=True)/f'{role}-{layout}-{runtime}'
                         args = fixture(directory, role, layout, runtime)
                         allowed = {directory/name for name in O.MEMBERS} | {ROOT/name for name in O.FILES}
                         original = O.V.bounded_read
@@ -93,7 +93,7 @@ class EvaluationBindingTests(unittest.TestCase):
         for changes in ({'station':'FRD'}, {'evaluation_role':'independent'}, {'evaluation_layout':'mixed'},
                         {'first_evaluation_issue':'2022-01-01T00:00:00.000Z'}):
             with self.subTest(changes=changes), tempfile.TemporaryDirectory() as root:
-                directory = Path(root)/'fixture'
+                directory = Path(root).resolve(strict=True)/'fixture'
                 args = fixture(directory, **changes)
                 with self.assertRaises(O.V.SnapshotError):
                     self.verify(directory, args)
@@ -106,7 +106,7 @@ class EvaluationBindingTests(unittest.TestCase):
                        lambda c: c.update(start_inclusive='2020-01-01T00:00:00.000Z'),
                        lambda c: c.update(job_sha256='f'*64)):
             with tempfile.TemporaryDirectory() as root:
-                directory = Path(root)/'fixture'; args = fixture(directory)
+                directory = Path(root).resolve(strict=True)/'fixture'; args = fixture(directory)
                 path = directory/'evaluation-binding.json'; value = O.V.decoded(path.read_bytes())
                 mutate(value); path.write_bytes(O.V.canonical(value)); args['pins'][path.name] = sha256(path.read_bytes()).hexdigest()
                 with self.assertRaises(O.V.SnapshotError):
@@ -114,7 +114,7 @@ class EvaluationBindingTests(unittest.TestCase):
 
     def test_external_pin_index_and_window_rejection(self):
         with tempfile.TemporaryDirectory() as root:
-            directory = Path(root)/'fixture'; original = fixture(directory)
+            directory = Path(root).resolve(strict=True)/'fixture'; original = fixture(directory)
             for mutate in (lambda a:a.update(table_index=True), lambda a:a.update(table_index=0),
                            lambda a:a.update(table_index=2), lambda a:a.update(asof='2021-01-01T04:00:00.000Z'),
                            lambda a:a['pins'].update({'point-model.bin':'f'*64})):
@@ -124,7 +124,7 @@ class EvaluationBindingTests(unittest.TestCase):
 
     def test_fileset_and_noncanonical_bytes_rejection(self):
         with tempfile.TemporaryDirectory() as root:
-            directory = Path(root)/'fixture'; args = fixture(directory)
+            directory = Path(root).resolve(strict=True)/'fixture'; args = fixture(directory)
             extra = directory/'unexpected'; extra.write_bytes(b'extra')
             with self.assertRaises(O.V.SnapshotError):self.verify(directory, args)
             extra.unlink()
