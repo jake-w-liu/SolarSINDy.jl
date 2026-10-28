@@ -1313,3 +1313,15 @@ exports and denial of unqualified callers. The experiment verifies eight generat
 exports independently. Full native, resource and whole-package qualification are
 pending for this new source revision; no actual input or scientific claim follows
 from the portable Python tests alone.
+
+
+## Exact inactive columns in the static uncertainty ridge
+
+The same unit-penalty ridge objective is reduced to its nonzero design columns
+before augmented QR. An exactlyzero column contributes only its coefficient's
+squared penalty, so its unique optimum is exactlyzero. Those coefficients are
+inserted as exact zeros; no threshold is applied to nonzero columns, no statistical
+recipe changes, and no test tolerance changes. The prior large-shift QR stability
+case remains mandatory. Native diagnostics retain both full and reduced QR values;
+the previously failing composite oracle must pass before this correction is called
+verified. Exact Fraction objective separation is the independent planning oracle.

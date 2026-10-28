@@ -1329,3 +1329,14 @@ exported rows. Qualified-path membership and copied/unqualified caller rejection
 are separate from actual authority. Native execution, realistic full-size bounds,
 complete package/experiment/harness and the full CI matrix remain required for
 this revision before any actual-data planning or research verdict.
+
+
+## Static zero-column correction candidate
+
+The existing native oracle failed on the expanded candidate at the joint intercept
+25/11 and exact-zero coefficient check. Its tolerance remains unchanged. The next
+native run prints the original full augmented QR and reduced solution, retains all
+existing 38 checks, and adds exact prediction invariance under an evaluation-only
+shift in an inactive feature. Exact Fraction algebra establishes objective
+separation and the zero inactive coefficients independently. Native execution,
+complete package/experiments/harness and the full CI matrix are still pending.

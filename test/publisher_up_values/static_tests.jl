@@ -11,6 +11,9 @@ const SB=S.B
     @test_throws ArgumentError SB._normal_quantile(-.1)
     train=zeros(4,2);X=zeros(10,2);residuals=collect(-4.:5.);scores=residuals./2;peaks=zeros(10)
     numeric=SB._fit_numeric(train,X,residuals,scores,peaks,.1)
+    full_design=hcat(ones(10),zeros(10,2))
+    full_qr=SB.qr(vcat(full_design,Matrix{Float64}(SB.I,3,3)))\vcat(abs.(residuals),zeros(3))
+    println("STATIC_ZERO_COLUMN_NATIVE_DIAGNOSTIC;FULL_QR=",repr(full_qr),";REDUCED_QR=",repr(numeric.weights),";EXACT_INTERCEPT=25/11;EXACT_INACTIVE_COEFFICIENTS=0,0")
     @test numeric.means==[0.,0.] && numeric.scales==[1e-9,1e-9]
     # With zero centered features,only the penalized intercept is fitted.
     @test isapprox(numeric.weights[1],25/11;atol=0,rtol=8eps(Float64)) && numeric.weights[2:3]==[0.,0.]
@@ -21,6 +24,8 @@ const SB=S.B
     @test projected.bounds.raw_split==projected.bounds.normalized_split==projected.bounds.regime_split==fill(expm1(5.),2)
     @test isapprox(projected.bounds.het_gaussian[1],expm1(numeric.normal*sqrt(pi/2)*(25/11));atol=2e-13,rtol=2e-15)
     @test all(c->c.issued==2 && c.full==c.empty==c.nonfinite==0,values(projected.counts))
+    shifted_inactive=SB._predict(numeric,ones(1,2),zeros(1),fill(2.,1),zeros(1))
+    @test shifted_inactive.bounds.het_gaussian==projected.bounds.het_gaussian[1:1]
     decoded=SB._decode(SB._encode(numeric))
     @test decoded.weights==numeric.weights && decoded.edges==numeric.edges && decoded.quantiles==numeric.quantiles
     @test decoded.raw==5. && decoded.normalized==2.5 && decoded.alpha==.1
