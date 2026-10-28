@@ -25,14 +25,14 @@ def run_owned(argv, *, cwd, environment, logpath, timeout, on_launch=None):
                 native = process.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 expired = True
-                os.killpg(process.pid, signal.SIGKILL)
-                native = process.wait(timeout=20)
         finally:
+            # Signal the owned group once, before reaping its leader. Repeating
+            # the signal after wait() can address an obsolete group identifier.
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-            process.wait(timeout=20)
+            native = process.wait(timeout=20)
         return dict(pid=process.pid, native_exit=native, timed_out=expired,
                     descendant_cleanup='owned POSIX session killed after stage',
                     ownership='start_new_session=True')

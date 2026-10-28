@@ -50,7 +50,7 @@ def frame(domain,chunks):
  return h.hexdigest()
 
 runner=Path(__file__).with_name('native_stage.py')
-assert file_sha(runner)=='1c593d90793f6f70e05622772aec83b53919aa2c22575ab738a4ee1968f116f0'
+assert file_sha(runner)=='0b0f2327841230e5ac87d03bd67d1cbaf10717e0a52ce0134d71169a36146b89'
 manifest=ordinary(pkg/'Manifest.toml')
 if manifest.stat().st_size>checkpointmodule.MAX_CONTROL_BYTES:
  raise ValueError('Manifest exceeds bounded source size')

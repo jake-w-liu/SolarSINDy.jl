@@ -1,7 +1,8 @@
 """Bounded synthetic filesystem/source-projection controls; no model fitting."""
 from pathlib import Path
-import ast,hashlib,importlib.util,json,os,subprocess,sys,tempfile,unittest
+import ast,hashlib,importlib.util,json,os,signal,subprocess,sys,tempfile,unittest
 from unittest import mock
+from types import SimpleNamespace
 sys.dont_write_bytecode=True
 PACKAGE=Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('fixed_snapshot_under_test',PACKAGE/'research/dbdt_completed_source/synthetic_checkpoint.py')
@@ -49,6 +50,56 @@ class PosixProbeRaceTests(unittest.TestCase):
                        subprocess.CompletedProcess([],1,b'',b'permission denied'),subprocess.CompletedProcess([],2,b'',b'bad status')):
             with mock.patch.object(os,'kill',return_value=None),mock.patch.object(subprocess,'run',return_value=result):
                 with self.assertRaises(AssertionError):assert_posix_descendant_stopped(self,12345)
+
+class PosixOwnerLifecycleTests(unittest.TestCase):
+    def setUp(self):
+        spec=importlib.util.spec_from_file_location('posix_owner_lifecycle',PACKAGE/'research/dbdt_completed_source/native_stage.py')
+        self.owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(self.owner)
+
+    def execute(self,waits,kills,on_launch=None):
+        process=mock.Mock(pid=12345)
+        process.wait.side_effect=waits
+        fake_os=SimpleNamespace(name='posix',killpg=mock.Mock(side_effect=kills))
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(self.owner,'os',fake_os), \
+             mock.patch.object(self.owner,'signal',SimpleNamespace(SIGKILL=9)), \
+             mock.patch.object(self.owner.subprocess,'Popen',return_value=process) as popen:
+            result=self.owner.run_owned(['fixture'],cwd=directory,environment={},
+                logpath=Path(directory)/'raw.log',timeout=2,on_launch=on_launch)
+            popen.assert_called_once()
+            self.assertTrue(popen.call_args.kwargs['start_new_session'])
+        return result,process,fake_os.killpg
+
+    def test_timeout_signals_group_once_before_final_wait(self):
+        # The former second group kill raises EPERM in the retained macOS log.
+        # A deliberate second-call fault makes this oracle catch that behavior.
+        result,process,kill=self.execute([subprocess.TimeoutExpired('fixture',2),-9],
+            [None,PermissionError(1,'obsolete second group signal')])
+        self.assertTrue(result['timed_out']);self.assertEqual(result['native_exit'],-9)
+        kill.assert_called_once_with(12345,9)
+        self.assertEqual(process.wait.call_args_list,[mock.call(timeout=2),mock.call(timeout=20)])
+
+    def test_normal_exit_still_cleans_owned_descendants(self):
+        result,process,kill=self.execute([7,7],[None])
+        self.assertFalse(result['timed_out']);self.assertEqual(result['native_exit'],7)
+        kill.assert_called_once_with(12345,9)
+
+    def test_missing_group_is_benign_but_permission_denial_fails_closed(self):
+        result,_,_=self.execute([0,0],[ProcessLookupError()])
+        self.assertEqual(result['native_exit'],0)
+        with self.assertRaises(PermissionError):self.execute([0],[PermissionError(1,'permission denied')])
+
+    def test_launch_callback_failure_still_kills_owned_group(self):
+        process=mock.Mock(pid=12345);process.wait.return_value=-9
+        fake_os=SimpleNamespace(name='posix',killpg=mock.Mock())
+        def fail(pid):raise RuntimeError('launch callback failed')
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(self.owner,'os',fake_os), \
+             mock.patch.object(self.owner,'signal',SimpleNamespace(SIGKILL=9)), \
+             mock.patch.object(self.owner.subprocess,'Popen',return_value=process):
+            with self.assertRaisesRegex(RuntimeError,'launch callback failed'):
+                self.owner.run_owned(['fixture'],cwd=directory,environment={},
+                    logpath=Path(directory)/'raw.log',timeout=2,on_launch=fail)
+        fake_os.killpg.assert_called_once_with(12345,9)
+        process.wait.assert_called_once_with(timeout=20)
 
 class ProjectionTests(unittest.TestCase):
     def test_owned_capture_rejects_partial_and_other_stream_io_failures(self):
@@ -323,6 +374,7 @@ subprocess.Popen=injected_popen
 if __name__=='__main__':
     suite=unittest.defaultTestLoader.loadTestsFromTestCase(ProjectionTests)
     suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(PosixProbeRaceTests))
+    suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(PosixOwnerLifecycleTests))
     result=unittest.TextTestRunner(verbosity=2).run(suite)
     record={'schema':'synthetic_portable_support_controls_v1','complete':result.wasSuccessful(),'tests':result.testsRun,
         'failures':len(result.failures),'errors':len(result.errors),'output_directory':str(OUT),'native_fit_claim':False,

@@ -20,6 +20,7 @@ function recipes()
      C.Recipe(kind=:forest,depth=1,trees=2,bins=2,minleaf=1,sample_rows=20,seed=17))
 end
 function run_scope(root)
+    root=realpath(root)
     outputs=Any[]
     @testset "Independent zero-training and nonzero signed calibration oracle" begin
         for role in ("primary","independent"),layout in ("ground-only","mixed")

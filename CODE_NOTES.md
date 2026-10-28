@@ -1254,3 +1254,16 @@ payloads, and invalid permits rejected before absent qualification files.
 The full package and cross-platform qualification of this combined change is
 still required before archival execution or release.
 
+
+
+## POSIX timeout and calibration fixture correction (2026-10-28)
+
+The retained macOS qualification exposed a second group signal after timeout
+cleanup and an internally created calibration fixture path containing an OS
+temporary-directory alias. The owner now signals the owned group once; permission
+denials still fail closed. The fixture resolves its own root before constructing
+paths; external ordinary-path admission remains strict. Coupled runner pins are
+updated to the reviewed owner bytes. Thirty portable support tests pass, including
+independent old-fails/new-passes lifecycle checks. Full Julia package, experiment,
+harness and cross-platform qualification of this revision remain required before
+release or archival authorization. No scientific result is changed or inferred.
