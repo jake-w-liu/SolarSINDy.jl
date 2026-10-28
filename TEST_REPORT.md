@@ -1499,3 +1499,23 @@ resource limit, calendar count, numeric oracle or fullCI gate was relaxed.
 ## Wind metadata capture controls
 
 Independent stdlib transport fixtures cover raw hashes and terminal receipts, HTTP errors/timeouts, bounded/truncated/rewritten bodies, allowed/forbidden redirects, default TLS checks, header redaction, exclusive output and false source/scientific authority. The maintained Julia test entry executes these network-free controls. Full Julia tests, complete experiments, unchanged canonical harness, both strict docs, all18 CI jobs and the real hosted metadata capture remain pending for this source revision. No magnetic observations or scientific results are supplied by fixtures.
+
+
+## Wind metadata deadline regression controls (2026-10-28)
+
+The metadata suite now contains 25 network-free tests. It preserves the 11
+original transport cases and adds literal late EOF/late close, failure-state
+consistency, actual blocked-child and cancellation reaping, late zero-exit
+rejection, malformed/oversized evidence, launch/reap failure, concurrency and
+the four-resource native worker entry. Test-only shortened deadlines do not
+change production 45-second transport, 5-second reap or 120-second capture
+limits. The native blocking fixture uses os.read and never opens a network.
+The receipt fixture constructs literal independent body/resource hashes and
+creates no descendants. An unreaped worker is a hard failure.
+
+Expected portable checkpoint per ordinary and linked temporary-root mode:
+79 Python tests run, 78 pass and one explicit Windows symlink fixture is
+skipped; 17 Node tests pass. The package's existing Julia entry invokes the
+entire metadata suite. Windows focused native controls have passed; full
+Linux/macOS/Windows Julia CI, Pkg.test(), complete examples/experiments.jl,
+canonical harness and actual-source scientific verification remain pending.

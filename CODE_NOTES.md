@@ -1509,3 +1509,39 @@ header correction or from the successful preceding case stage.
 ## Wind metadata transport
 
 The fixed NASA Wind metadata capture uses verified HTTPS, bounded raw retention, same-resource redirects, whitelisted headers and received-byte hashes. It requests master/HAPI info resources only and grants no model, source or scientific authority. A separate hosted workflow provides another network environment while the original18-job CI remains unchanged. Native response semantics, Time-only phase and pre-value bootstrap indices require independent admission before magnetic values.
+
+
+## Fixed Wind metadata worker deadlines (2026-10-28)
+
+Objective and verified failure: the original in-process transport could accept
+EOF after its 45-second deadline and could remain in a blocked socket read.
+An independent literal-clock fixture reproduced complete=true at 46 seconds.
+Separate negative fixtures confirmed that a response-close exception could
+leave the complete flag true and malformed oversized worker evidence could
+prevent an aggregate terminal receipt.
+
+Contract: keep the same four metadata URLs, TLS checks, two-worker concurrency,
+2 MiB body bound, exclusive output and unconditional absence of source or
+scientific authority. A dedicated fixed-index Python worker has a 45-second
+transport budget; its owner kills and reaps it on expiry or cancellation with
+a separate bounded 5-second reap allowance. All attempts share a 120-second
+transport deadline with reap time reserved. No worker creates descendants.
+Late exit zero is rejected. Worker/staging receipts remain separate from the
+authoritative owner receipt, whose admission checks resource identity,
+duplicate/nonfinite JSON, body size and hash, and failure-state consistency.
+Damaged evidence produces a terminal failure record without admission.
+
+Independent oracles: literal EOF at t=46 must be incomplete; a native child
+blocked in os.read must be killed/reaped; cancellation must leave no owned
+child; literal externally generated valid/bad receipts exercise identity,
+hash, duplicate-key, nonfinite and retained-byte failures. The four-resource
+native child entry is exercised using network-free literal HTTP fixtures.
+Original transport cases remain explicit kernel fixtures. No NASA values,
+fit, source-admission permission or scientific conclusion is generated.
+
+Reverification: 25 focused Python tests pass with ResourceWarnings as errors.
+The full original portable controls are required under ordinary and linked
+TEMP/TMP/TMPDIR paths before private checkpointing. Native cross-platform
+Pkg.test(), complete experiments, unchanged canonical harness, both strict
+documentation builds and the original 18-job CI remain required before full
+software qualification; this local correction does not establish them.

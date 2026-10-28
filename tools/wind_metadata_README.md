@@ -20,3 +20,18 @@ and the experiment's admission protocol before magnetic values are read.
 The separate Wind metadata workflow runs on candidate/main pushes and can be
 triggered manually after registration. Its transport fixtures are also included
 in the complete Julia package tests. The original 18-job CI is unchanged.
+
+
+Each fixed resource runs in its own Python worker. The owner gives the request
+45 seconds, then kills and reaps a blocked worker, allowing a separate 5-second
+reaping grace. The four attempts share a 120-second transport deadline with
+cleanup time reserved; at most two workers are owned concurrently. A late
+zero exit does not count as successful transport. Workers create no children,
+and their standard output and standard error use the null device.
+
+Worker receipts are staged separately from authoritative owner receipts. After
+reaping, the owner checks bounded JSON, exact resource identity and retained
+body hashes. Persisted partial bytes remain available after timeout. Damaged
+or oversized evidence is retained without admission and receives an explicit
+failure record. Receipt or body admission failure cannot grant transport or
+scientific authority. Cancellation reaps an active child before propagating.
