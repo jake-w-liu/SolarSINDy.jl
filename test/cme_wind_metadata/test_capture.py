@@ -312,6 +312,38 @@ class WindMetadataOwnershipTests(unittest.TestCase):
                 self.assertTrue(item['resource_process']['reaped'])
                 self.assertEqual(item['resource_process']['native_exit'], 0)
                 self.assertIn('failure', item)
+        # A writer racing the first evidence check cannot turn the second
+        # receipt read into an unbounded allocation before hash rejection.
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw).resolve()
+            receipt = directory/'master.skt.worker-receipt.json'
+            original_open = Path.open
+            original_evidence = M.evidence
+            reads = []
+            grown = [False]
+            class Observed:
+                def __init__(self, stream): self.stream = stream
+                def __enter__(self): self.stream.__enter__(); return self
+                def __exit__(self, *args): return self.stream.__exit__(*args)
+                def read(self, amount=-1): reads.append(amount); return self.stream.read(amount)
+                def __getattr__(self, name): return getattr(self.stream, name)
+            def observed_open(path, mode='r', *args, **kwargs):
+                stream = original_open(path, mode, *args, **kwargs)
+                return Observed(stream) if Path(path)==receipt and mode=='rb' else stream
+            def growing_evidence(path, limit=1024**2):
+                value = original_evidence(path, limit)
+                if Path(path)==receipt and not grown[0]:
+                    grown[0] = True
+                    with original_open(receipt, 'ab') as stream:
+                        stream.write(b'x'*(3*1024**2))
+                return value
+            with patch.object(M, '_worker_command', side_effect=self.command('success')), patch.object(Path, 'open', observed_open), patch.object(M, 'evidence', side_effect=growing_evidence):
+                item, _ = M._run_resource_owned(*M.RESOURCES[0], directory, time.monotonic()+60)
+            self.assertTrue(grown[0])
+            self.assertFalse(item['response_complete'])
+            self.assertEqual(reads, [1048577, 1048577])
+            self.assertEqual(item['failure']['type'], 'EvidenceRetentionFailure')
+            self.assertTrue(item['resource_process']['reaped'])
 
     def test_oversized_worker_output_retains_aggregate_failure_terminal(self):
         for mode in ('oversized-receipt', 'oversized-body'):

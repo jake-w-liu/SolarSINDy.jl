@@ -1519,3 +1519,11 @@ skipped; 17 Node tests pass. The package's existing Julia entry invokes the
 entire metadata suite. Windows focused native controls have passed; full
 Linux/macOS/Windows Julia CI, Pkg.test(), complete examples/experiments.jl,
 canonical harness and actual-source scientific verification remain pending.
+
+
+The strict-receipt control additionally simulates concurrent file growth after
+the first evidence hash. Both receipt reads must request at most 1 MiB plus
+one overflow byte. An independent owned oracle first observed read arguments
+[1048577, -1] in the prior implementation; the corrected regression requires
+[1048577, 1048577], incomplete admission, reaped ownership and retained failure
+evidence. This adds a subcase without reducing or changing the 25 test methods.

@@ -214,8 +214,9 @@ def _reject_constant(value):
 def _read_worker(name, original, directory):
     path = directory / (name + '.worker-receipt.json')
     sealed = evidence(path)
-    raw = path.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != sealed['sha256']:
+    with path.open('rb') as stream:
+        raw = stream.read(1024**2 + 1)
+    if len(raw) > 1024**2 or hashlib.sha256(raw).hexdigest() != sealed['sha256']:
         raise ValueError('worker receipt changed before admission')
     record = json.loads(raw, object_pairs_hook=_unique_pairs, parse_constant=_reject_constant)
     if (not isinstance(record, dict) or record.get('schema') != 'wind_metadata_resource_v2'

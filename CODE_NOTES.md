@@ -1545,3 +1545,13 @@ TEMP/TMP/TMPDIR paths before private checkpointing. Native cross-platform
 Pkg.test(), complete experiments, unchanged canonical harness, both strict
 documentation builds and the original 18-job CI remain required before full
 software qualification; this local correction does not establish them.
+
+
+The final receipt-admission pass also independently reproduced a bounded-read
+race: after the first bounded hash check a concurrent writer enlarged the
+receipt, and read_bytes() then read it without a limit before rejecting its
+hash. The second read now uses the same 1 MiB plus one overflow byte bound.
+The independent regression grows the file by 3 MiB and observes two bounded
+read calls of 1,048,577 bytes each. It remains a subcase of the existing strict
+receipt test, so the complete method count remains 25. No evidence is admitted
+on growth, and an authoritative incomplete receipt remains available.
