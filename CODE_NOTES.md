@@ -1281,7 +1281,7 @@ numeric capsules require external context/numeric pins. Actual uncertainty-fit
 authority, data publication/readers and full scientific verification remain pending.
 
 Independent fraction/closed-form quantile, bin, ridge and conditioning oracles
-are retained. Eight hosted-wrapper controls pass. Native Julia verification of
+are retained. Nine hosted-wrapper controls pass. Native Julia verification of
 this revision, full package/experiment/harness execution, semantic/resource
 checks and complete cross-platform CI remain required. The source-bound example
 is generated-only and carries no empirical performance claim.

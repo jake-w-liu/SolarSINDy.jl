@@ -2,7 +2,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
-import importlib.util,os,shlex,unittest
+import importlib.util,os,shlex,stat,unittest
 ROOT=Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('canonical_harness_controls',ROOT/'tools/run_canonical_harness.py')
 H=importlib.util.module_from_spec(spec);spec.loader.exec_module(H)
@@ -36,4 +36,10 @@ class HarnessAdmissionTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'Native Git Bash required'):H.bash_path()
     def test_current_platform_memory_probe_is_nonnegative(self):
         value,method=H.available_memory();self.assertIsInstance(value,int);self.assertGreaterEqual(value,0);self.assertTrue(method)
+    def test_link_detection_uses_native_stat_attributes(self):
+        for mode,flags,expected in ((stat.S_IFREG,0,False),(stat.S_IFLNK,0,True),(stat.S_IFDIR,0x400,True),(stat.S_IFREG,0x400,True)):
+            path=mock.Mock();path.lstat.return_value=SimpleNamespace(st_mode=mode,st_file_attributes=flags)
+            self.assertEqual(H.link_path(path),expected)
+        path=mock.Mock();path.lstat.return_value=SimpleNamespace(st_mode=stat.S_IFREG)
+        self.assertFalse(H.link_path(path))
 if __name__=='__main__':unittest.main(verbosity=2)

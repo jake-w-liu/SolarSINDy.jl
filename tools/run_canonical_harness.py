@@ -51,6 +51,11 @@ def shell_path(path):
         text='/'+text[0].lower()+text[2:]
     if '\n' in text or '\r' in text:raise ValueError('Unsupported shell path characters')
     return text
+def link_path(path):
+    # Python3.11 has no Path.is_junction();the native reparse attribute
+    # covers Windows junctions as well as symlinks without following them.
+    info=path.lstat()
+    return stat.S_ISLNK(info.st_mode) or bool(getattr(info,'st_file_attributes',0)&0x400)
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--project-root',type=Path,default=Path(__file__).resolve().parents[1])
@@ -128,7 +133,7 @@ def main():
         for parent in (raw,operational):
             try:
                 for path in parent.rglob('*'):
-                    if path.is_symlink() or path.is_junction():inventory_errors.append(dict(path=str(path),error='Evidence link forbidden'));continue
+                    if link_path(path):inventory_errors.append(dict(path=str(path),error='Evidence link forbidden'));continue
                     if path.is_file():inventory[path.relative_to(out).as_posix()]=dict(bytes=path.stat().st_size,sha256=pin(path))
             except OSError as error:inventory_errors.append(dict(path=str(parent),error=repr(error)))
         record['complete']=record['complete'] and not inventory_errors
