@@ -1431,3 +1431,12 @@ The existing bundle and graph limits remain unchanged. Native before/after
 controls, full package tests, complete experiments, the unchanged canonical
 harness, both strict documentation builds and all18CI jobs remain pending on
 this private source. No actual source access, fits or scientific verdict follows.
+
+The full-size1.13mixed case job completed, then its separate input entry failed
+before workload execution because a header docstring tried to document using.
+Both standalone resource/agreement headers now use ordinary comments. Native
+regression controls evaluate each actual parsed prelude in a fresh module.
+Full input and agreement execution, their original sizes, independent oracles
+and admission limits remain mandatory. The failed job's full retained ZIP is
+verified against the GitHub API digest; no resource pass is inferred from this
+header correction or from the successful preceding case stage.

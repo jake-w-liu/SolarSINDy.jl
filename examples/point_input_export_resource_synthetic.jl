@@ -1,4 +1,4 @@
-"""Optional full-size generated numeric/input-export workload; no actual data or fitting."""
+# Optional full-size generated numeric/input-export workload; no actual data or fitting.
 using Dates,SHA,Test,SolarSINDy
 const F=SolarSINDy.ArchiveSourceBoundPointFit
 const Q=SolarSINDy.ArchiveCatalogCaseJob
