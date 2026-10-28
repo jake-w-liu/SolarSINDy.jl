@@ -1434,8 +1434,10 @@ this private source. No actual source access, fits or scientific verdict follows
 
 The full-size1.13mixed case job completed, then its separate input entry failed
 before workload execution because a header docstring tried to document using.
-Both standalone resource/agreement headers now use ordinary comments. Native
-regression controls evaluate each actual parsed prelude in a fresh module.
+The input entry's attached header now uses an ordinary comment. The agreement
+and existing replay headers are detached by blank lines and remain unchanged.
+Native controls evaluate the real preludes,including valid detached strings,
+in fresh modules; header-string matches alone are not bug evidence.
 Full input and agreement execution, their original sizes, independent oracles
 and admission limits remain mandatory. The failed job's full retained ZIP is
 verified against the GitHub API digest; no resource pass is inferred from this

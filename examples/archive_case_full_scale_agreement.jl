@@ -1,4 +1,4 @@
-# Optional native agreement for eight separately retained generated full-size jobs.
+"""Optional native agreement for eight separately retained generated full-size jobs."""
 
 using SolarSINDy,Dates,SHA,JSON3
 length(ARGS)==2 || error("usage: archive_case_full_scale_agreement.jl INPUT_DIRECTORY FRESH_REPORT")

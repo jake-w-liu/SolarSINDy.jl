@@ -1441,7 +1441,8 @@ The running predecessor is unchanged and is not qualified by these edits.
 The full-size input entry failed before its numeric workload because a leading
 docstring attached to using. Its native exit1 was not a timeout; the preceding
 whole-case stage exited0. The175860214-byte ZIP and raw stage hashes match the
-GitHub API digest. Both affected standalone headers are now comments. New
-native controls execute their actual parsed preludes; these controls and both
+GitHub API digest. The failing input header is now a comment. Blank lines detach
+the valid agreement/replay headers;they remain unchanged. Native controls
+execute actual preludes including those positive controls; these and both
 full-size input/agreement workloads still require native verification. No
 resource limit, calendar count, numeric oracle or fullCI gate was relaxed.
