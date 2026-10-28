@@ -2,9 +2,11 @@
 module ArchiveSourceBoundPointFit
 using Dates,SHA,LinearAlgebra
 import ..ArchivePointNumericTrees, ..ArchiveClassicPointModels, ..ArchiveCatalogCaseJob, ..ArchiveCatalogCaseReader
+import ..ArchiveLockedMixed8Ridge
 import ..ArchiveCatalogCaseAuthority, ..ArchiveCatalogSourceJob, ..ArchiveCatalogSnapshotFilesystem, ..CompletedSourceDBDT, ..MatchedGBMPrimitives342
 const ROOT=parentmodule(@__MODULE__)
 const C=ArchiveClassicPointModels
+const L=ArchiveLockedMixed8Ridge
 const B=ArchiveCatalogCaseReader
 const A=ArchiveCatalogCaseAuthority
 const J=ArchiveCatalogSourceJob
@@ -12,7 +14,7 @@ const FS=ArchiveCatalogSnapshotFilesystem
 const Q=ArchiveCatalogCaseJob
 const R=CompletedSourceDBDT.CompletedRefitArtifacts
 const P=ArchivePointNumericTrees
-export BoostRecipe,ExpectedFit,BoundFit,FitAuthority,prepare_expected,fit_generated,fit_archival,predict_log,receipt_bytes,publish_fit,read_published
+export BoostRecipe,LockedMixed8RidgeRecipe,ExpectedFit,BoundFit,FitAuthority,prepare_expected,fit_generated,fit_archival,predict_log,receipt_bytes,publish_fit,read_published
 need(ok,message)=ok || throw(ArgumentError(message))
 isint(x)=x isa Integer && !(x isa Bool)
 hex(x)=x isa AbstractString && occursin(r"\A[0-9a-f]{64}\z",x)
@@ -72,14 +74,18 @@ function source_identity()
     entries=[Dict("path"=>first(p),"sha256"=>h) for (p,h) in zip(_FILES,_SOURCE_PINS)]
     digest(R.canonical_bytes(Dict("schema"=>"source_bound_fit_source_closure_v1","files"=>entries);limit=262144))
 end
-const PointRecipe=Union{BoostRecipe,C.Recipe}
-const PointModel=Union{P.NumericModel,C.NumericModel}
+const LockedMixed8RidgeRecipe=L.Recipe
+const PointRecipe=Union{BoostRecipe,C.Recipe,L.Recipe}
+const PointModel=Union{P.NumericModel,C.NumericModel,L.NumericModel}
 family(recipe::BoostRecipe)="evotrees_cpu_mse_log1p"
 family(recipe::C.Recipe)="retained_"*String(recipe.kind)*"_log1p"
+family(recipe::L.Recipe)=L.FAMILY
 model_bytes(model::P.NumericModel)=P.encode_model(model)
 model_bytes(model::C.NumericModel)=C.encode_model(model)
+model_bytes(model::L.NumericModel)=L.encode_model(model)
 model_predict(model::P.NumericModel,X)=P.predict(model,X)
 model_predict(model::C.NumericModel,X)=C.predict(model,X)
+model_predict(model::L.NumericModel,X)=L.predict(model,X)
 struct _ArchivalBinding
     json::String
     admission_sha256::String
@@ -109,6 +115,7 @@ function _prepare(value::Q.VerifiedCases,index,recipe::PointRecipe,start,stop,as
     need(request["schema"]==(actual ? "archive_catalog_case_request_v1" : "generated_catalog_case_request_v1") && request["evidence_mode"]==(actual ? "actual_archival_cache" : "generated"),"fit case evidence context")
     need(digest(codeunits(value.request_json))==value.request_sha256,"fit case request binding")
     need(isint(index)&&1<=index<=length(request["tables"]),"fit table index")
+    recipe isa L.Recipe && need(request["layout"]=="mixed","locked ridge recipe requires mixed8 feature layout")
     need(all(t->t isa DateTime,(start,stop,asof)) && start<stop<=asof,"fit split clocks")
     source=source_identity()
     arrays=Q.split_arrays(value,index;start,stop,asof)
@@ -158,6 +165,11 @@ function _native_fit(X,y,recipe::C.Recipe)
         T.predict_boost(result.native,T.apply_bins(X,result.cuts)) : T.predict_forest(result.native,T.apply_bins(X,result.cuts))
     (;model=result.model,native=result.native,author)
 end
+function _native_fit(X,y,recipe::L.Recipe)
+    result=L.fit_numeric(X,y,recipe);native=result.native
+    author=hcat(ones(size(X,1)),(X.-native.mean')./native.scale')*native.coefficients
+    (;model=result.model,native,author)
+end
 function _fit_prepared(value,index,recipe,expected,start,stop,asof,fitter,binding;attempt_sha256=nothing)
     actual=binding isa _ArchivalBinding
     actual ? J._sha(attempt_sha256) : need(attempt_sha256===nothing,"generated fit cannot consume an archival attempt")
@@ -169,6 +181,7 @@ function _fit_prepared(value,index,recipe,expected,start,stop,asof,fitter,bindin
     need(fitted.model isa PointModel,"fit numeric model type")
     need(recipe isa BoostRecipe ? fitted.model isa P.NumericModel && fitted.model.depth==recipe.settings.max_depth &&
         fitted.model.rounds==recipe.settings.nrounds && fitted.model.bins==recipe.settings.nbins :
+        recipe isa L.Recipe ? fitted.model isa L.NumericModel && fitted.model.recipe.json==recipe.json :
         fitted.model isa C.NumericModel && fitted.model.recipe.json==recipe.json,"fit numeric model recipe differs")
     reconstructed=model_predict(fitted.model,X);author=fitted.author
     need(author isa Vector{Float64} && isequal(reinterpret(UInt64,reconstructed),reinterpret(UInt64,author)),"fit numeric replay differs from native prediction")

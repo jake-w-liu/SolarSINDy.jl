@@ -1565,3 +1565,44 @@ Only the current batch of two resources is now submitted. A hard reap failure
 aborts before any later batch; ordinary failures still produce all four
 resource receipts and an aggregate terminal record. The existing unreaped-child
 test includes aggregate launch/kill checks and retains the 25-method count.
+
+
+## Locked mixed8 ridge actual-source route — unverified implementation (2026-10-28)
+
+The paper's locked eight-feature ridge uses sample standard deviation plus
+1e-9 and penalty one on every coefficient, including the intercept. The generic
+retained ridge uses constant-scale replacement and an unpenalized intercept;
+that generic algorithm remains unchanged. A distinct ArchiveLockedMixed8Ridge
+recipe, numerical model and canonical codec now represent the locked algorithm.
+The recipe binds the ordered eight features, target transform, fixed penalty,
+standardization rule and intercept convention. Owned model fields are tuples of
+eight means, eight scales and nine coefficients. Only mixed8 inputs are accepted.
+
+The numerical route reuses pure CompletedRefitArtifacts preprocessing/statistics
+helpers without consuming their synthetic admission state. Those helpers add an
+explicit all-unit Diagonal; the historical script uses UniformScaling. They have
+the same entrywise mathematical penalty, while native Float64 parity remains a
+required historical-reference test. Actual fitting still requires the original
+distinct, qualified 2017 FitAuthority and atomically spent fit-attempt marker.
+The source closure includes the new worker. Source-bound prediction, publication,
+strict readback, calibration, four static methods and shared replay use the new
+typed model through ArchiveSourceBoundPointFit dispatch. No generic recipe is
+silently substituted. Gaussian residual-ridge conventions and its codec remain
+unchanged; it consumes residuals from the newly bound point model.
+
+Independent exact rational elimination verifies the zero-design intercept 2/3
+and the nonconstant intercept 3/4 with sample-scale-plus-epsilon slope. Eight
+Python data-only codec controls pass. They check literal raw-bit fixtures,
+schema/family/convention/feature order, geometry, external digests, canonical
+JSON, reparse rejection and bounded fixture arithmetic. This checker is used
+only as an independent test/tool, never as a Julia production fitting runtime.
+
+Julia execution is BLOCKED: the pre-code physical-memory snapshot was below
+the unchanged 8 GiB admission requirement (exact bytes are retained with the
+pre-code contract). No Julia executable, real-source data, holdout values or
+actual fit was run. The Julia implementation and all new Julia regression and
+experiment entries are unexecuted and unverified. Required work remains: narrow
+native historical/oracle/integration controls, unfiltered Pkg.test(), complete
+examples/experiments.jl, canonical harness audit, strict documentation and all
+original 18 CI jobs, followed by genuine qualified actual-source positives.
+No manuscript value, scientific verdict, main promotion or public push follows.

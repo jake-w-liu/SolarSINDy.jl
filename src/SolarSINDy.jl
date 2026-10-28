@@ -95,6 +95,8 @@ include("archive_point_models/ArchivePointNumericTrees.jl")
 export ArchivePointNumericTrees
 include("archive_point_models/ArchiveClassicPointModels.jl")
 export ArchiveClassicPointModels
+include("archive_point_models/ArchiveLockedMixed8Ridge.jl")
+export ArchiveLockedMixed8Ridge
 include("archive_point_models/ArchiveSourceBoundPointFit.jl")
 export ArchiveSourceBoundPointFit
 export ArchiveCatalogCaseJob

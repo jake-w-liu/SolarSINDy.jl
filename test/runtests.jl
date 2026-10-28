@@ -1021,3 +1021,6 @@ include(joinpath(@__DIR__,"publisher_up_values","archival_static_tests.jl"))
 include(joinpath(@__DIR__,"publisher_up_values","archival_replay_tests.jl"))
 # Network-free metadata transport controls.
 include("cme_wind_metadata_tests.jl")
+
+# Distinct locked mixed8 point-model and source-bound integration controls.
+include("archive_locked_mixed8_ridge_tests.jl")

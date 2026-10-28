@@ -75,6 +75,8 @@ function _admit_archival(value::B.ReverifiedCases,index,recipe::PointRecipe,expe
                  "src/archive_point_models/ArchivePointNumericTrees.jl","src/archive_format/ArchiveCatalogCaseReader.jl")
         need(haskey(proof["source_sha256"],name),"archival point fit worker missing from qualification")
     end
+    recipe isa L.Recipe && need(haskey(proof["source_sha256"],"src/archive_point_models/ArchiveLockedMixed8Ridge.jl"),
+        "locked mixed8 ridge worker missing from qualification")
     need(J._same(realpath(@__FILE__),joinpath(root,"src","archive_point_models","point_fit_authority.jl")),"archival fit authority outside loaded package")
     need(source_identity()==expected.source_sha256,"archival fit current source differs")
     need(BLAS.get_num_threads()==1,"archival point fit requires one BLAS thread")

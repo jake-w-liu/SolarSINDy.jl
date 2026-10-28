@@ -259,3 +259,6 @@ ArchivalStaticCodecSynthetic.run_example()
 
 include(joinpath(@__DIR__,"archival_replay_trace_synthetic.jl"))
 ArchivalReplayTraceSynthetic.run_example()
+
+include(joinpath(@__DIR__,"archive_locked_mixed8_ridge_synthetic.jl"))
+ArchiveLockedMixed8RidgeSynthetic.run_example()

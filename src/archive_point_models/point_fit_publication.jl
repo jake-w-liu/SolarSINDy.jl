@@ -5,6 +5,8 @@ function _recipe_bytes(bytes)
     need(value isa AbstractDict,"fit recipe must be an object")
     if get(value,"schema",nothing)=="archive_classic_recipe_v1"
         return C._recipe(value)
+    elseif get(value,"schema",nothing)==L.RECIPE_SCHEMA
+        return L._recipe(value)
     end
     J._object(value,Set(("schema","family","parameters")))
     need(value["schema"]=="source_bound_boost_recipe_v1" && value["family"]=="cpu_scalar_mse_log1p","fit recipe codec schema")
@@ -56,6 +58,9 @@ function _check_capsule(value::BoundFit)
     if recipe isa BoostRecipe
         need(value.model isa P.NumericModel && value.model.depth==recipe.settings.max_depth &&
             value.model.rounds==recipe.settings.nrounds && value.model.bins==recipe.settings.nbins,"fit capsule EvoTrees recipe")
+    elseif recipe isa L.Recipe
+        need(value.model isa L.NumericModel && value.model.recipe.json==recipe.json && context["layout"]=="mixed",
+            "fit capsule locked mixed8 recipe")
     else
         need(value.model isa C.NumericModel && value.model.recipe.json==recipe.json,"fit capsule retained recipe")
     end
@@ -131,7 +136,8 @@ function read_published(directory;expected::ExpectedFit,model_sha256,receipt_sha
         isint(marker["bytes_without_marker"]) && marker["bytes_without_marker"]==sum(length,payloads[1:4]) &&
         all(marker[key]==pin for (key,pin) in zip(("context_sha256","recipe_sha256","model_sha256","receipt_sha256"),pins[1:4])),
         "fit publication completion binding differs")
-    recipe=_recipe_bytes(payloads[2]);model=recipe isa BoostRecipe ? P.decode_model(payloads[3]) : C.decode_model(payloads[3])
+    recipe=_recipe_bytes(payloads[2]);model=recipe isa BoostRecipe ? P.decode_model(payloads[3]) :
+        recipe isa L.Recipe ? L.decode_model(payloads[3]) : C.decode_model(payloads[3])
     value=BoundFit(model,expected,String(copy(payloads[1])),String(copy(payloads[2])),String(copy(payloads[4])),_FitToken())
     checked=_check_capsule(value)
     need(marker["actual_fit_performed"]===checked.actual,"fit publication evidence flag differs")

@@ -1536,3 +1536,28 @@ call kill on every launched fixture. The prior independent ten-case oracle
 observed three launches each time. These fixtures create no actual child
 orphans and make no network request. Full four-resource success and ordinary
 launch-failure aggregate cases remain separate positive controls.
+
+
+## Locked mixed8 ridge — pending Julia verification (2026-10-28)
+
+Executed evidence: exact Fraction-based nine-variable Gaussian elimination on
+two independent literal designs; eight stdlib Python model-codec tests, native
+exit zero under ResourceWarnings-as-errors. These results do not verify the
+Julia solver or native serialization parity.
+
+Written but UNEXECUTED Julia controls cover the two literal coefficient oracles,
+an independently written historical mean/std/UniformScaling solve, unchanged
+generic-ridge behavior, immutable ownership, wrong eleven-feature layouts,
+nonfinite/overflow/empty prediction cases, canonical recipe/model tampering,
+source/recipe bindings, strict readiness, non-2017 archival rejection, generated
+fit/publication/readback and independent Python read of the Julia artifact,
+calibration/four-static/shared replay integration, and future-source prefix
+invariance. Temporary roots are canonicalized before ordinary-path guards.
+The full package and experiment entry prefixes are preserved and append the new
+controls. Existing opaque metadata checks and all old recipe/model codecs remain
+intact. No tolerance or required verification gate was weakened.
+
+Native Julia remains blocked by the unchanged 8 GiB physical-memory gate. This
+private implementation is not qualified, committed, merged, pushed or usable as
+scientific evidence. All new Julia tests and the required full verification
+chain must run before that status can change.
