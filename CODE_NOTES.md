@@ -1767,3 +1767,34 @@ assertion count is claimed. Actual CDF values, actual Time-only phase/source
 admission, all three native RNG regeneration/equality gates, full changed-P
 qualification and any scientific conclusion remain pending. No actual GSM
 values, scientific result or source authority were produced by this integration.
+
+## Native-driver and CDF entry integration: verification pending (2026-11-02)
+
+The unfiltered package entry now runs all17 frozen Python driver controls under
+the fixed Python chooser and bounded native owner. The package runner rejects
+optimized Python before output creation or launch and checks a genuine owned
+optimized-mode negative. Its positive child uses ResourceWarnings as errors;
+native exit, timeout, raw bytes and fixture report remain separate evidence.
+The Julia package wrapper and complete experiments also call the real fixed
+dispatcher in-process on the generated32-candidate/6-refit chain, without a
+recursive Julia process or current-source qualification prerequisite.
+
+The CDF package adapter includes every frozen reader test. The complete example
+executes private generated API spies for both byte orders: Time-only read,
+phase-domain freezing, separate QC pass and the literal peak Bs7. It imports
+no real CDF package and produces zero actual CDF values or source authority.
+The reviewed CDF reader/tests and production stage drivers, owners and evidence
+consumers remain byte-identical. Shared test/experiment entries are appended.
+
+Python driver/ownership controls verify Python mechanics only. All new Julia
+adapters, dispatcher execution and CDF examples remain unparsed/unexecuted
+under the8GiB admission blocker. FullPkg, completeExamples, unchanged canonical
+H, both strict docs, all18 changed-source CI jobs, genuine actual cross-process
+handoff, golden CDF/source/RSS admission and three native bootstrap equality
+gates remain mandatory. No assertion count, forecast result or paper claim is
+inferred. This batch changes no Project/Manifest or workflow. macOS needs
+Python>=3.13 for waitid/WNOWAIT; current CI Python3.12 provisioning is an open
+dependency defect. The approved next batch must provision macOS Python3.14
+before its first Python consumer, retaining Windows/Linux3.12 and every gate.
+The new candidate owner fixes its own POSIX signal-before-reap path only;
+migration of legacy native_stage.py callers remains pending.

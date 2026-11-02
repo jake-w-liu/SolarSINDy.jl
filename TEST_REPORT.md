@@ -1665,3 +1665,32 @@ by this fixed-index synthetic fixture. The reviewed REAL4 marker correction
 preserves exact same-Epoch field semantics. These Julia tests have not run or
 been parsed under the8GiB admission blocker. Independent rational-oracle checks
 do not qualify Julia, actual CDF data, source admission, results or the paper.
+
+## Driver/CDF entry integration: written controls (2026-11-02)
+
+The package entry invokes the unchanged17 Python methods with ResourceWarnings
+as errors through a fixed bounded owner. Native exit0 and untimed status,
+exact17-method raw/report counts and unchanged control hashes are required.
+An additional owned metadata-only invocation uses -O and must fail before
+creating its output directory; assertion removal cannot admit a positive
+terminal. The existing17-method V3 author and independent native passes are
+historical Python-only evidence; this new wrapper is separately rechecked.
+
+New Julia test/example entries call the actual generated dispatcher directly
+in-process, requiring32 generated candidate fits and6 selected family refits,
+zero actual fits and zero recursive Julia processes. Literal inspect-runtime
+and unsupported-operation/input guards are also included. The CDF wrapper
+includes all frozen sibling testsets. Its example really runs both-endian
+private API Time->phase->QC->label routes, checking read order, two closes,
+[-2,0,-7] Bz, three valid/expected minutes and the literal peak Bs7/support.
+Private fake API status remains explicit; no real CDF package is imported.
+
+All newly added Julia assertions and examples are UNPARSED/UNEXECUTED below
+the8GiB native admission threshold; no native assertion count is claimed.
+FullPkg, completeExamples, source-specific unchanged-H named checks, both
+strict docs, all18 changed-source CI jobs and actual numerical/source/resource
+positives remain unverified. macOS Python3.12 lacks required waitid support;
+the approved following dependency batch must provision3.14 before the first
+Python consumer, without skip/fallback or gate changes. Production driver,
+owner, consumers and frozen CDF bytes are unchanged in this integration;
+legacy owner-callsite migration and the142-stage campaign are not completed.

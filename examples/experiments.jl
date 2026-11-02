@@ -277,3 +277,9 @@ CandidateValidationSynthetic.run_example()
 
 include(joinpath(@__DIR__,"cme_gsm_labels_synthetic.jl"))
 CMEGSMLabelsSynthetic.run_example()
+
+include(joinpath(@__DIR__,"candidate_stage_dispatch_synthetic.jl"))
+CandidateStageDispatchSynthetic.run_example()
+
+include(joinpath(@__DIR__,"cme_gsm_cdf_reader_synthetic.jl"))
+CMEGSMCDFReaderSynthetic.run_example()

@@ -1041,3 +1041,9 @@ include(joinpath(@__DIR__,"candidate_validation","runtests.jl"))
 # Native minute-label/QC kernels and complete frozen551-event generated replay.
 include("cme_gsm_labels_tests.jl")
 CMEGSMLabelsPackageControls.run_package_native_fixture()
+
+# Fixed owned Python controls plus the real generated Julia stage dispatcher.
+include("candidate_stage_driver_tests.jl")
+
+# All frozen CDF minute-reader generated/API-spy controls; no real CDF import.
+include("cme_gsm_cdf_reader_tests.jl")
