@@ -1,0 +1,3313 @@
+schema = "cme_gsm_frozen_population_years_v1"
+frozen_population_sha256 = "b81228b4b0954dfec881d5a57ae9f7a76bb7e9a73aeee84bf17a0dcfdaf99fb9"
+provider_sha256 = "4ab51b795b549e7a26c0a8f17206abcad0c493ddd7255f62549335d0300d0d24"
+frozen_protocol_sha256 = "df44b33c835f1df7479d11e672676054db9c0925a829fee7c2059e481cd58276"
+event_count = 551
+event_order = "original_frozen_population_order"
+year_universe = [1995,1996,1997,1998,1999,2000,2001,2002,2003,2004,2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022,2023,2024,2025]
+
+[[event]]
+index = 1
+id = "ICME_Wind_MOESTL_20250726_01"
+mo_start_utc = "2025-07-26T16:44:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 2
+id = "ICME_Wind_MOESTL_20250703_01"
+mo_start_utc = "2025-07-03T12:34:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 3
+id = "ICME_Wind_MOESTL_20250612_01"
+mo_start_utc = "2025-06-12T19:34:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 4
+id = "ICME_Wind_MOESTL_20250607_01"
+mo_start_utc = "2025-06-07T11:24:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 5
+id = "ICME_Wind_MOESTL_20250604_01"
+mo_start_utc = "2025-06-04T18:06:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 6
+id = "ICME_Wind_MOESTL_20250602_02"
+mo_start_utc = "2025-06-03T02:06:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 7
+id = "ICME_Wind_MOESTL_20250602_01"
+mo_start_utc = "2025-06-02T03:56:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 8
+id = "ICME_Wind_MOESTL_20250601_03"
+mo_start_utc = "2025-06-01T18:54:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 9
+id = "ICME_Wind_MOESTL_20250601_02"
+mo_start_utc = "2025-06-01T12:16:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 10
+id = "ICME_Wind_MOESTL_20250601_01"
+mo_start_utc = "2025-06-01T08:20:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 11
+id = "ICME_Wind_MOESTL_20250527_01"
+mo_start_utc = "2025-05-28T05:58:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 12
+id = "ICME_Wind_MOESTL_20250526_01"
+mo_start_utc = "2025-05-26T15:12:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 13
+id = "ICME_Wind_MOESTL_20250415_01"
+mo_start_utc = "2025-04-16T11:14:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 14
+id = "ICME_Wind_MOESTL_20250401_01"
+mo_start_utc = "2025-04-02T01:52:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 15
+id = "ICME_Wind_MOESTL_20250202_01"
+mo_start_utc = "2025-02-02T16:06:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 16
+id = "ICME_Wind_MOESTL_20250103_01"
+mo_start_utc = "2025-01-04T06:26:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 17
+id = "ICME_Wind_MOESTL_20250101_01"
+mo_start_utc = "2025-01-01T08:50:00+00:00"
+utc_year = 2025
+
+[[event]]
+index = 18
+id = "ICME_Wind_MOESTL_20241231_01"
+mo_start_utc = "2024-12-31T17:06:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 19
+id = "ICME_Wind_MOESTL_20241217_01"
+mo_start_utc = "2024-12-17T05:28:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 20
+id = "ICME_Wind_MOESTL_20241207_01"
+mo_start_utc = "2024-12-07T23:14:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 21
+id = "ICME_Wind_MOESTL_20241129_01"
+mo_start_utc = "2024-11-29T06:12:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 22
+id = "ICME_Wind_MOESTL_20241114_01"
+mo_start_utc = "2024-11-14T04:28:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 23
+id = "ICME_Wind_MOESTL_20241109_01"
+mo_start_utc = "2024-11-09T22:00:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 24
+id = "ICME_Wind_MOESTL_20241108_02"
+mo_start_utc = "2024-11-08T22:00:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 25
+id = "ICME_Wind_MOESTL_20241108_01"
+mo_start_utc = "2024-11-08T11:34:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 26
+id = "ICME_Wind_MOESTL_20241026_01"
+mo_start_utc = "2024-10-26T22:32:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 27
+id = "ICME_Wind_MOESTL_20241010_01"
+mo_start_utc = "2024-10-10T22:06:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 28
+id = "ICME_Wind_MOESTL_20241007_02"
+mo_start_utc = "2024-10-07T22:10:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 29
+id = "ICME_Wind_MOESTL_20241007_01"
+mo_start_utc = "2024-10-07T11:36:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 30
+id = "ICME_Wind_MOESTL_20241006_01"
+mo_start_utc = "2024-10-06T15:02:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 31
+id = "ICME_Wind_MOESTL_20240916_01"
+mo_start_utc = "2024-09-17T01:48:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 32
+id = "ICME_Wind_MOESTL_20240912_02"
+mo_start_utc = "2024-09-12T11:44:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 33
+id = "ICME_Wind_MOESTL_20240912_01"
+mo_start_utc = "2024-09-12T05:16:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 34
+id = "ICME_Wind_MOESTL_20240831_01"
+mo_start_utc = "2024-08-31T17:40:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 35
+id = "ICME_Wind_MOESTL_20240827_01"
+mo_start_utc = "2024-08-27T22:14:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 36
+id = "ICME_Wind_MOESTL_20240817_01"
+mo_start_utc = "2024-08-17T18:56:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 37
+id = "ICME_Wind_MOESTL_20240810_01"
+mo_start_utc = "2024-08-12T08:00:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 38
+id = "ICME_Wind_MOESTL_20240804_02"
+mo_start_utc = "2024-08-04T23:44:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 39
+id = "ICME_Wind_MOESTL_20240804_01"
+mo_start_utc = "2024-08-04T08:24:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 40
+id = "ICME_Wind_MOESTL_20240723_01"
+mo_start_utc = "2024-07-24T00:02:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 41
+id = "ICME_Wind_MOESTL_20240721_01"
+mo_start_utc = "2024-07-21T14:20:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 42
+id = "ICME_Wind_MOESTL_20240715_01"
+mo_start_utc = "2024-07-15T20:36:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 43
+id = "ICME_Wind_MOESTL_20240615_01"
+mo_start_utc = "2024-06-15T16:30:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 44
+id = "ICME_Wind_MOESTL_20240606_01"
+mo_start_utc = "2024-06-06T01:44:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 45
+id = "ICME_Wind_MOESTL_20240531_01"
+mo_start_utc = "2024-05-31T01:00:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 46
+id = "ICME_Wind_MOESTL_20240530_01"
+mo_start_utc = "2024-05-30T12:30:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 47
+id = "ICME_Wind_MOESTL_20240529_02"
+mo_start_utc = "2024-05-29T21:48:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 48
+id = "ICME_Wind_MOESTL_20240529_01"
+mo_start_utc = "2024-05-29T05:34:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 49
+id = "ICME_Wind_MOESTL_20240517_01"
+mo_start_utc = "2024-05-17T04:30:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 50
+id = "ICME_Wind_MOESTL_20240516_01"
+mo_start_utc = "2024-05-16T12:34:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 51
+id = "ICME_Wind_MOESTL_20240511_03"
+mo_start_utc = "2024-05-11T11:06:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 52
+id = "ICME_Wind_MOESTL_20240511_02"
+mo_start_utc = "2024-05-11T07:55:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 53
+id = "ICME_Wind_MOESTL_20240511_01"
+mo_start_utc = "2024-05-11T02:18:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 54
+id = "ICME_Wind_MOESTL_20240510_02"
+mo_start_utc = "2024-05-10T22:05:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 55
+id = "ICME_Wind_MOESTL_20240510_01"
+mo_start_utc = "2024-05-10T19:10:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 56
+id = "ICME_Wind_MOESTL_20240430_01"
+mo_start_utc = "2024-05-01T01:32:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 57
+id = "ICME_Wind_MOESTL_20240415_01"
+mo_start_utc = "2024-04-16T09:56:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 58
+id = "ICME_Wind_MOESTL_20240408_01"
+mo_start_utc = "2024-04-08T09:23:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 59
+id = "ICME_Wind_MOESTL_20240404_01"
+mo_start_utc = "2024-04-04T10:00:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 60
+id = "ICME_Wind_MOESTL_20240330_01"
+mo_start_utc = "2024-03-30T14:10:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 61
+id = "ICME_Wind_MOESTL_20240324_01"
+mo_start_utc = "2024-03-24T18:22:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 62
+id = "ICME_Wind_MOESTL_20240321_01"
+mo_start_utc = "2024-03-21T15:34:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 63
+id = "ICME_Wind_MOESTL_20240303_01"
+mo_start_utc = "2024-03-03T23:56:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 64
+id = "ICME_Wind_MOESTL_20240224_01"
+mo_start_utc = "2024-02-25T13:30:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 65
+id = "ICME_Wind_MOESTL_20240103_02"
+mo_start_utc = "2024-01-03T18:00:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 66
+id = "ICME_Wind_MOESTL_20240103_01"
+mo_start_utc = "2024-01-03T08:12:00+00:00"
+utc_year = 2024
+
+[[event]]
+index = 67
+id = "ICME_Wind_MOESTL_20231228_01"
+mo_start_utc = "2023-12-29T11:36:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 68
+id = "ICME_Wind_MOESTL_20231217_01"
+mo_start_utc = "2023-12-17T21:40:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 69
+id = "ICME_Wind_MOESTL_20231215_01"
+mo_start_utc = "2023-12-15T22:44:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 70
+id = "ICME_Wind_MOESTL_20231204_01"
+mo_start_utc = "2023-12-04T11:54:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 71
+id = "ICME_Wind_MOESTL_20231201_01"
+mo_start_utc = "2023-12-01T19:52:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 72
+id = "ICME_Wind_MOESTL_20231130_01"
+mo_start_utc = "2023-12-01T06:06:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 73
+id = "ICME_Wind_MOESTL_20231113_01"
+mo_start_utc = "2023-11-14T10:02:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 74
+id = "ICME_Wind_MOESTL_20231112_01"
+mo_start_utc = "2023-11-12T22:12:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 75
+id = "ICME_Wind_MOESTL_20231105_02"
+mo_start_utc = "2023-11-05T12:30:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 76
+id = "ICME_Wind_MOESTL_20231105_01"
+mo_start_utc = "2023-11-05T08:28:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 77
+id = "ICME_Wind_MOESTL_20231104_01"
+mo_start_utc = "2023-11-04T17:30:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 78
+id = "ICME_Wind_MOESTL_20231020_01"
+mo_start_utc = "2023-10-20T12:34:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 79
+id = "ICME_Wind_MOESTL_20230928_01"
+mo_start_utc = "2023-09-28T20:56:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 80
+id = "ICME_Wind_MOESTL_20230924_01"
+mo_start_utc = "2023-09-25T06:20:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 81
+id = "ICME_Wind_MOESTL_20230919_01"
+mo_start_utc = "2023-09-19T14:30:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 82
+id = "ICME_Wind_MOESTL_20230918_01"
+mo_start_utc = "2023-09-18T15:30:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 83
+id = "ICME_Wind_MOESTL_20230912_01"
+mo_start_utc = "2023-09-12T13:50:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 84
+id = "ICME_Wind_MOESTL_20230805_01"
+mo_start_utc = "2023-08-05T02:18:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 85
+id = "ICME_Wind_MOESTL_20230801_01"
+mo_start_utc = "2023-08-02T04:02:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 86
+id = "ICME_Wind_WEILER_20230603_01"
+mo_start_utc = "2023-06-04T22:24:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 87
+id = "ICME_Wind_WEILER_20230513_01"
+mo_start_utc = "2023-05-13T17:18:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 88
+id = "ICME_Wind_WEILER_20230512_01"
+mo_start_utc = "2023-05-12T14:00:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 89
+id = "ICME_Wind_WEILER_20230423_01"
+mo_start_utc = "2023-04-24T01:06:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 90
+id = "ICME_Wind_WEILER_20230418_01"
+mo_start_utc = "2023-04-19T08:36:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 91
+id = "ICME_Wind_MOESTL_20230323_01"
+mo_start_utc = "2023-03-23T13:48:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 92
+id = "ICME_Wind_MOESTL_20230315_01"
+mo_start_utc = "2023-03-15T11:20:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 93
+id = "ICME_Wind_MOESTL_20230221_01"
+mo_start_utc = "2023-02-21T23:32:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 94
+id = "ICME_Wind_MOESTL_20230220_01"
+mo_start_utc = "2023-02-20T14:40:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 95
+id = "ICME_Wind_MOESTL_20230201_01"
+mo_start_utc = "2023-02-01T20:32:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 96
+id = "ICME_Wind_MOESTL_20230117_01"
+mo_start_utc = "2023-01-17T22:06:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 97
+id = "ICME_Wind_MOESTL_20230104_01"
+mo_start_utc = "2023-01-04T14:32:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 98
+id = "ICME_Wind_MOESTL_20230103_01"
+mo_start_utc = "2023-01-04T02:00:00+00:00"
+utc_year = 2023
+
+[[event]]
+index = 99
+id = "ICME_Wind_MOESTL_20221218_01"
+mo_start_utc = "2022-12-19T04:02:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 100
+id = "ICME_Wind_MOESTL_20221119_01"
+mo_start_utc = "2022-11-19T22:54:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 101
+id = "ICME_Wind_MOESTL_20221107_01"
+mo_start_utc = "2022-11-07T08:12:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 102
+id = "ICME_Wind_MOESTL_20221021_01"
+mo_start_utc = "2022-10-21T10:38:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 103
+id = "ICME_Wind_MOESTL_20220930_01"
+mo_start_utc = "2022-09-30T08:28:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 104
+id = "ICME_Wind_MOESTL_20220914_01"
+mo_start_utc = "2022-09-14T22:14:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 105
+id = "ICME_Wind_MOESTL_20220718_01"
+mo_start_utc = "2022-07-19T04:14:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 106
+id = "ICME_Wind_MOESTL_20220708_01"
+mo_start_utc = "2022-07-08T09:30:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 107
+id = "ICME_Wind_MOESTL_20220707_01"
+mo_start_utc = "2022-07-07T10:54:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 108
+id = "ICME_Wind_MOESTL_20220702_01"
+mo_start_utc = "2022-07-02T00:30:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 109
+id = "ICME_Wind_MOESTL_20220625_01"
+mo_start_utc = "2022-06-25T08:28:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 110
+id = "ICME_Wind_MOESTL_20220606_01"
+mo_start_utc = "2022-06-06T23:34:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 111
+id = "ICME_Wind_MOESTL_20220414_01"
+mo_start_utc = "2022-04-14T12:58:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 112
+id = "ICME_Wind_MOESTL_20220413_01"
+mo_start_utc = "2022-04-13T01:46:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 113
+id = "ICME_Wind_MOESTL_20220409_01"
+mo_start_utc = "2022-04-09T13:26:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 114
+id = "ICME_Wind_MOESTL_20220408_01"
+mo_start_utc = "2022-04-08T22:26:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 115
+id = "ICME_Wind_MOESTL_20220331_01"
+mo_start_utc = "2022-03-31T14:32:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 116
+id = "ICME_Wind_MOESTL_20220313_01"
+mo_start_utc = "2022-03-13T22:42:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 117
+id = "ICME_Wind_MOESTL_20220310_01"
+mo_start_utc = "2022-03-10T19:10:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 118
+id = "ICME_Wind_MOESTL_20220211_01"
+mo_start_utc = "2022-02-11T10:44:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 119
+id = "ICME_Wind_MOESTL_20220209_01"
+mo_start_utc = "2022-02-10T13:40:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 120
+id = "ICME_Wind_MOESTL_20220203_01"
+mo_start_utc = "2022-02-04T04:12:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 121
+id = "ICME_Wind_MOESTL_20220201_01"
+mo_start_utc = "2022-02-02T20:46:00+00:00"
+utc_year = 2022
+
+[[event]]
+index = 122
+id = "ICME_Wind_MOESTL_20211227_01"
+mo_start_utc = "2021-12-27T21:28:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 123
+id = "ICME_Wind_MOESTL_20211127_01"
+mo_start_utc = "2021-11-28T10:00:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 124
+id = "ICME_Wind_MOESTL_20211103_01"
+mo_start_utc = "2021-11-04T06:30:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 125
+id = "ICME_Wind_MOESTL_20211031_01"
+mo_start_utc = "2021-10-31T10:04:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 126
+id = "ICME_Wind_MOESTL_20211017_01"
+mo_start_utc = "2021-10-17T01:18:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 127
+id = "ICME_Wind_MOESTL_20211016_01"
+mo_start_utc = "2021-10-16T00:08:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 128
+id = "ICME_Wind_MOESTL_20211012_01"
+mo_start_utc = "2021-10-12T05:00:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 129
+id = "ICME_Wind_MOESTL_20211006_01"
+mo_start_utc = "2021-10-06T07:10:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 130
+id = "ICME_Wind_MOESTL_20211001_01"
+mo_start_utc = "2021-10-01T15:12:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 131
+id = "ICME_Wind_MOESTL_20210927_01"
+mo_start_utc = "2021-09-27T00:20:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 132
+id = "ICME_Wind_MOESTL_20210917_01"
+mo_start_utc = "2021-09-17T09:52:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 133
+id = "ICME_Wind_MOESTL_20210910_02"
+mo_start_utc = "2021-09-10T22:34:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 134
+id = "ICME_Wind_MOESTL_20210910_01"
+mo_start_utc = "2021-09-10T10:42:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 135
+id = "ICME_Wind_MOESTL_20210827_01"
+mo_start_utc = "2021-08-27T12:16:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 136
+id = "ICME_Wind_MOESTL_20210806_01"
+mo_start_utc = "2021-08-06T10:00:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 137
+id = "ICME_Wind_MOESTL_20210802_01"
+mo_start_utc = "2021-08-03T23:26:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 138
+id = "ICME_Wind_MOESTL_20210714_01"
+mo_start_utc = "2021-07-14T12:42:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 139
+id = "ICME_Wind_MOESTL_20210709_01"
+mo_start_utc = "2021-07-09T23:40:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 140
+id = "ICME_Wind_MOESTL_20210705_01"
+mo_start_utc = "2021-07-05T07:12:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 141
+id = "ICME_Wind_MOESTL_20210611_01"
+mo_start_utc = "2021-06-11T00:42:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 142
+id = "ICME_Wind_MOESTL_20210526_01"
+mo_start_utc = "2021-05-26T21:20:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 143
+id = "ICME_Wind_MOESTL_20210512_01"
+mo_start_utc = "2021-05-12T14:44:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 144
+id = "ICME_Wind_MOESTL_20210501_01"
+mo_start_utc = "2021-05-02T00:24:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 145
+id = "ICME_Wind_MOESTL_20210429_01"
+mo_start_utc = "2021-04-30T15:00:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 146
+id = "ICME_Wind_MOESTL_20210424_01"
+mo_start_utc = "2021-04-25T10:42:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 147
+id = "ICME_Wind_MOESTL_20210415_01"
+mo_start_utc = "2021-04-15T05:48:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 148
+id = "ICME_Wind_MOESTL_20210404_01"
+mo_start_utc = "2021-04-05T10:04:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 149
+id = "ICME_Wind_MOESTL_20210326_01"
+mo_start_utc = "2021-03-26T18:00:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 150
+id = "ICME_Wind_MOESTL_20210311_01"
+mo_start_utc = "2021-03-11T21:40:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 151
+id = "ICME_Wind_MOESTL_20210224_01"
+mo_start_utc = "2021-02-24T04:08:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 152
+id = "ICME_Wind_MOESTL_20210215_01"
+mo_start_utc = "2021-02-16T03:18:00+00:00"
+utc_year = 2021
+
+[[event]]
+index = 153
+id = "ICME_Wind_MOESTL_20201101_01"
+mo_start_utc = "2020-11-01T11:54:00+00:00"
+utc_year = 2020
+
+[[event]]
+index = 154
+id = "ICME_Wind_MOESTL_20201005_01"
+mo_start_utc = "2020-10-05T16:40:00+00:00"
+utc_year = 2020
+
+[[event]]
+index = 155
+id = "ICME_Wind_MOESTL_20200724_01"
+mo_start_utc = "2020-07-24T04:32:00+00:00"
+utc_year = 2020
+
+[[event]]
+index = 156
+id = "ICME_Wind_MOESTL_20200713_01"
+mo_start_utc = "2020-07-13T20:18:00+00:00"
+utc_year = 2020
+
+[[event]]
+index = 157
+id = "ICME_Wind_MOESTL_20200630_01"
+mo_start_utc = "2020-06-30T20:48:00+00:00"
+utc_year = 2020
+
+[[event]]
+index = 158
+id = "ICME_Wind_MOESTL_20200626_01"
+mo_start_utc = "2020-06-26T18:04:00+00:00"
+utc_year = 2020
+
+[[event]]
+index = 159
+id = "ICME_Wind_MOESTL_20200529_01"
+mo_start_utc = "2020-05-30T04:18:00+00:00"
+utc_year = 2020
+
+[[event]]
+index = 160
+id = "ICME_Wind_MOESTL_20200420_01"
+mo_start_utc = "2020-04-20T07:56:00+00:00"
+utc_year = 2020
+
+[[event]]
+index = 161
+id = "ICME_Wind_MOESTL_20200217_01"
+mo_start_utc = "2020-02-18T01:58:00+00:00"
+utc_year = 2020
+
+[[event]]
+index = 162
+id = "ICME_Wind_MOESTL_20200104_01"
+mo_start_utc = "2020-01-04T09:06:00+00:00"
+utc_year = 2020
+
+[[event]]
+index = 163
+id = "ICME_Wind_MOESTL_20191111_01"
+mo_start_utc = "2019-11-11T09:12:00+00:00"
+utc_year = 2019
+
+[[event]]
+index = 164
+id = "ICME_Wind_MOESTL_20191029_01"
+mo_start_utc = "2019-10-29T20:52:00+00:00"
+utc_year = 2019
+
+[[event]]
+index = 165
+id = "ICME_Wind_MOESTL_20190820_01"
+mo_start_utc = "2019-08-20T03:08:00+00:00"
+utc_year = 2019
+
+[[event]]
+index = 166
+id = "ICME_Wind_MOESTL_20190527_01"
+mo_start_utc = "2019-05-27T05:40:00+00:00"
+utc_year = 2019
+
+[[event]]
+index = 167
+id = "ICME_Wind_MOESTL_20190513_01"
+mo_start_utc = "2019-05-14T08:30:00+00:00"
+utc_year = 2019
+
+[[event]]
+index = 168
+id = "ICME_Wind_MOESTL_20190510_01"
+mo_start_utc = "2019-05-11T06:28:00+00:00"
+utc_year = 2019
+
+[[event]]
+index = 169
+id = "ICME_Wind_MOESTL_20180907_01"
+mo_start_utc = "2018-09-07T05:58:00+00:00"
+utc_year = 2018
+
+[[event]]
+index = 170
+id = "ICME_Wind_MOESTL_20180825_01"
+mo_start_utc = "2018-08-25T12:48:00+00:00"
+utc_year = 2018
+
+[[event]]
+index = 171
+id = "ICME_Wind_MOESTL_20180811_01"
+mo_start_utc = "2018-08-11T06:32:00+00:00"
+utc_year = 2018
+
+[[event]]
+index = 172
+id = "ICME_Wind_MOESTL_20180716_01"
+mo_start_utc = "2018-07-16T04:50:00+00:00"
+utc_year = 2018
+
+[[event]]
+index = 173
+id = "ICME_Wind_MOESTL_20180710_01"
+mo_start_utc = "2018-07-10T13:00:00+00:00"
+utc_year = 2018
+
+[[event]]
+index = 174
+id = "ICME_Wind_MOESTL_20180606_01"
+mo_start_utc = "2018-06-06T18:52:00+00:00"
+utc_year = 2018
+
+[[event]]
+index = 175
+id = "ICME_Wind_MOESTL_20180309_01"
+mo_start_utc = "2018-03-09T23:16:00+00:00"
+utc_year = 2018
+
+[[event]]
+index = 176
+id = "ICME_Wind_MOESTL_20180119_01"
+mo_start_utc = "2018-01-19T00:42:00+00:00"
+utc_year = 2018
+
+[[event]]
+index = 177
+id = "ICME_Wind_MOESTL_20171224_01"
+mo_start_utc = "2017-12-25T00:02:00+00:00"
+utc_year = 2017
+
+[[event]]
+index = 178
+id = "ICME_Wind_MOESTL_20171115_01"
+mo_start_utc = "2017-11-15T11:47:00+00:00"
+utc_year = 2017
+
+[[event]]
+index = 179
+id = "ICME_Wind_MOESTL_20171114_01"
+mo_start_utc = "2017-11-14T01:08:00+00:00"
+utc_year = 2017
+
+[[event]]
+index = 180
+id = "ICME_Wind_MOESTL_20170907_01"
+mo_start_utc = "2017-09-08T11:07:00+00:00"
+utc_year = 2017
+
+[[event]]
+index = 181
+id = "ICME_Wind_MOESTL_20170906_01"
+mo_start_utc = "2017-09-07T06:45:00+00:00"
+utc_year = 2017
+
+[[event]]
+index = 182
+id = "ICME_Wind_MOESTL_20170716_01"
+mo_start_utc = "2017-07-16T10:03:00+00:00"
+utc_year = 2017
+
+[[event]]
+index = 183
+id = "ICME_Wind_MOESTL_20170527_01"
+mo_start_utc = "2017-05-27T20:48:00+00:00"
+utc_year = 2017
+
+[[event]]
+index = 184
+id = "ICME_Wind_MOESTL_20170413_01"
+mo_start_utc = "2017-04-14T00:02:00+00:00"
+utc_year = 2017
+
+[[event]]
+index = 185
+id = "ICME_Wind_MOESTL_20170409_01"
+mo_start_utc = "2017-04-09T09:55:00+00:00"
+utc_year = 2017
+
+[[event]]
+index = 186
+id = "ICME_Wind_MOESTL_20170404_01"
+mo_start_utc = "2017-04-04T07:34:00+00:00"
+utc_year = 2017
+
+[[event]]
+index = 187
+id = "ICME_Wind_MOESTL_20161012_01"
+mo_start_utc = "2016-10-13T05:27:00+00:00"
+utc_year = 2016
+
+[[event]]
+index = 188
+id = "ICME_Wind_MOESTL_20160914_01"
+mo_start_utc = "2016-09-14T18:01:00+00:00"
+utc_year = 2016
+
+[[event]]
+index = 189
+id = "ICME_Wind_MOESTL_20160802_01"
+mo_start_utc = "2016-08-02T20:19:00+00:00"
+utc_year = 2016
+
+[[event]]
+index = 190
+id = "ICME_Wind_MOESTL_20160724_01"
+mo_start_utc = "2016-07-24T21:44:00+00:00"
+utc_year = 2016
+
+[[event]]
+index = 191
+id = "ICME_Wind_MOESTL_20160719_01"
+mo_start_utc = "2016-07-20T01:48:00+00:00"
+utc_year = 2016
+
+[[event]]
+index = 192
+id = "ICME_Wind_MOESTL_20160417_01"
+mo_start_utc = "2016-04-17T02:46:00+00:00"
+utc_year = 2016
+
+[[event]]
+index = 193
+id = "ICME_Wind_MOESTL_20160416_01"
+mo_start_utc = "2016-04-16T13:51:00+00:00"
+utc_year = 2016
+
+[[event]]
+index = 194
+id = "ICME_Wind_MOESTL_20160414_01"
+mo_start_utc = "2016-04-14T09:06:00+00:00"
+utc_year = 2016
+
+[[event]]
+index = 195
+id = "ICME_Wind_MOESTL_20160118_01"
+mo_start_utc = "2016-01-19T11:20:00+00:00"
+utc_year = 2016
+
+[[event]]
+index = 196
+id = "ICME_Wind_MOESTL_20151231_01"
+mo_start_utc = "2015-12-31T18:46:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 197
+id = "ICME_Wind_NASA_20151219_01"
+mo_start_utc = "2015-12-20T13:40:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 198
+id = "ICME_Wind_NASA_20151106_01"
+mo_start_utc = "2015-11-07T07:11:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 199
+id = "ICME_Wind_NASA_20151024_01"
+mo_start_utc = "2015-10-25T13:11:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 200
+id = "ICME_Wind_NASA_20151006_01"
+mo_start_utc = "2015-10-06T21:35:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 201
+id = "ICME_Wind_NASA_20150907_01"
+mo_start_utc = "2015-09-07T23:31:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 202
+id = "ICME_Wind_NASA_20150622_01"
+mo_start_utc = "2015-06-23T02:23:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 203
+id = "ICME_Wind_NASA_20150510_01"
+mo_start_utc = "2015-05-10T11:59:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 204
+id = "ICME_Wind_NASA_20150508_01"
+mo_start_utc = "2015-05-08T07:11:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 205
+id = "ICME_Wind_NASA_20150506_01"
+mo_start_utc = "2015-05-06T16:48:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 206
+id = "ICME_Wind_NASA_20150409_01"
+mo_start_utc = "2015-04-09T23:02:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 207
+id = "ICME_Wind_NASA_20150331_01"
+mo_start_utc = "2015-03-31T17:57:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 208
+id = "ICME_Wind_NASA_20150328_01"
+mo_start_utc = "2015-03-28T11:45:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 209
+id = "ICME_Wind_NASA_20150107_01"
+mo_start_utc = "2015-01-07T06:28:00+00:00"
+utc_year = 2015
+
+[[event]]
+index = 210
+id = "ICME_Wind_NASA_20140912_01"
+mo_start_utc = "2014-09-12T21:22:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 211
+id = "ICME_Wind_NASA_20140826_01"
+mo_start_utc = "2014-08-27T03:07:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 212
+id = "ICME_Wind_NASA_20140819_01"
+mo_start_utc = "2014-08-19T17:59:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 213
+id = "ICME_Wind_NASA_20140703_01"
+mo_start_utc = "2014-07-03T03:07:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 214
+id = "ICME_Wind_NASA_20140629_01"
+mo_start_utc = "2014-06-29T20:53:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 215
+id = "ICME_Wind_NASA_20140622_01"
+mo_start_utc = "2014-06-22T22:19:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 216
+id = "ICME_Wind_NASA_20140607_01"
+mo_start_utc = "2014-06-08T19:12:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 217
+id = "ICME_Wind_NASA_20140429_01"
+mo_start_utc = "2014-04-29T19:11:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 218
+id = "ICME_Wind_NASA_20140420_01"
+mo_start_utc = "2014-04-21T07:41:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 219
+id = "ICME_Wind_NASA_20140411_01"
+mo_start_utc = "2014-04-11T06:57:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 220
+id = "ICME_Wind_NASA_20140405_01"
+mo_start_utc = "2014-04-05T22:18:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 221
+id = "ICME_Wind_NASA_20140219_01"
+mo_start_utc = "2014-02-19T03:09:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 222
+id = "ICME_Wind_NASA_20140218_01"
+mo_start_utc = "2014-02-18T15:07:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 223
+id = "ICME_Wind_NASA_20140215_01"
+mo_start_utc = "2014-02-16T00:43:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 224
+id = "ICME_Wind_NASA_20140205_01"
+mo_start_utc = "2014-02-06T02:23:00+00:00"
+utc_year = 2014
+
+[[event]]
+index = 225
+id = "ICME_Wind_NASA_20131224_01"
+mo_start_utc = "2013-12-25T04:47:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 226
+id = "ICME_Wind_NASA_20131214_01"
+mo_start_utc = "2013-12-15T16:47:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 227
+id = "ICME_Wind_NASA_20131208_01"
+mo_start_utc = "2013-12-08T16:47:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 228
+id = "ICME_Wind_NASA_20131130_01"
+mo_start_utc = "2013-12-01T04:48:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 229
+id = "ICME_Wind_NASA_20131123_01"
+mo_start_utc = "2013-11-23T04:47:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 230
+id = "ICME_Wind_NASA_20131108_01"
+mo_start_utc = "2013-11-08T23:59:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 231
+id = "ICME_Wind_NASA_20131029_01"
+mo_start_utc = "2013-10-30T18:14:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 232
+id = "ICME_Wind_NASA_20131003_01"
+mo_start_utc = "2013-10-03T00:00:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 233
+id = "ICME_Wind_NASA_20131002_01"
+mo_start_utc = "2013-10-02T15:35:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 234
+id = "ICME_Wind_NASA_20130901_01"
+mo_start_utc = "2013-09-01T13:55:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 235
+id = "ICME_Wind_NASA_20130712_01"
+mo_start_utc = "2013-07-12T20:24:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 236
+id = "ICME_Wind_NASA_20130704_01"
+mo_start_utc = "2013-07-05T04:05:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 237
+id = "ICME_Wind_NASA_20130627_01"
+mo_start_utc = "2013-06-28T02:23:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 238
+id = "ICME_Wind_NASA_20130606_01"
+mo_start_utc = "2013-06-06T14:23:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 239
+id = "ICME_Wind_NASA_20130514_01"
+mo_start_utc = "2013-05-14T06:00:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 240
+id = "ICME_Wind_NASA_20130430_01"
+mo_start_utc = "2013-04-30T12:00:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 241
+id = "ICME_Wind_MOESTL_20130413_01"
+mo_start_utc = "2013-04-14T17:02:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 242
+id = "ICME_Wind_NASA_20130317_01"
+mo_start_utc = "2013-03-17T14:09:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 243
+id = "ICME_Wind_NASA_20130119_01"
+mo_start_utc = "2013-01-19T22:47:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 244
+id = "ICME_Wind_NASA_20130118_01"
+mo_start_utc = "2013-01-19T00:14:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 245
+id = "ICME_Wind_NASA_20130116_01"
+mo_start_utc = "2013-01-17T14:52:00+00:00"
+utc_year = 2013
+
+[[event]]
+index = 246
+id = "ICME_Wind_NASA_20121123_01"
+mo_start_utc = "2012-11-24T11:31:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 247
+id = "ICME_Wind_NASA_20121112_01"
+mo_start_utc = "2012-11-13T08:23:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 248
+id = "ICME_Wind_NASA_20121031_01"
+mo_start_utc = "2012-10-31T23:35:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 249
+id = "ICME_Wind_NASA_20121012_01"
+mo_start_utc = "2012-10-12T18:29:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 250
+id = "ICME_Wind_NASA_20121008_01"
+mo_start_utc = "2012-10-08T15:50:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 251
+id = "ICME_Wind_NASA_20120930_01"
+mo_start_utc = "2012-09-30T12:14:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 252
+id = "ICME_Wind_NASA_20120912_01"
+mo_start_utc = "2012-09-12T19:55:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 253
+id = "ICME_Wind_NASA_20120906_01"
+mo_start_utc = "2012-09-06T02:23:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 254
+id = "ICME_Wind_NASA_20120904_01"
+mo_start_utc = "2012-09-05T05:52:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 255
+id = "ICME_Wind_NASA_20120901_01"
+mo_start_utc = "2012-09-01T07:12:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 256
+id = "ICME_Wind_NASA_20120830_01"
+mo_start_utc = "2012-08-30T15:35:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 257
+id = "ICME_Wind_NASA_20120818_01"
+mo_start_utc = "2012-08-18T19:12:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 258
+id = "ICME_Wind_NASA_20120812_01"
+mo_start_utc = "2012-08-12T19:12:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 259
+id = "ICME_Wind_MOESTL_20120714_01"
+mo_start_utc = "2012-07-15T06:14:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 260
+id = "ICME_Wind_NASA_20120708_01"
+mo_start_utc = "2012-07-08T07:58:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 261
+id = "ICME_Wind_MOESTL_20120616_01"
+mo_start_utc = "2012-06-16T22:01:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 262
+id = "ICME_Wind_NASA_20120611_01"
+mo_start_utc = "2012-06-11T11:31:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 263
+id = "ICME_Wind_NASA_20120516_01"
+mo_start_utc = "2012-05-16T16:04:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 264
+id = "ICME_Wind_NASA_20120503_01"
+mo_start_utc = "2012-05-04T03:36:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 265
+id = "ICME_Wind_NASA_20120423_01"
+mo_start_utc = "2012-04-23T16:48:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 266
+id = "ICME_Wind_NASA_20120411_01"
+mo_start_utc = "2012-04-11T06:28:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 267
+id = "ICME_Wind_NASA_20120405_01"
+mo_start_utc = "2012-04-05T19:41:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 268
+id = "ICME_Wind_NASA_20120315_01"
+mo_start_utc = "2012-03-15T16:04:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 269
+id = "ICME_Wind_NASA_20120312_01"
+mo_start_utc = "2012-03-12T16:19:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 270
+id = "ICME_Wind_NASA_20120308_01"
+mo_start_utc = "2012-03-08T19:55:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 271
+id = "ICME_Wind_NASA_20120226_01"
+mo_start_utc = "2012-02-27T17:59:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 272
+id = "ICME_Wind_NASA_20120214_01"
+mo_start_utc = "2012-02-14T20:52:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 273
+id = "ICME_Wind_MOESTL_20120124_01"
+mo_start_utc = "2012-01-25T07:31:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 274
+id = "ICME_Wind_NASA_20120122_01"
+mo_start_utc = "2012-01-22T11:24:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 275
+id = "ICME_Wind_NASA_20120121_01"
+mo_start_utc = "2012-01-21T04:04:00+00:00"
+utc_year = 2012
+
+[[event]]
+index = 276
+id = "ICME_Wind_NASA_20111128_01"
+mo_start_utc = "2011-11-29T19:40:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 277
+id = "ICME_Wind_NASA_20111111_01"
+mo_start_utc = "2011-11-11T03:01:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 278
+id = "ICME_Wind_NASA_20111107_01"
+mo_start_utc = "2011-11-07T16:19:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 279
+id = "ICME_Wind_NASA_20111104_01"
+mo_start_utc = "2011-11-04T21:17:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 280
+id = "ICME_Wind_NASA_20111102_01"
+mo_start_utc = "2011-11-02T03:35:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 281
+id = "ICME_Wind_NASA_20111101_01"
+mo_start_utc = "2011-11-01T08:09:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 282
+id = "ICME_Wind_NASA_20111024_01"
+mo_start_utc = "2011-10-25T00:21:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 283
+id = "ICME_Wind_NASA_20111005_01"
+mo_start_utc = "2011-10-05T09:56:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 284
+id = "ICME_Wind_NASA_20110917_01"
+mo_start_utc = "2011-09-17T15:35:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 285
+id = "ICME_Wind_MOESTL_20110909_01"
+mo_start_utc = "2011-09-09T13:54:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 286
+id = "ICME_Wind_NASA_20110703_01"
+mo_start_utc = "2011-07-03T19:12:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 287
+id = "ICME_Wind_NASA_20110630_01"
+mo_start_utc = "2011-06-30T18:43:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 288
+id = "ICME_Wind_NASA_20110617_01"
+mo_start_utc = "2011-06-17T05:16:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 289
+id = "ICME_Wind_NASA_20110604_01"
+mo_start_utc = "2011-06-05T01:12:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 290
+id = "ICME_Wind_NASA_20110528_01"
+mo_start_utc = "2011-05-28T05:31:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 291
+id = "ICME_Wind_NASA_20110429_01"
+mo_start_utc = "2011-04-29T13:55:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 292
+id = "ICME_Wind_NASA_20110423_01"
+mo_start_utc = "2011-04-23T00:01:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 293
+id = "ICME_Wind_NASA_20110329_01"
+mo_start_utc = "2011-03-29T23:59:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 294
+id = "ICME_Wind_MOESTL_20110218_02"
+mo_start_utc = "2011-02-18T19:55:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 295
+id = "ICME_Wind_MOESTL_20110218_01"
+mo_start_utc = "2011-02-18T04:01:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 296
+id = "ICME_Wind_MOESTL_20110204_01"
+mo_start_utc = "2011-02-04T13:11:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 297
+id = "ICME_Wind_NASA_20110124_01"
+mo_start_utc = "2011-01-24T10:33:00+00:00"
+utc_year = 2011
+
+[[event]]
+index = 298
+id = "ICME_Wind_NASA_20101219_01"
+mo_start_utc = "2010-12-19T22:33:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 299
+id = "ICME_Wind_NASA_20101031_01"
+mo_start_utc = "2010-10-31T05:16:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 300
+id = "ICME_Wind_MOESTL_20101030_01"
+mo_start_utc = "2010-10-30T16:00:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 301
+id = "ICME_Wind_NASA_20101011_01"
+mo_start_utc = "2010-10-11T05:45:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 302
+id = "ICME_Wind_NASA_20100925_01"
+mo_start_utc = "2010-09-25T13:11:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 303
+id = "ICME_Wind_NASA_20100915_01"
+mo_start_utc = "2010-09-15T02:24:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 304
+id = "ICME_Wind_NASA_20100803_01"
+mo_start_utc = "2010-08-04T02:52:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 305
+id = "ICME_Wind_NASA_20100621_01"
+mo_start_utc = "2010-06-21T06:28:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 306
+id = "ICME_Wind_NASA_20100528_01"
+mo_start_utc = "2010-05-28T19:12:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 307
+id = "ICME_Wind_NASA_20100518_01"
+mo_start_utc = "2010-05-18T04:04:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 308
+id = "ICME_Wind_NASA_20100411_01"
+mo_start_utc = "2010-04-11T21:36:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 309
+id = "ICME_Wind_NASA_20100405_01"
+mo_start_utc = "2010-04-05T11:59:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 310
+id = "ICME_Wind_MOESTL_20100323_01"
+mo_start_utc = "2010-03-23T22:29:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 311
+id = "ICME_Wind_NASA_20100207_01"
+mo_start_utc = "2010-02-07T19:11:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 312
+id = "ICME_Wind_NASA_20100101_01"
+mo_start_utc = "2010-01-02T00:14:00+00:00"
+utc_year = 2010
+
+[[event]]
+index = 313
+id = "ICME_Wind_NASA_20091212_01"
+mo_start_utc = "2009-12-12T19:26:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 314
+id = "ICME_Wind_NASA_20091114_01"
+mo_start_utc = "2009-11-14T10:47:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 315
+id = "ICME_Wind_NASA_20091101_01"
+mo_start_utc = "2009-11-01T10:04:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 316
+id = "ICME_Wind_NASA_20091029_01"
+mo_start_utc = "2009-10-29T01:26:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 317
+id = "ICME_Wind_NASA_20090930_01"
+mo_start_utc = "2009-09-30T06:59:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 318
+id = "ICME_Wind_NASA_20090910_01"
+mo_start_utc = "2009-09-10T10:19:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 319
+id = "ICME_Wind_NASA_20090721_01"
+mo_start_utc = "2009-07-21T04:48:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 320
+id = "ICME_Wind_NASA_20090627_01"
+mo_start_utc = "2009-06-27T17:59:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 321
+id = "ICME_Wind_NASA_20090603_01"
+mo_start_utc = "2009-06-03T20:52:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 322
+id = "ICME_Wind_NASA_20090422_01"
+mo_start_utc = "2009-04-22T14:09:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 323
+id = "ICME_Wind_NASA_20090405_01"
+mo_start_utc = "2009-04-05T17:02:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 324
+id = "ICME_Wind_NASA_20090311_01"
+mo_start_utc = "2009-03-12T01:12:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 325
+id = "ICME_Wind_NASA_20090203_01"
+mo_start_utc = "2009-02-04T01:12:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 326
+id = "ICME_Wind_NASA_20090126_01"
+mo_start_utc = "2009-01-26T05:02:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 327
+id = "ICME_Wind_NASA_20090102_01"
+mo_start_utc = "2009-01-02T04:48:00+00:00"
+utc_year = 2009
+
+[[event]]
+index = 328
+id = "ICME_Wind_NASA_20081217_01"
+mo_start_utc = "2008-12-17T03:35:00+00:00"
+utc_year = 2008
+
+[[event]]
+index = 329
+id = "ICME_Wind_NASA_20081204_01"
+mo_start_utc = "2008-12-04T16:47:00+00:00"
+utc_year = 2008
+
+[[event]]
+index = 330
+id = "ICME_Wind_NASA_20080917_01"
+mo_start_utc = "2008-09-17T03:57:00+00:00"
+utc_year = 2008
+
+[[event]]
+index = 331
+id = "ICME_Wind_NASA_20080903_01"
+mo_start_utc = "2008-09-03T16:33:00+00:00"
+utc_year = 2008
+
+[[event]]
+index = 332
+id = "ICME_Wind_NASA_20080523_01"
+mo_start_utc = "2008-05-23T01:12:00+00:00"
+utc_year = 2008
+
+[[event]]
+index = 333
+id = "ICME_Wind_NASA_20071225_01"
+mo_start_utc = "2007-12-25T16:19:00+00:00"
+utc_year = 2007
+
+[[event]]
+index = 334
+id = "ICME_Wind_NASA_20071119_01"
+mo_start_utc = "2007-11-20T00:33:00+00:00"
+utc_year = 2007
+
+[[event]]
+index = 335
+id = "ICME_Wind_NASA_20070608_01"
+mo_start_utc = "2007-06-08T05:45:00+00:00"
+utc_year = 2007
+
+[[event]]
+index = 336
+id = "ICME_Wind_NASA_20070521_01"
+mo_start_utc = "2007-05-21T22:45:00+00:00"
+utc_year = 2007
+
+[[event]]
+index = 337
+id = "ICME_Wind_NASA_20070329_01"
+mo_start_utc = "2007-03-29T15:04:00+00:00"
+utc_year = 2007
+
+[[event]]
+index = 338
+id = "ICME_Wind_NASA_20070115_01"
+mo_start_utc = "2007-01-15T20:49:00+00:00"
+utc_year = 2007
+
+[[event]]
+index = 339
+id = "ICME_Wind_NASA_20070114_01"
+mo_start_utc = "2007-01-14T11:44:00+00:00"
+utc_year = 2007
+
+[[event]]
+index = 340
+id = "ICME_Wind_NASA_20061216_01"
+mo_start_utc = "2006-12-17T00:25:00+00:00"
+utc_year = 2006
+
+[[event]]
+index = 341
+id = "ICME_Wind_NASA_20061214_01"
+mo_start_utc = "2006-12-14T22:36:00+00:00"
+utc_year = 2006
+
+[[event]]
+index = 342
+id = "ICME_Wind_NASA_20061129_01"
+mo_start_utc = "2006-11-29T05:16:00+00:00"
+utc_year = 2006
+
+[[event]]
+index = 343
+id = "ICME_Wind_NASA_20061118_01"
+mo_start_utc = "2006-11-18T07:11:00+00:00"
+utc_year = 2006
+
+[[event]]
+index = 344
+id = "ICME_Wind_NASA_20061101_01"
+mo_start_utc = "2006-11-01T21:21:00+00:00"
+utc_year = 2006
+
+[[event]]
+index = 345
+id = "ICME_Wind_NASA_20060930_01"
+mo_start_utc = "2006-09-30T08:23:00+00:00"
+utc_year = 2006
+
+[[event]]
+index = 346
+id = "ICME_Wind_NASA_20060830_01"
+mo_start_utc = "2006-08-30T20:38:00+00:00"
+utc_year = 2006
+
+[[event]]
+index = 347
+id = "ICME_Wind_NASA_20060819_01"
+mo_start_utc = "2006-08-20T13:55:00+00:00"
+utc_year = 2006
+
+[[event]]
+index = 348
+id = "ICME_Wind_NASA_20060709_01"
+mo_start_utc = "2006-07-10T17:45:00+00:00"
+utc_year = 2006
+
+[[event]]
+index = 349
+id = "ICME_Wind_NASA_20060614_01"
+mo_start_utc = "2006-06-14T08:09:00+00:00"
+utc_year = 2006
+
+[[event]]
+index = 350
+id = "ICME_Wind_NASA_20060414_01"
+mo_start_utc = "2006-04-14T13:11:00+00:00"
+utc_year = 2006
+
+[[event]]
+index = 351
+id = "ICME_Wind_NASA_20060413_01"
+mo_start_utc = "2006-04-13T15:07:00+00:00"
+utc_year = 2006
+
+[[event]]
+index = 352
+id = "ICME_Wind_NASA_20060205_01"
+mo_start_utc = "2006-02-05T20:23:00+00:00"
+utc_year = 2006
+
+[[event]]
+index = 353
+id = "ICME_Wind_NASA_20051031_01"
+mo_start_utc = "2005-10-31T02:23:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 354
+id = "ICME_Wind_NASA_20050810_01"
+mo_start_utc = "2005-08-10T06:14:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 355
+id = "ICME_Wind_NASA_20050717_01"
+mo_start_utc = "2005-07-17T14:52:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 356
+id = "ICME_Wind_NASA_20050710_01"
+mo_start_utc = "2005-07-10T10:47:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 357
+id = "ICME_Wind_NASA_20050614_01"
+mo_start_utc = "2005-06-15T05:08:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 358
+id = "ICME_Wind_NASA_20050612_01"
+mo_start_utc = "2005-06-12T15:07:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 359
+id = "ICME_Wind_NASA_20050520_01"
+mo_start_utc = "2005-05-20T09:35:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 360
+id = "ICME_Wind_NASA_20050515_01"
+mo_start_utc = "2005-05-15T05:31:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 361
+id = "ICME_Wind_NASA_20050220_01"
+mo_start_utc = "2005-02-20T20:23:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 362
+id = "ICME_Wind_NASA_20050217_01"
+mo_start_utc = "2005-02-18T14:52:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 363
+id = "ICME_Wind_NASA_20050216_01"
+mo_start_utc = "2005-02-16T12:14:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 364
+id = "ICME_Wind_NASA_20050121_01"
+mo_start_utc = "2005-01-21T23:45:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 365
+id = "ICME_Wind_NASA_20050118_01"
+mo_start_utc = "2005-01-19T00:28:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 366
+id = "ICME_Wind_NASA_20050116_01"
+mo_start_utc = "2005-01-16T15:35:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 367
+id = "ICME_Wind_NASA_20050108_01"
+mo_start_utc = "2005-01-08T20:51:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 368
+id = "ICME_Wind_NASA_20050107_01"
+mo_start_utc = "2005-01-07T14:23:00+00:00"
+utc_year = 2005
+
+[[event]]
+index = 369
+id = "ICME_Wind_NASA_20041210_01"
+mo_start_utc = "2004-12-10T04:47:00+00:00"
+utc_year = 2004
+
+[[event]]
+index = 370
+id = "ICME_Wind_NASA_20041111_01"
+mo_start_utc = "2004-11-12T08:35:00+00:00"
+utc_year = 2004
+
+[[event]]
+index = 371
+id = "ICME_Wind_NASA_20041109_01"
+mo_start_utc = "2004-11-09T20:38:00+00:00"
+utc_year = 2004
+
+[[event]]
+index = 372
+id = "ICME_Wind_NASA_20041107_01"
+mo_start_utc = "2004-11-07T22:46:00+00:00"
+utc_year = 2004
+
+[[event]]
+index = 373
+id = "ICME_Wind_NASA_20040917_01"
+mo_start_utc = "2004-09-18T12:28:00+00:00"
+utc_year = 2004
+
+[[event]]
+index = 374
+id = "ICME_Wind_NASA_20040913_01"
+mo_start_utc = "2004-09-14T17:59:00+00:00"
+utc_year = 2004
+
+[[event]]
+index = 375
+id = "ICME_Wind_NASA_20040829_01"
+mo_start_utc = "2004-08-29T19:26:00+00:00"
+utc_year = 2004
+
+[[event]]
+index = 376
+id = "ICME_Wind_NASA_20040726_01"
+mo_start_utc = "2004-07-27T01:12:00+00:00"
+utc_year = 2004
+
+[[event]]
+index = 377
+id = "ICME_Wind_NASA_20040725_01"
+mo_start_utc = "2004-07-25T17:45:00+00:00"
+utc_year = 2004
+
+[[event]]
+index = 378
+id = "ICME_Wind_NASA_20040724_01"
+mo_start_utc = "2004-07-24T07:12:00+00:00"
+utc_year = 2004
+
+[[event]]
+index = 379
+id = "ICME_Wind_NASA_20040722_01"
+mo_start_utc = "2004-07-22T13:26:00+00:00"
+utc_year = 2004
+
+[[event]]
+index = 380
+id = "ICME_Wind_NASA_20040403_01"
+mo_start_utc = "2004-04-04T01:11:00+00:00"
+utc_year = 2004
+
+[[event]]
+index = 381
+id = "ICME_Wind_NASA_20040109_01"
+mo_start_utc = "2004-01-10T06:01:00+00:00"
+utc_year = 2004
+
+[[event]]
+index = 382
+id = "ICME_Wind_NASA_20031120_01"
+mo_start_utc = "2003-11-20T11:31:00+00:00"
+utc_year = 2003
+
+[[event]]
+index = 383
+id = "ICME_Wind_NASA_20031030_01"
+mo_start_utc = "2003-10-31T02:00:00+00:00"
+utc_year = 2003
+
+[[event]]
+index = 384
+id = "ICME_Wind_NASA_20031029_01"
+mo_start_utc = "2003-10-29T11:16:00+00:00"
+utc_year = 2003
+
+[[event]]
+index = 385
+id = "ICME_Wind_NASA_20031021_01"
+mo_start_utc = "2003-10-22T02:24:00+00:00"
+utc_year = 2003
+
+[[event]]
+index = 386
+id = "ICME_Wind_NASA_20030804_01"
+mo_start_utc = "2003-08-05T01:10:00+00:00"
+utc_year = 2003
+
+[[event]]
+index = 387
+id = "ICME_Wind_NASA_20030616_01"
+mo_start_utc = "2003-06-17T17:48:00+00:00"
+utc_year = 2003
+
+[[event]]
+index = 388
+id = "ICME_Wind_NASA_20030509_01"
+mo_start_utc = "2003-05-09T09:27:00+00:00"
+utc_year = 2003
+
+[[event]]
+index = 389
+id = "ICME_Wind_NASA_20030320_01"
+mo_start_utc = "2003-03-20T11:54:00+00:00"
+utc_year = 2003
+
+[[event]]
+index = 390
+id = "ICME_Wind_NASA_20030201_01"
+mo_start_utc = "2003-02-02T19:11:00+00:00"
+utc_year = 2003
+
+[[event]]
+index = 391
+id = "ICME_Wind_NASA_20030126_01"
+mo_start_utc = "2003-01-27T01:40:00+00:00"
+utc_year = 2003
+
+[[event]]
+index = 392
+id = "ICME_Wind_NASA_20021221_01"
+mo_start_utc = "2002-12-21T10:20:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 393
+id = "ICME_Wind_NASA_20021116_01"
+mo_start_utc = "2002-11-17T20:24:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 394
+id = "ICME_Wind_NASA_20020930_01"
+mo_start_utc = "2002-09-30T22:04:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 395
+id = "ICME_Wind_NASA_20020903_01"
+mo_start_utc = "2002-09-03T04:47:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 396
+id = "ICME_Wind_NASA_20020826_01"
+mo_start_utc = "2002-08-26T14:23:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 397
+id = "ICME_Wind_NASA_20020818_01"
+mo_start_utc = "2002-08-19T19:12:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 398
+id = "ICME_Wind_NASA_20020801_02"
+mo_start_utc = "2002-08-02T07:12:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 399
+id = "ICME_Wind_NASA_20020801_01"
+mo_start_utc = "2002-08-01T12:14:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 400
+id = "ICME_Wind_NASA_20020523_01"
+mo_start_utc = "2002-05-23T23:02:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 401
+id = "ICME_Wind_NASA_20020520_01"
+mo_start_utc = "2002-05-20T16:47:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 402
+id = "ICME_Wind_NASA_20020518_01"
+mo_start_utc = "2002-05-19T03:30:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 403
+id = "ICME_Wind_NASA_20020511_01"
+mo_start_utc = "2002-05-11T12:37:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 404
+id = "ICME_Wind_NASA_20020510_01"
+mo_start_utc = "2002-05-10T22:20:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 405
+id = "ICME_Wind_NASA_20020423_01"
+mo_start_utc = "2002-04-24T07:11:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 406
+id = "ICME_Wind_NASA_20020419_01"
+mo_start_utc = "2002-04-20T06:57:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 407
+id = "ICME_Wind_NASA_20020417_01"
+mo_start_utc = "2002-04-17T21:36:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 408
+id = "ICME_Wind_NASA_20020414_01"
+mo_start_utc = "2002-04-14T15:21:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 409
+id = "ICME_Wind_NASA_20020323_01"
+mo_start_utc = "2002-03-24T13:11:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 410
+id = "ICME_Wind_NASA_20020318_01"
+mo_start_utc = "2002-03-19T06:14:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 411
+id = "ICME_Wind_NASA_20020228_01"
+mo_start_utc = "2002-02-28T19:11:00+00:00"
+utc_year = 2002
+
+[[event]]
+index = 412
+id = "ICME_Wind_NASA_20011230_01"
+mo_start_utc = "2001-12-30T23:10:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 413
+id = "ICME_Wind_NASA_20011229_01"
+mo_start_utc = "2001-12-30T03:24:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 414
+id = "ICME_Wind_NASA_20011124_01"
+mo_start_utc = "2001-11-24T15:47:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 415
+id = "ICME_Wind_NASA_20011031_01"
+mo_start_utc = "2001-10-31T22:04:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 416
+id = "ICME_Wind_NASA_20011028_01"
+mo_start_utc = "2001-10-29T16:19:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 417
+id = "ICME_Wind_NASA_20011021_01"
+mo_start_utc = "2001-10-22T01:17:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 418
+id = "ICME_Wind_NASA_20010930_01"
+mo_start_utc = "2001-09-30T22:33:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 419
+id = "ICME_Wind_NASA_20010929_01"
+mo_start_utc = "2001-09-29T14:23:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 420
+id = "ICME_Wind_NASA_20010925_01"
+mo_start_utc = "2001-09-26T10:04:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 421
+id = "ICME_Wind_NASA_20010817_01"
+mo_start_utc = "2001-08-17T23:59:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 422
+id = "ICME_Wind_NASA_20010805_01"
+mo_start_utc = "2001-08-06T06:43:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 423
+id = "ICME_Wind_NASA_20010627_01"
+mo_start_utc = "2001-06-27T05:59:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 424
+id = "ICME_Wind_NASA_20010527_01"
+mo_start_utc = "2001-05-28T07:12:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 425
+id = "ICME_Wind_NASA_20010428_01"
+mo_start_utc = "2001-04-28T17:59:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 426
+id = "ICME_Wind_NASA_20010421_01"
+mo_start_utc = "2001-04-22T00:28:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 427
+id = "ICME_Wind_NASA_20010413_01"
+mo_start_utc = "2001-04-13T13:11:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 428
+id = "ICME_Wind_NASA_20010411_01"
+mo_start_utc = "2001-04-11T22:48:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 429
+id = "ICME_Wind_NASA_20010404_01"
+mo_start_utc = "2001-04-04T20:54:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 430
+id = "ICME_Wind_NASA_20010327_01"
+mo_start_utc = "2001-03-27T01:59:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 431
+id = "ICME_Wind_NASA_20010320_01"
+mo_start_utc = "2001-03-20T18:17:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 432
+id = "ICME_Wind_NASA_20010319_01"
+mo_start_utc = "2001-03-19T19:55:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 433
+id = "ICME_Wind_NASA_20010304_01"
+mo_start_utc = "2001-03-04T05:45:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 434
+id = "ICME_Wind_NASA_20010123_01"
+mo_start_utc = "2001-01-24T08:38:00+00:00"
+utc_year = 2001
+
+[[event]]
+index = 435
+id = "ICME_Wind_NASA_20001203_01"
+mo_start_utc = "2000-12-03T03:59:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 436
+id = "ICME_Wind_NASA_20001126_01"
+mo_start_utc = "2000-11-27T09:30:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 437
+id = "ICME_Wind_NASA_20001111_01"
+mo_start_utc = "2000-11-11T04:11:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 438
+id = "ICME_Wind_NASA_20001110_01"
+mo_start_utc = "2000-11-10T11:02:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 439
+id = "ICME_Wind_NASA_20001106_01"
+mo_start_utc = "2000-11-06T23:05:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 440
+id = "ICME_Wind_NASA_20001028_01"
+mo_start_utc = "2000-10-28T23:18:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 441
+id = "ICME_Wind_NASA_20001012_01"
+mo_start_utc = "2000-10-13T18:24:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 442
+id = "ICME_Wind_NASA_20001005_01"
+mo_start_utc = "2000-10-05T19:11:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 443
+id = "ICME_Wind_NASA_20001003_01"
+mo_start_utc = "2000-10-03T09:36:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 444
+id = "ICME_Wind_NASA_20000917_01"
+mo_start_utc = "2000-09-18T01:53:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 445
+id = "ICME_Wind_NASA_20000906_01"
+mo_start_utc = "2000-09-07T03:24:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 446
+id = "ICME_Wind_NASA_20000904_01"
+mo_start_utc = "2000-09-04T13:13:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 447
+id = "ICME_Wind_NASA_20000902_01"
+mo_start_utc = "2000-09-02T23:16:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 448
+id = "ICME_Wind_NASA_20000811_01"
+mo_start_utc = "2000-08-12T06:05:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 449
+id = "ICME_Wind_NASA_20000810_01"
+mo_start_utc = "2000-08-10T20:52:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 450
+id = "ICME_Wind_NASA_20000731_01"
+mo_start_utc = "2000-07-31T23:28:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 451
+id = "ICME_Wind_NASA_20000728_01"
+mo_start_utc = "2000-07-28T14:24:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 452
+id = "ICME_Wind_NASA_20000719_01"
+mo_start_utc = "2000-07-19T15:30:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 453
+id = "ICME_Wind_NASA_20000715_02"
+mo_start_utc = "2000-07-15T17:31:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 454
+id = "ICME_Wind_NASA_20000715_01"
+mo_start_utc = "2000-07-15T06:47:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 455
+id = "ICME_Wind_NASA_20000713_01"
+mo_start_utc = "2000-07-13T15:35:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 456
+id = "ICME_Wind_NASA_20000711_01"
+mo_start_utc = "2000-07-11T22:35:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 457
+id = "ICME_Wind_NASA_20000701_01"
+mo_start_utc = "2000-07-01T07:12:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 458
+id = "ICME_Wind_NASA_20000623_01"
+mo_start_utc = "2000-06-24T09:00:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 459
+id = "ICME_Wind_NASA_20000608_01"
+mo_start_utc = "2000-06-08T16:47:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 460
+id = "ICME_Wind_NASA_20000507_01"
+mo_start_utc = "2000-05-07T03:53:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 461
+id = "ICME_Wind_NASA_20000328_01"
+mo_start_utc = "2000-03-28T02:52:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 462
+id = "ICME_Wind_NASA_20000301_01"
+mo_start_utc = "2000-03-01T03:21:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 463
+id = "ICME_Wind_NASA_20000220_01"
+mo_start_utc = "2000-02-21T14:24:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 464
+id = "ICME_Wind_NASA_20000214_01"
+mo_start_utc = "2000-02-14T13:11:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 465
+id = "ICME_Wind_NASA_20000211_01"
+mo_start_utc = "2000-02-12T12:20:00+00:00"
+utc_year = 2000
+
+[[event]]
+index = 466
+id = "ICME_Wind_NASA_19991212_01"
+mo_start_utc = "1999-12-12T17:31:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 467
+id = "ICME_Wind_NASA_19991021_01"
+mo_start_utc = "1999-10-21T02:19:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 468
+id = "ICME_Wind_NASA_19990922_01"
+mo_start_utc = "1999-09-22T17:59:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 469
+id = "ICME_Wind_NASA_19990921_01"
+mo_start_utc = "1999-09-21T18:57:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 470
+id = "ICME_Wind_NASA_19990915_01"
+mo_start_utc = "1999-09-15T07:43:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 471
+id = "ICME_Wind_NASA_19990809_01"
+mo_start_utc = "1999-08-09T10:12:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 472
+id = "ICME_Wind_NASA_19990806_01"
+mo_start_utc = "1999-08-06T14:23:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 473
+id = "ICME_Wind_NASA_19990730_01"
+mo_start_utc = "1999-07-31T02:02:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 474
+id = "ICME_Wind_NASA_19990706_01"
+mo_start_utc = "1999-07-06T19:12:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 475
+id = "ICME_Wind_NASA_19990702_01"
+mo_start_utc = "1999-07-03T08:09:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 476
+id = "ICME_Wind_NASA_19990626_01"
+mo_start_utc = "1999-06-26T02:31:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 477
+id = "ICME_Wind_NASA_19990528_01"
+mo_start_utc = "1999-05-28T21:50:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 478
+id = "ICME_Wind_NASA_19990416_01"
+mo_start_utc = "1999-04-16T19:11:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 479
+id = "ICME_Wind_NASA_19990218_01"
+mo_start_utc = "1999-02-18T09:14:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 480
+id = "ICME_Wind_NASA_19990211_01"
+mo_start_utc = "1999-02-11T17:41:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 481
+id = "ICME_Wind_NASA_19990122_01"
+mo_start_utc = "1999-01-22T20:21:00+00:00"
+utc_year = 1999
+
+[[event]]
+index = 482
+id = "ICME_Wind_NASA_19981109_01"
+mo_start_utc = "1998-11-09T00:44:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 483
+id = "ICME_Wind_NASA_19981108_01"
+mo_start_utc = "1998-11-08T04:41:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 484
+id = "ICME_Wind_NASA_19981023_01"
+mo_start_utc = "1998-10-23T19:55:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 485
+id = "ICME_Wind_NASA_19981018_01"
+mo_start_utc = "1998-10-19T04:19:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 486
+id = "ICME_Wind_NASA_19980924_01"
+mo_start_utc = "1998-09-25T04:33:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 487
+id = "ICME_Wind_NASA_19980923_01"
+mo_start_utc = "1998-09-23T04:19:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 488
+id = "ICME_Wind_NASA_19980826_01"
+mo_start_utc = "1998-08-26T21:07:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 489
+id = "ICME_Wind_NASA_19980819_01"
+mo_start_utc = "1998-08-20T08:38:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 490
+id = "ICME_Wind_NASA_19980810_01"
+mo_start_utc = "1998-08-10T04:47:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 491
+id = "ICME_Wind_NASA_19980710_01"
+mo_start_utc = "1998-07-10T22:36:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 492
+id = "ICME_Wind_NASA_19980624_01"
+mo_start_utc = "1998-06-24T13:26:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 493
+id = "ICME_Wind_MOESTL_19980613_01"
+mo_start_utc = "1998-06-13T22:18:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 494
+id = "ICME_Wind_MOESTL_19980602_01"
+mo_start_utc = "1998-06-02T10:28:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 495
+id = "ICME_Wind_NASA_19980504_01"
+mo_start_utc = "1998-05-04T09:50:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 496
+id = "ICME_Wind_NASA_19980501_01"
+mo_start_utc = "1998-05-02T11:31:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 497
+id = "ICME_Wind_MOESTL_19980407_01"
+mo_start_utc = "1998-04-08T00:26:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 498
+id = "ICME_Wind_NASA_19980401_01"
+mo_start_utc = "1998-04-01T21:07:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 499
+id = "ICME_Wind_NASA_19980331_01"
+mo_start_utc = "1998-03-31T11:59:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 500
+id = "ICME_Wind_NASA_19980325_01"
+mo_start_utc = "1998-03-25T14:23:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 501
+id = "ICME_Wind_NASA_19980306_01"
+mo_start_utc = "1998-03-06T11:59:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 502
+id = "ICME_Wind_NASA_19980304_01"
+mo_start_utc = "1998-03-04T14:42:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 503
+id = "ICME_Wind_NASA_19980218_01"
+mo_start_utc = "1998-02-18T21:35:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 504
+id = "ICME_Wind_NASA_19980217_01"
+mo_start_utc = "1998-02-17T10:48:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 505
+id = "ICME_Wind_NASA_19980204_01"
+mo_start_utc = "1998-02-04T04:48:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 506
+id = "ICME_Wind_NASA_19980202_01"
+mo_start_utc = "1998-02-02T10:27:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 507
+id = "ICME_Wind_NASA_19980128_01"
+mo_start_utc = "1998-01-29T13:12:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 508
+id = "ICME_Wind_NASA_19980121_01"
+mo_start_utc = "1998-01-21T04:47:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 509
+id = "ICME_Wind_NASA_19980109_01"
+mo_start_utc = "1998-01-09T08:23:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 510
+id = "ICME_Wind_NASA_19980108_01"
+mo_start_utc = "1998-01-08T15:35:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 511
+id = "ICME_Wind_NASA_19980106_01"
+mo_start_utc = "1998-01-07T02:23:00+00:00"
+utc_year = 1998
+
+[[event]]
+index = 512
+id = "ICME_Wind_NASA_19971230_01"
+mo_start_utc = "1997-12-30T09:35:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 513
+id = "ICME_Wind_NASA_19971210_01"
+mo_start_utc = "1997-12-10T19:11:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 514
+id = "ICME_Wind_NASA_19971122_01"
+mo_start_utc = "1997-11-22T17:31:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 515
+id = "ICME_Wind_NASA_19971106_01"
+mo_start_utc = "1997-11-07T06:00:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 516
+id = "ICME_Wind_NASA_19971010_01"
+mo_start_utc = "1997-10-10T15:33:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 517
+id = "ICME_Wind_NASA_19971001_01"
+mo_start_utc = "1997-10-01T17:08:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 518
+id = "ICME_Wind_NASA_19970921_01"
+mo_start_utc = "1997-09-21T22:21:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 519
+id = "ICME_Wind_NASA_19970918_01"
+mo_start_utc = "1997-09-18T04:07:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 520
+id = "ICME_Wind_NASA_19970902_01"
+mo_start_utc = "1997-09-03T08:38:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 521
+id = "ICME_Wind_NASA_19970817_01"
+mo_start_utc = "1997-08-17T06:33:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 522
+id = "ICME_Wind_NASA_19970803_01"
+mo_start_utc = "1997-08-03T13:55:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 523
+id = "ICME_Wind_NASA_19970715_01"
+mo_start_utc = "1997-07-15T06:48:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 524
+id = "ICME_Wind_NASA_19970619_01"
+mo_start_utc = "1997-06-19T05:31:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 525
+id = "ICME_Wind_NASA_19970608_01"
+mo_start_utc = "1997-06-09T06:18:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 526
+id = "ICME_Wind_NASA_19970526_01"
+mo_start_utc = "1997-05-26T15:35:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 527
+id = "ICME_Wind_NASA_19970516_01"
+mo_start_utc = "1997-05-16T06:01:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 528
+id = "ICME_Wind_NASA_19970515_01"
+mo_start_utc = "1997-05-15T10:00:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 529
+id = "ICME_Wind_NASA_19970421_01"
+mo_start_utc = "1997-04-21T11:59:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 530
+id = "ICME_Wind_NASA_19970410_01"
+mo_start_utc = "1997-04-11T05:45:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 531
+id = "ICME_Wind_NASA_19970209_01"
+mo_start_utc = "1997-02-10T02:52:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 532
+id = "ICME_Wind_NASA_19970110_01"
+mo_start_utc = "1997-01-10T04:47:00+00:00"
+utc_year = 1997
+
+[[event]]
+index = 533
+id = "ICME_Wind_NASA_19961224_01"
+mo_start_utc = "1996-12-24T03:07:00+00:00"
+utc_year = 1996
+
+[[event]]
+index = 534
+id = "ICME_Wind_NASA_19960807_01"
+mo_start_utc = "1996-08-07T11:59:00+00:00"
+utc_year = 1996
+
+[[event]]
+index = 535
+id = "ICME_Wind_NASA_19960702_01"
+mo_start_utc = "1996-07-02T16:04:00+00:00"
+utc_year = 1996
+
+[[event]]
+index = 536
+id = "ICME_Wind_NASA_19960701_01"
+mo_start_utc = "1996-07-01T17:16:00+00:00"
+utc_year = 1996
+
+[[event]]
+index = 537
+id = "ICME_Wind_NASA_19960527_01"
+mo_start_utc = "1996-05-27T14:45:00+00:00"
+utc_year = 1996
+
+[[event]]
+index = 538
+id = "ICME_Wind_NASA_19960516_01"
+mo_start_utc = "1996-05-17T01:36:00+00:00"
+utc_year = 1996
+
+[[event]]
+index = 539
+id = "ICME_Wind_NASA_19960404_01"
+mo_start_utc = "1996-04-04T11:59:00+00:00"
+utc_year = 1996
+
+[[event]]
+index = 540
+id = "ICME_Wind_NASA_19960215_01"
+mo_start_utc = "1996-02-15T15:07:00+00:00"
+utc_year = 1996
+
+[[event]]
+index = 541
+id = "ICME_Wind_NASA_19951215_01"
+mo_start_utc = "1995-12-16T07:11:00+00:00"
+utc_year = 1995
+
+[[event]]
+index = 542
+id = "ICME_Wind_NASA_19951018_01"
+mo_start_utc = "1995-10-18T19:11:00+00:00"
+utc_year = 1995
+
+[[event]]
+index = 543
+id = "ICME_Wind_NASA_19950926_01"
+mo_start_utc = "1995-09-27T03:36:00+00:00"
+utc_year = 1995
+
+[[event]]
+index = 544
+id = "ICME_Wind_NASA_19950822_01"
+mo_start_utc = "1995-08-22T22:19:00+00:00"
+utc_year = 1995
+
+[[event]]
+index = 545
+id = "ICME_Wind_NASA_19950630_01"
+mo_start_utc = "1995-06-30T14:23:00+00:00"
+utc_year = 1995
+
+[[event]]
+index = 546
+id = "ICME_Wind_NASA_19950513_01"
+mo_start_utc = "1995-05-13T10:19:00+00:00"
+utc_year = 1995
+
+[[event]]
+index = 547
+id = "ICME_Wind_NASA_19950405_01"
+mo_start_utc = "1995-04-05T17:59:00+00:00"
+utc_year = 1995
+
+[[event]]
+index = 548
+id = "ICME_Wind_NASA_19950403_01"
+mo_start_utc = "1995-04-03T12:45:00+00:00"
+utc_year = 1995
+
+[[event]]
+index = 549
+id = "ICME_Wind_NASA_19950306_01"
+mo_start_utc = "1995-03-06T07:11:00+00:00"
+utc_year = 1995
+
+[[event]]
+index = 550
+id = "ICME_Wind_NASA_19950304_01"
+mo_start_utc = "1995-03-04T11:23:00+00:00"
+utc_year = 1995
+
+[[event]]
+index = 551
+id = "ICME_Wind_NASA_19950207_01"
+mo_start_utc = "1995-02-08T03:21:00+00:00"
+utc_year = 1995

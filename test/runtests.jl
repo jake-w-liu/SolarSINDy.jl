@@ -1024,3 +1024,20 @@ include("cme_wind_metadata_tests.jl")
 
 # Distinct locked mixed8 point-model and source-bound integration controls.
 include("archive_locked_mixed8_ridge_tests.jl")
+
+# Unprivileged completed-source selection metadata controls.
+include("completed_selection_tests.jl")
+
+# Parsed selection metadata and zero-fit point-binding controls.
+include("selected_point_binding_tests.jl")
+
+# Full native bootstrap fixture controls; separate protocol workflow remains mandatory.
+include("cme_gsm_bootstrap_tests.jl")
+CMEGSMBootstrapPackageControls.run_package_native_fixture()
+
+# Fixed-grid numerical candidate production and independent reconstruction.
+include(joinpath(@__DIR__,"candidate_validation","runtests.jl"))
+
+# Native minute-label/QC kernels and complete frozen551-event generated replay.
+include("cme_gsm_labels_tests.jl")
+CMEGSMLabelsPackageControls.run_package_native_fixture()

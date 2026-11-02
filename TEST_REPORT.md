@@ -1561,3 +1561,107 @@ Native Julia remains blocked by the unchanged 8 GiB physical-memory gate. This
 private implementation is not qualified, committed, merged, pushed or usable as
 scientific evidence. All new Julia tests and the required full verification
 chain must run before that status can change.
+
+
+## Pure selection integration: written but unexecuted (2026-10-28)
+
+Q's frozen kernel and V2 tests were independently reviewed before integration.
+The existing Python literal-oracle checkpoint records six methods covering
+thirty fixture cases; integration does not rerun or convert them into Julia
+evidence. Native Julia parsing, assertion counts and execution remain unknown.
+
+The appended package controls retain all frozen test-body bytes, including
+complete R2 parameter records, legal nonwinner digest mutations, gamma station
+weighting/grid priority, all-family ties, malformed metadata, and strict source
+readiness. A generated metadata-only experiment exercises the package namespace.
+It does not fit any model or implement actual-source selection/selected-refit
+lineage. The unchanged8GiB physical-memory gate still governs any Julia launch.
+This integration remains privately unverified; source-byte proofs are not tests
+or software/scientific qualification, and all required native gates remain open.
+
+
+## Selection codec/binding slice: native checks pending (2026-10-29)
+
+Executed pre-code evidence is five independent Python methods covering18 literal
+metadata binding routes and10 abstract admission truth-table cases. The truth
+table is not native actual-admission evidence. Independent full canonical/frame
+fixtures are also written from the frozen literal gamma/R2 cases and declared
+raw-bit recipes, without importing the production fitter or executing Julia.
+
+Written Julia controls cover exact request/decision hashes and primitive frames,
+ownership, typed primary/sensitivity rejection, complete schema/evidence/grid/
+split/status validation, outside pins, semantic tampering after outer rehash,
+all18 metadata binding cases, generated L8 identity and all3 ground11 family
+transfers, wrong origin/policy rejection, and canonical publication/readback.
+They explicitly check that actual selected APIs and a producer-checked admission
+type do not exist. A generated example is appended to complete experiments.
+All new Julia code/tests/examples remain unexecuted and unverified behind8GiB
+admission. Actual producer/evaluation checks and generated selected calibration/
+static/replay full-chain positives remain required next; no metadata layer is
+presented as actual selected-operation support or scientific evidence.
+
+
+## CME bootstrap package/workflow integration: unexecuted (2026-10-29)
+
+The D review established metadata/static properties only. This integration
+preserves its six source/input/test files and adds package/example entry adapters
+without skipping, changing or weakening native test bodies. The adapter resolves
+the fixed Main module explicitly and uses canonical temporary roots. All native
+runtime and RNG equality gates remain required; no primary RNG matrix hash is
+invented or inferred from a seed. Workflow parsing and official action-pin checks
+are separate metadata verification, not Julia execution or scientific evidence.
+The host8GiB admission requirement remains unchanged; Julia has not been run.
+
+
+## Archival-static positive fixture-root correction (2026-10-29)
+
+Pre-code source hashes, exact eight-callback patch bytes and an inverse oracle
+were frozen before editing. Static checks confirm canonical-root derivation
+precedes each positive prepare/path call and preserve the negative-only block,
+already-canonical block and every production guard. No tautological test or
+tolerance change was added. The observed macOS failure and broader temporary
+path audit are retained; native Julia/fullPkg/examples/macOS reverification
+remains pending because8GiB admission is unmet.
+
+## Candidate numerical pipeline: written, Julia unexecuted (2026-11-02)
+
+The complete Pkg and examples entry points append the candidate pipeline without
+removing any earlier suite. The synthetic source has changing training and
+validation regimes and enough rows for the unchanged64/32 minleaf settings.
+The written chain runs all16 recipes for CMO and FRD, strict model readback,
+real K preparation, separate source/record/model/metric reconstruction, completed
+witness readback, and ridge/boost/forest selected refits for each station.
+
+Independent expectations include raw log-MSE5/2 for targets[0,0] and predictions
+[-2,1], scale independence, the80-term rational log2 sign oracle, and the literal
+nonconstant11-column input digest413fd2f8. A forged prediction with consistently
+updated scores/ranks/metric/enclosing hashes must still fail source/model
+reconstruction. Later source changes remain outside the earlier split.
+Source-spy negatives cover wrong station/case/table/role, preexisting output,
+missing or wrong actual-operation permits, and generated evidence presented as
+actual. A two-target numerical failure retains its generated attempt and a retry
+cannot reopen targets. Generated completion fixtures explicitly declare no
+actual authority or native execution evidence; their shape tests are not native
+receipt qualification. No tolerance was loosened and no original F/K/Q/C byte
+was changed for this slice.
+
+Status: no Julia command was launched because current physical admission is
+below8GiB. Julia syntax/dispatch, assertions, counts, numerical bit parity, actual
+authority positives, fullPkg, completeExamples, unchangedH, both strict docs,
+all18CI and authorized actual positive execution are therefore UNVERIFIED. The
+Python rational-oracle metadata checks do not execute or qualify these Julia
+implementations. No empirical forecast superiority or paper result follows from
+these written controls.
+
+## CME GSM minute-label integration: written, Julia unexecuted (2026-11-02)
+
+The nested package adapter includes every frozen minute-label literal test and
+calls the full551-event generated population fixture. Complete experiments call
+the matching reviewed example, which executes the synthetic Time/QC/label/
+join/statistic/fixed-index numerical route. Primary75percent and named90/95
+coverage sensitivities, full frozen membership and year-weighted10000draw
+contrasts remain explicit; no native regeneration/equality gate was replaced
+by this fixed-index synthetic fixture. The reviewed REAL4 marker correction
+preserves exact same-Epoch field semantics. These Julia tests have not run or
+been parsed under the8GiB admission blocker. Independent rational-oracle checks
+do not qualify Julia, actual CDF data, source admission, results or the paper.

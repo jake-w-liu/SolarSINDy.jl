@@ -1,0 +1,1564 @@
+{
+  "schema": "selected_slice_independent_literal_metadata_oracles_v1",
+  "fixture_only": true,
+  "no_real_evidence_or_authority": true,
+  "binding_cases": [
+    {
+      "name": "zero_fit_L8_CMO_identity",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "fixed_locked_mixed8",
+          "candidate_id": "locked-mixed8-penalty1",
+          "decision_sha256": null
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "mixed8",
+          "family": "locked_mixed8_ridge_log1p_v1",
+          "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+          "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+          "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+          "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+          "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+        },
+        "transfer_policy": "locked_mixed8_identity_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": true,
+      "expected_reason": "identity",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "zero_fit_L8_FRD_identity",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "fixed_locked_mixed8",
+          "candidate_id": "locked-mixed8-penalty1",
+          "decision_sha256": null
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "FRD",
+          "layout": "mixed8",
+          "family": "locked_mixed8_ridge_log1p_v1",
+          "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+          "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+          "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+          "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+          "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+        },
+        "transfer_policy": "locked_mixed8_identity_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": true,
+      "expected_reason": "identity",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "zero_fit_primary_transfer_ridge",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "selected_R2_ground11",
+          "candidate_id": "ridge-0.01",
+          "decision_sha256": "56b1b5c9752f2d4030b6fc60c16cbee59c96a521d3b8e997ac4de90590ecd6b5"
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "ground11",
+          "family": "ridge",
+          "context_sha256": "dedc0e83944c7662e83e7631f42c8513818ba97b7944fdbdea5c0708c1f04def",
+          "recipe_sha256": "4a007e97e95760ee3cf26b60f9b8c4f0923f9b413a757c4e3af88a2fd7f8ab79",
+          "model_sha256": "7fa105cc3d27e165c4f830f75eb336c982e9f8100865e5b99009c208988160b4",
+          "receipt_sha256": "919f337798fe0a7d846bd7b5f0067aff6c8acccb36f8affee95f85596aacf15b",
+          "source_sha256": "5e89e393df11fb6d941baf502ac40b97a5c474d42f1f20dc33312357871c3dc3"
+        },
+        "transfer_policy": "primary_mixed8_to_ground11_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": true,
+      "expected_reason": "declared_transfer",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "zero_fit_primary_transfer_boost",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "selected_R2_ground11",
+          "candidate_id": "boost-2-50",
+          "decision_sha256": "56b1b5c9752f2d4030b6fc60c16cbee59c96a521d3b8e997ac4de90590ecd6b5"
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "ground11",
+          "family": "boost",
+          "context_sha256": "a0caef21b8003c47337916e3d062b105218fe7340535042212b9ef8ebe57a963",
+          "recipe_sha256": "a04aa17dcf5c44f1bd3ab65b1b7cf53a32112606aa945c63f8d49ec5cc45b33a",
+          "model_sha256": "87b2ed4dda1bc87c9bb7fc89e970e986fb7966383cb498d42eaf633a9fb23693",
+          "receipt_sha256": "3151b89d607bc2ac8cfb4093259da4e63b23694684cc4042827e2ceca9eaa9ab",
+          "source_sha256": "133b925250b06738849277748c85b552139a3d3d685aec961dffca7f31aeeee3"
+        },
+        "transfer_policy": "primary_mixed8_to_ground11_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": true,
+      "expected_reason": "declared_transfer",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "zero_fit_primary_transfer_forest",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "selected_R2_ground11",
+          "candidate_id": "forest-6-64",
+          "decision_sha256": "56b1b5c9752f2d4030b6fc60c16cbee59c96a521d3b8e997ac4de90590ecd6b5"
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "ground11",
+          "family": "forest",
+          "context_sha256": "d967fb2a13bba67f51bb88aa0d40731fdf091faf47980e8654521c582974528c",
+          "recipe_sha256": "ac34f1197f89878ed9d28d66ef262ddae94f78b3ec7e042dee5037a264a8b714",
+          "model_sha256": "2b2af4d77f4e17ccc849771cca53a4cdb086c41fbd4b3868a4d0686a4228eba6",
+          "receipt_sha256": "4e9768fc5d3026aa00c61ae4bbe812365682989d2f418149929766df38767244",
+          "source_sha256": "497c1ce27a176b81a2c1efa26f73cf74cc23e1cedd3e9a679c8e44121c96abaf"
+        },
+        "transfer_policy": "primary_mixed8_to_ground11_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": true,
+      "expected_reason": "declared_transfer",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "identity_changed_model",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "fixed_locked_mixed8",
+          "candidate_id": "locked-mixed8-penalty1",
+          "decision_sha256": null
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "mixed8",
+          "family": "locked_mixed8_ridge_log1p_v1",
+          "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+          "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+          "model_sha256": "747a0eb4aac4d7d9dc867386c1f079d4f260933c8bdcea4420c5f391017579a5",
+          "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+          "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+        },
+        "transfer_policy": "locked_mixed8_identity_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": false,
+      "expected_reason": "identity_mismatch",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "identity_wrong_layout",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "fixed_locked_mixed8",
+          "candidate_id": "locked-mixed8-penalty1",
+          "decision_sha256": null
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "ground11",
+          "family": "locked_mixed8_ridge_log1p_v1",
+          "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+          "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+          "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+          "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+          "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+        },
+        "transfer_policy": "locked_mixed8_identity_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": false,
+      "expected_reason": "layout",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "undeclared_transfer",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "fixed_locked_mixed8",
+          "candidate_id": "locked-mixed8-penalty1",
+          "decision_sha256": null
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "mixed8",
+          "family": "locked_mixed8_ridge_log1p_v1",
+          "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+          "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+          "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+          "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+          "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+        },
+        "transfer_policy": "arbitrary_transfer",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": false,
+      "expected_reason": "transfer_policy",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "wrong_station",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "fixed_locked_mixed8",
+          "candidate_id": "locked-mixed8-penalty1",
+          "decision_sha256": null
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "BOU",
+          "layout": "mixed8",
+          "family": "locked_mixed8_ridge_log1p_v1",
+          "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+          "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+          "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+          "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+          "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+        },
+        "transfer_policy": "locked_mixed8_identity_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": false,
+      "expected_reason": "station",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "missing_FRD_origin",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "fixed_locked_mixed8",
+          "candidate_id": "locked-mixed8-penalty1",
+          "decision_sha256": null
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "mixed8",
+          "family": "locked_mixed8_ridge_log1p_v1",
+          "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+          "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+          "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+          "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+          "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+        },
+        "transfer_policy": "locked_mixed8_identity_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": false,
+      "expected_reason": "origin_inventory",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "wrong_policy_period30",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "fixed_locked_mixed8",
+          "candidate_id": "locked-mixed8-penalty1",
+          "decision_sha256": null
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 30
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "mixed8",
+          "family": "locked_mixed8_ridge_log1p_v1",
+          "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+          "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+          "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+          "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+          "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+        },
+        "transfer_policy": "locked_mixed8_identity_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": false,
+      "expected_reason": "period",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "FIFO31_sensitivity_in_primary",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "fixed_locked_mixed8",
+          "candidate_id": "locked-mixed8-penalty1",
+          "decision_sha256": null
+        },
+        "primary_rate_choice": {
+          "kind": "fifo_clock31_sensitivity",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "clock_matched_1_over_31_sensitivity",
+          "fifo_gamma_bits": "3f00e99aa833441d",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "mixed8",
+          "family": "locked_mixed8_ridge_log1p_v1",
+          "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+          "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+          "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+          "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+          "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+        },
+        "transfer_policy": "locked_mixed8_identity_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": false,
+      "expected_reason": "primary_rate_type",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "gamma_not_in_fixed_grid",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "fixed_locked_mixed8",
+          "candidate_id": "locked-mixed8-penalty1",
+          "decision_sha256": null
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3ff0000000000000",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "mixed8",
+          "family": "locked_mixed8_ridge_log1p_v1",
+          "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+          "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+          "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+          "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+          "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+        },
+        "transfer_policy": "locked_mixed8_identity_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": false,
+      "expected_reason": "gamma_grid",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "parsed_claims_verified",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "fixed_locked_mixed8",
+          "candidate_id": "locked-mixed8-penalty1",
+          "decision_sha256": null
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "mixed8",
+          "family": "locked_mixed8_ridge_log1p_v1",
+          "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+          "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+          "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+          "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+          "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+        },
+        "transfer_policy": "locked_mixed8_identity_v1",
+        "producer_evidence_verified": true,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": false,
+      "expected_reason": "untrusted_status",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "parsed_claims_authority",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "fixed_locked_mixed8",
+          "candidate_id": "locked-mixed8-penalty1",
+          "decision_sha256": null
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "mixed8",
+          "family": "locked_mixed8_ridge_log1p_v1",
+          "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+          "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+          "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+          "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+          "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+        },
+        "transfer_policy": "locked_mixed8_identity_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": true,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": false,
+      "expected_reason": "untrusted_status",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "binding_claims_fit",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "fixed_locked_mixed8",
+          "candidate_id": "locked-mixed8-penalty1",
+          "decision_sha256": null
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "mixed8",
+          "family": "locked_mixed8_ridge_log1p_v1",
+          "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+          "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+          "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+          "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+          "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+        },
+        "transfer_policy": "locked_mixed8_identity_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": true
+      },
+      "expected_metadata_binding": false,
+      "expected_reason": "binding_work",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "undeclared_deployment_family",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "selected_R2_ground11",
+          "candidate_id": "ridge-0.01",
+          "decision_sha256": "56b1b5c9752f2d4030b6fc60c16cbee59c96a521d3b8e997ac4de90590ecd6b5"
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "ground11",
+          "family": "evotrees",
+          "context_sha256": "dedc0e83944c7662e83e7631f42c8513818ba97b7944fdbdea5c0708c1f04def",
+          "recipe_sha256": "4a007e97e95760ee3cf26b60f9b8c4f0923f9b413a757c4e3af88a2fd7f8ab79",
+          "model_sha256": "7fa105cc3d27e165c4f830f75eb336c982e9f8100865e5b99009c208988160b4",
+          "receipt_sha256": "919f337798fe0a7d846bd7b5f0067aff6c8acccb36f8affee95f85596aacf15b",
+          "source_sha256": "5e89e393df11fb6d941baf502ac40b97a5c474d42f1f20dc33312357871c3dc3"
+        },
+        "transfer_policy": "primary_mixed8_to_ground11_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": false,
+      "expected_reason": "family",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    },
+    {
+      "name": "wrong_selected_candidate",
+      "value": {
+        "schema": "selected_point_binding_data_v1",
+        "point_choice": {
+          "kind": "selected_R2_ground11",
+          "candidate_id": "forest-9-64",
+          "decision_sha256": "56b1b5c9752f2d4030b6fc60c16cbee59c96a521d3b8e997ac4de90590ecd6b5"
+        },
+        "primary_rate_choice": {
+          "kind": "primary_L8_joint_CMO_FRD",
+          "phase_grid": "phase_declared",
+          "phase_gamma_bits": "3f50624dd2f1a9fc",
+          "fifo_grid": "rate_matched_1_over_30",
+          "fifo_gamma_bits": "3f0179ec9cbd821e",
+          "decision_sha256": "14bbfe9b507033e2212766b180032ec40d2a07d23023ee22e32596813a992fa8",
+          "policy_sha256": "0f2ffa800405b063bb05beca011574c0db8a2fd3791e53d778df28f865012984",
+          "phase_period_minutes": 31
+        },
+        "gamma_origin": [
+          {
+            "point": {
+              "station": "CMO",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "6f6c0623f758f13f4228f095f2c51f983c28c38e70b864984207520555993234",
+              "recipe_sha256": "6349ce7fef791e7741d34b638d5bbffb956297f484e1bdb396db936cbf121060",
+              "model_sha256": "5a667c4e1d8cb8edd9fce0a40e81c1ff7d04687e24c7b38edd4810a073c9b21d",
+              "receipt_sha256": "095806aff36723600ea724dea89aff038b66578833a01512b4d3696b1608c43c",
+              "source_sha256": "918cc58bb544e43ba6dae8d7dc8157724592bf8b7985ff7e562ba49c57da0ef1"
+            },
+            "calibration_context_sha256": "333fd22100a7315e5eb94b86087247a7e8d7289927d29ad427b50f0fee08fa07",
+            "calibration_input_sha256": "65d098d8e4e29c215dbac8bec91d3774fd44d3f3f391c0d1d881a547b97bb70c",
+            "calibration_receipt_sha256": "18ebd50bc50f0736975f8418819b97b9c614e339e7688735e377f808e9f69454"
+          },
+          {
+            "point": {
+              "station": "FRD",
+              "layout": "mixed8",
+              "family": "locked_mixed8_ridge_log1p_v1",
+              "context_sha256": "64c84104d692be7ae04ff092de8998473989b884cc7538814158f585206338b8",
+              "recipe_sha256": "2414196850f5bcd90ec1a70a15f19005f5682a365aee4738e474478d7aed32a0",
+              "model_sha256": "8142064331f17de9fbc46dd915fe5ce86b0659dfbde839f2f9b0c8a5dabf594c",
+              "receipt_sha256": "339a8abf589ef6e644443d42f6899a79bb914477d21dd6aa3754fc113c5c5491",
+              "source_sha256": "d5d445659fd436075135343a7cada3fedb3add5e1f2bd46d70104cb942bf2d98"
+            },
+            "calibration_context_sha256": "9393b19b4d0fc1344ee7756b6dc46365b2ae5d4cfd246bfc81b99df923366c57",
+            "calibration_input_sha256": "632debf4c060ade27521ab56a100dd58f91cda5877ebe35973dc60911c3752d4",
+            "calibration_receipt_sha256": "215813c74faf81b98009d8c9e82a65de6d4905f404918de9f1f23a9c0c40c8b2"
+          }
+        ],
+        "deployment_point": {
+          "station": "CMO",
+          "layout": "ground11",
+          "family": "ridge",
+          "context_sha256": "dedc0e83944c7662e83e7631f42c8513818ba97b7944fdbdea5c0708c1f04def",
+          "recipe_sha256": "4a007e97e95760ee3cf26b60f9b8c4f0923f9b413a757c4e3af88a2fd7f8ab79",
+          "model_sha256": "7fa105cc3d27e165c4f830f75eb336c982e9f8100865e5b99009c208988160b4",
+          "receipt_sha256": "919f337798fe0a7d846bd7b5f0067aff6c8acccb36f8affee95f85596aacf15b",
+          "source_sha256": "5e89e393df11fb6d941baf502ac40b97a5c474d42f1f20dc33312357871c3dc3"
+        },
+        "transfer_policy": "primary_mixed8_to_ground11_v1",
+        "producer_evidence_verified": false,
+        "actual_authority_granted": false,
+        "binding_performed_new_fit": false
+      },
+      "expected_metadata_binding": false,
+      "expected_reason": "point_choice",
+      "expected_new_fits": 0,
+      "expected_target_reads": 0
+    }
+  ],
+  "admission_cases": [
+    {
+      "name": "parsed_no_permits",
+      "parsed_unverified": true,
+      "concrete_producer_checks_complete": false,
+      "outer_selected_refit_permit": false,
+      "inner_F_fit_permit": false,
+      "all_recipe_source_cohort_pins_match": true,
+      "external_expected_digest_supplied": false,
+      "selected_and_inner_attempts_fresh": true,
+      "expected_actual_refit_admissible": false,
+      "expected_fit_budget": 0,
+      "fixture_only_abstract_gate": true
+    },
+    {
+      "name": "parsed_outer_only",
+      "parsed_unverified": true,
+      "concrete_producer_checks_complete": false,
+      "outer_selected_refit_permit": true,
+      "inner_F_fit_permit": false,
+      "all_recipe_source_cohort_pins_match": true,
+      "external_expected_digest_supplied": false,
+      "selected_and_inner_attempts_fresh": true,
+      "expected_actual_refit_admissible": false,
+      "expected_fit_budget": 0,
+      "fixture_only_abstract_gate": true
+    },
+    {
+      "name": "parsed_inner_only",
+      "parsed_unverified": true,
+      "concrete_producer_checks_complete": false,
+      "outer_selected_refit_permit": false,
+      "inner_F_fit_permit": true,
+      "all_recipe_source_cohort_pins_match": true,
+      "external_expected_digest_supplied": false,
+      "selected_and_inner_attempts_fresh": true,
+      "expected_actual_refit_admissible": false,
+      "expected_fit_budget": 0,
+      "fixture_only_abstract_gate": true
+    },
+    {
+      "name": "parsed_both_permits",
+      "parsed_unverified": true,
+      "concrete_producer_checks_complete": false,
+      "outer_selected_refit_permit": true,
+      "inner_F_fit_permit": true,
+      "all_recipe_source_cohort_pins_match": true,
+      "external_expected_digest_supplied": false,
+      "selected_and_inner_attempts_fresh": true,
+      "expected_actual_refit_admissible": false,
+      "expected_fit_budget": 0,
+      "fixture_only_abstract_gate": true
+    },
+    {
+      "name": "parsed_expected_digest_and_permits",
+      "parsed_unverified": true,
+      "concrete_producer_checks_complete": false,
+      "outer_selected_refit_permit": true,
+      "inner_F_fit_permit": true,
+      "all_recipe_source_cohort_pins_match": true,
+      "external_expected_digest_supplied": true,
+      "selected_and_inner_attempts_fresh": true,
+      "expected_actual_refit_admissible": false,
+      "expected_fit_budget": 0,
+      "fixture_only_abstract_gate": true
+    },
+    {
+      "name": "checked_without_outer",
+      "parsed_unverified": false,
+      "concrete_producer_checks_complete": true,
+      "outer_selected_refit_permit": false,
+      "inner_F_fit_permit": true,
+      "all_recipe_source_cohort_pins_match": true,
+      "external_expected_digest_supplied": false,
+      "selected_and_inner_attempts_fresh": true,
+      "expected_actual_refit_admissible": false,
+      "expected_fit_budget": 0,
+      "fixture_only_abstract_gate": true
+    },
+    {
+      "name": "checked_without_inner",
+      "parsed_unverified": false,
+      "concrete_producer_checks_complete": true,
+      "outer_selected_refit_permit": true,
+      "inner_F_fit_permit": false,
+      "all_recipe_source_cohort_pins_match": true,
+      "external_expected_digest_supplied": false,
+      "selected_and_inner_attempts_fresh": true,
+      "expected_actual_refit_admissible": false,
+      "expected_fit_budget": 0,
+      "fixture_only_abstract_gate": true
+    },
+    {
+      "name": "checked_wrong_recipe_or_pins",
+      "parsed_unverified": false,
+      "concrete_producer_checks_complete": true,
+      "outer_selected_refit_permit": true,
+      "inner_F_fit_permit": true,
+      "all_recipe_source_cohort_pins_match": false,
+      "external_expected_digest_supplied": false,
+      "selected_and_inner_attempts_fresh": true,
+      "expected_actual_refit_admissible": false,
+      "expected_fit_budget": 0,
+      "fixture_only_abstract_gate": true
+    },
+    {
+      "name": "checked_spent_attempt",
+      "parsed_unverified": false,
+      "concrete_producer_checks_complete": true,
+      "outer_selected_refit_permit": true,
+      "inner_F_fit_permit": true,
+      "all_recipe_source_cohort_pins_match": true,
+      "external_expected_digest_supplied": false,
+      "selected_and_inner_attempts_fresh": false,
+      "expected_actual_refit_admissible": false,
+      "expected_fit_budget": 0,
+      "fixture_only_abstract_gate": true
+    },
+    {
+      "name": "future_all_concrete_checks_and_permits",
+      "parsed_unverified": false,
+      "concrete_producer_checks_complete": true,
+      "outer_selected_refit_permit": true,
+      "inner_F_fit_permit": true,
+      "all_recipe_source_cohort_pins_match": true,
+      "external_expected_digest_supplied": false,
+      "selected_and_inner_attempts_fresh": true,
+      "expected_actual_refit_admissible": true,
+      "expected_fit_budget": 1,
+      "fixture_only_abstract_gate": true
+    }
+  ],
+  "total_literal_cases": 28,
+  "fixed_primary_gamma_bits": [
+    "3f50624dd2f1a9fc",
+    "3f60624dd2f1a9fc",
+    "3f747ae147ae147b",
+    "3f847ae147ae147b",
+    "3f947ae147ae147b",
+    "3fa999999999999a",
+    "3fb999999999999a"
+  ],
+  "fixed_primary_FIFO30_bits": [
+    "3f0179ec9cbd821e",
+    "3f1179ec9cbd821e",
+    "3f25d867c3ece2a5",
+    "3f35d867c3ece2a5",
+    "3f45d867c3ece2a5",
+    "3f5b4e81b4e81b4f",
+    "3f6b4e81b4e81b4f"
+  ],
+  "fixed_sensitivity_FIFO31_bits": [
+    "3f00e99aa833441d",
+    "3f10e99aa833441d",
+    "3f25240152401524",
+    "3f35240152401524",
+    "3f45240152401524",
+    "3f5a6d01a6d01a6d",
+    "3f6a6d01a6d01a6d"
+  ],
+  "fixed_R2_grid": [
+    {
+      "id": "ridge-0.01",
+      "family": "ridge",
+      "penalty": "0.01",
+      "depth": 0,
+      "trees": 0
+    },
+    {
+      "id": "ridge-0.1",
+      "family": "ridge",
+      "penalty": "0.1",
+      "depth": 0,
+      "trees": 0
+    },
+    {
+      "id": "ridge-1",
+      "family": "ridge",
+      "penalty": "1",
+      "depth": 0,
+      "trees": 0
+    },
+    {
+      "id": "ridge-10",
+      "family": "ridge",
+      "penalty": "10",
+      "depth": 0,
+      "trees": 0
+    },
+    {
+      "id": "ridge-100",
+      "family": "ridge",
+      "penalty": "100",
+      "depth": 0,
+      "trees": 0
+    },
+    {
+      "id": "boost-2-50",
+      "family": "boost",
+      "penalty": "0",
+      "depth": 2,
+      "trees": 50
+    },
+    {
+      "id": "boost-2-100",
+      "family": "boost",
+      "penalty": "0",
+      "depth": 2,
+      "trees": 100
+    },
+    {
+      "id": "boost-2-200",
+      "family": "boost",
+      "penalty": "0",
+      "depth": 2,
+      "trees": 200
+    },
+    {
+      "id": "boost-3-50",
+      "family": "boost",
+      "penalty": "0",
+      "depth": 3,
+      "trees": 50
+    },
+    {
+      "id": "boost-3-100",
+      "family": "boost",
+      "penalty": "0",
+      "depth": 3,
+      "trees": 100
+    },
+    {
+      "id": "boost-3-200",
+      "family": "boost",
+      "penalty": "0",
+      "depth": 3,
+      "trees": 200
+    },
+    {
+      "id": "boost-4-50",
+      "family": "boost",
+      "penalty": "0",
+      "depth": 4,
+      "trees": 50
+    },
+    {
+      "id": "boost-4-100",
+      "family": "boost",
+      "penalty": "0",
+      "depth": 4,
+      "trees": 100
+    },
+    {
+      "id": "boost-4-200",
+      "family": "boost",
+      "penalty": "0",
+      "depth": 4,
+      "trees": 200
+    },
+    {
+      "id": "forest-6-64",
+      "family": "forest",
+      "penalty": "0",
+      "depth": 6,
+      "trees": 64
+    },
+    {
+      "id": "forest-9-64",
+      "family": "forest",
+      "penalty": "0",
+      "depth": 9,
+      "trees": 64
+    }
+  ],
+  "R2_allties_expected": [
+    "ridge-0.01",
+    "boost-2-50",
+    "forest-6-64"
+  ],
+  "canonical_literal": {
+    "object": {
+      "schema": "selected_point_binding_data_v1",
+      "actual_authority_granted": false,
+      "binding_performed_new_fit": false,
+      "producer_evidence_verified": false
+    },
+    "utf8_hex": "7b2261637475616c5f617574686f726974795f6772616e746564223a66616c73652c2262696e64696e675f706572666f726d65645f6e65775f666974223a66616c73652c2270726f64756365725f65766964656e63655f7665726966696564223a66616c73652c22736368656d61223a2273656c65637465645f706f696e745f62696e64696e675f646174615f7631227d0a",
+    "sha256": "d8717ff7e1a41939a89c59be398cb38d897662ffae039773f623449e5abe905a"
+  },
+  "zero_fit_identity_canonical_hex": "7b2261637475616c5f617574686f726974795f6772616e746564223a66616c73652c2262696e64696e675f706572666f726d65645f6e65775f666974223a66616c73652c226465706c6f796d656e745f706f696e74223a7b22636f6e746578745f736861323536223a2236663663303632336637353866313366343232386630393566326335316639383363323863333865373062383634393834323037353230353535393933323334222c2266616d696c79223a226c6f636b65645f6d69786564385f72696467655f6c6f6731705f7631222c226c61796f7574223a226d6978656438222c226d6f64656c5f736861323536223a2235613636376334653164386362386564643966636530613430653831633166663764303436383765323463376233386564643438313061303733633962323164222c22726563656970745f736861323536223a2230393538303661666633363732333630306561373234646561383961666630333862363635373838333361303135313262346433363936623136303863343363222c227265636970655f736861323536223a2236333439636537666566373931653737343164333462363338643562626666623935363239376634383465316264623339366462393336636266313231303630222c22736f757263655f736861323536223a2239313863633538626235343465343362613664616538643764633831353737323435393262663862373938356666376535363262613439633537646130656631222c2273746174696f6e223a22434d4f227d2c2267616d6d615f6f726967696e223a5b7b2263616c6962726174696f6e5f636f6e746578745f736861323536223a2233333366643232313030613733313565356562393462383630383732343761376538643732383939323764323961643432376235306630666565303866613037222c2263616c6962726174696f6e5f696e7075745f736861323536223a2236356430393864386534653239633231356462616338626563393164333737346664343464336633663339316330643164383831613534376239376262373063222c2263616c6962726174696f6e5f726563656970745f736861323536223a2231386562643530626335306630373336393735663834313838313962393762396336313465333339653736383837333565333737663830386539663639343534222c22706f696e74223a7b22636f6e746578745f736861323536223a2236663663303632336637353866313366343232386630393566326335316639383363323863333865373062383634393834323037353230353535393933323334222c2266616d696c79223a226c6f636b65645f6d69786564385f72696467655f6c6f6731705f7631222c226c61796f7574223a226d6978656438222c226d6f64656c5f736861323536223a2235613636376334653164386362386564643966636530613430653831633166663764303436383765323463376233386564643438313061303733633962323164222c22726563656970745f736861323536223a2230393538303661666633363732333630306561373234646561383961666630333862363635373838333361303135313262346433363936623136303863343363222c227265636970655f736861323536223a2236333439636537666566373931653737343164333462363338643562626666623935363239376634383465316264623339366462393336636266313231303630222c22736f757263655f736861323536223a2239313863633538626235343465343362613664616538643764633831353737323435393262663862373938356666376535363262613439633537646130656631222c2273746174696f6e223a22434d4f227d7d2c7b2263616c6962726174696f6e5f636f6e746578745f736861323536223a2239333933623139623464306663313334346565373735366236646334363336356232616535643463666432343662666338316239396466393233333636633537222c2263616c6962726174696f6e5f696e7075745f736861323536223a2236333264656266346330363061646532373532316162353661313030646435386639316364613538373765626533353937336463363039313163333735326434222c2263616c6962726174696f6e5f726563656970745f736861323536223a2232313538313363373466616638316239383030396438633965383261363564653664343930356634303439313864653966316632336139633063343063386232222c22706f696e74223a7b22636f6e746578745f736861323536223a2236346338343130346436393262653761653034666630393264653839393834373339383962383834636337353338383134313538663538353230363333386238222c2266616d696c79223a226c6f636b65645f6d69786564385f72696467655f6c6f6731705f7631222c226c61796f7574223a226d6978656438222c226d6f64656c5f736861323536223a2238313432303634333331663137646539666263343664643931356665356365383662303635396466626465383339663266396230633861356461626635393463222c22726563656970745f736861323536223a2233333961386162663538396566366536343434343364343266363839396137396262393134343737643231646436616133373534666331313363356335343931222c227265636970655f736861323536223a2232343134313936383530663562636439306563316137306131356631393030356635363832613336356165653437333865343734343738643761656433326130222c22736f757263655f736861323536223a2264356434343536353966643433363037353133353334336137636164613366656462336164643565316632626434366437303130346362393432626632643938222c2273746174696f6e223a22465244227d7d5d2c22706f696e745f63686f696365223a7b2263616e6469646174655f6964223a226c6f636b65642d6d69786564382d70656e616c747931222c226465636973696f6e5f736861323536223a6e756c6c2c226b696e64223a2266697865645f6c6f636b65645f6d6978656438227d2c227072696d6172795f726174655f63686f696365223a7b226465636973696f6e5f736861323536223a2231346262666539623530373033336532323132373636623138303033326563343064326130376432333032336565323265333235393638313361393932666138222c226669666f5f67616d6d615f62697473223a2233663031373965633963626438323165222c226669666f5f67726964223a22726174655f6d6174636865645f315f6f7665725f3330222c226b696e64223a227072696d6172795f4c385f6a6f696e745f434d4f5f465244222c2270686173655f67616d6d615f62697473223a2233663530363234646432663161396663222c2270686173655f67726964223a2270686173655f6465636c61726564222c2270686173655f706572696f645f6d696e75746573223a33312c22706f6c6963795f736861323536223a2230663266666138303034303562303633626230356265636130313135373463306462386132666433373931653533643737386466323866383635303132393834227d2c2270726f64756365725f65766964656e63655f7665726966696564223a66616c73652c22736368656d61223a2273656c65637465645f706f696e745f62696e64696e675f646174615f7631222c227472616e736665725f706f6c696379223a226c6f636b65645f6d69786564385f6964656e746974795f7631227d0a",
+  "zero_fit_identity_sha256": "40c5066d9e3b44cdd607ea87ed2a61a65b7c2bcbdd35530e9880d945c580055c",
+  "Julia_executed": false,
+  "actual_fits": 0,
+  "source_or_scientific_qualification": false
+}

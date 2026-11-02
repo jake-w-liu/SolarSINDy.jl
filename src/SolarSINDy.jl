@@ -23,6 +23,8 @@ include("completed_minute_replay.jl")
 export CompletedMinuteReplay
 include("completed_source_dbdt/CompletedSourceDBDT.jl")
 export CompletedSourceDBDT
+include("completed_source_dbdt/CompletedSelectionPrimitives.jl")
+export CompletedSelectionPrimitives
 include("data.jl")
 include("sindy.jl")
 include("storm_selection.jl")
@@ -99,6 +101,8 @@ include("archive_point_models/ArchiveLockedMixed8Ridge.jl")
 export ArchiveLockedMixed8Ridge
 include("archive_point_models/ArchiveSourceBoundPointFit.jl")
 export ArchiveSourceBoundPointFit
+include("archive_point_models/ArchiveSelectedPointBindings.jl")
+export ArchiveSelectedPointBindings
 export ArchiveCatalogCaseJob
 
 export # Utils

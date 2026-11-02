@@ -262,3 +262,18 @@ ArchivalReplayTraceSynthetic.run_example()
 
 include(joinpath(@__DIR__,"archive_locked_mixed8_ridge_synthetic.jl"))
 ArchiveLockedMixed8RidgeSynthetic.run_example()
+
+include(joinpath(@__DIR__,"completed_selection_synthetic.jl"))
+CompletedSelectionSynthetic.run_example()
+
+include(joinpath(@__DIR__,"selected_point_binding_synthetic.jl"))
+SelectedPointBindingSynthetic.run_example()
+
+include(joinpath(@__DIR__,"cme_gsm_bootstrap_synthetic.jl"))
+CMEGSMBootstrapSynthetic.run_example()
+
+include(joinpath(@__DIR__,"candidate_validation_synthetic.jl"))
+CandidateValidationSynthetic.run_example()
+
+include(joinpath(@__DIR__,"cme_gsm_labels_synthetic.jl"))
+CMEGSMLabelsSynthetic.run_example()

@@ -1,0 +1,86 @@
+# Repository-integrated protocol; native qualification remains pending.
+# Requires the reviewed sibling files at research/cme_gsm_bootstrap/ in a clean,
+# committed checkout. This protocol artifact grants no observational/scientific
+# authority and does not replace Pkg.test(), experiments, or the full CI18 gates.
+name: CME GSM bootstrap native protocol
+on:
+  push:
+    branches: [main, codex/catalog-calibration-integration-20261027]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  primary:
+    name: Candidate primary Julia 1.12.6 Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Keep frozen source bytes LF on every host
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: julia-actions/setup-julia@da908477b5db94c10ffce8cfea9f2b3b9d5db687
+        with:
+          version: '1.12.6'
+      - name: Own one native child; available physical RAM at least 8 GiB; timeout 900 seconds
+        run: python -B -X utf8 research/cme_gsm_bootstrap/run_native_bootstrap.py --project-root "${{ github.workspace }}" --evidence-dir "${{ runner.temp }}/bootstrap-primary" --runtime '1.12.6' --role primary --source-head '${{ github.sha }}'
+      - name: Retain every raw, receipt, partial output and candidate matrix
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bootstrap-primary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bootstrap-primary
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30
+  controls:
+    name: Native control ${{ matrix.os }} Julia ${{ matrix.julia }}
+    needs: primary
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            julia: '1.12.6'
+          # Official standard Intel macOS runner has 14 GB total RAM.
+          # Total RAM is not admission evidence: still require 8 GiB AVAILABLE.
+          - os: macos-15-intel
+            julia: '1.12.6'
+          - os: ubuntu-latest
+            julia: '1.13.1'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - name: Keep frozen source bytes LF on every host
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: julia-actions/setup-julia@da908477b5db94c10ffce8cfea9f2b3b9d5db687
+        with:
+          version: ${{ matrix.julia }}
+      - name: Download candidate primary as evidence only; never execute its contents
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: bootstrap-primary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bootstrap-frozen-primary
+      - name: Own one native child and measure agreement against primary bytes
+        run: python -B -X utf8 research/cme_gsm_bootstrap/run_native_bootstrap.py --project-root "${{ github.workspace }}" --evidence-dir "${{ runner.temp }}/bootstrap-control" --runtime '${{ matrix.julia }}' --role control --source-head '${{ github.sha }}' --primary-evidence-dir "${{ runner.temp }}/bootstrap-frozen-primary"
+      - name: Retain every raw, receipt, partial output, matrix and measured comparison
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bootstrap-control-${{ matrix.os }}-${{ matrix.julia }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/bootstrap-control
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30
+# Freeze/admit the primary only after all four native jobs succeed and an
+# independent observer retains genuine job logs + API-digest-verified artifacts,
+# checks native receipts, hashes and all three measured byte comparisons.
+# Cross-version native RNG equality is an untested, fail-closed gate under the
+# current V2 interpretation. It is distinct from frozen-primary reader parity;
+# replacing it with reader parity needs an explicit reviewed protocol amendment.

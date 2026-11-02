@@ -1606,3 +1606,164 @@ native historical/oracle/integration controls, unfiltered Pkg.test(), complete
 examples/experiments.jl, canonical harness audit, strict documentation and all
 original 18 CI jobs, followed by genuine qualified actual-source positives.
 No manuscript value, scientific verdict, main promotion or public push follows.
+
+
+## Pure completed-source selection primitives: native verification pending (2026-10-28)
+
+The locked mixed8 implementation was privately committed as
+0d84d2e24e7a3aec037fd5405c81ead29c68d3fa after exact source-byte checks. That
+commit and its 917-file native source proof establish bytes and Git filters only;
+Julia syntax, execution, solver parity and software qualification remain pending.
+
+The separately reviewed CompletedSelectionPrimitives kernel is now copied
+byte-for-byte into the package and exported as an unprivileged namespace. It
+accepts fixed typed metric tables, chooses gamma by equal station-normalized
+loss and declared-grid priority, retains all sixteen R2 candidates and three
+family winners, and supplies a target-free strict2017 readiness predicate.
+Deterministic numeric decision digests grant no producer, source, fit, replay or
+scientific authority. Existing actual-source entry points and legacy synthetic
+R2 admission guards are unchanged; no actual selection coordinator is added.
+
+The frozen independent fixtures and V2 Julia test bodies are retained verbatim
+apart from package imports, fixture location and a test-isolation module. Full
+Pkg.test and experiment entries append the new controls/example without removing
+earlier entries. Julia has not parsed or executed these additions. All native
+tests, complete experiments, unchanged harness, strict docs, original18 jobs and
+authorized current-source actual positives remain required. No actual source
+values, fits, paper results, public push or main promotion occurred.
+
+
+## Parsed selection codecs and zero-fit bindings: unexecuted (2026-10-29)
+
+ArchiveSelectedPointBindings now supplies bounded strict request, parsed decision
+and point-binding metadata codecs. It recomputes fixed gamma/R2 choices from all
+retained reports, preserves every expected candidate/evidence pin, separates
+primary from FIFO31 sensitivity types, and distinguishes gamma-origin from the
+deployment model under explicit primary mixed8-to-ground11 transfer. Immutable
+wrappers provide no implicit conversion to bare point fits. Canonical publication
+uses four exclusive ordinary files with completion last and external-pin readback.
+
+Parsed decisions and bindings always retain false producer-verification and
+actual-authority flags. Zero-fit binding reads no target or prediction and calls
+no fitter. The generated example constructs point fixtures before binding; those
+fixture fits are separate from the zero-fit metadata operation. No actual
+selected-refit/calibration/replay API, placeholder refit method or producer-checked
+constructor is exported or implemented. Digest grammar and outside expected pins
+cannot establish native candidate losses. Concrete candidate fit/validation and
+producer-evidence verification are the next required implementation slice.
+
+The pre-code contract and independent28 metadata cases precede this source.
+Additional independent canonical/frame fixtures bind full42 primary gamma,
+14 sensitivity and16 R2 report/evidence tables. New Julia controls and example
+entries are written but wholly unparsed/unexecuted; no assertion count, native
+parity or software/scientific qualification is claimed. Earlier package entries,
+engines, v1 schemas and synthetic null-R2 guards remain intact. No actual values,
+actual fits, public push or main promotion occurred. The unchanged8GiB admission
+and complete native/Pkg/examples/harness/docs/original18/actual-positive gates
+remain required.
+
+
+## Frozen CME bootstrap integration: native execution pending (2026-10-29)
+
+The independently reviewed standalone generator, CLI owner, two native testfiles
+and frozen population metadata are copied byte-for-byte under the repository's
+bootstrap research entry; its README is unchanged. The new separate workflow
+uses five official immutable action revisions. Its primary plus three native
+control jobs and all three measured cross-host/version equality gates remain
+unchanged. The original CI18 workflow is byte-identical.
+
+Full package tests and complete experiments append an explicit fixed-path
+adapter for the unchanged Main.CMEGSMBootstrap test expectations. It guards the
+exact generator hash and default-input realpath, preserves both test bodies and
+runs all10000x31 scalar-RNG/artifact-tamper controls. Package/example artifact
+source heads are explicitly synthetic fixture tags, with authority/science flags
+false; they cannot substitute for clean-source four-job protocol evidence.
+
+No Julia, actual RNG matrix, primary RNG hash, GSM outcome, scientific result,
+public push or main promotion was produced during integration. Native tests,
+fullPkg/complete experiments, unchanged harness, strict docs, original18 and the
+separate four-job bootstrap evidence remain unexecuted or pending. All selected
+binding module/test/fixture bytes stay frozen for their independent review.
+
+
+## Owned archival-static fixture roots: native recheck pending (2026-10-29)
+
+The genuine macOS package failure reached a strict ordinary-path guard through
+an unresolved system temporary-directory alias. Exactly seven positive archival
+static test callbacks and the matching codec example now derive root from
+realpath(temporary) before their existing publication preparation calls. The
+negative-only callback and already-canonical source-case callback are unchanged.
+Inverse transformation recovers both original files byte-for-byte. Production
+path/reparse guards, numerical code, assertions and tolerances are unchanged.
+This is a fixture correction; Julia/fullPkg/examples/macOS behavior remains
+unexecuted and unverified under the unchanged8GiB admission gate.
+
+## Fixed-candidate numerical production: native verification pending (2026-11-02)
+
+Development Ledger: the new research/dbdt_completed_source/candidate_validation
+slice closes the numerical input-preparation and input-only scoring gap without
+changing the original F/K/Q/C engines, recipes, split definitions or grants.
+Zero-fit input preparation derives the real Q split and F input frame. A pure
+builder derives the corresponding ExpectedFit from a strictly reopened summary;
+that value grants no fitting. Actual candidate fitting still needs the original
+independently supplied F grant, preserves its three preparation passes, and adds
+a wrapper attempt before entering the first target preparation. Scoring invokes
+the real K preparation and publishes a separate bounded validation schema.
+
+The metric is Statistics.mean(abs2,log1p(raw_target)-raw_log_prediction), with
+finite residual/square/mean checks. Negative predictions are retained and case
+scales do not enter the selection objective. The independent verifier performs
+a separate source-row join, input-frame writer, binary decoder, portable numeric
+prediction and loss reconstruction. All16 candidates and all3 family winners
+remain bound to one station/case/cohort; the selected-refit target must match
+that station-specific lineage. Primary L8 gamma origin and its declared transfer
+convention are outside this R2 slice and remain unchanged.
+
+Generated and actual operations are separate. Generated preparation/scoring and
+actual preparation/scoring/read/refit attempts remain spent after failure.
+Actual operations require the complete current source qualification, original
+producer evidence, current resource admission, one BLAS thread and closed native
+receipts at evidence admission. The source-specific H gate derives every Julia
+parse check plus the original12 fixed named checks from the unchanged producer;
+it cannot accept a missing stage by changing an observed aggregate count.
+Payload limits remain600000rows/11features,8192-row shards,56-byte records,
+4-byte ranks, at most6 input members and81 validation members. Native execution
+must remain under the original7200second owner limit and8GiB/16GiB admission.
+
+A completed independent witness has strict readback for a later selection
+process. It binds frozen request/member/reader-admission identity, original
+fit/score/read grants and spent attempts, current worker/source closure, model
+and validation bytes, and all closed native/raw/output pins. This admission
+opens no target callback and grants no new fit. Parsed selection metadata never
+converts into producer-checked evidence. Selected refits retain both the checked
+decision and their separately granted inner F fit.
+
+Evidence/oracles: frozen contract982e456f, rational metric/input-frame oracles
+21400376/68c11867, historical unclipped statistic, and immutable source mapping
+f0b743f6. Generated tests/example are written for32 frozen candidate fits and6
+family refits, numerical forgery, future-prefix exclusion, process readback and
+authority failures. These are written tests, not executed results. No actual
+data, fits, observations or paper numbers were produced. Available physical
+memory was1131159552bytes, below8589934592; Julia parsing, focused tests,
+Pkg.test(), complete experiments, H, strict docs and the changed-P18CI remain
+unexecuted and mandatory before software/scientific qualification.
+
+## CME GSM minute-label numerical core: native verification pending (2026-11-02)
+
+Implemented separately reviewed reusable GSM centred-minute numerical kernels
+for Time-only phase runs/change brackets and explicit pre-value domains; exact
+same-Epoch REAL4 marker/vector/NUM_PTS QC; all551 retained label dispositions
+with90/75/95percent coverage; the frozen-provider ID/window/covariate join; paired
+Pearson/weighted replicated-rank Spearman; and10000 fixed-index calendar-year
+contrasts with invalid-draw/type7/population/support gates. Corrected REAL4
+fill/pad tagging is frozen with the reviewed source. The full package and
+complete experiments append every literal test plus the whole551-event
+generated numerical fixture through explicit nested modules. This integration
+preserves the three reviewed source/test/example bytes.
+
+The independent Python rational literals are metadata/oracle evidence only.
+Julia source/tests/examples remain unparsed and unexecuted below8GiB; no native
+assertion count is claimed. Actual CDF values, actual Time-only phase/source
+admission, all three native RNG regeneration/equality gates, full changed-P
+qualification and any scientific conclusion remain pending. No actual GSM
+values, scientific result or source authority were produced by this integration.
