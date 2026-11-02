@@ -61,7 +61,8 @@ end
     @test capsule isa AS.ArchivalStaticCapsule && !(capsule isa S.B.StaticCalibration)
 end
 @testset "Static data publication is fresh, bounded, complete last and externally pinned" begin
-    mktempdir() do root
+    mktempdir() do temporary
+        root=realpath(temporary)
         f=prepare(root);directory=f.prepared.directory
         @test Set(readdir(directory))==Set(("context.json","numeric.bin","receipt.json","manifest.json"))
         @test !ispath(joinpath(directory,"COMPLETE.json"))
@@ -85,26 +86,30 @@ end
         @test_throws ArgumentError AS._read_publication(directory,wrong;pins...)
     end
     for (index,name) in enumerate(("context.json","numeric.bin","receipt.json","manifest.json"))
-        mktempdir() do root
+        mktempdir() do temporary
+            root=realpath(temporary)
             f=prepare(root);file=joinpath(f.prepared.directory,name);body=read(file);body[1]⊻=0x01;write(file,body)
             @test_throws ArgumentError AS._complete_publication(f.prepared)
             @test !ispath(joinpath(f.prepared.directory,"COMPLETE.json"))
         end
     end
     for name in ("context.json","numeric.bin","receipt.json","manifest.json","COMPLETE.json")
-        mktempdir() do root
+        mktempdir() do temporary
+            root=realpath(temporary)
             f=prepare(root);pins=AS._complete_publication(f.prepared);file=joinpath(f.prepared.directory,name)
             body=read(file);write(file,body[1:end-1])
             @test_throws ArgumentError reread(f,pins)
         end
     end
-    mktempdir() do root
+    mktempdir() do temporary
+        root=realpath(temporary)
         f=prepare(root);write(joinpath(f.prepared.directory,"extra.txt"),"retained")
         @test_throws ArgumentError AS._complete_publication(f.prepared)
         @test !ispath(joinpath(f.prepared.directory,"COMPLETE.json"))
         @test read(joinpath(f.prepared.directory,"extra.txt"),String)=="retained"
     end
-    mktempdir() do root
+    mktempdir() do temporary
+        root=realpath(temporary)
         f=prepare(root);pins=AS._complete_publication(f.prepared);write(joinpath(f.prepared.directory,"extra.txt"),"retained")
         @test_throws ArgumentError reread(f,pins)
     end
@@ -126,7 +131,8 @@ end
                    (m,c)->(c["members"]=true),
                    (m,c)->push!(m["members"],copy(m["members"][1])),
                    (m,c)->(m["unknown"]=false))
-        mktempdir() do root
+        mktempdir() do temporary
+            root=realpath(temporary)
             f=prepare(root);pins=AS._complete_publication(f.prepared);changed=repin_metadata(f,pins,change)
             @test_throws ArgumentError reread(f,changed)
         end
@@ -138,7 +144,8 @@ end
     @test_throws MethodError AS.calibrate_archival(nothing,1,nothing,nothing,nothing)
     @test_throws MethodError AS.check_calibration(opaque,nothing,nothing,nothing;expected_static=f.expected)
     # A structural roundtrip alone cannot publish or read an archival capsule.
-    mktempdir() do root
+    mktempdir() do temporary
+        root=realpath(temporary)
         f=prepare(root);pins=AS._complete_publication(f.prepared)
         @test_throws MethodError AS.read_static(f.prepared.directory,nothing,nothing,nothing;expected_static=f.expected,pins...)
         @test_throws MethodError AS.publish_static(opaque,nothing,nothing,nothing,joinpath(root,"not-authorized");expected_static=f.expected)

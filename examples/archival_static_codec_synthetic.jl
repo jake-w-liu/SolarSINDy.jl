@@ -10,7 +10,8 @@ function run_example()
     expected=AS.ExpectedStatic(oracle["context_sha256"],oracle["numeric_sha256"])
     @assert oracle["fixture_only"]===true && oracle["actual_source_authority_granted"]===false
     @assert length(numeric)==186 && bytes2hex(sha256(numeric))=="1449b3e36a0d75a728654e0b5229a351ba2c88ae280b3c5a49bbaa10ed0e65aa"
-    mktempdir() do root
+    mktempdir() do temporary
+        root=realpath(temporary)
         path=joinpath(root,"opaque-static-fixture")
         prepared=AS._prepare_publication(path,context,numeric,receipt,expected)
         @assert !ispath(joinpath(path,"COMPLETE.json"))
