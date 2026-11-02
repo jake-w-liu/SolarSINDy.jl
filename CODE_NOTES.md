@@ -1798,3 +1798,31 @@ dependency defect. The approved next batch must provision macOS Python3.14
 before its first Python consumer, retaining Windows/Linux3.12 and every gate.
 The new candidate owner fixes its own POSIX signal-before-reap path only;
 migration of legacy native_stage.py callers remains pending.
+
+## Campaign package/examples entries: native Julia verification pending (2026-11-02)
+
+The unfiltered package entry now includes every frozen descriptor test: exact23
+keys,32 base cases with64 runtime-specific canonical hashes, genuine generated
+Q.VerifiedCases no-fit production/formatter parity, and strict metadata binding
+negatives. Its fixed Python runner invokes all17 campaign controls under the
+reviewed native owner, including the real Python ownership fault probes. Full
+experiments invoke the fixed142-row Python plan and the real in-process Julia
+untrusted descriptor example. The plan declares38 intended fit operations and
+performs zero archive workers, actual source reads or model fits.
+
+The new runner accepts only tests/plan and a fresh outside-checkout output.
+Python paths, source pins, native900s bounds, raw/result checks and warning
+handling are fixed. Optimized Python and unsupported-mode native negatives are
+reported separately from the17 methods. The nested Julia bridge uses the old
+fixed Python chooser/logger without ensure_root, recursive Julia or a current
+head qualification prerequisite. It canonicalizes only its owned positive temp
+roots; production archive/alias guards and all original entries are preserved.
+
+This integration is WRITTEN, NOT EXECUTED. The previous117-method composite
+(116passes plus one unchanged WinError1314 skip) belongs only to the saved973
+snapshot and does not qualify these additions. All new Julia remains unparsed
+and unexecuted below8GiB. Native runner checks must wait for the concurrent
+writers' barrier; fullPkg, completeExamples, unchangedH, both strict docs,
+all18 current-source CI and genuine actual numerical positives remain required.
+No actual data,38-fit execution, forecast result or scientific/source authority
+is claimed. This append preserves every byte of the reviewed prefix.

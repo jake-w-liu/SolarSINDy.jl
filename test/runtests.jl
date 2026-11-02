@@ -1047,3 +1047,6 @@ include("candidate_stage_driver_tests.jl")
 
 # All frozen CDF minute-reader generated/API-spy controls; no real CDF import.
 include("cme_gsm_cdf_reader_tests.jl")
+
+# Fixed17 campaign controls and all frozen descriptor/real generated no-fit parity checks.
+include("candidate_campaign_tests.jl")

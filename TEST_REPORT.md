@@ -1694,3 +1694,28 @@ the approved following dependency batch must provision3.14 before the first
 Python consumer, without skip/fallback or gate changes. Production driver,
 owner, consumers and frozen CDF bytes are unchanged in this integration;
 legacy owner-callsite migration and the142-stage campaign are not completed.
+
+## Campaign entry integration: written, unexecuted (2026-11-02)
+
+The new package wrapper includes all frozen Julia descriptor literals and
+generated no-fit parity assertions, then requires17 Python methods with no
+skips under the fixed native owner. Tests retain real Python wait/raw evidence
+for emit, inherited-pipe/publication failure and launch-callback failure; these
+are ownership controls, never substitute Julia or actual archive evidence.
+The fixed runner also requires optimized and unsupported-mode invocations to
+fail before output creation, with each actual negative native wait retained.
+Output alias/freshness/source-pin guards have explicit zero-launch oracles.
+
+The complete example runs the existing fixed Python plan and untrusted Julia
+descriptor route. Every142 plan row/order/field is checked against the original
+16 recipe IDs and independent queue literals, including38 intended fits and
+zero actual fits/workers/source access/authority. No arbitrary script or cap
+override is exposed. Raw summaries, fixed method names, results, source pins
+and genuine native0/untimed closure are mandatory; failures remain failures.
+
+No new runner, Julia test or example was executed during these source writes.
+The old973 composite117 evidence remains historical and explicitly split; the
+new integration needs post-barrier native Python controls and full native Julia
+Pkg/experiments/H/docs/all18 verification. Julia parsing and numerical execution
+remain blocked below8GiB. Scientific qualification and actual data access are
+false, and all original checks/tolerances/skips remain unchanged.

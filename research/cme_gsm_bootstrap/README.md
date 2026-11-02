@@ -1,7 +1,13 @@
-This is a preparation directory, not an integrated or executed workflow.
+These sources are integrated into the package and the separate four-job
+`.github/workflows/cme-gsm-bootstrap.yml` workflow. Integration is not native or
+scientific qualification. Production matrix admission still requires all four
+genuine successful native jobs, three byte-equality controls and independent
+retained-log/artifact verification before reader setup or any study GSM values.
 
-`PRECODE.json` and `frozen_population_years.toml` were written before the Julia
-implementation. The derivative preserves all 551 original IDs and UTC MO-start
+The original external preparation package contained `PRECODE.json` and wrote
+`frozen_population_years.toml` before the Julia implementation. That historical
+precode/recovery evidence is separate from this integrated source directory.
+The committed derivative preserves all 551 original IDs and UTC MO-start
 timestamps in original order, and the sorted year universe 1995 through 2025
 (31 years). It contains no observations, speed values, quality values or labels.
 The original population and protocol SHA-256 values are bound in the derivative.
@@ -14,40 +20,50 @@ generation is exactly Julia 1.12.6, `MersenneTwister(170281)`, 10,000 outer draw
 31 inner slots, one scalar `rand(rng, 1:K)` per slot. It writes UTF-8 ASCII CSV
 without a header or BOM, comma separators, LF after each draw, and 1-based indices.
 Four artifact members bind matrix bytes, source, runtime and full year lineage.
-The actual Julia RNG matrix hash is UNKNOWN: no Julia has been executed here.
+No actual production RNG matrix hash is predeclared here. Admit only the bytes
+and hash retained by the successful native primary and all three controls.
 
 The literal fake-draw test fixes bytes and scalar-call order independently of
 Julia RNG output. The native test separately reconstructs each real RNG row as a
 tuple, compares exact serialized lines, checks no overwrite, and mutates copied
 artifacts to test matrix, lineage, source, year order and year omission rejection.
-All Julia code and its tests are currently UNEXECUTED; static review is not a
-Julia syntax, runtime, numerical, cross-platform or scientific qualification.
+The original preparation tests were unexecuted at authoring. Current validation
+status must come from exact-source native receipts; static review is not a Julia
+syntax, runtime, numerical, cross-platform or scientific qualification.
 
-`run_native_bootstrap.py` is a future integrated owner. It requires its sibling
+`run_native_bootstrap.py` is the integrated owner. It requires its sibling
 files committed under `research/cme_gsm_bootstrap/` in a clean repository. It pins
 and reuses the existing repository-native descendant owner and physical-memory
 helper, verifies exact HEAD bytes before and after, and refuses to run below
 8 GiB available physical memory. It owns one Julia child with a 900-second limit,
 uses standard libraries only, retains logs, partial results and receipts, and
 checks Julia's measured peak RSS against 8 GiB. This last check is retrospective;
-it is not an OS-enforced memory cap. No Julia or native owner was launched here.
+it is not an OS-enforced memory cap. This authoring note supplies no native run.
 
-The workflow file is inert (`.yml.template`). Its four planned jobs are Linux
+The full-file pins form a dependency chain: the bootstrap owner pins the memory
+helper, which itself pins the native owner. A helper-owner pin edit therefore
+also changes the memory helper's full-file hash. The package-invoked controls in
+`test/cme_gsm_bootstrap/` check these transitive references and exercise the real
+source preflight on bounded clean generated repositories, including the original
+stale-memory-pin rejection. They perform no Julia or observational work.
+
+The original preparation workflow was an inert `.yml.template`; the integrated
+workflow is now active on the declared repository events. Its four jobs are Linux
 1.12.6 candidate primary, Windows and Intel macOS 1.12.6 controls, and Linux
 1.13.1 control. Standard `macos-15-intel` total RAM is documented as 14 GB by
 https://docs.github.com/en/actions/reference/runners/github-hosted-runners;
-every host must still pass the actual available-memory test. Setup/action major
-versions follow the existing repository workflow; future review must verify and
-pin action revisions according to the repository's integration policy.
+every host must still pass the actual available-memory test. The integrated
+workflow pins action revisions. macOS provisions Python3.14 before the owner;
+Windows/Linux use Python3.12.
 
-The amended template triggers on push to `main` and the existing
+The integrated workflow triggers on push to `main` and the existing
 `codex/catalog-calibration-integration-20261027` candidate, and retains manual
 dispatch for later use. A dispatch-only new workflow cannot bootstrap before
 default-branch registration under the official GitHub event rules:
 https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_dispatch.
-The original13 reviewed files are retained byte-for-byte in
-`reviewed-draft-recovery-v1`; `PRECODE_AMENDMENT_V1.json` was frozen before this
-trigger edit. The original precode and551-event TOML remain unchanged.
+The external preparation record retained the original13 reviewed files and froze
+`PRECODE_AMENDMENT_V1.json` before that trigger correction. Those historical
+receipts are not new runtime authority; the551-event TOML remains unchanged.
 
 Runtime controls distinguish same-version OS equality, measured1.13.1 native RNG
 generation, and reproduction of the frozen primary through a reader. Julia's
@@ -65,10 +81,9 @@ receipt. Replacing the1.13.1 equality gate with measured generation plus require
 reader parity needs an explicit reviewed protocol interpretation/amendment.
 This trigger correction changes no Julia source or native-owner gate.
 
-Remaining concrete steps: independently review and integrate the files after the
-current frozen source/CI18 work; preserve the precode and full lineage; retain the
-pinned repository helper paths or independently re-review changed helpers; add
-the template as a separate workflow; run all four genuine native jobs; retain
+Remaining concrete steps: qualify the complete current source and preserve full
+lineage; retain the pinned helper paths or independently re-review changed
+helpers; run all four genuine native jobs; retain
 their raw logs and API-digest-verified artifacts; independently verify every
 matrix hash and all three exact-byte comparisons; then freeze the measured
 primary matrix before any GSM values. Cross-version equality has not been
