@@ -55,51 +55,41 @@ class PosixOwnerLifecycleTests(unittest.TestCase):
     def setUp(self):
         spec=importlib.util.spec_from_file_location('posix_owner_lifecycle',PACKAGE/'research/dbdt_completed_source/native_stage.py')
         self.owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(self.owner)
+        spec=importlib.util.spec_from_file_location('portable_posix_oracles_v2',PACKAGE/'test/initial_reference/posix_lifetime_oracles_v2.py')
+        self.oracles=importlib.util.module_from_spec(spec);spec.loader.exec_module(self.oracles)
 
-    def execute(self,waits,kills,on_launch=None):
-        process=mock.Mock(pid=12345)
-        process.wait.side_effect=waits
-        fake_os=SimpleNamespace(name='posix',killpg=mock.Mock(side_effect=kills))
-        with tempfile.TemporaryDirectory() as directory, mock.patch.object(self.owner,'os',fake_os), \
-             mock.patch.object(self.owner,'signal',SimpleNamespace(SIGKILL=9)), \
-             mock.patch.object(self.owner.subprocess,'Popen',return_value=process) as popen:
-            result=self.owner.run_owned(['fixture'],cwd=directory,environment={},
-                logpath=Path(directory)/'raw.log',timeout=2,on_launch=on_launch)
-            popen.assert_called_once()
-            self.assertTrue(popen.call_args.kwargs['start_new_session'])
-        return result,process,fake_os.killpg
+    def execute(self,mode):
+        with tempfile.TemporaryDirectory(prefix='solarsindy-portable-posix-v2-') as directory:
+            return self.oracles.exercise(self.owner,mode,Path(directory))
 
     def test_timeout_signals_group_once_before_final_wait(self):
-        # The former second group kill raises EPERM in the retained macOS log.
-        # A deliberate second-call fault makes this oracle catch that behavior.
-        result,process,kill=self.execute([subprocess.TimeoutExpired('fixture',2),-9],
-            [None,PermissionError(1,'obsolete second group signal')])
+        result,_,_=self.execute('timeout')
         self.assertTrue(result['timed_out']);self.assertEqual(result['native_exit'],-9)
-        kill.assert_called_once_with(12345,9)
-        self.assertEqual(process.wait.call_args_list,[mock.call(timeout=2),mock.call(timeout=20)])
 
     def test_normal_exit_still_cleans_owned_descendants(self):
-        result,process,kill=self.execute([7,7],[None])
+        result,_,_=self.execute('normal_exit')
         self.assertFalse(result['timed_out']);self.assertEqual(result['native_exit'],7)
-        kill.assert_called_once_with(12345,9)
 
     def test_missing_group_is_benign_but_permission_denial_fails_closed(self):
-        result,_,_=self.execute([0,0],[ProcessLookupError()])
+        result,_,_=self.execute('disappeared_group')
         self.assertEqual(result['native_exit'],0)
-        with self.assertRaises(PermissionError):self.execute([0],[PermissionError(1,'permission denied')])
+        _,error,_=self.execute('permission_denied');self.assertIsInstance(error,PermissionError)
+        _,error,_=self.execute('direct_kill_error');self.assertIsInstance(error,RuntimeError)
 
     def test_launch_callback_failure_still_kills_owned_group(self):
-        process=mock.Mock(pid=12345);process.wait.return_value=-9
-        fake_os=SimpleNamespace(name='posix',killpg=mock.Mock())
-        def fail(pid):raise RuntimeError('launch callback failed')
-        with tempfile.TemporaryDirectory() as directory, mock.patch.object(self.owner,'os',fake_os), \
-             mock.patch.object(self.owner,'signal',SimpleNamespace(SIGKILL=9)), \
-             mock.patch.object(self.owner.subprocess,'Popen',return_value=process):
-            with self.assertRaisesRegex(RuntimeError,'launch callback failed'):
-                self.owner.run_owned(['fixture'],cwd=directory,environment={},
-                    logpath=Path(directory)/'raw.log',timeout=2,on_launch=fail)
-        fake_os.killpg.assert_called_once_with(12345,9)
-        process.wait.assert_called_once_with(timeout=20)
+        _,error,_=self.execute('callback_error');self.assertIsInstance(error,RuntimeError)
+
+    def test_observation_exception_cleans_up_before_propagating(self):self.execute('observation_error')
+
+    def test_observation_and_cleanup_deadlines_preserve_actual_zero(self):
+        for mode in ('late_zero','cleanup_late_zero'):
+            with self.subTest(mode=mode):self.execute(mode)
+
+    def test_missing_nonreaping_features_fail_before_launch(self):
+        for mode in ('missing_feature','unsupported_feature'):
+            with self.subTest(mode=mode):self.execute(mode)
+
+    def test_windows_whole_delegate_deadline_preserves_actual_exit(self):self.oracles.verify_windows_deadlines(self.owner)
 
 class ProjectionTests(unittest.TestCase):
     def test_owned_capture_rejects_partial_and_other_stream_io_failures(self):

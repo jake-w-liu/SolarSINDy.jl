@@ -1,0 +1,17 @@
+{
+  "schema": "owned_posix_nonreaping_cleanup_oracles_v2",
+  "feature_event": ["feature", 999999, 14],
+  "normal_exit": {"events": [["feature",999999,14],["spawn",true],["observe",424242,14],["killpg",424242,9],["first_reap",20]], "native_exit":7, "timed_out":false},
+  "timeout": {"events": [["feature",999999,14],["spawn",true],["observe",424242,14],["killpg",424242,9],["first_reap",20]], "native_exit":-9, "timed_out":true},
+  "late_zero": {"events": [["feature",999999,14],["spawn",true],["observe",424242,14],["killpg",424242,9],["first_reap",20]], "native_exit":0, "timed_out":true},
+  "cleanup_late_zero": {"events": [["feature",999999,14],["spawn",true],["observe",424242,14],["killpg",424242,9],["first_reap",20]], "native_exit":0, "timed_out":true},
+  "callback_error": {"events": [["feature",999999,14],["spawn",true],["callback",424242],["killpg",424242,9],["first_reap",20]], "error":"RuntimeError"},
+  "disappeared_group": {"events": [["feature",999999,14],["spawn",true],["observe",424242,14],["killpg",424242,9],["first_reap",20]], "native_exit":0, "timed_out":true},
+  "permission_denied": {"events": [["feature",999999,14],["spawn",true],["observe",424242,14],["killpg",424242,9],["direct_kill",424242],["first_reap",20]], "error":"PermissionError"},
+  "direct_kill_error": {"events": [["feature",999999,14],["spawn",true],["observe",424242,14],["killpg",424242,9],["direct_kill",424242],["first_reap",20]], "error":"RuntimeError"},
+  "observation_error": {"events": [["feature",999999,14],["spawn",true],["observe",424242,14],["killpg",424242,9],["first_reap",20]], "error":"OSError"},
+  "missing_feature": {"events": [], "error":"RuntimeError", "launched":false},
+  "unsupported_feature": {"events": [["feature",999999,14]], "error":"RuntimeError", "launched":false},
+  "requirements": ["feature admission before log creation and spawn", "nonreaping observation precedes exactly one group signal", "first and only reaping wait follows the signal", "normal, deadline and cleanup-late actual exit codes are preserved", "callback and observation errors clean up then propagate", "missing group alone is benign", "permission errors remain fatal after owned direct-child cleanup", "frozen V1 records remain historical"],
+  "scope": "Independent literal fake-state controls, not observations of an operating-system failure or PGID reuse"
+}

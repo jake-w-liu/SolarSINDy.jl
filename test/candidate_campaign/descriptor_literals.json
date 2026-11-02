@@ -1,0 +1,210 @@
+{
+    "schema":  "candidate_campaign_independent_literals_v1",
+    "fixture_only":  true,
+    "actual_source_or_native_qualification":  false,
+    "stage_count":  142,
+    "fit_count":  38,
+    "grant_slots":  146,
+    "positions_one_based":  {
+                                "1":  "CMO/ridge-0.01/candidate-input",
+                                "4":  "CMO/ridge-0.01/independent-verify",
+                                "64":  "CMO/forest-9-64/independent-verify",
+                                "65":  "CMO/select-R2",
+                                "66":  "CMO/ridge/selected-refit-input",
+                                "71":  "CMO/forest/selected-refit",
+                                "72":  "FRD/ridge-0.01/candidate-input",
+                                "136":  "FRD/select-R2",
+                                "142":  "FRD/forest/selected-refit"
+                            },
+    "operation_counts":  {
+                             "candidate-input":  32,
+                             "candidate-fit":  32,
+                             "candidate-validation":  32,
+                             "independent-verify":  32,
+                             "select-R2":  2,
+                             "selected-refit-input":  6,
+                             "selected-refit":  6
+                         },
+    "R2_grid_sha256":  "51148ee5ad49e885977483bc6b54f4d71a845075acd4ea951a712526f647318e",
+    "descriptor_schema":  "candidate_known_input_descriptor_v1",
+    "descriptor_keys":  [
+                            "schema",
+                            "operation",
+                            "case_request_sha256",
+                            "case_manifest_sha256",
+                            "case_complete_sha256",
+                            "table_index",
+                            "station",
+                            "role",
+                            "layout",
+                            "candidate_id",
+                            "recipe_sha256",
+                            "grid_sha256",
+                            "split",
+                            "runtime",
+                            "phase_period_minutes",
+                            "policy_sha256",
+                            "job_sha256",
+                            "point_source_sha256",
+                            "actual_source_access",
+                            "case_read_admission_sha256",
+                            "selection_sha256",
+                            "point",
+                            "work_budget"
+                        ],
+    "layout":  "ground11",
+    "phase_period_minutes":  31,
+    "work_budget":  {
+                        "rows_max":  600000,
+                        "features":  11,
+                        "target_queries_max":  600000,
+                        "native_fits":  0,
+                        "stage_seconds":  7200,
+                        "available_physical_bytes_min":  8589934592,
+                        "free_disk_bytes_min":  17179869184,
+                        "one_BLAS_thread":  true,
+                        "concurrency":  1
+                    },
+    "future_or_missing_authority_launches":  0,
+    "partial_or_unknown_attempt_retries":  0,
+    "preview_fits":  0,
+    "preview_source_body_reads":  0,
+    "maximum_auxiliary_previews":  142,
+    "maximum_invocations":  1024,
+    "cumulative_active_seconds":  2048400,
+    "canonical_descriptors":  {
+                                  "CMO/boost-2-100":  {
+                                                          "1.12.6":  "3956e40054fdb6a7cbaa97c6dbfed2cf49bf7da9150cada992594c7429f26a61",
+                                                          "1.13.1":  "c0af879dafc0e17de247257172f31c773e496e0f40017ec8c26d5e4386ba27f9"
+                                                      },
+                                  "CMO/boost-2-200":  {
+                                                          "1.12.6":  "3347b585fcc7bbb5cc093136b1a4d756f6ee967d74916f509037db32d60eafc9",
+                                                          "1.13.1":  "eecb1bec449d4b474b26959d66c5f789f534dd3d6076eb5b24f56dd57b63f9db"
+                                                      },
+                                  "CMO/boost-2-50":  {
+                                                         "1.12.6":  "f24ac71893a2027c4b62ecc87720e21658d8fa93f8af2d9e3dc478bde7f8001f",
+                                                         "1.13.1":  "bce9bbea9e307d00e3ddbd52012fa5c9028bd2b435a64df86dd42fcccaad6155"
+                                                     },
+                                  "CMO/boost-3-100":  {
+                                                          "1.12.6":  "337247ca1b5426e8d718a559130f88a7c7601fa33cba5eb543214a87e9cfc9a0",
+                                                          "1.13.1":  "e27d8d9f95d872cce4c2864ebce015a522603074ad862a7420fff89bbe87a946"
+                                                      },
+                                  "CMO/boost-3-200":  {
+                                                          "1.12.6":  "ab4341160367e92c6a96bc63a31e9f955d8a55f11b00124a260f5582459ea103",
+                                                          "1.13.1":  "50f137907b199c569e1419b4efa7034802c7c62445e88ca43e44d6719b101a11"
+                                                      },
+                                  "CMO/boost-3-50":  {
+                                                         "1.12.6":  "9334cbb1e5b62227dc6cafa11ab9c45938e657ba3b5eb98dbc334dd90a74d21e",
+                                                         "1.13.1":  "06edca05a51aa49c218f9ba3978512e77c1d6873ca8d591a4a590810429c6af3"
+                                                     },
+                                  "CMO/boost-4-100":  {
+                                                          "1.12.6":  "d8ef8dffaf4ee58e7cf262cb2944d08bc0c6e88b98e5ae4f60e2b3dfdf46d14e",
+                                                          "1.13.1":  "dd054ca33c9195e4b4f1228522ec3981ad312b42b7d26b5c7ab163f87cd57be2"
+                                                      },
+                                  "CMO/boost-4-200":  {
+                                                          "1.12.6":  "2dc228916f79b227d25252f0e88bead0ff18dad71e73fa34a61c9119d0e8d052",
+                                                          "1.13.1":  "f6f10fed8cdc18aa2a1d6e6fd62c09f95930e3b2347391c8c38116f0dc214703"
+                                                      },
+                                  "CMO/boost-4-50":  {
+                                                         "1.12.6":  "e1bb1d79b21e94cd8e3b2001d5096a5820b6163118656b3e801a2ae83f7ec92f",
+                                                         "1.13.1":  "e336824320940ff157314bfb7efa7f9e1ed77b0ef74d5a3cd17352ee7d99403a"
+                                                     },
+                                  "CMO/forest-6-64":  {
+                                                          "1.12.6":  "3013e8adc39b64ab9ee543a00fc856f4b6f6aa3e380a0a41bb7b4c57f99dc7ed",
+                                                          "1.13.1":  "aa67c0418d87401bca730cf87e4512748d0a5df7db8ae0ea471e74e0fad5fd54"
+                                                      },
+                                  "CMO/forest-9-64":  {
+                                                          "1.12.6":  "7fbdf1c4f1257098b82a27f9c97f3d77a3e2391497640c5f37f8782f8b6f1210",
+                                                          "1.13.1":  "000b45296a8ce98bd4d36d938ec7dae764432fec82662edd7a88049435eeba88"
+                                                      },
+                                  "CMO/ridge-0.01":  {
+                                                         "1.12.6":  "d56cde217a3fa39c9581312f5e9201fc61c0632af50ea6acbe5b8dcae5c7ef1f",
+                                                         "1.13.1":  "af1d835625a526311dbb712a5d4ffcfc49b7f54bfcb9100d32286b1363b1d206"
+                                                     },
+                                  "CMO/ridge-0.1":  {
+                                                        "1.12.6":  "9b35703aec0e1e7b7d00d99d843da6c1221ab90394b4d9c93713162822ea3a15",
+                                                        "1.13.1":  "0bc0eff6afea67c88497e690a5557f791ada137a753796c41b31a7707e8b05d8"
+                                                    },
+                                  "CMO/ridge-1":  {
+                                                      "1.12.6":  "58f63e1b79492f0ffe41833fd910b644a0c7efc6189fc13fd4037a2dc81f4880",
+                                                      "1.13.1":  "36ac71138a0fdcec651014be50b5262d9dad114cf322ea51364174863f3fda35"
+                                                  },
+                                  "CMO/ridge-10":  {
+                                                       "1.12.6":  "30acdea1e169b1c664751391140d386e07eafe759cf2d79a13f3219f3f614397",
+                                                       "1.13.1":  "97c59d70e21a95b3b84733cef3a4f146712e73f716346bab192732a9592b0cad"
+                                                   },
+                                  "CMO/ridge-100":  {
+                                                        "1.12.6":  "785db9d164b1a97629d5f5216f9e1441153ea795d2d0eb44e3f99483d0da1694",
+                                                        "1.13.1":  "60f0f571bf876a7f91fe9e18b5d1a6aa9b0457f21a7ff30f807dd1f170715f68"
+                                                    },
+                                  "FRD/boost-2-100":  {
+                                                          "1.12.6":  "65be487b4d5d3eca544ad2cc6c4efb31909a509fc57f4878cf6fe73fbbe35785",
+                                                          "1.13.1":  "d281f076a5936523d4d98de410425b3fbcc7d7e5ea05076084fb95496b370662"
+                                                      },
+                                  "FRD/boost-2-200":  {
+                                                          "1.12.6":  "2971be0d0283a78a3a92b3c485811c9fec1cb32be63f2341b6e4edc30ae58ce8",
+                                                          "1.13.1":  "6f1f8dd180f7c99ddf18c539aa770f4b19f5f0bee68b60dbbfc8a3e6606dfe9e"
+                                                      },
+                                  "FRD/boost-2-50":  {
+                                                         "1.12.6":  "40f5c2d0879ad85b80194b87541e9b807fa9dfc99ad5eca4382d2b16f6e14532",
+                                                         "1.13.1":  "9ad97f53297fc0b25c314ae27e69827ebcc039b1bb4abae5025f2b0393951c82"
+                                                     },
+                                  "FRD/boost-3-100":  {
+                                                          "1.12.6":  "5ea105d149dc1c60939aab340c6e19267c41312d6da7df05189b3d267f2c391a",
+                                                          "1.13.1":  "85b2207da62e249ace034a5f45b6f82a40066a0cfedf7e04be23558d9b742328"
+                                                      },
+                                  "FRD/boost-3-200":  {
+                                                          "1.12.6":  "269d4e408582e59112cd761fe56de04dfb16911e2cab0e04e84673917933b8cf",
+                                                          "1.13.1":  "d6711776e1d267d2df811286fc404c2c9d4a7b16a3ad4773cbf97ced1e8d7ff5"
+                                                      },
+                                  "FRD/boost-3-50":  {
+                                                         "1.12.6":  "f9482f2e788919cabc055292d33888edadb9a3e6c5e9d035cdbdd089d5a86d9c",
+                                                         "1.13.1":  "4cc0b3790ecc7ba51af669638c6efd3cabb9bd69c46f3bab18c54cf2223dfcb6"
+                                                     },
+                                  "FRD/boost-4-100":  {
+                                                          "1.12.6":  "07339fbcc05f7e8fbccbbc8c5ca0406b4be175a02c1a97aaf6ab5bf87ff3df44",
+                                                          "1.13.1":  "a43b9e566c4603a9cb216a7d8b4b1edbf75070d39858655d9ed2157e83075912"
+                                                      },
+                                  "FRD/boost-4-200":  {
+                                                          "1.12.6":  "e67587f19d95d0f5bee0e859ded47be33a6a627c8bb6df890239d7a2c40bedd6",
+                                                          "1.13.1":  "bd89d36ec4d5314eec9fa70810d17854e4abf5f8444951ac6bc34814d5a49406"
+                                                      },
+                                  "FRD/boost-4-50":  {
+                                                         "1.12.6":  "5c9fdfe676b5656684587d5a3c2f4391d2f6449f05caff2e8008f3060616ed1b",
+                                                         "1.13.1":  "ec50b90b2a3aaf9011c12f5e49180d36094eda3b7d0c490587395da7a8a2949e"
+                                                     },
+                                  "FRD/forest-6-64":  {
+                                                          "1.12.6":  "8e71f09d15e66da96b7d5029c4d66bfac0657e1ef6983807c253184eee18d9b1",
+                                                          "1.13.1":  "4010aa6383d1a79e230c67a7a9011a0f8fe5ebe1af6e5fee0c1a218f9a6f5bf1"
+                                                      },
+                                  "FRD/forest-9-64":  {
+                                                          "1.12.6":  "bec292fc621da055b64f6cb7191e05d60f01b207abb6cc9bd4c800974f88e007",
+                                                          "1.13.1":  "727d84a3ec5bff8fdb8076c391a077fbd95d787c3af73d4bbcf2c33aa785f8ee"
+                                                      },
+                                  "FRD/ridge-0.01":  {
+                                                         "1.12.6":  "37693afd08adfa6770730b937c18f2efc657cb66d9539d7f626db80ec05c311d",
+                                                         "1.13.1":  "2e21089af66af3a39404040a132e511af97aafcea738cff78afc4eb81b5b8014"
+                                                     },
+                                  "FRD/ridge-0.1":  {
+                                                        "1.12.6":  "5aede7e36e4e818df1322a9cd30e30154213fda9a13f9bcb8fd545aba253f2d7",
+                                                        "1.13.1":  "a86e1016520c4b3c9b76448089319b517b14c8c1686c714cec7c16adbb1cd31c"
+                                                    },
+                                  "FRD/ridge-1":  {
+                                                      "1.12.6":  "570b8755003708b1862e2ff3af68ef49c8f23bdfbe4ba8cc343e2f86bd54ecbe",
+                                                      "1.13.1":  "cece4f9809ef8a60d7bd0dab065c54d0ac2b87c6e8310ee78a9725b409d97387"
+                                                  },
+                                  "FRD/ridge-10":  {
+                                                       "1.12.6":  "9d1f5f5dbb561138413c09237a16519401c5ae48309fbfbdfd4b7f4de86c9e6a",
+                                                       "1.13.1":  "4a6fec234020359fc2152e7ae2c0fd9c15167fdfc5b2876be3ebeeebc71859b7"
+                                                   },
+                                  "FRD/ridge-100":  {
+                                                        "1.12.6":  "7bbd8590e6770089c2cafa229a621d00c895562ca5eb22c8e9193bca55b3e521",
+                                                        "1.13.1":  "e40a5b69824025423983a02d9ed2baff4b0467c85b504a1334a222852b46cb81"
+                                                    }
+                              },
+    "independent_canonical_oracle_sha256":  "5793cb7ca7c19c8f9231b9e1a2ce60588a0776843afa54bca0eae7e3a611987b",
+    "canonical_runtime_variants":  [
+                                       "1.12.6",
+                                       "1.13.1"
+                                   ]
+}

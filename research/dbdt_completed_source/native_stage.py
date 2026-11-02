@@ -11,9 +11,28 @@ import subprocess
 import time
 
 
+def _posix_features():
+    if os.name != 'posix' or not all(hasattr(os, key) for key in
+            ('waitid', 'P_PID', 'WEXITED', 'WNOHANG', 'WNOWAIT')):
+        raise RuntimeError('nonreaping POSIX waitid/WNOWAIT is required; no unsafe fallback')
+    try:
+        os.waitid(os.P_PID, os.getpid(), os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError:
+        pass  # The current process is not its own child; the operation exists.
+    except OSError as error:
+        raise RuntimeError('nonreaping waitid feature unavailable before launch') from error
+
+
 def run_owned(argv, *, cwd, environment, logpath, timeout, on_launch=None):
     if os.name == 'nt':
-        return _run_windows(argv, cwd, environment, logpath, timeout, on_launch)
+        started = time.monotonic()
+        result = _run_windows(argv, cwd, environment, logpath, timeout, on_launch)
+        elapsed = time.monotonic() - started
+        result['timed_out'] = (result['timed_out'] or elapsed >= timeout or
+                              result.get('wall_seconds', elapsed) >= timeout)
+        return result
+    _posix_features()
+    started = time.monotonic()
     with Path(logpath).open('xb', buffering=0) as log:
         process = subprocess.Popen(argv, cwd=cwd, env=environment, stdout=log,
                                    stderr=subprocess.STDOUT, start_new_session=True)
@@ -21,19 +40,32 @@ def run_owned(argv, *, cwd, environment, logpath, timeout, on_launch=None):
         try:
             if on_launch:
                 on_launch(process.pid)
-            try:
-                native = process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                expired = True
+            while True:
+                observed = os.waitid(os.P_PID, process.pid,
+                                     os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                expired = time.monotonic() - started >= timeout
+                if observed is not None or expired:
+                    break
+                time.sleep(min(.02, max(0., timeout - (time.monotonic() - started))))
         finally:
-            # Signal the owned group once, before reaping its leader. Repeating
-            # the signal after wait() can address an obsolete group identifier.
+            # Observe without reaping, then signal the private group once while
+            # its leader is still owned. The first wait follows that signal.
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+            except BaseException:
+                # A denied group signal remains fatal. Still attempt bounded
+                # cleanup of the direct owned child before propagating it.
+                try:
+                    process.kill()
+                finally:
+                    process.wait(timeout=20)
+                raise
             native = process.wait(timeout=20)
-        return dict(pid=process.pid, native_exit=native, timed_out=expired,
+        elapsed = time.monotonic() - started
+        return dict(pid=process.pid, native_exit=native,
+                    timed_out=expired or elapsed >= timeout, wall_seconds=elapsed,
                     descendant_cleanup='owned POSIX session killed after stage',
                     ownership='start_new_session=True')
 

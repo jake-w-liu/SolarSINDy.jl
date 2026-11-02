@@ -34,7 +34,7 @@ const MAX_ROWS=600000
 const MAX_INPUT_BYTES=462848
 const MAX_VALIDATION_BYTES=36413696
 const WORKER_NAMES=("candidate_validation.jl","candidate_validation_authority.jl",
-    "candidate_validation_codec.jl","candidate_validation_independent.jl")
+    "candidate_validation_codec.jl","candidate_validation_independent.jl","candidate_descriptor_metadata.jl")
 const WORKER_PINS=Tuple(digest(read(joinpath(@__DIR__,name))) for name in WORKER_NAMES)
 function job_identity()
     root=realpath(pkgdir(SolarSINDy))
@@ -71,16 +71,17 @@ function case_metadata(value,index;actual=false)
         request["evidence_mode"]==(actual ? "actual_archival_cache" : "generated"),"candidate ground11 case required")
     request
 end
+include("candidate_descriptor_metadata.jl")
 function descriptor(value,index,id,split;operation,point=nothing,actual=false,admission=nothing,selection_sha256=nothing)
     req=case_metadata(value,index;actual);recipe=recipe_for(id)
-    result=Dict{String,Any}("schema"=>"candidate_known_input_descriptor_v1","operation"=>operation,
+    facts=Dict{String,Any}("operation"=>operation,
         "case_request_sha256"=>value.request_sha256,"case_manifest_sha256"=>value.manifest_sha256,
         "case_complete_sha256"=>value.complete_sha256,"table_index"=>Int(index),"station"=>req["tables"][index]["station"],
-        "role"=>req["role"],"layout"=>"ground11","candidate_id"=>String(id),"recipe_sha256"=>recipe.sha256,
+        "role"=>req["role"],"candidate_id"=>String(id),"recipe_sha256"=>recipe.sha256,
         "grid_sha256"=>M.grid_identity(:R2),"split"=>split_object(split),"runtime"=>string(VERSION),
-        "phase_period_minutes"=>31,"policy_sha256"=>policy_identity(),"job_sha256"=>job_identity(),
+        "policy_sha256"=>policy_identity(),"job_sha256"=>job_identity(),
         "point_source_sha256"=>F.source_identity(),"actual_source_access"=>actual,
-        "case_read_admission_sha256"=>admission,"selection_sha256"=>selection_sha256,"work_budget"=>work_budget())
+        "case_read_admission_sha256"=>admission,"selection_sha256"=>selection_sha256)
     if point!==nothing
         p=F._check_capsule(point)
         need(p.actual===actual && point.expected.recipe_sha256==recipe.sha256 &&
@@ -90,11 +91,11 @@ function descriptor(value,index,id,split;operation,point=nothing,actual=false,ad
                 p.context["stop_exclusive"]==F.clock(DateTime(2017,7,1)) && p.context["rows"]>=1000,
                 "actual candidate must retain locked Jan-Jun training and minimum rows")
         end
-        result["point"]=point_descriptor(point)
+        facts["point"]=point_descriptor(point)
     else
-        result["point"]=nothing
+        facts["point"]=nothing
     end
-    result
+    descriptor_from_metadata(facts)
 end
 function policy_identity()
     p=SolarSINDy.CompletedMinuteReplay.ReplayPolicy()

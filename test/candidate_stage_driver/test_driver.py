@@ -127,6 +127,12 @@ class DriverControls(unittest.TestCase):
             mock.patch.object(owner.subprocess,'Popen',return_value=Process()):
             result=owner.run_owned(['fixed-mock'],cwd=str(self.root),environment={},logpath=self.root/'order.log',timeout=10)
         self.assertEqual(events,['feature','observe','signal','reap']);self.assertEqual(result['native_exit'],0)
+        # Independent literal spy: an on-time exit can finish cleanup at the
+        # deadline. The actual zero survives, but the whole stage is late.
+        literal=D.module(ROOT/'test/initial_reference/posix_lifetime_oracles_v2.py','candidate_cleanup_deadline_oracle')
+        for mode in ('cleanup_late_zero','direct_kill_error'):
+            with self.subTest(mode=mode):
+                root=self.root/mode;root.mkdir();literal.exercise(owner,mode,root)
     def test_POSIX_callback_exception_still_signals_before_reap(self):
         owner=D.module(D.OWNER,'candidate_mock_exception_owner');events=[]
         class Process:

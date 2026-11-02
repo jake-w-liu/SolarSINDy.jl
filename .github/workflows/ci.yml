@@ -28,6 +28,11 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+      # Some early Julia controls invoke Python, so provision it before them.
+      # macOS exposes the required nonreaping waitid/WNOWAIT API in this runtime.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ runner.os == 'macOS' && '3.14' || '3.12' }}
       - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.julia-version }}
@@ -60,9 +65,6 @@ jobs:
         run: julia --startup-file=no --pkgimages=no --project=. test/test_initial_reference_tools.jl
       - name: Verify source-bound selection import
         run: julia --startup-file=no --pkgimages=no --project=. test/test_initial_reference_import.jl
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - name: Verify portable source-bound point input exports
         run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/point_input_export/runtests.jl
       - name: Retain portable input verification failure evidence

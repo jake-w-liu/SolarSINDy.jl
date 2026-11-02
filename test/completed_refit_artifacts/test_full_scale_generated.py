@@ -96,7 +96,88 @@ class FullScaleContractTests(unittest.TestCase):
     def test_original_nine_jobs_strict_docs_and_corrected_evidence_contract(self):
         workflow=(ROOT/'.github/workflows/ci.yml').read_bytes()
         prefix=workflow.split(b'\n  full-scale-generated:',1)[0]
-        self.assertEqual(hashlib.sha256(prefix).hexdigest(),'dc262831827339c1eff92ff07d1e16f1942dfb4b53659dbba1a6f117d9312768')
+        # Only this reviewed provisioning change is admitted. The original
+        # nine-job byte oracle remains unchanged; no new observed hash replaces it.
+        approved=(
+            b'      # Some early Julia controls invoke Python, so provision it before them.\n'
+            b'      # macOS exposes the required nonreaping waitid/WNOWAIT API in this runtime.\n'
+            b'      - uses: actions/setup-python@v5\n'
+            b'        with:\n'
+            b"          python-version: ${{ runner.os == 'macOS' && '3.14' || '3.12' }}\n")
+        checkout=b'      - uses: actions/checkout@v4\n'
+        julia_setup=b'      - uses: julia-actions/setup-julia@v3\n'
+        old_setup=(b'      - uses: actions/setup-python@v5\n'
+                   b'        with:\n'
+                   b"          python-version: '3.12'\n")
+        old_position=b'      - name: Verify portable source-bound point input exports\n'
+        first_consumer=b'      - name: Verify cold ordinary duration API\n'
+        def check(candidate):
+            self.assertEqual(candidate.count(b'\n  full-scale-generated:'),1)
+            current=candidate.split(b'\n  full-scale-generated:',1)[0]
+            self.assertEqual(current.count(b'\n  canonical-harness:'),1)
+            matrix=current.split(b'\n  canonical-harness:',1)[0]
+            self.assertEqual(matrix.count(checkout),1)
+            self.assertEqual(current.count(approved),1)
+            self.assertEqual(matrix.count(approved),1)
+            self.assertEqual(matrix.count(b'actions/setup-python@'),1)
+            self.assertIn(checkout+approved+julia_setup,matrix)
+            self.assertLess(matrix.index(approved),matrix.index(julia_setup))
+            self.assertLess(matrix.index(approved),matrix.index(first_consumer))
+            # Invert the exact approved bytes and their exact old insertion site.
+            # This is a test literal, independent of the production workflow code.
+            restored=candidate.replace(approved,b'',1)
+            self.assertEqual(restored.count(old_position),1)
+            restored=restored.replace(old_position,old_setup+old_position,1)
+            restored_prefix=restored.split(b'\n  full-scale-generated:',1)[0]
+            self.assertEqual(hashlib.sha256(restored_prefix).hexdigest(),'dc262831827339c1eff92ff07d1e16f1942dfb4b53659dbba1a6f117d9312768')
+            # Sealed963 SOURCE_INVENTORY2fc9b7fd files_sha256['.github/workflows/ci.yml'].
+            # This also freezes all eight workloads and the agreement job.
+            self.assertEqual(hashlib.sha256(restored).hexdigest(),'ae8c23a3faad1a0071c8ef4fe75c9ef364f1bde62095cf2590a689471410a680')
+        check(workflow)
+        def changed(before,after):
+            self.assertEqual(prefix.count(before),1)
+            return workflow.replace(before,after,1)
+        without=workflow.replace(approved,b'',1)
+        before_harness,harness_and_later=without.split(b'\n  canonical-harness:',1)
+        moved_other_job=before_harness+b'\n  canonical-harness:'+harness_and_later.replace(checkout,checkout+approved,1)
+        suffix=workflow.split(b'\n  full-scale-generated:',1)[1]
+        def changed_suffix(before,after):
+            self.assertEqual(suffix.count(before),1)
+            return prefix+b'\n  full-scale-generated:'+suffix.replace(before,after,1)
+        mutations={
+            'missing provisioning':without,
+            'duplicate provisioning':workflow.replace(approved,approved+approved,1),
+            'provisioning after early consumer':without.replace(old_position,approved+old_position,1),
+            'provisioning in another job':moved_other_job,
+            'macOS runtime':workflow.replace(approved,approved.replace(b"'3.14'",b"'3.13'"),1),
+            'other OS runtime':workflow.replace(approved,approved.replace(b"'3.12'",b"'3.11'"),1),
+            'Python setup action':workflow.replace(approved,approved.replace(b'setup-python@v5',b'setup-python@v4'),1),
+            'extra step':changed(b'      - name: Verify the JavaScript test runtime\n',b'      - run: echo unapproved\n      - name: Verify the JavaScript test runtime\n'),
+            'missing step':changed(b'      - name: Verify the JavaScript test runtime\n        run: node --version\n',b''),
+            'Julia runtime grid':changed(b"julia-version: ['1.12.6', '1.13.1']",b"julia-version: ['1.12.6', '1.13.0']"),
+            'fail-fast gate':changed(b'      fail-fast: false\n',b'      fail-fast: true\n'),
+            'native cap':changed(b'    timeout-minutes: 180\n',b'    timeout-minutes: 181\n'),
+            'checkout action':changed(checkout+approved+julia_setup,checkout.replace(b'@v4',b'@v3')+approved+julia_setup),
+            'Pkg test action':changed(b'julia-actions/julia-runtest@v1',b'julia-actions/julia-runtest@v0'),
+            'complete experiments':changed(b'examples/experiments.jl',b'examples/incomplete.jl'),
+            'canonical harness command':changed(b'python -B tools/run_canonical_harness.py --evidence-dir',b'python -B tools/other_harness.py --evidence-dir'),
+            'strict docs runtime assertion':changed(b'VERSION == v"1.13.1"',b'VERSION == v"1.13.0"'),
+            'required output assertion':changed(b'            exit 1\n',b'            exit 0\n'),
+            'full-scale native cap':changed_suffix(b'    timeout-minutes: 420\n',b'    timeout-minutes: 421\n'),
+            'agreement native cap':changed_suffix(b'    timeout-minutes: 180\n',b'    timeout-minutes: 181\n'),
+            'full-scale command':changed_suffix(b'tools/run_full_scale_generated.py --mode workload',b'tools/run_full_scale_generated.py --mode preview'),
+            'agreement command':changed_suffix(b"--mode agreement --runtime '1.13.1'",b"--mode agreement --runtime '1.12.6'"),
+            'agreement artifact action':changed_suffix(b'actions/download-artifact@v4',b'actions/download-artifact@v3'),
+            'agreement dependency':changed_suffix(b'    needs: full-scale-generated\n',b'    needs: test\n'),
+            'disabled full-scale job':workflow.replace(b'\n  full-scale-generated:\n',b'\n  full-scale-generated:\n    if: false\n',1),
+            'disabled agreement job':changed_suffix(b'\n  full-scale-agreement:\n',b'\n  full-scale-agreement:\n    if: false\n'),
+            'full-scale role grid':changed_suffix(b'        role: [primary, independent]\n',b'        role: [primary]\n'),
+            'full-scale layout grid':changed_suffix(b'        layout: [ground-only, mixed]\n',b'        layout: [ground-only]\n'),
+            'full-scale raw retention guard':changed_suffix(b'      - name: Retain full-size generated outputs and every raw stage log\n        if: always()\n',b'      - name: Retain full-size generated outputs and every raw stage log\n        if: success()\n'),
+        }
+        for name,candidate in mutations.items():
+            with self.subTest(unapproved_change=name):
+                with self.assertRaises(AssertionError):check(candidate)
         self.assertEqual(workflow.count(b'\n  full-scale-generated:'),1)
         self.assertEqual(workflow.count(b'\n  full-scale-agreement:'),1)
         self.assertIn(b'needs: full-scale-generated',workflow)

@@ -18,6 +18,8 @@ import owned_process
 
 ORACLE=HERE/'frozen/posix_cleanup_oracles_v1.json'
 BEFORE=HERE/'frozen/owned_process_before_v1.py'
+V2_SPEC=importlib.util.spec_from_file_location('reference_posix_oracles_v2',HERE/'posix_lifetime_oracles_v2.py')
+V2=importlib.util.module_from_spec(V2_SPEC);V2_SPEC.loader.exec_module(V2)
 
 
 class PosixCleanupSemantics(unittest.TestCase):
@@ -75,22 +77,24 @@ class PosixCleanupSemantics(unittest.TestCase):
             Path(owned_process.__file__).read_bytes().split(b'def _run_windows',1)[1])
 
     def verify(self,mode):
-        result,error,events=self.exercise(owned_process,mode)
-        expected=self.oracle[mode]
-        self.assertEqual(events,expected['events'])
-        if mode=='callback_error':self.assertIsInstance(error,RuntimeError);self.assertIsNone(result)
-        elif mode=='permission_denied':self.assertIsInstance(error,PermissionError);self.assertIsNone(result)
-        else:
-            self.assertIsNone(error)
-            self.assertEqual(result['native_exit'],expected['native_exit'])
-            self.assertEqual(result['timed_out'],expected['timed_out'])
-            self.assertEqual(result['ownership'],'start_new_session=True')
+        with tempfile.TemporaryDirectory(prefix='solarsindy-posix-v2-') as temporary:
+            return V2.exercise(owned_process,mode,Path(temporary))
 
     def test_timeout_signals_owned_group_once(self):self.verify('timeout')
     def test_normal_exit_still_signals_owned_descendants(self):self.verify('normal_exit')
     def test_callback_error_still_terminates_and_reaps(self):self.verify('callback_error')
     def test_disappeared_group_remains_a_timed_out_deadline(self):self.verify('disappeared_group')
-    def test_first_permission_denial_is_fatal(self):self.verify('permission_denied')
+    def test_first_permission_denial_is_fatal(self):
+        for mode in ('permission_denied','direct_kill_error'):
+            with self.subTest(mode=mode):self.verify(mode)
+    def test_observation_exception_cleans_up_before_propagating(self):self.verify('observation_error')
+    def test_observation_and_cleanup_deadlines_preserve_actual_zero(self):
+        for mode in ('late_zero','cleanup_late_zero'):
+            with self.subTest(mode=mode):self.verify(mode)
+    def test_missing_nonreaping_features_fail_before_launch(self):
+        for mode in ('missing_feature','unsupported_feature'):
+            with self.subTest(mode=mode):self.verify(mode)
+    def test_windows_whole_delegate_deadline_preserves_actual_exit(self):V2.verify_windows_deadlines(owned_process)
 
 
 if __name__=='__main__':unittest.main()

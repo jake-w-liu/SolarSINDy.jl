@@ -1,5 +1,5 @@
 const _PACKAGE_ROOT = normpath(joinpath(@__DIR__,"..","..",".."))
-const _OWNED_RUNNER_SHA = "0b0f2327841230e5ac87d03bd67d1cbaf10717e0a52ce0134d71169a36146b89"
+const _OWNED_RUNNER_SHA = "15d2644ae5eb2e87ce31c9913f103f9fa7e940b67403b94f29ef2ed5a4d175b8"
 _stream_sha(path) = open(io->bytes2hex(SHA.sha256(io)),path)
 
 function _git_read(arguments...)

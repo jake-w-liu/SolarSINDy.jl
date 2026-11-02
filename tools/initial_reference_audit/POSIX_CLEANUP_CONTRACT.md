@@ -13,6 +13,27 @@ Only a missing group is tolerated; genuine permission failures stay fatal.
 Normal root exit must still terminate its listening descendant. Preserve all
 native Windows Job Object bytes and the two real descendant-listener controls.
 
+The legacy normal-exit path also reaped the leader before its single group
+signal. The V2 control contract requires feature admission before launch,
+`waitid(P_PID, ..., WEXITED | WNOHANG | WNOWAIT)` observation, one private-group
+signal, and then the first reaping wait. Missing nonreaping support fails before
+launch; no polling or wait-before-signal fallback is allowed. Permission errors
+remain fatal after bounded direct-child cleanup. No actual PGID-reuse event was
+observed in the deterministic reproduction.
+
+Both legacy entry points measure the complete stage, including cleanup. An
+on-time exit followed by late cleanup remains a failed deadline, with its actual
+exit code preserved. The Windows correction wraps the unchanged native
+function; its signaled-handle path can otherwise return zero after the deadline
+before testing elapsed time. The late-zero controls use fake delegates and
+clocks and do not demonstrate a native Windows failure.
+
+`fixtures/posix_cleanup_oracles_v2.json` and the independent V2 process-state
+spies enforce these transitions, including separate observation-at-deadline
+and cleanup-at-deadline cases. The frozen V1 oracle and before implementation
+remain historical bytes. Hosted macOS provisions Python 3.14 before its first
+Python consumer; Linux and Windows retain Python 3.12.
+
 The pre-implementation literal events are frozen in
 `posix_cleanup_oracles_v1.json`, SHA256
 cc6a1d5892321862e1826300600c4f0f46d0dfe9a99c0e1b4106131ead16408c.
