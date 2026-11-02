@@ -149,12 +149,12 @@ function _validation_producer_evidence(artifact,producer,native)
         grant["actual_model_fit_authorized"]===false && grant["actual_source_access_authorized"]===true,"independent validation producer authority")
     attempt=R.bounded_read(grant["attempt_path"];limit=16384)
     need(digest(attempt)==auth["attempt_sha256"],"independent validation producer attempt")
-    owner=A._pinned(native.receipt_path,native.receipt_sha256;limit=262144);raw,_=FS._read(native.raw_path,64*1024^2)
+    owner=_checked_native_stage(native,"candidate-validation",producer);raw,_=FS._read(native.raw_path,64*1024^2)
     need(digest(codeunits(raw))==native.raw_sha256==owner["raw_sha256"] && owner["complete"]===true &&
         owner["schema"]=="candidate_native_stage_evidence_v1" && owner["grant_sha256"]==producer.grant_sha256 &&
         owner["head"]==grant["head"] && owner["source_proof_sha256"]==producer.source_proof_sha256 &&
         owner["qualification_sha256"]==producer.qualification_sha256 && F.isint(owner["native_exit"]) && owner["native_exit"]==0 &&
-        owner["timed_out"]===false && owner["owned_descendants_reaped"]===true && owner["stage_seconds_limit"]==7200 &&
+        owner["timed_out"]===false && owner["ownership_boundary_closed"]===true && owner["stage_seconds_limit"]==7200 &&
         owner["available_physical_bytes"]>=8589934592 && owner["free_disk_bytes"]>=17179869184 &&
         owner["output_context_sha256"]==artifact.pins.context_sha256 && owner["output_complete_sha256"]==artifact.pins.complete_sha256,
         "independent validation native output evidence")
@@ -178,11 +178,17 @@ end
 function _independent_native(candidate,evidence)
     need(evidence isa NativeEvidence && candidate.verification_authorization!==nothing,"actual R2 needs completed independent native evidence")
     auth=decode(Vector{UInt8}(codeunits(candidate.verification_authorization)))
-    owner=A._pinned(evidence.receipt_path,evidence.receipt_sha256;limit=262144);raw,_=FS._read(evidence.raw_path,64*1024^2)
+    preliminary=A._pinned(evidence.receipt_path,evidence.receipt_sha256;limit=262144)
+    request=A._pinned(preliminary["request_path"],preliminary["request_sha256"];canonical=true,limit=1048576)
+    q=request["qualification_authority"];J._object(q,Set(String.(fieldnames(IndependentReadAuthority))))
+    # Resolve the original supplied permit for evidence checking only. This is
+    # never passed to a new source/target operation and creates no grant.
+    original=IndependentReadAuthority((q[String(name)] for name in fieldnames(IndependentReadAuthority))...)
+    owner=_checked_native_stage(evidence,"independent-verify",original);raw,_=FS._read(evidence.raw_path,64*1024^2)
     need(digest(codeunits(raw))==evidence.raw_sha256==owner["raw_sha256"] && owner["schema"]=="candidate_native_stage_evidence_v1" &&
         owner["complete"]===true && owner["grant_sha256"]==auth["grant_sha256"] && owner["head"]==auth["head"] &&
         owner["source_proof_sha256"]==auth["source_proof_sha256"] && owner["qualification_sha256"]==auth["qualification_sha256"] &&
-        F.isint(owner["native_exit"]) && owner["native_exit"]==0 && owner["timed_out"]===false && owner["owned_descendants_reaped"]===true &&
+        F.isint(owner["native_exit"]) && owner["native_exit"]==0 && owner["timed_out"]===false && owner["ownership_boundary_closed"]===true &&
         owner["stage_seconds_limit"]==7200 && owner["output_witness_sha256"]==candidate.witness_sha256,"actual independent native witness differs")
 end
 function _completed_witness(candidate,authorization)

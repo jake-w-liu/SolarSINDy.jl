@@ -26,6 +26,66 @@ struct NativeEvidence
     raw_path::String
     raw_sha256::String
 end
+const NATIVE_DRIVER_FILES=("research/dbdt_completed_source/run_candidate_stage.py","research/dbdt_completed_source/run_candidate_stage.jl",
+    "research/dbdt_completed_source/candidate_native_owner.py","research/dbdt_completed_source/native_stage.py")
+const NATIVE_DRIVER_PINS=Tuple(digest(read(joinpath(pkgdir(SolarSINDy),split(name,'/')...))) for name in NATIVE_DRIVER_FILES)
+function _checked_native_stage(evidence,operation,authority)
+    need(evidence isa NativeEvidence,"native stage outside pins required")
+    owner=A._pinned(evidence.receipt_path,evidence.receipt_sha256;limit=262144)
+    root=realpath(pkgdir(SolarSINDy));paths=Tuple(joinpath(root,split(name,'/')...) for name in NATIVE_DRIVER_FILES)
+    need(all(digest(read(path))==pin for (path,pin) in zip(paths,NATIVE_DRIVER_PINS)) &&
+        NATIVE_DRIVER_PINS[4]=="0b0f2327841230e5ac87d03bd67d1cbaf10717e0a52ce0134d71169a36146b89","native loaded driver changed")
+    need(owner["schema"]=="candidate_native_stage_evidence_v1" && owner["complete"]===true && owner["actual_authority"]===true &&
+        owner["operation"]==operation && owner["driver_sha256"]==NATIVE_DRIVER_PINS[1] && owner["entry_sha256"]==NATIVE_DRIVER_PINS[2] &&
+        owner["runner_sha256"]==NATIVE_DRIVER_PINS[3] && owner["legacy_runner_sha256"]==NATIVE_DRIVER_PINS[4] && owner["source_proof_sha256"]==authority.source_proof_sha256 &&
+        owner["qualification_sha256"]==authority.qualification_sha256 && owner["grant_sha256"]==authority.grant_sha256 &&
+        owner["job_sha256"]==job_identity() && owner["stage_seconds_limit"]==7200 && owner["raw_bytes_limit"]==64*1024^2,
+        "native fixed operation/driver/source binding differs")
+    request=A._pinned(owner["request_path"],owner["request_sha256"];canonical=true,limit=1048576)
+    need(request["schema"]=="candidate_native_stage_request_v1" && request["operation"]==operation &&
+        request["evidence_mode"]=="actual_archival_cache" && request["source_proof"]["sha256"]==authority.source_proof_sha256 &&
+        request["qualification"]["sha256"]==authority.qualification_sha256,"native request/source binding differs")
+    q=request["qualification_authority"]
+    need(all(q[String(name)]==getproperty(authority,name) for name in fieldnames(typeof(authority))),"native request permit differs")
+    grant=A._pinned(authority.grant_path,authority.grant_sha256;canonical=true,limit=131072)
+    _whole_qualification(authority,grant)
+    directory=request["execution_directory"];J._ordinary(directory;directory=true)
+    need(J._same(abspath(evidence.receipt_path),joinpath(directory,"CANDIDATE_NATIVE_RECEIPT.json")) &&
+        J._same(abspath(evidence.raw_path),joinpath(directory,"julia.log")),"native output paths differ")
+    runtime=owner["runtime"];argv=owner["argv"]
+    expected=String[request["julia"]["path"],"--startup-file=no","--compiled-modules=no","--pkgimages=no","--threads=1","--project="*root,
+        paths[2],"--request",owner["request_path"],"--request-sha256",owner["request_sha256"],"--argv",joinpath(directory,"stage-argv.json")]
+    need(argv==expected && runtime["argv"]==expected && owner["argv_sha256"]==digest(canonical(expected;limit=65536)) &&
+        runtime["executable_sha256"]==request["julia"]["sha256"]==F.digest(read(first(expected))) &&
+        runtime["compiled_modules"]===false && runtime["pkgimages"]===false && F.isint(runtime["blas_threads"]) &&
+        F.isint(runtime["omp_threads"]) && runtime["blas_threads"]==runtime["omp_threads"]==1,"native argv/runtime differs")
+    R._ownership_check(runtime,owner["ownership"],owner["descendant_cleanup"])
+    inner=owner["julia_native"];outer=owner["supervisor_native"]
+    need(F.isint(inner["native_exit"]) && inner["native_exit"]==0 && F.isint(outer["native_exit"]) && outer["native_exit"]==0 &&
+        inner["timed_out"]===false && outer["timed_out"]===false && inner["complete"]===true && inner["raw_byte_limit_exceeded"]===false &&
+        inner["reader_joined"]===true && inner["reader_pipe_close_pending"]===false &&
+        inner["exact_child_reaped"]===true && outer["leader_reaped"]===true && owner["ownership_boundary_closed"]===true &&
+        owner["all_descendants_os_reaped"]===false && owner["julia_leader_reaped"]===true && owner["supervisor_leader_reaped"]===true &&
+        owner["owned_launch"]["pid"]==outer["pid"] && inner["pid"]!=outer["pid"] &&
+        owner["native_owner_wall_seconds"]<=7200,"native inner/outer exit ownership differs")
+    log,_=FS._read(evidence.raw_path,64*1024^2)
+    need(digest(codeunits(log))==evidence.raw_sha256==inner["raw_sha256"]==owner["raw_sha256"] &&
+        F.isint(inner["raw_bytes"]) && inner["raw_bytes"]==ncodeunits(log),"native actual raw transcript differs")
+    before=owner["controls_before"];after=owner["controls_after"]
+    b=A._pinned(before["path"],before["sha256"];canonical=true,limit=8*1024^2)
+    a=A._pinned(after["path"],after["sha256"];canonical=true,limit=8*1024^2)
+    need(b==a && before["sha256"]==after["sha256"] && owner["changed_control_count"]===0 && owner["control_read_error_count"]===0,
+        "native guarded bytes changed")
+    for (path,pin) in zip(paths,NATIVE_DRIVER_PINS);need(get(b,path,nothing)==pin,"native driver missing from guarded closure");end
+    need(get(b,owner["request_path"],nothing)==owner["request_sha256"] && get(b,first(expected),nothing)==runtime["executable_sha256"],"native request/executable outside guard")
+    internal=A._pinned(joinpath(directory,"JULIA_STAGE_RESULT.json"),owner["internal_result_sha256"];canonical=true,limit=1048576)
+    need(internal["complete"]===true && internal["operation"]==operation && internal["request_sha256"]==owner["request_sha256"] &&
+        internal["runtime"]==runtime && internal["job_sha256"]==job_identity(),"native internal result differs")
+    required=operation=="candidate-fit" ? ("point",) : operation=="candidate-validation" ? ("output_context_sha256","output_complete_sha256") :
+        ("output_witness_sha256","output_manifest_sha256","output_complete_sha256","input_descriptor_sha256")
+    need(all(haskey(internal,key) && owner[key]==internal[key] for key in required),"native completed output pins differ")
+    owner
+end
 const REQUIRED_JOBS=Set(vcat(["Julia $v / $s-latest" for v in ("1.12.6","1.13.1") for s in ("ubuntu","windows","macos")],
     ["Documentation build","Julia 1.12 deployment images","Canonical development harness","Full-scale cross-runtime agreement"],
     ["Full-scale $v / $r / $l" for v in ("1.12.6","1.13.1") for r in ("primary","independent") for l in ("ground-only","mixed")]))
@@ -78,13 +138,16 @@ function _whole_qualification(authority,grant)
     for (name,pin) in zip(WORKER_NAMES,WORKER_PINS)
         need(get(proof["source_sha256"],"research/dbdt_completed_source/"*name,nothing)==pin,"candidate worker absent from qualification")
     end
+    for (name,pin) in zip(NATIVE_DRIVER_FILES,NATIVE_DRIVER_PINS)
+        need(get(proof["source_sha256"],name,nothing)==pin,"native driver absent from full qualification")
+    end
     need(get(proof["source_sha256"],K.JOB_NAME,nothing)==K.JOB_PIN &&
         get(proof["source_sha256"],K.CODEC_NAME,nothing)==K.CODEC_PIN,"candidate K closure absent from qualification")
     proof,qual
 end
 function _native_evidence(evidence,point,producer)
     need(evidence isa NativeEvidence,"candidate requires original native owner/raw evidence")
-    owner=A._pinned(evidence.receipt_path,evidence.receipt_sha256;limit=262144)
+    owner=_checked_native_stage(evidence,"candidate-fit",producer)
     text,_=FS._read(evidence.raw_path,64*1024^2)
     need(digest(codeunits(text))==J._sha(evidence.raw_sha256),"candidate producer raw SHA differs")
     auth=K._producer_evidence(point,producer)
@@ -94,7 +157,7 @@ function _native_evidence(evidence,point,producer)
         owner["head"]==auth["head"] && owner["grant_sha256"]==producer.grant_sha256 &&
         owner["source_proof_sha256"]==producer.source_proof_sha256 && owner["qualification_sha256"]==producer.qualification_sha256 &&
         owner["raw_sha256"]==evidence.raw_sha256 && F.isint(owner["native_exit"]) && owner["native_exit"]==0 &&
-        owner["timed_out"]===false && owner["owned_descendants_reaped"]===true && owner["stage_seconds_limit"]==7200 &&
+        owner["timed_out"]===false && owner["ownership_boundary_closed"]===true && owner["stage_seconds_limit"]==7200 &&
         owner["available_physical_bytes"]>=8589934592 && owner["free_disk_bytes"]>=17179869184 &&
         owner["point"]==point_descriptor(point),"candidate original native producer evidence differs")
     path=joinpath(realpath(dirname(producer.grant_path)),"POINT_FIT_ATTEMPT.json")
