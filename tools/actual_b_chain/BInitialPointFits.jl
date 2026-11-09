@@ -260,4 +260,5 @@ function verify_initial_l0(directory,a::BInputs.BPrefixAdmission,reference::BSel
     BInputs.recheck(a);_permission_recheck(permission);T._need(P._bound(P._member(root,"completion.json"))==body&&T._hashmap(P.source_identity())==sources,"B readback source/completion changed")
     (;complete=true,model_count=36,hazard_fit_calls=0,gain_fit_calls=0,raw_replay_A_streams=9,certificate_count=length(proof.certificates),selected_index=nothing)
 end
+include("BInitialNativePermitV2.jl")
 end

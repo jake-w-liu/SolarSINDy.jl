@@ -1826,3 +1826,7 @@ writers' barrier; fullPkg, completeExamples, unchangedH, both strict docs,
 all18 current-source CI and genuine actual numerical positives remain required.
 No actual data,38-fit execution, forecast result or scientific/source authority
 is claimed. This append preserves every byte of the reviewed prefix.
+
+## B1 fixed native entry and independent handoff controls (written, unverified)
+
+Added a distinct owned-v2 permit/native entry for the existing two-law/full36 initial-L0 executor and independent readback. The legacy permit/owner binding and numerical executor remain intact. The contract keeps one7200s whole owned phase, separately bounded metadata, live8MiB supervisor diagnostics and64MiB Julia raw, supplied authority only, null primary selection, zero final/calibration fits and no promotion. Full package tests now include the fixed24 Python controls and real generated36-fit/readback/parity tests; complete examples include the generated entry once. These controls and Julia examples are WRITTEN/UNEXECUTED. The shared candidate-driver bounded-metadata dependency correction is still in progress. Unfiltered Pkg.test(), complete experiments, H, both strict docs, current full18 qualification and a genuine permitted actual cross-process positive remain pending. Earlier126-method evidence belongs only to the old978-source snapshot and does not qualify this changed source. No actual observations, forecast advantage or scientific/source authority are established.

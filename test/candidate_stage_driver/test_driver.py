@@ -12,6 +12,169 @@ OUT.mkdir(exist_ok=True)
 class DriverControls(unittest.TestCase):
     def setUp(self):self.root=Path(tempfile.mkdtemp(prefix=self._testMethodName+'-',dir=OUT)).resolve()
     def command(self,mode):return [sys.executable,'-B','-X','utf8',str(FIXTURE),'--mode',mode,'--root',str(self.root)]
+    def metadata_bound_oracles(self):
+        # Independent literal, prepared before this edit. These are generated
+        # JSON bytes only; no actual source/qualification authority is created.
+        original=b'{"x":1}\n';changed=b'{"x":2}\n'
+        digest='bb157861a164e35cdde9d726b0af9ce2765a8f530c35d9e45732b94ee65e9557'
+        self.assertEqual(hashlib.sha256(original).hexdigest(),digest)
+        file=self.root/'bounded-metadata.json';file.write_bytes(original)
+        reference=dict(path=str(file),sha256=digest)
+        original_sha=hashlib.sha256;original_loads=json.loads
+        original_bounded=D.bounded_bytes;original_open=Path.open
+        for kind in ('pinned','initial-request'):
+            limit=31 if kind=='pinned' else 1048576
+            huge=self.root/(kind+'-oversize.json');huge.write_bytes(b'x'*(limit+1))
+            with self.subTest(kind=kind),mock.patch.object(D,'pin',side_effect=AssertionError('unbounded pin called')),\
+                mock.patch.object(D.hashlib,'file_digest',side_effect=AssertionError('streaming hash called')) as stream_hash,\
+                mock.patch.object(D.hashlib,'sha256',wraps=original_sha) as sha,\
+                mock.patch.object(D.json,'loads',wraps=original_loads) as parser,\
+                mock.patch.object(Path,'open',side_effect=AssertionError('oversized metadata opened')) as opened,\
+                mock.patch.object(subprocess,'Popen') as launched:
+                with self.assertRaisesRegex(ValueError,'metadata byte bound'):
+                    if kind=='pinned':D.pinned(dict(path=str(huge),sha256='0'*64),limit)
+                    else:D.admit_request(huge,'0'*64)
+                opened.assert_not_called();stream_hash.assert_not_called();sha.assert_not_called();parser.assert_not_called();launched.assert_not_called()
+        # Exact bound accepts a single captured snapshot. Mutating the path
+        # AFTER that read must not change which bytes are hashed or parsed.
+        def capture(path,limit):
+            raw=original_bounded(path,limit);file.write_bytes(changed);return raw
+        with mock.patch.object(D,'bounded_bytes',side_effect=capture) as bounded,\
+            mock.patch.object(D,'pin',side_effect=AssertionError('unbounded pin called')),\
+            mock.patch.object(D.hashlib,'file_digest',side_effect=AssertionError('streaming hash called')),\
+            mock.patch.object(D.hashlib,'sha256',wraps=original_sha) as sha,\
+            mock.patch.object(D.json,'loads',wraps=original_loads) as parser,\
+            mock.patch.object(D,'load',side_effect=AssertionError('metadata reopened')):
+            self.assertEqual(D.pinned(reference,8),{'x':1})
+            bounded.assert_called_once_with(str(file),8)
+            sha.assert_called_once_with(original)
+            self.assertEqual(parser.call_count,1);self.assertEqual(parser.call_args.args[0],original)
+        self.assertEqual(file.read_bytes(),changed)
+        # A wrong digest is rejected before parsing the otherwise-valid blob.
+        file.write_bytes(original)
+        with mock.patch.object(D.json,'loads',wraps=original_loads) as parser,\
+            mock.patch.object(D.hashlib,'sha256',wraps=original_sha) as sha:
+            with self.assertRaisesRegex(ValueError,'SHA mismatch'):D.pinned(dict(path=str(file),sha256='0'*64),8)
+            sha.assert_called_once_with(original);parser.assert_not_called()
+        # Simulate growth DURING the real bounded read. No hash/JSON work can
+        # run after the size/identity check detects the changing snapshot.
+        read_sizes=[]
+        class GrowingReader:
+            def __init__(self,stream):self.stream=stream
+            def __enter__(self):return self
+            def __exit__(self,*args):self.stream.close();return False
+            def read(self,count):
+                read_sizes.append(count);raw=self.stream.read(count)
+                with original_open(file,'ab') as out:out.write(b'x')
+                return raw
+        def growing_open(path,*args,**kwargs):
+            stream=original_open(path,*args,**kwargs)
+            return GrowingReader(stream) if Path(path)==file and args==('rb',) else stream
+        with mock.patch.object(Path,'open',new=growing_open),\
+            mock.patch.object(D.hashlib,'sha256',wraps=original_sha) as sha,\
+            mock.patch.object(D.json,'loads',wraps=original_loads) as parser:
+            with self.assertRaisesRegex(ValueError,'metadata changed'):D.pinned(reference,8)
+            self.assertEqual(read_sizes,[9]);sha.assert_not_called();parser.assert_not_called()
+        # Preserve the original duplicate/finite/depth/list/text rejection
+        # semantics after the byte-read/decode factorization.
+        invalid=[b'{"x":1,"x":2}\n',b'{"x":NaN}\n',b'{"x":1e999}\n',
+            b'['*25+b'0'+b']'*25,json.dumps(['x']*8193).encode(),
+            json.dumps({'x':'x'*65537}).encode()]
+        for index,raw in enumerate(invalid):
+            file.write_bytes(raw);ref=dict(path=str(file),sha256=original_sha(raw).hexdigest())
+            with self.subTest(invalid=index),self.assertRaises(ValueError):D.pinned(ref)
+        # Initial request admission must use the same bounded snapshot too.
+        # The literal intentionally has no request fields, so it stops before
+        # authority/source reads or launches even after its digest is accepted.
+        file.write_bytes(original)
+        with mock.patch.object(D,'bounded_bytes',side_effect=capture) as bounded,\
+            mock.patch.object(D,'pin',side_effect=AssertionError('unbounded request pin called')),\
+            mock.patch.object(D.json,'loads',wraps=original_loads) as parser,\
+            mock.patch.object(subprocess,'Popen') as launched:
+            with self.assertRaisesRegex(ValueError,'fixed request fields'):D.admit_request(file,digest)
+            bounded.assert_called_once_with(str(file),1048576)
+            self.assertEqual(parser.call_args.args[0],original);self.assertEqual(parser.call_count,1);launched.assert_not_called()
+        # grant_ref has three known metadata roles. Sourceproof/qualification
+        # were hash-only here before; their non-JSON bytes must remain legal at
+        # this layer, with their later admission grammar preserved elsewhere.
+        roles=(('grant',131072,original),('source_proof',4194304,b'not-JSON-source-proof'),
+            ('qualification',1048576,b'not-JSON-qualification'))
+        authority={}
+        for role,limit,raw in roles:
+            path=self.root/(role+'-metadata');path.write_bytes(raw)
+            authority[role+'_path']=str(path);authority[role+'_sha256']=original_sha(raw).hexdigest()
+        with mock.patch.object(D,'bounded_bytes',wraps=original_bounded) as bounded,\
+            mock.patch.object(D,'decode_metadata',wraps=D.decode_metadata) as decode,\
+            mock.patch.object(D,'pin',side_effect=AssertionError('unbounded authority pin called')),\
+            mock.patch.object(D.hashlib,'file_digest',side_effect=AssertionError('streaming authority hash called')):
+            self.assertEqual(D.grant_ref(authority),{'x':1})
+            self.assertEqual([call.args for call in bounded.call_args_list],
+                [(authority[role+'_path'],limit) for role,limit,raw in roles])
+            decode.assert_called_once_with(original)
+        for offset,(role,limit,raw) in enumerate(roles):
+            candidate=dict(authority);oversize=self.root/(role+'-oversize-metadata');oversize.write_bytes(b'x'*(limit+1))
+            candidate[role+'_path']=str(oversize);candidate[role+'_sha256']='0'*64
+            def guarded_open(path,*args,**kwargs):
+                if Path(path)==oversize:raise AssertionError('oversized role opened')
+                return original_open(path,*args,**kwargs)
+            with self.subTest(role=role),mock.patch.object(Path,'open',new=guarded_open),\
+                mock.patch.object(D,'pin',side_effect=AssertionError('unbounded authority pin called')),\
+                mock.patch.object(D.hashlib,'file_digest',side_effect=AssertionError('streaming authority hash called')),\
+                mock.patch.object(D.hashlib,'sha256',wraps=original_sha) as sha,\
+                mock.patch.object(D,'decode_metadata',wraps=D.decode_metadata) as decode:
+                with self.assertRaisesRegex(ValueError,'metadata byte bound'):D.grant_ref(candidate)
+                self.assertEqual(sha.call_count,offset);decode.assert_not_called()
+    def directory_bound_oracles(self):
+        # Actual flat metadata fixture, with an independently pinned8-byte
+        # literal. No models, observations or source authorities are created.
+        directory=self.root/'bounded-flat-files';directory.mkdir()
+        expected={}
+        for index in range(1024):
+            path=directory/('%04d.json'%index);path.write_bytes(b'{"x":1}\n')
+            expected[str(path)]='bb157861a164e35cdde9d726b0af9ce2765a8f530c35d9e45732b94ee65e9557'
+        self.assertEqual(D.input_controls(dict(directory=str(directory))),expected)
+        (directory/'overflow.json').write_bytes(b'{"x":1}\n')
+        with mock.patch.object(D,'pin',side_effect=AssertionError('hash before1025-entry bound')) as hashed:
+            with self.assertRaisesRegex(ValueError,'artifact fileset bound'):D.input_controls(dict(directory=str(directory)))
+            hashed.assert_not_called()
+        class Scan:
+            def __init__(self,count,error_at=None):self.count=count;self.error_at=error_at;self.visits=0;self.closed=False
+            def __enter__(self):return self
+            def __exit__(self,*args):self.closed=True;return False
+            def __iter__(self):return self
+            def __next__(self):
+                if self.visits>=self.count:raise StopIteration
+                self.visits+=1
+                if self.visits>1025:raise AssertionError('eager enumeration exceeded safe fixture bound')
+                if self.error_at==self.visits:raise OSError('fixed scandir iteration error')
+                return SimpleNamespace(name='%04d.json'%(self.visits-1))
+        # A conceptual huge directory remains safe even for a broken eager
+        # implementation: the fixture itself stops at1026 rather than allocate
+        # unbounded names. Correct code visits exactly1025 and closes it.
+        scan=Scan(1000000000)
+        with mock.patch.object(D.os,'scandir',return_value=scan),\
+            mock.patch.object(Path,'iterdir',side_effect=AssertionError('Path.iterdir eager fallback forbidden')),\
+            mock.patch.object(D,'pin',side_effect=AssertionError('hash before bounded collection')) as hashed:
+            with self.assertRaisesRegex(ValueError,'artifact fileset bound'):D.input_controls(dict(directory=str(directory)))
+            self.assertEqual(scan.visits,1025);self.assertTrue(scan.closed);hashed.assert_not_called()
+        scan=Scan(10,error_at=5)
+        with mock.patch.object(D.os,'scandir',return_value=scan),mock.patch.object(D,'pin') as hashed:
+            with self.assertRaisesRegex(OSError,'scandir iteration error'):D.input_controls(dict(directory=str(directory)))
+            self.assertEqual(scan.visits,5);self.assertTrue(scan.closed);hashed.assert_not_called()
+        scan=Scan(2)
+        def hash_failure(path):
+            self.assertTrue(scan.closed)
+            raise OSError('fixed add/hash failure after scan close')
+        with mock.patch.object(D.os,'scandir',return_value=scan),mock.patch.object(D,'pin',side_effect=hash_failure):
+            with self.assertRaisesRegex(OSError,'add/hash failure after scan close'):D.input_controls(dict(directory=str(directory)))
+            self.assertEqual(scan.visits,2);self.assertTrue(scan.closed)
+        # Preserve flat-file admission. A subdirectory containing a valid
+        # generated file must still reject before any recursive child hash.
+        flat=self.root/'reject-subdirectory';flat.mkdir();inner=flat/'inner';inner.mkdir()
+        (inner/'not-recursively-admitted.json').write_bytes(b'{"x":1}\n')
+        with mock.patch.object(D,'pin') as hashed:
+            with self.assertRaisesRegex(ValueError,'ordinary path kind'):D.input_controls(dict(directory=str(flat)))
+            hashed.assert_not_called()
     def test_real_native_bytes_and_actual_zero_wait(self):
         result=D.pump_process(self.command('emit'),str(self.root),dict(os.environ),self.root/'raw.log',limit=128,timeout=10)
         self.assertTrue(result['complete']);self.assertEqual(result['native_exit'],0);self.assertTrue(result['exact_child_reaped'])
@@ -93,6 +256,7 @@ class DriverControls(unittest.TestCase):
             D.preflight_grant(request,ref,grant)
         start.assert_not_called()
     def test_fixed_runtime_and_binding_outputs_reject_before_owner_launch(self):
+        self.metadata_bound_oracles()
         for filename in ('RUNTIME.json','selected-binding.json'):
             root=self.root/filename.replace('.','-');root.mkdir();(root/filename).write_bytes(b'occupied')
             request=dict(schema='candidate_native_stage_request_v1',evidence_mode='generated',operation='inspect-runtime',execution_directory=str(root),
@@ -102,6 +266,7 @@ class DriverControls(unittest.TestCase):
             with mock.patch.object(subprocess,'Popen') as start,self.assertRaisesRegex(ValueError,'stage path already spent: '+filename):D.admit_request(path,D.pin(path))
             start.assert_not_called()
     def test_unknown_inputs_or_grid_rejected_before_closure(self):
+        self.directory_bound_oracles()
         request=dict(operation='candidate-input',candidate_id='ridge-0.01',evidence_mode='generated',inputs=dict(authority={},arbitrary_path='forbidden'))
         with self.assertRaisesRegex(ValueError,'fixed stage input fields'):D.validate_headers(request)
         request['inputs']=dict(authority={});request['candidate_id']='arbitrary-model'

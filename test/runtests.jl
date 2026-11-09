@@ -1050,3 +1050,5 @@ include("cme_gsm_cdf_reader_tests.jl")
 
 # Fixed17 campaign controls and all frozen descriptor/real generated no-fit parity checks.
 include("candidate_campaign_tests.jl")
+
+include(joinpath(@__DIR__,"b_initial_native_tests.jl"))

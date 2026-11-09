@@ -35,11 +35,13 @@ def write_all(stream,body):
         view=view[count:]
 def write(path,value):
     with Path(path).open('xb') as f:write_all(f,canonical(value))
-def load(path,limit=1048576):
+def bounded_bytes(path,limit=1048576):
     p=ordinary(path);before=p.stat();need(before.st_size<=limit,'metadata byte bound')
     with p.open('rb') as f:raw=f.read(limit+1)
     after=p.stat();need(len(raw)<=limit and len(raw)==before.st_size==after.st_size and
         (before.st_dev,before.st_ino,before.st_mtime_ns)==(after.st_dev,after.st_ino,after.st_mtime_ns),'metadata changed')
+    return raw
+def decode_metadata(raw):
     def pairs(values):
         out={}
         for k,v in values:need(k not in out,'duplicate metadata key');out[k]=v
@@ -57,10 +59,14 @@ def load(path,limit=1048576):
         elif isinstance(v,float):need(math.isfinite(v),'finite metadata number required')
         else:need(v is None or type(v) in (bool,int),'metadata atom type')
     shape(value);return value
-def pinned(ref,limit=1048576):
+def load(path,limit=1048576):return decode_metadata(bounded_bytes(path,limit))
+def pinned_bytes(ref,limit=1048576):
     need(isinstance(ref,dict) and set(ref)=={'path','sha256'},'outside pin reference')
-    need(re.fullmatch('[0-9a-f]{64}',ref['sha256']) and pin(ref['path'])==ref['sha256'],'outside SHA mismatch')
-    return load(ref['path'],limit)
+    need(isinstance(ref['sha256'],str) and re.fullmatch('[0-9a-f]{64}',ref['sha256']),'outside SHA mismatch')
+    raw=bounded_bytes(ref['path'],limit)
+    need(hashlib.sha256(raw).hexdigest()==ref['sha256'],'outside SHA mismatch')
+    return raw
+def pinned(ref,limit=1048576):return decode_metadata(pinned_bytes(ref,limit))
 def module(path,name):
     spec=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
 def git(*args):return subprocess.check_output(['git','-C',str(ROOT),*args],stderr=subprocess.PIPE,timeout=120).decode().strip()
@@ -106,8 +112,11 @@ def qualification(ref,proof,proof_sha):
 def grant_ref(value):
     fields={'grant_path','grant_sha256','source_proof_path','source_proof_sha256','qualification_path','qualification_sha256'}
     need(isinstance(value,dict) and set(value)==fields,'six-field supplied authority required')
-    for suffix in ('grant','source_proof','qualification'):need(pin(value[suffix+'_path'])==value[suffix+'_sha256'],'supplied authority pin differs')
-    return load(value['grant_path'],131072)
+    grant_raw=None
+    for suffix,limit in (('grant',131072),('source_proof',4194304),('qualification',1048576)):
+        raw=pinned_bytes(dict(path=value[suffix+'_path'],sha256=value[suffix+'_sha256']),limit)
+        if suffix=='grant':grant_raw=raw
+    return decode_metadata(grant_raw)
 def preflight_grant(request,ref,grant):
     op=request['operation'];is_fit=op in ('candidate-fit','selected-refit')
     expected={
@@ -176,14 +185,18 @@ def input_controls(request):
             for k,x in v.items():
                 if k.endswith('_path') and isinstance(x,str):add(x)
                 elif k=='directory' and isinstance(x,str):
-                    d=ordinary(x,True);members=list(d.iterdir());need(len(members)<=1024,'artifact fileset bound')
+                    d=ordinary(x,True);members=[]
+                    with os.scandir(d) as entries:
+                        for entry in entries:
+                            need(len(members)<1024,'artifact fileset bound')
+                            members.append(d/entry.name)
                     for p in members:add(p)
                 else:walk(x)
         elif isinstance(v,list):
             for x in v:walk(x)
     walk(request);return controls
 def admit_request(path,sha,*,started=False):
-    need(pin(path)==sha,'request SHA differs');r=load(path)
+    r=pinned(dict(path=str(path),sha256=sha))
     need(set(r)=={'schema','evidence_mode','operation','execution_directory','source_proof','qualification','qualification_authority','julia','runtime','case','table_index','candidate_id','inputs'},'fixed request fields')
     need(r['schema']=='candidate_native_stage_request_v1' and r['operation'] in OPERATIONS,'fixed operation required')
     actual=r['operation'] not in ('inspect-runtime','generated-chain')

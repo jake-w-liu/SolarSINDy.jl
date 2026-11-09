@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[2]
 SCRIPT=Path(__file__).with_name('test_driver.py')
 FIXTURE=Path(__file__).with_name('native_fixture.py')
 OWNER=ROOT/'research/dbdt_completed_source/candidate_native_owner.py'
-PINS={SCRIPT:'3284bb932958ba36e80b5475c8cc159624f9d679af279f50a92d08380b0a6f91',
+PINS={SCRIPT:'49e3f3a72a6f25762acdc52cbd5768a036e43ea3645adc5c3bd5f2f93a0ca090',
     FIXTURE:'d855e765adf0f1820edf0a25d1c96ed8cb59cf9c3edb5dd6ae2d395bc1cd4f57',
     OWNER:'ccbf1cbd0709e50d0b5080bdbe4977ae80ebd1649237e016588d24800ddf2e21'}
 def pin(path):

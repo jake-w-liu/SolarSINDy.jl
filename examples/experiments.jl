@@ -286,3 +286,5 @@ CMEGSMCDFReaderSynthetic.run_example()
 
 include(joinpath(@__DIR__,"candidate_campaign_metadata_synthetic.jl"))
 CandidateCampaignMetadataSynthetic.run_example()
+
+include(joinpath(@__DIR__,"b_initial_l0_native_synthetic.jl"))

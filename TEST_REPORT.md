@@ -1719,3 +1719,7 @@ new integration needs post-barrier native Python controls and full native Julia
 Pkg/experiments/H/docs/all18 verification. Julia parsing and numerical execution
 remain blocked below8GiB. Scientific qualification and actual data access are
 false, and all original checks/tolerances/skips remain unchanged.
+
+## B1 native package/example integration: execution pending
+
+Registered the fixed24 independently authored Python methods and real generated full36-fit/save/readback/parity controls in unfiltered Pkg.test(); registered the auto-executing generated example once in the complete experiments entry. Independent expectations retain the old exact36 setting order,423/424 member geometry,36 readback certificates, zero readback fits and null selection; negative controls cover supplied-permit/source/clock/runtime grammar, exact source closure, deadlines, separate genuine waits and bounded diagnostic failure evidence. All new controls are WRITTEN/UNEXECUTED; no assertion count or passing result is claimed. Shared candidate-driver metadata correction remains in progress. Full Pkg/examples/H/strict-docs/full18 and actual cross-process qualification remain pending. The prior126-method evidence applies only to the old978-source snapshot, not this source. No Julia, actual B values/fits or new scientific results were produced during integration.
