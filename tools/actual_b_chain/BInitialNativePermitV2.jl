@@ -64,19 +64,18 @@ function _v2_precheck(permit::OwnedInitialPointExecutionPermitV2;argv_path=nothi
     for name in OWNED_V2_SCOPE;T._need(T._bytes(getproperty(d,name))==T._bytes(getproperty(intent.scope,name)),"B v2 permit/intent scope differs");end
     # Bind all knowable input/reference metadata BEFORE raw prefix decoding.
     input=intent.input;T._fields(input,(:envelope,:roots,:independent_admission,:expected_view_id,:expected_admitted_seal))
-    env=_v2_canonical_ref(input.envelope);T._fields(env,P.INPUT_FIELDS)
-    T._need(env.schema=="b_point_input_envelope_v1"&&env.complete===true&&env.evidence_mode=="archival_assumed_completion_research"&&env.availability_kind=="assumed_completed_hour"&&env.source_sha256==BInputs.ACTUAL_SOURCE,"B v2 actual input header differs")
-    T._need(d.source_sha256==env.source_sha256&&d.input_envelope_sha256==input.envelope.sha256&&d.input_view_id==input.expected_view_id&&d.admitted_input_seal==input.expected_admitted_seal&&T._hex(d.input_prefix_sha256),"B v2 pre-body input intent differs")
-    T._need(P._sources(env.implementation_sources)==P._sources(intent.implementation_sources),"B v2 input implementation map differs")
-    n=T._int(env.prefix_rows,1,T.MAX_ROWS);T._need(T._int(env.channel_count,17,17)==17&&T._int(env.raw_prefix_bytes,1,T.MAX_FILE)==136n&&T._int(env.receipt_delay_hours,0,0)==0,"B v2 input geometry differs")
-    T._need(T._clock(env.prefix_start_ms)==DateTime(1976,11,1)&&T._clock(env.prefix_stop_ms)==DateTime(2023)&&T.Adapter._shift(T._clock(env.prefix_start_ms),n)==T._clock(env.prefix_stop_ms),"B v2 fixed prefix clock differs")
+    T._fields(input.envelope,(:path,:sha256));T._fields(input.independent_admission,(:path,:sha256))
+    ref=intent.reference;T._fields(ref,(:completion_path,:roots,:pins));pins=_v2_canonical_ref(ref.pins)
+    info=BInputs._joined_metadata_v2(input.envelope.path;expected_envelope_sha256=input.envelope.sha256,roots=Dict(String(k)=>String(v) for (k,v) in pairs(input.roots)),expected_sources=P.source_identity(),independent_admission=(;path=String(input.independent_admission.path),sha256=String(input.independent_admission.sha256)),expected_view_id=input.expected_view_id,expected_input_prefix_sha256=d.input_prefix_sha256,reference_pins=ref.pins)
+    env=info.data
+    T._need(env.evidence_mode=="archival_assumed_completion_research"&&env.source_sha256==BInputs.ACTUAL_SOURCE&&T._int(env.receipt_delay_hours,0,0)==0,"B v2 actual joined source header differs")
+    T._need(d.source_sha256==env.source_sha256&&d.input_envelope_sha256==input.envelope.sha256&&d.input_view_id==input.expected_view_id==info.join.input_view_id&&d.admitted_input_seal==input.expected_admitted_seal&&d.input_prefix_sha256==info.join.input_prefix_sha256,"B v2 pre-body joined intent differs")
+    T._need(P._sources(env.implementation_sources)==P._sources(intent.implementation_sources),"B v2 joined implementation map differs")
     for (k,e) in ((:training_boundary,:training_boundary_ms),(:validation_start,:validation_start_ms),(:validation_end,:validation_end_ms))
         T._need(getproperty(d,k)==getproperty(env,e),"B v2 pre-body split differs")
     end
-    T._need(input.independent_admission.sha256==env.independent_admission_completion_sha256,"B v2 independent input proof differs")
-    BInputs._proof(input.independent_admission.path,input.independent_admission.sha256,env,:archival_assumed_completion_research)
-    ref=intent.reference;T._fields(ref,(:completion_path,:roots,:pins));pins=_v2_canonical_ref(ref.pins)
-    T._need(pins.completion_sha256==env.reference_completion_sha256==d.reference_completion_sha256&&pins.audit_sha256==env.reference_audit_sha256==d.reference_audit_sha256&&P._file_sha(ref.completion_path)[1]==pins.completion_sha256,"B v2 pre-body reference identity differs")
+    T._need(pins.completion_sha256==env.reference_completion_sha256==d.reference_completion_sha256&&pins.audit_sha256==env.reference_audit_sha256==d.reference_audit_sha256,"B v2 pre-body reference identity differs")
+    T._need(BInputs._role_v2(info.members,"reference_completion").absolute==ref.completion_path,"B v2 joined reference path differs")
 
     own=T._hashmap(P.source_identity());T._need(P._sources(d.implementation_sources)==P._sources(intent.implementation_sources)==own,"B v2 current implementation map differs")
     for limits in (d.limits,intent.limits)
@@ -120,10 +119,11 @@ function _v2_precheck(permit::OwnedInitialPointExecutionPermitV2;argv_path=nothi
     for path in (request_path,permit.path,permit.intent_path,joinpath(root,"B1_TIMING.json"),joinpath(root,"B1_OWNER_LAUNCH.json"),joinpath(root,"b1-argv.json"))
         push!(controls,path=>P._file_sha(path)[1])
     end
-    (;request=r,intent,permission=_OwnedInitialAdmissionV2(permit.path,permit.sha256,String(d.qualification_file),String(d.qualification_sha256),head,Tuple(controls)))
+    (;request=r,intent,expected_input_prefix_sha256=String(d.input_prefix_sha256),permission=_OwnedInitialAdmissionV2(permit.path,permit.sha256,String(d.qualification_file),String(d.qualification_sha256),head,Tuple(controls)))
 end
 function _permission(a,permit::OwnedInitialPointExecutionPermitV2)
     T._need(a.view.evidence_mode==:archival_assumed_completion_research,"B v2 actual permit rejects synthetic admission")
+    T._need(hasproperty(a.metadata,:input_contract_version)&&a.metadata.input_contract_version===2,"B v2 permit requires acyclic joined admission")
     checked=_v2_precheck(permit);d,_=P._json(permit.path;fields=OWNED_V2_FIELDS)
     T._need(d.source_sha256==a.view.source_sha256&&d.input_prefix_sha256==a.view.input_prefix_sha256&&d.input_view_id==a.view.view_id&&d.input_envelope_sha256==a.envelope_sha256&&d.admitted_input_seal==a.admission_id&&d.reference_completion_sha256==a.metadata.reference_completion_sha256&&d.reference_audit_sha256==a.metadata.reference_audit_sha256,"B v2 reconstructed admission differs")
     input=checked.intent.input

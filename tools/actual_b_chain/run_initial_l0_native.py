@@ -264,6 +264,139 @@ def _member(roots,root,name):
         need(part in os.listdir(current),'member name/case alias');current=current/part
     return p
 
+SOURCE_V2_COMMON=('complete','evidence_mode','availability_kind','source_sha256','raw_prefix_sha256','prefix_start_ms','prefix_stop_ms','prefix_rows','channel_count','training_boundary_ms','validation_start_ms','validation_end_ms','receipt_delay_hours','implementation_sources')
+PROVENANCE_V2_FIELDS=('schema',*SOURCE_V2_COMMON,'source_format_sha256','parser_source_sha256','raw_layout')
+SOURCE_AUDIT_V2_FIELDS=('schema',*SOURCE_V2_COMMON,'raw_provenance_sha256')
+SOURCE_PROOF_V2_FIELDS=('schema',*SOURCE_V2_COMMON,'raw_prefix_member','raw_prefix_bytes','raw_provenance_sha256','source_audit_sha256','limits','members')
+JOIN_AUDIT_V2_FIELDS=('schema',*SOURCE_V2_COMMON,'source_admission_sha256','input_view_id','input_prefix_sha256','reference_kind','reference_completion_sha256','reference_audit_sha256','source_audit_sha256','raw_provenance_sha256')
+ENVELOPE_V2_FIELDS=('schema','complete','evidence_mode','availability_kind','source_sha256','prefix_start_ms','prefix_stop_ms','prefix_rows','channel_count','raw_prefix_member','raw_prefix_bytes','raw_prefix_sha256','training_boundary_ms','validation_start_ms','validation_end_ms','receipt_delay_hours','independent_admission_completion_sha256','audit_completion_sha256','reference_kind','reference_completion_sha256','reference_audit_sha256','implementation_sources','limits','members','reference_join_audit_sha256')
+SOURCE_V2_ROLES=('raw_prefix','raw_provenance','independent_audit')
+JOIN_V2_ROLES=(*SOURCE_V2_ROLES,'source_admission','reference_completion','reference_audit','reference_join_audit')
+SOURCE_FORMAT_V2='ab7cc12ea18d178ed3b529d603b867c9e948df419275a4cea56a8da08042feee'
+SOURCE_PARSER_V2='src/interval_mean_forecaster/sandu_fullchannel_features.jl'
+REFERENCE_COMMON_V2=('complete','evidence_mode','reference_kind','source_sha256','input_prefix_sha256','input_view_id','delay_hours','training_boundary','validation_start','validation_end','training_history_start','feature_contract_sha256','tuning_loss_contract_sha256','baseline_qualification_sha256','baseline_sources')
+REFERENCE_COMPLETION_V2_FIELDS=('schema',*REFERENCE_COMMON_V2,'audit_contract_sha256','model_ids','selected_setting_ids','raw_row_identity_sha256','prediction_panel_sha256','grid_sha256','tuning_sha256','audit_sha256','members','completion_id')
+REFERENCE_AUDIT_V2_FIELDS=('schema',*REFERENCE_COMMON_V2,'audit_contract_sha256','raw_row_identity_sha256','prediction_panel_sha256','grid_sha256','tuning_sha256','all_eight_settings_checked','full_per_lead_cohorts_checked','feature_receipt_history_checked','selected_prediction_columns_checked','initial_only','audit_id')
+
+def admit_input_metadata_v2(input_spec,reference_spec,expected_sources,execution_root,expected_evidence_mode='archival_assumed_completion_research'):
+    """Check the acyclic S/P/SA/J/E graph without reading raw or prediction bodies.
+
+    This supplies no fitting/reference/qualification authority. Julia still
+    reconstructs the raw view and performs the unchanged complete reference read.
+    """
+    need(expected_evidence_mode in ('synthetic_only','archival_assumed_completion_research'),'v2 expected evidence mode')
+    need(isinstance(expected_sources,dict) and set(expected_sources)==set(B_SOURCE_FILES) and all(isinstance(v,str) and re.fullmatch('[0-9a-f]{64}',v) for v in expected_sources.values()),'v2 exact expected source map')
+    metadata_controls={}
+    def hex64(value):return isinstance(value,str) and re.fullmatch('[0-9a-f]{64}',value) is not None
+    def metadata(ref):
+        exact(ref,('path','sha256'));need(hex64(ref['sha256']),'v2 metadata pin grammar')
+        value,digest=_metadata(ref['path'],canonical_required=True);need(digest==ref['sha256'],'v2 metadata pin differs')
+        key=str(ordinary(ref['path']));need(key not in metadata_controls or metadata_controls[key]==digest,'v2 conflicting metadata pin')
+        metadata_controls[key]=digest;return value
+    def clock(value):
+        need(isinstance(value,str) and re.fullmatch('0|-?[1-9][0-9]*',value),'v2 canonical clock')
+        number=int(value);need(-(2**63)<=number<2**63 and number%3600000==0,'v2 exact-hour clock');return number
+    def source_map(rows):
+        need(isinstance(rows,list) and len(rows)==len(expected_sources),'v2 source map width')
+        mapping={}
+        for row in rows:
+            exact(row,('name','sha256'));name=row['name']
+            need(isinstance(name,str) and name not in mapping and name in expected_sources and hex64(row['sha256']) and expected_sources[name]==row['sha256'],'v2 source map differs')
+            mapping[name]=row['sha256']
+        need(list(mapping)==sorted(mapping),'v2 source map order')
+    def common(value,base=None):
+        need(value['complete'] is True and value['evidence_mode']==expected_evidence_mode and value['availability_kind']=='assumed_completed_hour','v2 source mode/completion')
+        need(hex64(value['source_sha256']) and hex64(value['raw_prefix_sha256']),'v2 raw/source hash grammar')
+        n=_int(value['prefix_rows'],1,500000);need(_int(value['channel_count'],17,17)==17,'v2 source channels');_int(value['receipt_delay_hours'],0,1)
+        start,stop,boundary,first,last=[clock(value[k]) for k in ('prefix_start_ms','prefix_stop_ms','training_boundary_ms','validation_start_ms','validation_end_ms')]
+        need(stop-start==n*3600000 and start<boundary<=first<last<=stop,'v2 source/split geometry')
+        if expected_evidence_mode=='archival_assumed_completion_research':
+            need(value['source_sha256']==ACTUAL_SOURCE and value['prefix_start_ms']==_clock(1976,11,1) and value['prefix_stop_ms']==value['validation_end_ms']==_clock(2023) and value['training_boundary_ms']==value['validation_start_ms']==_clock(2020),'v2 actual source/split')
+        source_map(value['implementation_sources'])
+        if base is not None:
+            need(all(same_typed(value[k],base[k]) for k in SOURCE_V2_COMMON),'v2 repeated source facts')
+    def members(rows,roots,roles):
+        need(isinstance(rows,list) and len(rows)==len(roles),'v2 exact member count')
+        found={};identities=set()
+        for row in rows:
+            exact(row,('root','path','bytes','sha256','role'));role=row['role']
+            need(isinstance(row['root'],str) and isinstance(row['path'],str) and isinstance(role,str) and role in roles and role not in found and hex64(row['sha256']),'v2 member grammar/role')
+            identity=(row['root']+'/'+row['path']).lower();need(identity not in identities,'v2 duplicate member');identities.add(identity)
+            path=_member(roots,row['root'],row['path']);need(path.stat().st_size==_int(row['bytes'],1,536870912),'v2 member size')
+            if role!='raw_prefix':
+                need(row['bytes']<=2097152,'v2 metadata member bound')
+            found[role]=dict(row,absolute=path)
+        need(set(found)==set(roles),'v2 complete roles');return found
+    exact(input_spec,('envelope','roots','independent_admission','expected_view_id','expected_admitted_seal'))
+    exact(reference_spec,('completion_path','roots','pins'))
+    roots=_roots(input_spec['roots'],Path(execution_root));refroots=_roots(reference_spec['roots'],Path(execution_root))
+    env=metadata(input_spec['envelope']);exact(env,ENVELOPE_V2_FIELDS);need(env['schema']=='b_point_input_envelope_v2','v2 joined envelope required');common(env)
+    need(same_typed(env['limits'],LIMITS),'v2 joined limits')
+    source=metadata(input_spec['independent_admission']);exact(source,SOURCE_PROOF_V2_FIELDS)
+    need(source['schema']=='independently_audited_b_source_prefix_v2','v2 source-only proof required');common(source,env)
+    need(same_typed(source['limits'],LIMITS),'v2 source limits')
+    source_members=members(source['members'],roots,SOURCE_V2_ROLES);joined=members(env['members'],roots,JOIN_V2_ROLES)
+    for role,row in source_members.items():need(row==joined[role],'v2 joined upstream member differs')
+    raw=source_members['raw_prefix'];p=source_members['raw_provenance'];sa=source_members['independent_audit'];sp=joined['source_admission'];j=joined['reference_join_audit']
+    need(source['raw_prefix_member']==env['raw_prefix_member']==raw['root']+'/'+raw['path'] and _int(source['raw_prefix_bytes'],1,536870912)==raw['bytes']==env['raw_prefix_bytes']==136*source['prefix_rows'] and raw['sha256']==source['raw_prefix_sha256'],'v2 raw prefix geometry')
+    need(str(sp['absolute'])==str(Path(input_spec['independent_admission']['path'])) and sp['sha256']==input_spec['independent_admission']['sha256']==env['independent_admission_completion_sha256'],'v2 source proof role')
+    need(source['raw_provenance_sha256']==p['sha256'] and source['source_audit_sha256']==sa['sha256']==env['audit_completion_sha256'],'v2 upstream source pins')
+    provenance=metadata(dict(path=str(p['absolute']),sha256=p['sha256']));exact(provenance,PROVENANCE_V2_FIELDS)
+    source_audit=metadata(dict(path=str(sa['absolute']),sha256=sa['sha256']));exact(source_audit,SOURCE_AUDIT_V2_FIELDS)
+    need(provenance['schema']=='b_raw_prefix_provenance_v2' and source_audit['schema']=='independently_audited_b_raw_source_v2','v2 upstream source schemas');common(provenance,source);common(source_audit,source)
+    need(source_audit['raw_provenance_sha256']==p['sha256'] and hex64(provenance['source_format_sha256']) and hex64(provenance['parser_source_sha256']) and provenance['parser_source_sha256']==expected_sources.get(SOURCE_PARSER_V2) and provenance['raw_layout']=='source17_le_f64_column_major_v1','v2 parser/provenance facts')
+    if expected_evidence_mode=='archival_assumed_completion_research':need(provenance['source_format_sha256']==SOURCE_FORMAT_V2,'v2 actual source format')
+    join=metadata(dict(path=str(j['absolute']),sha256=j['sha256']));exact(join,JOIN_AUDIT_V2_FIELDS)
+    need(join['schema']=='independently_audited_b_reference_join_v2' and env['reference_join_audit_sha256']==j['sha256'],'v2 independent join audit');common(join,source)
+    links=dict(source_admission_sha256=sp['sha256'],source_audit_sha256=sa['sha256'],raw_provenance_sha256=p['sha256'],reference_kind=env['reference_kind'],reference_completion_sha256=joined['reference_completion']['sha256'],reference_audit_sha256=joined['reference_audit']['sha256'])
+    need(all(same_typed(join[k],v) for k,v in links.items()),'v2 join upstream pins')
+    need(env['reference_kind'] in ('original_reference_diagnostic_only','matched_information_gbm_initial_v1') and (env['reference_kind']!='original_reference_diagnostic_only' or env['receipt_delay_hours']==0),'v2 reference kind/delay')
+    need(hex64(join['input_view_id']) and hex64(join['input_prefix_sha256']) and join['input_view_id']==input_spec['expected_view_id'] and hex64(input_spec['expected_admitted_seal']),'v2 expected stable view/seal')
+    rp=metadata(reference_spec['pins']);exact(rp,('completion_sha256','audit_sha256','grid_sha256','tuning_sha256','prediction_sha256','feature_contract_sha256','tuning_loss_contract_sha256','baseline_qualification_sha256','baseline_sources','baseline_qualified_head','feature_contract_member','tuning_loss_contract_member'))
+    r=joined['reference_completion'];ra=joined['reference_audit']
+    need(str(r['absolute'])==str(Path(reference_spec['completion_path'])) and r['absolute'].name=='completion.json' and r['absolute'].parent in refroots.values() and ra['absolute']==r['absolute'].parent/'audit.json','v2 reference roots/paths')
+    need(r['sha256']==rp['completion_sha256']==env['reference_completion_sha256'] and ra['sha256']==rp['audit_sha256']==env['reference_audit_sha256'],'v2 outside reference pins')
+    completion=metadata(dict(path=str(r['absolute']),sha256=r['sha256']));exact(completion,REFERENCE_COMPLETION_V2_FIELDS)
+    audit=metadata(dict(path=str(ra['absolute']),sha256=ra['sha256']));exact(audit,REFERENCE_AUDIT_V2_FIELDS)
+    matched=env['reference_kind']=='matched_information_gbm_initial_v1'
+    need(completion['schema']==('b_matched_reference_completion_v2' if matched else 'b_original_reference_completion_v1') and audit['schema']==('b_matched_reference_audit_v2' if matched else 'b_original_reference_audit_v1') and completion['complete'] is True and audit['complete'] is True,'v2 reference header schema/completion')
+    for value,key in ((completion,'completion_id'),(audit,'audit_id')):
+        need(hex64(value[key]) and hashlib.sha256(canonical({k:v for k,v in value.items() if k!=key})).hexdigest()==value[key],'v2 reference header identity')
+    need(all(same_typed(completion[k],audit[k]) for k in REFERENCE_COMMON_V2),'v2 reference/audit repeated fields')
+    header_links=dict(evidence_mode=expected_evidence_mode,reference_kind=env['reference_kind'],source_sha256=env['source_sha256'],input_view_id=join['input_view_id'],input_prefix_sha256=join['input_prefix_sha256'],training_boundary=env['training_boundary_ms'],validation_start=env['validation_start_ms'],validation_end=env['validation_end_ms'],training_history_start=env['prefix_start_ms'])
+    need(all(same_typed(completion[k],v) for k,v in header_links.items()) and _int(completion['delay_hours'],0,1)==env['receipt_delay_hours'],'v2 reference header source/clock/view')
+    for key in ('feature_contract_sha256','tuning_loss_contract_sha256','baseline_qualification_sha256','audit_contract_sha256','raw_row_identity_sha256','prediction_panel_sha256','grid_sha256','tuning_sha256','audit_sha256'):need(hex64(completion[key]),'v2 reference header hash grammar')
+    need(all(same_typed(audit[k],completion[k]) for k in ('audit_contract_sha256','raw_row_identity_sha256','prediction_panel_sha256','grid_sha256','tuning_sha256')),'v2 repeated audit header hashes')
+    need(all(audit[k] is True for k in ('full_per_lead_cohorts_checked','feature_receipt_history_checked','selected_prediction_columns_checked','initial_only')) and audit['all_eight_settings_checked'] is matched and completion['audit_sha256']==ra['sha256'],'v2 reference audit scope/header')
+    need(isinstance(completion['model_ids'],list) and isinstance(completion['selected_setting_ids'],list) and len(completion['model_ids'])==len(completion['selected_setting_ids'])==2 and all(hex64(v) for v in completion['model_ids']),'v2 reference model IDs')
+    for value in completion['selected_setting_ids']:_int(value,1,8 if matched else 10000)
+    for key in ('completion_sha256','audit_sha256','grid_sha256','tuning_sha256','prediction_sha256','feature_contract_sha256','tuning_loss_contract_sha256','baseline_qualification_sha256'):need(hex64(rp[key]),'v2 outside reference pin grammar')
+    need(isinstance(rp['baseline_qualified_head'],str) and re.fullmatch('[0-9a-f]{40}',rp['baseline_qualified_head']),'v2 baseline head grammar')
+    rows=rp['baseline_sources'];need(isinstance(rows,list) and 1<=len(rows)<=2048,'v2 baseline source bound');baseline={}
+    for row in rows:
+        exact(row,('name','sha256'));name=row['name']
+        need(isinstance(name,str) and name.isascii() and 0<len(name)<=256 and not name.startswith('/') and '\\' not in name and all(p not in ('','.','..') for p in name.split('/')) and name not in baseline and hex64(row['sha256']),'v2 baseline source grammar');baseline[name]=row['sha256']
+    need(list(baseline)==sorted(baseline) and isinstance(rp['feature_contract_member'],str) and isinstance(rp['tuning_loss_contract_member'],str) and baseline.get(rp['feature_contract_member'])==rp['feature_contract_sha256'] and baseline.get(rp['tuning_loss_contract_member'])==rp['tuning_loss_contract_sha256'],'v2 outside baseline contract members')
+    need(same_typed(completion['baseline_sources'],rows) and all(completion[k]==rp[k] for k in ('grid_sha256','tuning_sha256','feature_contract_sha256','tuning_loss_contract_sha256','baseline_qualification_sha256')) and completion['prediction_panel_sha256']==rp['prediction_sha256'],'v2 outside reference component headers')
+    names=['audit.json','predictions.bin','qualification.json']
+    if matched:names+=['grid.json','tuning.json']+[f'candidates/h{h}/setting-{s}.bin' for h in (4,6) for s in range(1,9)]
+    names.sort();rows=completion['members'];need(isinstance(rows,list) and len(rows)==len(names),'v2 reference member ledger count')
+    ledger={};total=r['bytes']
+    for row,name in zip(rows,names):
+        exact(row,('name','bytes','sha256'));need(row['name']==name and hex64(row['sha256']),'v2 reference member ledger')
+        size=_int(row['bytes'],1,536870912)
+        if name.endswith('.json'):need(size<=2097152,'v2 reference metadata bound')
+        member=_member({'reference':r['absolute'].parent},'reference',name)
+        need(member.stat().st_size==size,'v2 reference member stat/size');total+=size;need(total<=128*1024**2,'v2 reference total bound');ledger[name]=row
+    pred=ledger['predictions.bin'];need(pred['bytes']>=32 and (pred['bytes']-16)%16==0 and 1<=(pred['bytes']-16)//16<=source['prefix_rows'],'v2 selected prediction header geometry')
+    need(ledger['audit.json']['sha256']==ra['sha256'] and pred['sha256']==completion['prediction_panel_sha256'] and ledger['qualification.json']['sha256']==completion['baseline_qualification_sha256'],'v2 reference member/header pins')
+    if matched:
+        need(ledger['grid.json']['sha256']==completion['grid_sha256'] and ledger['tuning.json']['sha256']==completion['tuning_sha256'],'v2 grid/tuning member headers')
+        count=(pred['bytes']-16)//16
+        need(all(ledger[f'candidates/h{h}/setting-{s}.bin']['bytes']==16+8*count for h in (4,6) for s in range(1,9)),'v2 candidate header geometry')
+    # Only the unchanged full Julia reader can establish numeric/reference authority.
+    return dict(env=env,roots=roots,reference_roots=refroots,reference_pins=rp,source=source,provenance=provenance,source_audit=source_audit,join=join,metadata_controls=metadata_controls)
+
 def resource_admission(root):
     H=module(ROOT/'tools/run_canonical_harness.py','b1_physical_memory');memory,method=H.available_memory();disk=shutil.disk_usage(root).free
     need(type(memory) is int and memory>=RAM and type(disk) is int and disk>=DISK,'8GiB available physical/16GiB disk required before Julia')
@@ -290,7 +423,7 @@ def admit_request(path,sha,started=False):
     need(time.monotonic()-began<METADATA_SECONDS,'metadata preflight deadline')
     intent=pinned(r['intent']);exact(intent,INTENT_FIELDS)
     need(intent['schema']=='b_initial_l0_execution_intent_v2' and intent['stage']=='initial_l0' and intent['evidence_mode']==r['evidence_mode'] and intent['execution_directory']==str(root) and intent['contract_sha256']==CONTRACT,'B intent scope differs')
-    _sources(intent['implementation_sources'],proof);scope=_scope(intent['scope']);need(canonical(intent['limits'])==canonical(LIMITS),'fixed B limits differ')
+    implementation_sources=_sources(intent['implementation_sources'],proof);scope=_scope(intent['scope']);need(canonical(intent['limits'])==canonical(LIMITS),'fixed B limits differ')
     need(intent['runtime']==r['runtime'],'runtime reference differs');runtime=pinned(r['runtime'],131072)
     validate_runtime(runtime,r['julia']['sha256'])
     exact(r['julia'],('path','sha256'));need(pin(r['julia']['path'])==r['julia']['sha256'],'Julia executable pin differs')
@@ -316,21 +449,13 @@ def admit_request(path,sha,started=False):
         exact(counts,('PASS','WARN','FAIL'));need(all(type(counts[k]) is int and counts[k]>=0 for k in counts),'qualification integer counter grammar')
     need(same_typed(q['harness']['counts'],evidence['harness_counts']),'B H raw count linkage differs')
     need(q['schema']=='b_point_execution_software_qualification_v1' and q['complete'] is True and q['head']==proof['head'] and q['source_sha256']=={row['name']:row['sha256'] for row in intent['implementation_sources']} and q['root_qualification_sha256']==r['root_qualification']['sha256'] and q['source_proof_sha256']==r['source_proof']['sha256'] and q['canonical_harness_sha256']==pinned(r['root_qualification'])['candidate_pipeline_full18']['harness_raw_sha256'] and q['software_qualification_only'] is True and q['actual_panel_fit_or_outcome_qualified'] is False and q['serving_promotion'] is False,'B execution wrapper/root linkage differs')
-    x=intent['input'];exact(x,('envelope','roots','independent_admission','expected_view_id','expected_admitted_seal'));roots=_roots(x['roots'],root)
-    env=pinned(x['envelope']);exact(env,('schema','complete','evidence_mode','availability_kind','source_sha256','prefix_start_ms','prefix_stop_ms','prefix_rows','channel_count','raw_prefix_member','raw_prefix_bytes','raw_prefix_sha256','training_boundary_ms','validation_start_ms','validation_end_ms','receipt_delay_hours','independent_admission_completion_sha256','audit_completion_sha256','reference_kind','reference_completion_sha256','reference_audit_sha256','implementation_sources','limits','members'));need(env['schema']=='b_point_input_envelope_v1' and env['complete'] is True and env['evidence_mode']==r['evidence_mode'] and env['availability_kind']=='assumed_completed_hour' and env['source_sha256']==ACTUAL_SOURCE and env['implementation_sources']==intent['implementation_sources'] and same_typed(env['limits'],LIMITS),'actual B envelope metadata differs')
-    n=_int(env['prefix_rows'],1,500000);_int(env['raw_prefix_bytes'],1,536870912)
-    need(env['channel_count']==17 and type(env['channel_count']) is int and env['receipt_delay_hours']==0 and type(env['receipt_delay_hours']) is int and env['prefix_start_ms']==_clock(1976,11,1) and env['prefix_stop_ms']==_clock(2023) and int(env['prefix_stop_ms'])-int(env['prefix_start_ms'])==n*3600000,'actual prefix geometry/clocks differ')
+    x=intent['input'];ref=intent['reference']
+    admitted=admit_input_metadata_v2(x,ref,implementation_sources,root,r['evidence_mode'])
+    env=admitted['env'];roots=admitted['roots'];refroots=admitted['reference_roots'];rp=admitted['reference_pins'];n=env['prefix_rows']
+    need(env['receipt_delay_hours']==0,'actual B1 remains L0 only')
     for a,b in (('training_boundary_ms','training_boundary'),('validation_start_ms','validation_start'),('validation_end_ms','validation_end')):need(env[a]==scope[b],'actual split differs')
-    for key in ('expected_view_id','expected_admitted_seal'):need(isinstance(x[key],str) and re.fullmatch('[0-9a-f]{64}',x[key]),'expected reconstructed identity grammar')
-    proof_admission=pinned(x['independent_admission']);exact(proof_admission,('schema','complete','evidence_mode','source_sha256','raw_prefix_sha256','prefix_start_ms','prefix_stop_ms','prefix_rows','training_boundary_ms','validation_start_ms','validation_end_ms','receipt_delay_hours','reference_completion_sha256','reference_audit_sha256','audit_completion_sha256','implementation_sources'));need(proof_admission['schema']=='independently_audited_b_prefix_v1' and proof_admission['complete'] is True,'independent prefix admission required')
-    for k,v in proof_admission.items():
-        if k not in ('schema','complete'):need(k in env and same_typed(env[k],v),'independent prefix metadata differs')
-    need(env['independent_admission_completion_sha256']==x['independent_admission']['sha256'],'independent proof pin differs')
-    need(permit['source_sha256']==env['source_sha256'] and isinstance(permit['input_prefix_sha256'],str) and re.fullmatch('[0-9a-f]{64}',permit['input_prefix_sha256']) and permit['input_envelope_sha256']==x['envelope']['sha256'] and permit['input_view_id']==x['expected_view_id'] and permit['admitted_input_seal']==x['expected_admitted_seal'],'permit input identity differs')
-    ref=intent['reference'];exact(ref,('completion_path','roots','pins'));refroots=_roots(ref['roots'],root);rp=pinned(ref['pins'])
-    exact(rp,('completion_sha256','audit_sha256','grid_sha256','tuning_sha256','prediction_sha256','feature_contract_sha256','tuning_loss_contract_sha256','baseline_qualification_sha256','baseline_sources','baseline_qualified_head','feature_contract_member','tuning_loss_contract_member'))
-    need(pin(ref['completion_path'])==rp['completion_sha256']==env['reference_completion_sha256']==permit['reference_completion_sha256'] and rp['audit_sha256']==env['reference_audit_sha256']==permit['reference_audit_sha256'],'reference pins differ')
-    need(Path(ref['completion_path']).name=='completion.json' and Path(ref['completion_path']).parent in refroots.values(),'reference completion outside supplied root')
+    need(permit['source_sha256']==env['source_sha256'] and permit['input_prefix_sha256']==admitted['join']['input_prefix_sha256'] and permit['input_envelope_sha256']==x['envelope']['sha256'] and permit['input_view_id']==x['expected_view_id'] and permit['admitted_input_seal']==x['expected_admitted_seal'],'permit v2 joined input identity differs')
+    need(rp['completion_sha256']==permit['reference_completion_sha256'] and rp['audit_sha256']==permit['reference_audit_sha256'],'permit reference pins differ')
     # Nothing below may decode observations; current native admission precedes body hashing.
     memory,method,disk=resource_admission(root)
     if os.name=='posix':module(OWNER,'b1_preflight_owner_features').posix_features()
@@ -346,14 +471,8 @@ def admit_request(path,sha,started=False):
         need(time.monotonic()-began<METADATA_SECONDS,'metadata preflight deadline')
     for refvalue in (r['intent'],r['permit'],r['source_proof'],r['root_qualification'],r['b_execution_qualification'],r['julia'],r['runtime'],x['envelope'],x['independent_admission'],ref['pins']):add(refvalue['path'],refvalue['sha256'])
     for p in (Path(__file__),ENTRY,GATE,OWNER,LEGACY,UTILITY,Path(path),Path(sys.executable)):add(p)
-    rows=env['members'];need(isinstance(rows,list) and 6<=len(rows)<=2048,'input member bound');roles={};identities=set()
-    for row in rows:
-        exact(row,('root','path','bytes','sha256','role'));identity=(row['root']+'/'+row['path']).lower();need(identity not in identities,'duplicate member');identities.add(identity)
-        role=row['role'];need(role in ('raw_prefix','reference_completion','reference_audit','source_admission','independent_audit','raw_provenance'),'input role differs');roles.setdefault(role,[]).append(row)
-        p=_member(roots,row['root'],row['path']);need(p.stat().st_size==_int(row['bytes'],1,536870912),'input member size differs');add(p,row['sha256'])
-    need(set(roles)=={'raw_prefix','reference_completion','reference_audit','source_admission','independent_audit','raw_provenance'} and all(len(roles[k])==1 for k in roles if k!='raw_provenance'),'input role cardinality differs')
-    raw=roles['raw_prefix'][0];need(raw['bytes']==env['raw_prefix_bytes']==136*n and raw['sha256']==env['raw_prefix_sha256'] and raw['root']+'/'+raw['path']==env['raw_prefix_member'],'raw role geometry differs')
-    for role,key in (('reference_completion','reference_completion_sha256'),('reference_audit','reference_audit_sha256'),('source_admission','independent_admission_completion_sha256'),('independent_audit','audit_completion_sha256')):need(roles[role][0]['sha256']==env[key],'input role pin mismatch')
+    for metadata_path,metadata_sha in admitted['metadata_controls'].items():add(metadata_path,metadata_sha)
+    for row in env['members']:add(_member(roots,row['root'],row['path']),row['sha256'])
     refdir=ordinary(Path(ref['completion_path']).parent,True);stack=[refdir];visited=0;refnames=set();refdirs=set();refbytes=0
     while stack:
         directory=stack.pop()

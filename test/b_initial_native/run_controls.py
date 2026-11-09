@@ -15,9 +15,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = Path(__file__).with_name('test_driver.py')
 OWNER = ROOT / 'research/dbdt_completed_source/candidate_native_owner.py'
 OWNER_SHA = 'ccbf1cbd0709e50d0b5080bdbe4977ae80ebd1649237e016588d24800ddf2e21'
-SCRIPT_SHA = '329d86a7f35c245d0ba096b85e2bb5f3c15c08a4b00f9c0d9523b389c07179eb'
+SCRIPT_SHA = '6369fffd78f6720af38a7dd822d528b59986bab715eb8e53d59cf3285a09b32f'
 SECONDS = 180
-METHODS = 24
+METHODS = 30
 NAMES = (
     'test/b_initial_native/fixed_child.py', 'test/b_initial_native/literal_oracles_v1.json',
     'test/b_initial_native/api_oracles_v2.json', 'test/b_initial_native/closure_oracles_v3.json',
@@ -31,7 +31,10 @@ NAMES = (
     'research/dbdt_completed_source/run_candidate_stage.py',
     'tools/run_canonical_harness.py', 'examples/support/b_point_generated_fixture.jl',
     'test/b_point_training/tree_inventory_oracles_v1.json',
-    'test/b_point_training/independent_literals_v1.json')
+    'test/b_point_training/independent_literals_v1.json',
+    'tools/actual_b_chain/BInputs.jl',
+    'test/b_input_v2/source_dag_literals_v1.json',
+    'test/b_input_v2/fixture.jl', 'test/b_input_v2/runtests.jl')
 
 
 def ordinary(path, directory=False):
@@ -59,9 +62,9 @@ def write(path, record):
 def validate_summary(raw):
     if not isinstance(raw, bytes) or len(raw) > 4 * 1024**2:
         raise ValueError('bounded native transcript required')
-    if re.findall(rb'^Ran (\d+) tests in [^\r\n]+\r?$', raw, re.M) != [b'24'] or \
+    if re.findall(rb'^Ran (\d+) tests in [^\r\n]+\r?$', raw, re.M) != [b'30'] or \
             re.findall(rb'^(OK)\r?$', raw, re.M) != [b'OK']:
-        raise ValueError('exact24-method LF/CRLF transcript required')
+        raise ValueError('exact30-method LF/CRLF transcript required')
     if re.search(rb'^(?:FAILED\b|FAIL:|ERROR:|SKIPPED\b)', raw, re.M):
         raise ValueError('failed/skipped native controls rejected')
 
@@ -88,7 +91,7 @@ def main(output):
     controls = {str(path): pin(path) for path in
                 (Path(__file__), SCRIPT, OWNER, executable, *(ROOT / n for n in NAMES))}
     record = dict(schema='b1_generated_native_controls_v1', complete=False,
-                  methods_expected=24, controls_before_sha256=controls,
+                  methods_expected=30, controls_before_sha256=controls,
                   Julia_executed=False, actual_observations=0,
                   source_authority_granted=False, scientific_qualification=False,
                   raw_positive_acceptance_bound_bytes=4 * 1024**2,
@@ -113,7 +116,7 @@ def main(output):
         with (output / 'native.log').open('rb') as stream:
             raw = stream.read(4 * 1024**2 + 1)
         validate_summary(raw)
-        record.update(complete=True, methods=24)
+        record.update(complete=True, methods=30)
     except BaseException as error:
         record['failure'] = dict(type=type(error).__name__, message=str(error),
                                  traceback=traceback.format_exc())

@@ -48,6 +48,36 @@ function _reference_pins(ref)
     sources=Pair{String,String}[String(row.name)=>String(row.sha256) for row in d.baseline_sources]
     B.BSelection.BReferencePins(; (name=>(name==:baseline_sources ? sources : String(getproperty(d,name))) for name in names)...)
 end
+function reconstruct_inputs_v2(input,reference_spec;expected_evidence_mode::Symbol,expected_input_prefix_sha256=nothing,expected_sources=P.source_identity())
+    need(expected_evidence_mode in (:synthetic_only,:archival_assumed_completion_research),"B v2 expected evidence mode differs")
+    T._fields(input,(:envelope,:roots,:independent_admission,:expected_view_id,:expected_admitted_seal))
+    T._fields(input.envelope,(:path,:sha256));T._fields(input.independent_admission,(:path,:sha256))
+    T._fields(reference_spec,(:completion_path,:roots,:pins))
+    independent=(;path=String(input.independent_admission.path),sha256=String(input.independent_admission.sha256))
+    rootmap=Dict(String(k)=>String(v) for (k,v) in pairs(input.roots))
+    info=B.BInputs._joined_metadata_v2(input.envelope.path;expected_envelope_sha256=input.envelope.sha256,
+        roots=rootmap,expected_sources,independent_admission=independent,expected_view_id=input.expected_view_id,
+        expected_input_prefix_sha256,reference_pins=reference_spec.pins)
+    trusted=_reference_pins(reference_spec.pins)
+    reference_roots=B.BInputs._roots_v2(Dict(String(k)=>String(v) for (k,v) in pairs(reference_spec.roots)))
+    completion=B.BInputs._ordinary_input_v2(reference_spec.completion_path)
+    need(Symbol(info.data.evidence_mode)==expected_evidence_mode&&completion==B.BInputs._role_v2(info.members,"reference_completion").absolute&&dirname(completion) in values(reference_roots)&&
+        trusted.completion_sha256==info.data.reference_completion_sha256&&trusted.audit_sha256==info.data.reference_audit_sha256,"B v2 supplied reference is not the joined reference")
+    admission=B.BInputs.admit_prefix_v2(input.envelope.path;expected_envelope_sha256=input.envelope.sha256,
+        roots=rootmap,expected_sources,independent_admission=independent,expected_view_id=input.expected_view_id,
+        expected_input_prefix_sha256,reference_pins=reference_spec.pins)
+    need(admission.view.evidence_mode==expected_evidence_mode&&admission.view.view_id==input.expected_view_id&&admission.admission_id==input.expected_admitted_seal,"B v2 reconstructed source/join differs")
+    reference=B.BInputs.admit_reference(reference_spec.completion_path;trusted_pins=trusted,
+        roots=reference_roots,view=admission.view,expected_sources)
+    m=reference.metadata;a=admission.metadata
+    need(m.evidence_mode==a.evidence_mode&&m.source_sha256==a.source_sha256&&m.delay_hours==a.delay_hours&&
+        m.training_boundary==a.training_boundary&&m.validation_start==a.validation_start&&m.validation_end==a.validation_end&&
+        m.training_history_start==a.prefix_start&&m.reference_kind==a.reference_kind&&
+        m.reference_completion_sha256==a.reference_completion_sha256&&m.audit_completion_sha256==a.reference_audit_sha256&&
+        reference.audit!==nothing&&reference.audit.view.view_id==admission.view.view_id,"B v2 admitted reference/join pair differs")
+    B.BInputs.recheck(admission)
+    (;admission,reference)
+end
 function main(args)
     worker=time_ns()
     need(length(args)==6&&args[1]=="--request"&&args[3]=="--request-sha256"&&args[5]=="--argv","fixed actual B1 worker argv required")
@@ -59,11 +89,8 @@ function main(args)
     need(all(x->x isa Integer&&!(x isa Bool),(expected.blas_threads,expected.omp_threads,expected.rng_seed)),"B1 inspected runtime integer grammar")
     need(Dict(k=>v for (k,v) in pairs(runtime) if k!="argv")==Dict(String(k)=>v for (k,v) in pairs(expected) if String(k)!="argv"),"B1 inspected runtime changed")
     # All supplied native authority/source/runtime checks above precede decoding.
-    x=intent.input;T._fields(x,(:envelope,:roots,:independent_admission,:expected_view_id,:expected_admitted_seal))
-    admission=B.BInputs.admit_prefix(x.envelope.path;expected_envelope_sha256=x.envelope.sha256,roots=Dict(String(k)=>String(v) for (k,v) in pairs(x.roots)),expected_sources=P.source_identity(),independent_admission=(;path=String(x.independent_admission.path),sha256=String(x.independent_admission.sha256)))
-    need(admission.view.view_id==x.expected_view_id&&admission.admission_id==x.expected_admitted_seal,"B1 reconstructed admission differs")
-    ref=intent.reference;T._fields(ref,(:completion_path,:roots,:pins))
-    reference=B.BInputs.admit_reference(ref.completion_path;trusted_pins=_reference_pins(ref.pins),roots=Dict(String(k)=>String(v) for (k,v) in pairs(ref.roots)),view=admission.view,expected_sources=P.source_identity())
+    reconstructed=reconstruct_inputs_v2(intent.input,intent.reference;expected_evidence_mode=:archival_assumed_completion_research,expected_input_prefix_sha256=checked.expected_input_prefix_sha256)
+    admission=reconstructed.admission;reference=reconstructed.reference
     output=joinpath(root,"output");start=time_ns()
     stage=F.run_initial_l0(admission,reference,output;execution_permit=permit,chunk_hours=24);fit_elapsed_ns=Int(time_ns()-start)
     start=time_ns();verified=F.verify_initial_l0(output,admission,reference;expected_completion_sha256=stage.completion_sha256,expected_sources=P.source_identity(),execution_permit=permit,chunk_hours=7);readback_elapsed_ns=Int(time_ns()-start)

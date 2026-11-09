@@ -10,7 +10,7 @@ end
 const ORIGINAL=OriginalBRoute.BPointSyntheticFixture
 const SUPPORT=CompletedRefitNativeDriver
 const CONTROL=joinpath(@__DIR__,"b_initial_native","run_controls.py")
-const CONTROL_SHA="7c885a4775493e9cd4ade71d09f5509e57cce08d0e0e40237b59d9c38592b031"
+const CONTROL_SHA="177bda7d43e455ac6907cc7c5cfb8fe94ea0dacb7c767f6f5b7351c873414f3e"
 const TREE_ORACLE=joinpath(@__DIR__,"b_point_training","tree_inventory_oracles_v1.json")
 const INDEPENDENT=joinpath(@__DIR__,"b_point_training","independent_literals_v1.json")
 
@@ -35,7 +35,7 @@ function run_python_controls()
         before.mtime==after.mtime&&before.ctime==after.ctime||error("B1 receipt changed")
     receipt=JSON3.read(body,Dict{String,Any})
     @test receipt["schema"]=="b1_generated_native_controls_v1"
-    @test receipt["complete"]===true&&receipt["methods"]==24
+    @test receipt["complete"]===true&&receipt["methods"]==30
     @test receipt["native"]["native_exit"] isa Integer&&!(receipt["native"]["native_exit"] isa Bool)
     @test receipt["native"]["native_exit"]==0&&receipt["native"]["timed_out"]===false
     @test receipt["native"]["leader_reaped"]===true&&receipt["native"]["ownership_boundary_closed"]===true

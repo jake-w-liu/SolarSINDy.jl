@@ -82,9 +82,23 @@ def verify_graph(bodies):
             raise ValueError('transitive pin differs: '+consumer+' -> '+target)
 
 @contextmanager
-def clean_fixture():
+def clean_fixture(*,root_characters=None):
     with tempfile.TemporaryDirectory(prefix='bootstrap-source-pin-control-') as temporary:
-        base=Path(temporary).resolve(strict=True);root=base/'project';root.mkdir()
+        base=Path(temporary).resolve(strict=True)
+        if root_characters is None:
+            root=base/'project'
+        else:
+            if type(root_characters) is not int or root_characters!=198:
+                raise ValueError('fixed long-root geometry required')
+            padding=root_characters-len(str(base))-len('/project')-1
+            if not 1<=padding<=255:
+                raise ValueError('temporary fixture base cannot fit the fixed198-character root')
+            component='x'*padding
+            parent=base/component;parent.mkdir()
+            root=parent/'project'
+            if len(str(root))!=198 or not root.is_relative_to(base):
+                raise ValueError('long fixture escaped its fixed geometry')
+        root.mkdir()
         empty_global=base/'empty-git-config';empty_global.write_bytes(b'')
         environment={key:value for key,value in os.environ.items() if not key.startswith('GIT_')}
         environment.update(GIT_CONFIG_NOSYSTEM='1',GIT_CONFIG_GLOBAL=str(empty_global),GIT_TERMINAL_PROMPT='0')
@@ -100,7 +114,10 @@ def clean_fixture():
             target.write_bytes(bounded(ROOT/'research/cme_gsm_bootstrap'/name))
         for name in (OWNER,MEMORY):
             target=root/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(bounded(ROOT/name))
-        command('init','--quiet');command('config','user.name','Generated pin regression')
+        command('init','--quiet');command('config','core.longpaths','false')
+        if command('config','--local','--get','core.longpaths')!='false':
+            raise ValueError('fixture local path configuration differs')
+        command('config','user.name','Generated pin regression')
         command('config','user.email','pin-fixture@invalid');command('config','commit.gpgsign','false')
         hooks=base/'no-hooks';hooks.mkdir();command('config','core.hooksPath',str(hooks))
         def commit():
@@ -144,6 +161,18 @@ class BootstrapOwnerPinTests(unittest.TestCase):
             snapshot=B.source_snapshot(root,head)
             self.assertEqual(len(snapshot),8)
             self.assertEqual(snapshot[OWNER],B.OWNER_SHA);self.assertEqual(snapshot[MEMORY],B.MEMORY_SHA)
+        with self.subTest(root_characters=198):
+            with clean_fixture(root_characters=198) as (root,head,_):
+                names=tuple('research/cme_gsm_bootstrap/'+name for name in B.SOURCES)+(OWNER,MEMORY)
+                target='research/cme_gsm_bootstrap/test_native_generated_artifact.jl'
+                self.assertEqual(len(str(root)),198)
+                self.assertEqual(max(len(str(root/name)) for name in names),259)
+                self.assertTrue(all(len(str(root/name))<260 for name in names))
+                expected=bounded(root/target)
+                self.assertEqual(B.git(root,'cat-file','blob','HEAD:'+target),expected)
+                self.assertEqual(B.git(root,'cat-file','blob',':'+target),expected)
+                snapshot=B.source_snapshot(root,head)
+                self.assertEqual(snapshot,{name:digest(bounded(root/name)) for name in names})
     def test_real_source_snapshot_rejects_original_stale_helper_pin(self):
         with clean_fixture() as (root,head,_),mock.patch.object(B,'MEMORY_SHA',STALE_MEMORY):
             with self.assertRaisesRegex(ValueError,'owner/memory helper pins differ'):B.source_snapshot(root,head)

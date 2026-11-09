@@ -95,7 +95,7 @@ def source_snapshot(root, expected_head):
         ordinary_ancestors(path.parent)
         relative = path.relative_to(root).as_posix()
         content = bounded(path, 1024**2)
-        need(git(root, "show", f"HEAD:{relative}") == content,
+        need(git(root, "cat-file", "blob", f"HEAD:{relative}") == content,
              f"Integrated source is not HEAD bytes: {relative}")
         snapshot[relative] = digest(content)
     need(snapshot[OWNER_RELATIVE] == OWNER_SHA and snapshot[MEMORY_RELATIVE] == MEMORY_SHA,

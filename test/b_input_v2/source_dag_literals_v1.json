@@ -1,0 +1,29 @@
+{
+  "schema": "independent_b_source_dag_oracles_v1",
+  "actual_data": false,
+  "source_contract": "c5c713e23bca9cdaa602d0d203e49a5a3d36eb2d2ba49ba9b89a874f0628c737",
+  "reference_header_amendment_sha256": "4d40eddb1aae828ec68f6e4d5c1d8cf35425171344d953c8f5277aa78aa686ed",
+  "contract_sha256": "f0fbbbd3bd7fea2fac983a232c3cbf7265af9524cfb5ad80e45d3ac2610a148b",
+  "common_fields": ["complete", "evidence_mode", "availability_kind", "source_sha256", "raw_prefix_sha256", "prefix_start_ms", "prefix_stop_ms", "prefix_rows", "channel_count", "training_boundary_ms", "validation_start_ms", "validation_end_ms", "receipt_delay_hours", "implementation_sources"],
+  "provenance_extra_fields": ["schema", "source_format_sha256", "parser_source_sha256", "raw_layout"],
+  "source_audit_extra_fields": ["schema", "raw_provenance_sha256"],
+  "source_extra_fields": ["schema", "raw_prefix_member", "raw_prefix_bytes", "raw_provenance_sha256", "source_audit_sha256", "limits", "members"],
+  "join_extra_fields": ["schema", "source_admission_sha256", "input_view_id", "input_prefix_sha256", "reference_kind", "reference_completion_sha256", "reference_audit_sha256", "source_audit_sha256", "raw_provenance_sha256"],
+  "source_roles": ["raw_prefix", "raw_provenance", "independent_audit"],
+  "envelope_roles": ["raw_prefix", "raw_provenance", "independent_audit", "source_admission", "reference_completion", "reference_audit", "reference_join_audit"],
+  "forbidden_source_fields": ["reference_completion_sha256", "reference_audit_sha256", "reference_join_audit_sha256", "input_view_id", "source_admission_sha256", "envelope_sha256", "admitted_input_seal", "execution_intent_sha256", "permit_sha256"],
+  "reference_common_fields": ["complete", "evidence_mode", "reference_kind", "source_sha256", "input_prefix_sha256", "input_view_id", "delay_hours", "training_boundary", "validation_start", "validation_end", "training_history_start", "feature_contract_sha256", "tuning_loss_contract_sha256", "baseline_qualification_sha256", "baseline_sources"],
+  "reference_completion_extra_fields": ["schema", "audit_contract_sha256", "model_ids", "selected_setting_ids", "raw_row_identity_sha256", "prediction_panel_sha256", "grid_sha256", "tuning_sha256", "audit_sha256", "members", "completion_id"],
+  "reference_audit_extra_fields": ["schema", "audit_contract_sha256", "raw_row_identity_sha256", "prediction_panel_sha256", "grid_sha256", "tuning_sha256", "all_eight_settings_checked", "full_per_lead_cohorts_checked", "feature_receipt_history_checked", "selected_prediction_columns_checked", "initial_only", "audit_id"],
+  "raw_layout": "source17_le_f64_column_major_v1",
+  "parser_member": "src/interval_mean_forecaster/sandu_fullchannel_features.jl",
+  "actual_source_format_sha256": "ab7cc12ea18d178ed3b529d603b867c9e948df419275a4cea56a8da08042feee",
+  "fixture": {"channels": 17, "hours": 1024, "raw_bytes": 139264, "boundary_hour": 512, "validation_stop_hour": 1024, "embargo_hours": 168, "final_fit_receipt_hour": 344, "final_selection_receipt_hour": 856},
+  "cohorts": [
+    {"delay": 0, "training_first": [1, 1], "training_last": [340, 338], "training_count": [340, 338], "validation_first": [512, 512], "validation_last": [852, 850], "validation_count": [341, 339], "union_count": 341, "h4_only": [851, 852], "selected_bytes": 5472, "candidate_bytes": 2744},
+    {"delay": 1, "training_first": [2, 2], "training_last": [339, 337], "training_count": [338, 336], "validation_first": [512, 512], "validation_last": [851, 849], "validation_count": [340, 338], "union_count": 340, "h4_only": [850, 851], "selected_bytes": 5456, "candidate_bytes": 2736}
+  ],
+  "reference_members": {"original": 4, "matched": 22},
+  "full36": {"hazard_fits": 2, "gain_fits": 36, "states": 9, "designs": 18, "files_including_completion": 424, "directories": 116, "final_fits": 0, "calibration_fits": 0},
+  "limits": {"chunk_rows": 4096, "fit_scalar_rows": 1000000, "hash_read_chunk_bytes": 65536, "horizon": 6, "json_depth": 12, "metadata_bytes": 2097152, "min_informative_joint_origins": 100, "ordinary_file_bytes": 536870912, "source_map_entries": 2048, "source_name_bytes": 256, "source_rows": 500000, "stage_bytes": 17179869184, "stage_directories": 256, "stage_files": 2048}
+}
