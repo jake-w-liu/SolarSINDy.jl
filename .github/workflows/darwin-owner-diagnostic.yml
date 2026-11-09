@@ -1,0 +1,35 @@
+name: Darwin owner observation diagnostic
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/darwin-owner-diagnostic-20261109
+
+permissions:
+  contents: read
+
+jobs:
+  observe-darwin-owner:
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14.10'
+      - name: Observe pinned owner without changing cleanup semantics
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONUTF8: '1'
+        run: python -B -X utf8 test/initial_reference/run_darwin_diagnostic.py
+      - name: Retain diagnostic raw and negative disposition
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: darwin-owner-observation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/solarsindy-darwin-owner-diagnostic-v2
+          if-no-files-found: error
+          retention-days: 14
