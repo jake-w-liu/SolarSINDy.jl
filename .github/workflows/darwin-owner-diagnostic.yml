@@ -11,12 +11,17 @@ permissions:
 
 jobs:
   observe-darwin-owner:
-    runs-on: macos-26
+    runs-on: macos-26-intel
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Record native runner capacity
+        run: |
+          /usr/sbin/sysctl hw.memsize
+          /usr/bin/vm_stat
+          /bin/df -k "$RUNNER_TEMP"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14.10'
