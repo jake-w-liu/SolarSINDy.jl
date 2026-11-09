@@ -16,6 +16,8 @@ COPY src ./src
 # Package loading binds the B executor source identities, even when the daemon
 # does not run that research executor. These files must precede precompilation.
 COPY tools/actual_b_chain ./tools/actual_b_chain
+COPY research/dbdt_completed_source/candidate_native_owner.py research/dbdt_completed_source/native_stage.py research/dbdt_completed_source/run_candidate_stage.py ./research/dbdt_completed_source/
+COPY tools/run_canonical_harness.py ./tools/
 RUN julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
 
 # Everything the daemon includes at runtime: the package source, the live-verification engine and
