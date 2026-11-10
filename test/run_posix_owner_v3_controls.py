@@ -146,6 +146,7 @@ def main():
     previous_term = None
     def interrupted(signum, frame):
         # Unwind through run_owned's cleanup; default SIGTERM skips its finally.
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         raise InterruptedError('V3 controller received termination signal')
     try:
         if os.name == 'posix':

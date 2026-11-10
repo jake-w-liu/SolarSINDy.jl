@@ -3,7 +3,7 @@ using Test,SHA,JSON3,SolarSINDy
 include(joinpath(@__DIR__,"completed_refit_artifacts","run_ci_native_chain.jl"))
 const SUPPORT=CompletedRefitNativeDriver
 const CONTROL=joinpath(@__DIR__,"run_posix_owner_v3_controls.py")
-const CONTROL_SHA="9f6bdcae15ca2194734621f84e293027fca12de036bc8316820b68149b288573"
+const CONTROL_SHA="5f5c19b711b7ca3fa3ff8f500f308c0397ba9f38866cd99178267a9134ce3738"
 file_sha(path)=open(io->bytes2hex(sha256(io)),path)
 
 function run_tests()

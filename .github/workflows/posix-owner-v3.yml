@@ -29,6 +29,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ runner.os == 'macOS' && '3.14.10' || '3.12' }}
+      - name: Observe held macOS leader identity without changing acceptance
+        if: runner.os == 'macOS'
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONUTF8: '1'
+        run: python -I -B -X utf8 test/initial_reference/diagnose_darwin_identity_v3.py --output-directory "$RUNNER_TEMP/solarsindy-posix-v3-identity"
       - name: Run bounded independent current-source controls
         env:
           PYTHONDONTWRITEBYTECODE: '1'
@@ -40,6 +46,15 @@ jobs:
         with:
           name: posix-v3-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/solarsindy-posix-v3-direct
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
+      - name: Retain macOS identity observations including negative results
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: posix-v3-identity-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/solarsindy-posix-v3-identity
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 14
