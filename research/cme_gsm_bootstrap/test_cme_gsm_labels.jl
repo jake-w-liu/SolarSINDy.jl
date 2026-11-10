@@ -186,7 +186,16 @@ end
     @test G.weighted_pearson([1,2],[1,2],[0,0]).reason == :insufficient_support
     @test_throws ArgumentError G.weighted_pearson([1,NaN],[1,2],[1,1])
     @test_throws ArgumentError G.weighted_pearson([1,2],[1,2],[1,-1])
-    @test_throws ArgumentError G.weighted_pearson([1,2],[1,2],[true,1])
+    boolean_weights = Real[true,1]
+    @test eltype(boolean_weights) === Real
+    @test boolean_weights[1] === true
+    @test boolean_weights[2] === 1
+    @test_throws ArgumentError G.weighted_pearson([1,2],[1,2],boolean_weights)
+    integer_weights = [1,1]
+    @test eltype(integer_weights) === Int
+    integer_result = G.weighted_pearson([1,2],[1,2],integer_weights)
+    @test integer_result.valid && integer_result.reason === :valid
+    @test integer_result.value ≈ 1 atol=SMALL_ATOL rtol=0
     # Empty matched blocks stay in the universe and consume their selected slots.
     @test G.year_weights([1995,1995,1997],[1995,1996,1997],[2,2,1]) == [1,1,0]
     @test G.year_weights([1995,1995,1997],[1995,1996,1997],[3,3,1]) == [1,1,2]
