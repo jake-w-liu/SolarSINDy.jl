@@ -15,7 +15,7 @@ import time
 from unittest.mock import patch
 sys.dont_write_bytecode = True
 _observations_path = Path(__file__).resolve().with_name('observations.py')
-_observations_sha = 'c68ce8f6c8ef38aef394538b6a9b1915b17988d73e5647531a5a63ce6eacbf36'
+_observations_sha = 'd9b02137f669e16819c82cdbf3b1cba182ecf9f8c94fc0e52ad6fe7f96bb01bf'
 with _observations_path.open('rb') as _stream:
     _observations_body = _stream.read(256*1024+1)
 if len(_observations_body)>256*1024 or hashlib.sha256(_observations_body).hexdigest()!=_observations_sha:
@@ -64,7 +64,7 @@ def exercise(module, observer, mode, directory, *, worker_deadline_ns):
             state['reap_started'] = True
             context = observation_context(started, worker_deadline_ns, first_wait=first and operation=='terminal_wait_entry',
                 wait_timeout=wait_timeout, expected_negative=mode=='other_group_persistent')
-            snap = observed_snapshot(observer, state['leader'], **context) if first else None
+            snap = observed_snapshot(observer, state['leader'], scope='whole_session', **context) if first else None
             event(operation, first=first, signal_started=state['signal_started'], snapshot=snap,
                 received_wait_timeout=wait_timeout)
 
@@ -136,13 +136,13 @@ def exercise(module, observer, mode, directory, *, worker_deadline_ns):
                 raise RuntimeError('test refuses repeated group signal')
             state['signal_started'] = True
             context = observation_context(started, worker_deadline_ns, before_signal=True)
-            snap = observed_snapshot(observer, state['leader'], **context)
+            snap = observed_snapshot(observer, state['leader'], scope='process_group', **context)
             event('group_signal_entry', pid=pid, signal=int(number), reap_started=state['reap_started'], snapshot=snap)
             try:
                 REAL_KILLPG(pid, number)
             except BaseException as error:
                 event('group_signal_error', error_type=type(error).__name__, errno=getattr(error, 'errno', None),
-                      snapshot=observed_snapshot(observer, state['leader'],
+                      snapshot=observed_snapshot(observer, state['leader'], scope='process_group',
                           **observation_context(started, worker_deadline_ns, before_signal=True)))
                 raise
             else:
@@ -294,7 +294,8 @@ def check(row, mode, *, historical=False):
                       live_other_group=row.get('other_group_live_at_owner_return') is True,
                       fixture_expiry_observed=row.get('fixture_expiry_observed') is True)
         failed = reaps[0].get('snapshot', {}) if len(reaps)==1 else {}
-        checks['live_sid_before_failed_reap'] = failed.get('complete') is True and \
+        checks['live_sid_before_failed_reap'] = failed.get('observation_scope') == 'whole_session' and \
+            failed.get('complete') is True and \
             failed.get('observation_phase') == _observations.NEGATIVE_PHASE and \
             failed.get('positive_acceptance_eligible') is False and \
             type(failed.get('session_live')) is int and failed['session_live'] >= 1
@@ -306,8 +307,11 @@ def check(row, mode, *, historical=False):
         native_exit=isinstance(native, dict) and native.get('native_exit') == code,
         timeout=isinstance(native, dict) and native.get('timed_out') is timeout,
         cleanup_token=isinstance(native, dict) and native.get('descendant_cleanup') == TOKEN,
-        zero_sid_before_reap=len(reaps) == 1 and reaps[0].get('snapshot', {}).get('complete') is True and reaps[0]['snapshot'].get('session_live') == 0)
+        zero_sid_before_reap=len(reaps) == 1 and reaps[0].get('snapshot', {}).get('observation_scope') == 'whole_session' and
+            reaps[0]['snapshot'].get('complete') is True and type(reaps[0]['snapshot'].get('session_live')) is int and
+            reaps[0]['snapshot']['session_live'] == 0)
     checks['positive_reap_observation_budget'] = len(reaps)==1 and \
+        reaps[0].get('snapshot',{}).get('observation_scope') == 'whole_session' and \
         reaps[0].get('snapshot',{}).get('positive_acceptance_eligible') is True and \
         reaps[0]['snapshot'].get('observation_phase') == _observations.POSITIVE_PHASE
     base_keys = {'pid','native_exit','timed_out','ownership','descendant_cleanup','wall_seconds'}
@@ -325,11 +329,22 @@ def check(row, mode, *, historical=False):
     for event in events:
         if event['operation'] == 'group_signal_error' and event['errno'] == 1:
             snap = event['snapshot']
-            checks['eperm_native_zombie_only'] = snap.get('complete') is True and snap.get('group_zombie_only') is True and snap.get('group_live') == 0 and snap['held_leader']['zombie'] is True
-            checks['eperm_observation_budget'] = snap.get('positive_acceptance_eligible') is True
+            checks['eperm_native_zombie_only'] = snap.get('observation_scope') == 'process_group' and \
+                snap.get('complete') is True and snap.get('group_zombie_only') is True and \
+                type(snap.get('group_live')) is int and snap['group_live'] == 0 and \
+                snap.get('session_live') is None and snap.get('session_members') is None and \
+                snap['held_leader']['zombie'] is True
+            checks['eperm_observation_budget'] = snap.get('observation_scope') == 'process_group' and \
+                snap.get('positive_acceptance_eligible') is True and snap.get('observation_phase') == _observations.POSITIVE_PHASE
     if mode == 'same_group_descendant':
-        checks['live_group_before_signal'] = len(signals) == 1 and signals[0]['snapshot'].get('group_live', 0) >= 1
-        checks['positive_group_observation_budget'] = len(signals)==1 and signals[0]['snapshot'].get('positive_acceptance_eligible') is True
+        group = signals[0].get('snapshot', {}) if len(signals) == 1 else {}
+        # A declared complete whole-session census also proves its group facts;
+        # the actual signal callers above request the smaller process-group scope.
+        checks['live_group_before_signal'] = len(signals) == 1 and \
+            group.get('observation_scope') in ('process_group','whole_session') and group.get('complete') is True and \
+            type(group.get('group_live')) is int and group['group_live'] >= 1
+        checks['positive_group_observation_budget'] = len(signals)==1 and \
+            group.get('positive_acceptance_eligible') is True and group.get('observation_phase') == _observations.POSITIVE_PHASE
     if mode in ('persistent_stop', 'transient_stop') and sys.platform == 'darwin':
         checks['stop_only_consumed'] = len(stops) >= 1
     if mode == 'transient_stop':

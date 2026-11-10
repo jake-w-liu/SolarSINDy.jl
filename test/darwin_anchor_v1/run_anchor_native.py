@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 sys.dont_write_bytecode=True
 HERE=Path(__file__).resolve().parent
-STATE_SHA='8c2bcdc9af8b22164278057e2a6a11696358e0df94bb50726293072c4d0a0619'
+STATE_SHA='072f740624bbb3e25910b3fbcfe7b6d6007ad9eedd7734d1c4d48322d9db385e'
 _path=HERE/'test_anchor_state.py'
 _spec=importlib.util.spec_from_file_location('anchor_independent_common',_path)
 _common=importlib.util.module_from_spec(_spec)

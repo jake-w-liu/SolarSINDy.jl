@@ -21,7 +21,7 @@ from unittest.mock import patch
 sys.dont_write_bytecode=True
 HERE=Path(__file__).resolve().parent
 ROOT=HERE.parents[1]
-ORACLE_SHA='0c3b0f434770a68497c68bddc163de59d5eb084576d3e34fd6737ae6a554ec3d'
+ORACLE_SHA='12e90474203342f792aaa45365549449cab1d23107515e6f7563ffec1cd2e753'
 ROLES=('tools/initial_reference_audit/owned_process.py','research/dbdt_completed_source/native_stage.py',
        'research/dbdt_completed_source/candidate_native_owner.py')
 PID=424242

@@ -3,7 +3,7 @@ using Test,SHA,JSON3,SolarSINDy
 include(joinpath(@__DIR__,"completed_refit_artifacts","run_ci_native_chain.jl"))
 const SUPPORT=CompletedRefitNativeDriver
 const CONTROL=joinpath(@__DIR__,"run_posix_owner_v3_controls.py")
-const CONTROL_SHA="625106cf49b498317a4b765d29399d9b81aa987431cb326975d500e5d1d12e6a"
+const CONTROL_SHA="f7ffb6a498e85f42f55fc009778ff438eca5a38ee8a2034beb820095b2b588b3"
 file_sha(path)=open(io->bytes2hex(sha256(io)),path)
 
 function run_tests()
@@ -37,7 +37,7 @@ function run_tests()
             result=JSON3.read(bytes,Dict{String,Any})
             @test result["schema"]=="owned_posix_v3_registered_controls_v1"
             @test result["complete"]===true&&result["source_unchanged"]===true
-            @test result["state_methods"]==7&&result["simulated_rows"]==101
+            @test result["state_methods"]==8&&result["simulated_rows"]==113
             applicable=Sys.islinux()||Sys.isapple()
             @test result["native_POSIX_applicable"]===applicable
             @test result["actual_current_native_cases"]==(applicable ? 21 : 0)

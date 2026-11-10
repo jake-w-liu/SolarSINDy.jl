@@ -245,6 +245,34 @@ class NativeObservation:
             raise RuntimeError('independently held Darwin leader SID changed')
         return sid
 
+    def group_snapshot(self, leader):
+        if self.darwin is None:
+            # Preserve the existing stronger Linux census, projecting only the
+            # group facts. Unobserved session fields are never numeric zero.
+            whole = self.snapshot(leader)
+            if whole.get('complete') is not True:
+                raise RuntimeError('independent Linux group projection is incomplete')
+            return dict(complete=True, held_leader=whole['held_leader'],
+                        group_live=whole['group_live'], group_zombie_only=whole['group_zombie_only'],
+                        session_live=None, session_members=None)
+        self._darwin_held(leader)
+        before = self._darwin_inventory(leader['pgid'])
+        if leader['pid'] not in before:
+            raise RuntimeError('independently held Darwin leader absent from group')
+        rows = [self._darwin_row('info', pid, leader) for pid in before]
+        if any(row['pgid'] != leader['pgid'] for row in rows):
+            raise RuntimeError('independent Darwin group member identity differs')
+        after = self._darwin_inventory(leader['pgid'])
+        held = self._darwin_held(leader)
+        if leader['pid'] not in after:
+            raise RuntimeError('independently held Darwin leader lost from group')
+        if before != after:
+            raise _DarwinCensusInstability('independent Darwin group PID inventory changed')
+        return dict(complete=True, held_leader=held,
+                    group_live=sum(row['status'] != 5 for row in rows),
+                    group_zombie_only=all(row['status'] == 5 for row in rows),
+                    session_live=None, session_members=None)
+
     def _darwin_snapshot(self, leader):
         # Keep the pinned3395 native primitives and whole group/session census,
         # but retain the exact known PID when a read races process disappearance.
@@ -327,9 +355,10 @@ def observation_context(case_started_ns, worker_deadline_ns, *, before_signal=Fa
     return dict(phase=POSITIVE_PHASE, deadline_ns=deadline)
 
 
-def observed_snapshot(observer, leader, *, deadline_ns=None, phase=POSITIVE_PHASE):
-    if phase not in (POSITIVE_PHASE, NEGATIVE_PHASE) or (deadline_ns is not None and type(deadline_ns) is not int):
-        raise ValueError('closed observation phase/original absolute deadline required')
+def observed_snapshot(observer, leader, *, deadline_ns=None, phase=POSITIVE_PHASE, scope='whole_session'):
+    if (phase not in (POSITIVE_PHASE, NEGATIVE_PHASE) or scope not in ('whole_session', 'process_group') or
+            (deadline_ns is not None and type(deadline_ns) is not int)):
+        raise ValueError('closed observation phase/scope/original absolute deadline required')
     started = time.monotonic_ns()
     effective = None if deadline_ns is None else min(deadline_ns, started+RETRY_SUBCAP_NS)
     attempts = []
@@ -344,9 +373,15 @@ def observed_snapshot(observer, leader, *, deadline_ns=None, phase=POSITIVE_PHAS
         try:
             # Every attempt rechecks the held leader and begins a whole new
             # inventory/two-pass census. No partial rows or counts are reused.
-            answer = observer.snapshot(leader)
+            answer = observer.group_snapshot(leader) if scope == 'process_group' else observer.snapshot(leader)
             if not isinstance(answer, dict) or answer.get('complete') is not True:
                 raise RuntimeError('independent census did not return a complete snapshot')
+            if scope == 'process_group' and (set(answer) != {
+                    'complete','held_leader','group_live','group_zombie_only','session_live','session_members'} or
+                    type(answer['group_live']) is not int or answer['group_live'] < 0 or
+                    type(answer['group_zombie_only']) is not bool or
+                    answer['session_live'] is not None or answer['session_members'] is not None):
+                raise RuntimeError('independent group-only proof fields differ')
         except Exception as caught:
             error = caught
         end = time.monotonic_ns()
@@ -362,7 +397,7 @@ def observed_snapshot(observer, leader, *, deadline_ns=None, phase=POSITIVE_PHAS
         if error is None and not late:
             finished = time.monotonic_ns()
             if effective is None or finished < effective:
-                return dict(answer, observation_phase=phase, positive_acceptance_eligible=phase==POSITIVE_PHASE and deadline_ns is not None,
+                return dict(answer, observation_scope=scope, observation_phase=phase, positive_acceptance_eligible=phase==POSITIVE_PHASE and deadline_ns is not None,
                     original_deadline_ns=deadline_ns, effective_deadline_ns=effective,
                     observation_started_ns=started, observation_finished_ns=finished, observation_attempts=attempts)
             late = True
@@ -379,7 +414,7 @@ def observed_snapshot(observer, leader, *, deadline_ns=None, phase=POSITIVE_PHAS
             break
         time.sleep(min(RETRY_SLEEP_NS, remaining)/10**9)
     return dict(complete=False, unknown=True, error_type=last_type, error=last_message,
-        observation_phase=phase, positive_acceptance_eligible=False, original_deadline_ns=deadline_ns,
+        observation_scope=scope, observation_phase=phase, positive_acceptance_eligible=False, original_deadline_ns=deadline_ns,
         effective_deadline_ns=effective, observation_started_ns=started,
         observation_finished_ns=time.monotonic_ns(), observation_attempts=attempts)
 

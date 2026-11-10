@@ -3,7 +3,7 @@ using Test,SHA,JSON3,SolarSINDy
 include(joinpath(@__DIR__,"completed_refit_artifacts","run_ci_native_chain.jl"))
 const SUPPORT=CompletedRefitNativeDriver
 const CONTROL=joinpath(@__DIR__,"run_darwin_anchor_v1_controls.py")
-const CONTROL_SHA="59d0295ba13727eaab76da873b487968a9e0e7a66e35c605021eebb1080c8998"
+const CONTROL_SHA="dac522335ee1a7f32c92e934286aec76e0156cc37bacad11b1dee96e765ee4c6"
 file_sha(path)=open(io->bytes2hex(sha256(io)),path)
 
 function run_tests()

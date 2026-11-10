@@ -13,7 +13,7 @@ sys.dont_write_bytecode = True
 import unittest
 from unittest.mock import patch
 _observations_path = Path(__file__).resolve().with_name('observations.py')
-_observations_sha = 'c68ce8f6c8ef38aef394538b6a9b1915b17988d73e5647531a5a63ce6eacbf36'
+_observations_sha = 'd9b02137f669e16819c82cdbf3b1cba182ecf9f8c94fc0e52ad6fe7f96bb01bf'
 with _observations_path.open('rb') as _stream:
     _observations_body = _stream.read(256*1024+1)
 if len(_observations_body)>256*1024 or hashlib.sha256(_observations_body).hexdigest()!=_observations_sha:
@@ -325,6 +325,116 @@ def darwin_retry_literal_scenario(module, mode, *, now=2000000000,
     with patch.object(module,'os',fake_os),patch.object(module,'time',fake_time),patch.object(primitive,'os',fake_os):
         result=module.observed_snapshot(observer,leader,deadline_ns=deadline,phase=phase)
     return result,calls,state
+
+
+def darwin_group_literal_scenario(module, mode, *, now=2000000000,
+                                  deadline=9000000000, phase='positive_owner_observation',
+                                  scope='process_group'):
+    """Independent primitive data; no real process, native library or signals."""
+    held, member = 26517, 26518
+    leader = dict(pid=held,pgid=held,sid=held,birth=[1794299426,355078],
+                  uid=501,ruid=501,zombie=True,stopped=False)
+    state = SimpleNamespace(now=now,attempt=0,group_reads=0,sleeps=0,
+                            post_changed=False,payloads=[])
+    calls=[]
+    def touch(operation,pid=None):
+        calls.append((operation,state.attempt,pid));state.now+=1000
+    def native_error(pid,number=3,count=0):
+        return OSError(number,f'BSD process information unavailable: pid={pid} bytes={count}')
+    class Primitives:
+        def pids(self,pgid,*,all_processes=False):
+            touch('global_inventory' if all_processes else 'group_inventory',pgid)
+            if all_processes:
+                raise AssertionError('group scope must not read the global Darwin PID inventory')
+            if pgid!=held:
+                raise AssertionError('only the held original process group may be listed')
+            state.group_reads+=1
+            if mode=='held_absent_before':return (member,)
+            if mode=='held_absent_after' and state.group_reads%2==0:return (member,)
+            if mode=='post_birth' and state.group_reads%2==0:state.post_changed=True
+            if mode=='roster_change' and state.attempt==1:
+                return (held,member) if state.group_reads%2 else (held,)
+            if mode=='unstable':return (held,) if state.group_reads%2 else (held,member)
+            if mode=='vanish' and state.attempt==1:return (held,member)
+            if mode in ('live_group','member_pgid','malformed_uid','extra_field','wrong_pid',
+                        'permission','protocol','partial'):
+                return (held,member)
+            return (held,)
+        def info(self,pid):
+            touch('info',pid)
+            if pid not in (held,member):
+                raise AssertionError('a non-group PID must not be read')
+            if mode=='held_lost' and pid==held:raise native_error(pid)
+            if mode=='vanish' and pid==member and state.attempt==1:raise native_error(pid)
+            if pid==member and mode in ('permission','protocol','partial'):
+                raise native_error(pid,number=13 if mode=='permission' else 71 if mode=='protocol' else 3,
+                                   count=63 if mode=='partial' else 0)
+            row=dict(pid=pid,ppid=1,pgid=held,status=5 if pid==held else 2,uid=501,ruid=501,
+                     start_sec=1794299426 if pid==held else 1794299427,start_usec=355078)
+            if pid==held:
+                if mode=='birth' or state.post_changed:row['start_usec']=355079
+                if mode=='uid':row['uid']=502
+                if mode=='ruid':row['ruid']=502
+                if mode=='held_pgid':row['pgid']=held+1
+            else:
+                if mode=='member_pgid':row['pgid']=held+1
+                if mode=='malformed_uid':row['uid']=True
+                if mode=='extra_field':row['future']=0
+                if mode=='wrong_pid':row['pid']=pid+1
+            return row
+        def short_info(self,pid):
+            touch('short_info',pid)
+            raise AssertionError('group scope requires exact full group rows, not unrelated short rows')
+    observer=object.__new__(module.NativeObservation)
+    observer.darwin=Primitives()
+    observer._held={held:{key:copy.deepcopy(leader[key]) for key in
+                         ('pid','pgid','sid','birth','uid','ruid')}}
+    def getsid(pid):
+        touch('getsid',pid)
+        if pid!=held:
+            raise AssertionError('group scope must not query a non-held PID session')
+        return held
+    def group_snapshot(anchor):
+        state.attempt+=1;state.group_reads=0
+        calls.append(('fresh_group_attempt',state.attempt,None))
+        answer=module.NativeObservation.group_snapshot(observer,anchor)
+        state.payloads.append(copy.deepcopy(answer))
+        if mode=='late':state.now=min(deadline,now+250000000) if deadline is not None else now+250000000
+        return answer
+    def forbidden_full_session(anchor):
+        raise AssertionError('Darwin group scope must not invoke a whole-session snapshot')
+    observer.group_snapshot=group_snapshot
+    observer.snapshot=forbidden_full_session
+    def sleep(seconds):state.sleeps+=1;state.now+=int(seconds*10**9)
+    with patch.object(module,'os',SimpleNamespace(getsid=getsid,getuid=lambda:501,geteuid=lambda:501)), \
+            patch.object(module,'time',SimpleNamespace(monotonic_ns=lambda:state.now,sleep=sleep)):
+        result=module.observed_snapshot(observer,leader,deadline_ns=deadline,phase=phase,scope=scope)
+    return result,calls,state
+
+
+def group_phase_native_predicates(module, group, reap, *, eperm=False, negative=False):
+    """Call the actual acceptance predicate over literal observations only."""
+    pid=26517
+    native=dict(pid=pid,native_exit=7,timed_out=False,wall_seconds=.1,
+                ownership='start_new_session=True',
+                descendant_cleanup='owned POSIX session has no live members after stage')
+    events=[dict(operation='spawn',pid=pid),
+            dict(operation='waitid',code=1,flags=10,monotonic_ns=1),
+            dict(operation='group_signal_entry',pid=pid,signal=9,reap_started=False,
+                 snapshot=group,monotonic_ns=2)]
+    if eperm:
+        events.append(dict(operation='group_signal_error',errno=1,error_type='PermissionError',
+                           snapshot=group,monotonic_ns=3))
+    events.append(dict(operation='terminal_wait_entry',first=True,signal_started=True,
+                       snapshot=reap,monotonic_ns=4))
+    row=dict(events=events,emergency=False,controller_threads_joined=True,actual_direct_exit=7,
+             native=None if negative else native,error=dict(type='RuntimeError') if negative else None,
+             role=ROLES[0],elapsed_ns=100000000,other_group_live_at_owner_return=True,
+             fixture_expiry_observed=True)
+    fake_os=SimpleNamespace(CLD_EXITED=1,CLD_KILLED=2,CLD_DUMPED=3,CLD_STOPPED=5,
+                            WNOWAIT=8,WEXITED=2,WSTOPPED=16)
+    with patch.object(module,'os',fake_os),patch.object(module,'sys',SimpleNamespace(platform='linux')):
+        return module.check(row,'other_group_persistent' if negative else 'no_descendant' if eperm else 'same_group_descendant')
 
 
 class LiteralStateTests(unittest.TestCase):
@@ -814,6 +924,185 @@ class LiteralStateTests(unittest.TestCase):
                     actual_POSIX_processes_started=0,actual_signals_sent=0,snapshots=details))
 
 
+    def test_darwin_process_group_observation_scope_literals(self):
+        path=HERE/'darwin_group_phase_oracles_v1.json'
+        self.assertEqual(observations.digest(path),'1b2dc20a907d309914d88eb4c012b7d17011cd0678992c56c6a94565306d8141')
+        oracle=observations.read_json(path)
+        self.assertEqual(oracle['schema'],'independent_darwin_process_group_phase_oracles_v1')
+        self.assertEqual((oracle['old_literal_rows'],oracle['old_unittest_methods'],
+                          oracle['new_literal_rows'],oracle['new_unittest_methods'],
+                          oracle['expected_literal_rows'],oracle['expected_unittest_methods']),(101,7,12,1,113,8))
+        self.assertEqual((oracle['retry_attempts'],oracle['retry_subcap_ns']),(8,250000000))
+        self.assertEqual(oracle['scopes'],['whole_session','process_group'])
+        names=(
+            'zombie_group_complete_without_unrelated_global_reads',
+            'live_group_is_complete_but_EPERM_ineligible',
+            'held_birth_change_fatal_unknown',
+            'held_UID_or_RUID_change_fatal_unknown',
+            'held_or_member_group_identity_change_fatal_unknown',
+            'held_leader_absent_before_or_after_group_fatal',
+            'group_roster_change_then_fresh_complete_retry',
+            'eight_group_roster_changes_remain_unknown',
+            'nonheld_ESRCH_fresh_retry_held_loss_fatal',
+            'malformed_or_access_error_fatal_unknown',
+            'preflight_or_postread_deadline_exhaustion_ineligible',
+            'group_only_cannot_close_session_or_replace_persistent_negative')
+        self.assertEqual([row['name'] for row in oracle['rows']],list(names))
+        native_checks=load(HERE/'run_native.py','group_phase_independent_acceptance_predicates')
+        def run(mode,**kwargs):return darwin_group_literal_scenario(observations,mode,**kwargs)
+        def unknown(result,attempts):
+            self.assertIs(result['complete'],False)
+            self.assertIs(result['unknown'],True)
+            self.assertIs(result['positive_acceptance_eligible'],False)
+            self.assertEqual(result['observation_scope'],'process_group')
+            self.assertIsNone(result.get('group_live'))
+            self.assertIsNone(result.get('session_live'))
+            self.assertEqual(len(result['observation_attempts']),attempts)
+        def group(result,state,*,live=0,attempts=1):
+            self.assertIs(result['complete'],True)
+            self.assertEqual(result['observation_scope'],'process_group')
+            self.assertIs(result['positive_acceptance_eligible'],True)
+            self.assertIs(type(result['group_live']),int)
+            self.assertEqual(result['group_live'],live)
+            self.assertIs(result['group_zombie_only'],live==0)
+            self.assertIs(result['held_leader']['zombie'],True)
+            self.assertIsNone(result['session_live'])
+            self.assertIsNone(result['session_members'])
+            self.assertEqual(len(result['observation_attempts']),attempts)
+            self.assertLess(result['observation_finished_ns'],result['effective_deadline_ns'])
+            self.assertEqual(set(state.payloads[-1]),{'complete','held_leader','group_live',
+                'group_zombie_only','session_live','session_members'})
+        full=dict(complete=True,observation_scope='whole_session',session_live=0,session_members=[],
+                  group_live=0,group_zombie_only=True,
+                  held_leader=dict(pid=26517,pgid=26517,sid=26517,birth=[1794299426,355078],
+                                   uid=501,ruid=501,zombie=True,stopped=False),
+                  positive_acceptance_eligible=True,observation_phase=observations.POSITIVE_PHASE)
+        for index,name in enumerate(names):
+            with self.subTest(case=name):
+                details=[]
+                if index==0:
+                    result,calls,state=run('zombie');group(result,state)
+                    self.assertEqual(state.attempt,1)
+                    self.assertTrue(any(row[0]=='group_inventory' for row in calls))
+                    self.assertFalse(any(row[0] in ('global_inventory','short_info') for row in calls))
+                    self.assertFalse(any(row[0]=='getsid' and row[2]!=26517 for row in calls))
+                    check=group_phase_native_predicates(native_checks,result,full,eperm=True)
+                    self.assertTrue(check['eperm_native_zombie_only'])
+                    self.assertTrue(check['eperm_observation_budget'])
+                    self.assertTrue(check['zero_sid_before_reap'])
+                    details=[result]
+                elif index==1:
+                    result,calls,state=run('live_group');group(result,state,live=1)
+                    check=group_phase_native_predicates(native_checks,result,full,eperm=True)
+                    self.assertFalse(check['eperm_native_zombie_only'])
+                    self.assertTrue(check['eperm_observation_budget'])
+                    self.assertTrue(group_phase_native_predicates(native_checks,result,full)['live_group_before_signal'])
+                    details=[result]
+                elif index in (2,3,4,5):
+                    modes=(('birth','post_birth'),('uid','ruid'),('held_pgid','member_pgid'),
+                           ('held_absent_before','held_absent_after'))[index-2]
+                    for mode in modes:
+                        result,calls,state=run(mode);unknown(result,1)
+                        self.assertEqual(state.attempt,1)
+                        self.assertFalse(result['observation_attempts'][0]['retryable'])
+                        details.append(result)
+                elif index==6:
+                    result,calls,state=run('roster_change');group(result,state,attempts=2)
+                    self.assertEqual((state.attempt,state.sleeps),(2,1))
+                    self.assertTrue(result['observation_attempts'][0]['retryable'])
+                    self.assertIn(('info',1,26518),calls)
+                    self.assertNotIn(('info',2,26518),calls)
+                    self.assertEqual(sum(row[0]=='fresh_group_attempt' for row in calls),2)
+                    self.assertTrue(all(row[0]!='global_inventory' for row in calls))
+                    details=[result]
+                elif index==7:
+                    result,calls,state=run('unstable');unknown(result,8)
+                    self.assertEqual((state.attempt,state.sleeps),(8,7))
+                    self.assertTrue(all(row['retryable'] for row in result['observation_attempts']))
+                    self.assertEqual(sum(row[0]=='fresh_group_attempt' for row in calls),8)
+                    self.assertFalse(any(row[0]=='global_inventory' for row in calls))
+                    details=[result]
+                elif index==8:
+                    result,calls,state=run('vanish');group(result,state,attempts=2)
+                    first=result['observation_attempts'][0]
+                    self.assertEqual((first['error_type'],first['errno'],first['vanished_pid']),
+                                     ('ProcessLookupError',3,26518))
+                    self.assertTrue(first['retryable'])
+                    self.assertIn(('info',1,26518),calls)
+                    self.assertNotIn(('info',2,26518),calls)
+                    self.assertTrue(any(row[0]=='group_inventory' and row[1]==2 for row in calls))
+                    missing,calls,state=run('held_lost');unknown(missing,1)
+                    self.assertFalse(missing['observation_attempts'][0]['retryable'])
+                    details=[result,missing]
+                elif index==9:
+                    for mode in ('malformed_uid','extra_field','wrong_pid','permission','protocol','partial'):
+                        result,calls,state=run(mode);unknown(result,1)
+                        self.assertEqual(state.attempt,1)
+                        self.assertFalse(result['observation_attempts'][0]['retryable'])
+                        details.append(result)
+                elif index==10:
+                    expired,calls,state=run('zombie',now=9000000000,deadline=9000000000)
+                    unknown(expired,0);self.assertEqual(calls,[])
+                    late,calls,state=run('late');unknown(late,1)
+                    self.assertTrue(late['observation_attempts'][0]['late'])
+                    self.assertEqual(late['original_deadline_ns'],9000000000)
+                    diagnostic,calls,state=run('zombie',phase=observations.NEGATIVE_PHASE)
+                    self.assertTrue(diagnostic['complete'])
+                    self.assertFalse(diagnostic['positive_acceptance_eligible'])
+                    self.assertFalse(group_phase_native_predicates(native_checks,diagnostic,full,eperm=True)['eperm_observation_budget'])
+                    no_clock,calls,state=run('zombie',deadline=None)
+                    self.assertTrue(no_clock['complete'])
+                    self.assertFalse(no_clock['positive_acceptance_eligible'])
+                    details=[expired,late,diagnostic,no_clock]
+                else:
+                    result,calls,state=run('zombie');group(result,state)
+                    self.assertFalse(group_phase_native_predicates(native_checks,result,result)['zero_sid_before_reap'])
+                    forged=dict(result,session_live=0,session_members=[])
+                    self.assertFalse(group_phase_native_predicates(native_checks,result,forged)['zero_sid_before_reap'])
+                    self.assertFalse(group_phase_native_predicates(native_checks,result,forged)['positive_reap_observation_budget'])
+                    live_full=dict(full,session_live=1,session_members=[dict(pid=26519,pgid=26519,sid=26517)],
+                                   observation_phase=observations.NEGATIVE_PHASE,positive_acceptance_eligible=False)
+                    self.assertTrue(all(group_phase_native_predicates(native_checks,result,live_full,negative=True).values()))
+                    self.assertFalse(group_phase_native_predicates(native_checks,result,
+                        dict(live_full,observation_scope='process_group'),negative=True)['live_sid_before_failed_reap'])
+                    stronger_group=dict(full,group_live=1,group_zombie_only=False)
+                    stronger=group_phase_native_predicates(native_checks,stronger_group,full)
+                    self.assertTrue(stronger['live_group_before_signal'])
+                    self.assertTrue(stronger['positive_group_observation_budget'])
+                    self.assertFalse(group_phase_native_predicates(native_checks,stronger_group,full,eperm=True)['eperm_native_zombie_only'])
+                    with self.assertRaises(ValueError):run('zombie',scope='undocumented')
+                    # Linux must project an already completed unchanged whole
+                    # census. It cannot turn an incomplete/failed one into group0.
+                    linux=object.__new__(observations.NativeObservation)
+                    linux.darwin=None;linux._held={};linux_calls=[]
+                    anchor=copy.deepcopy(full['held_leader'])
+                    linux.identity=lambda pid:copy.deepcopy(anchor)
+                    def whole_snapshot(leader):
+                        linux_calls.append(copy.deepcopy(leader))
+                        return copy.deepcopy(full)
+                    linux.snapshot=whole_snapshot
+                    clock=SimpleNamespace(monotonic_ns=lambda:2000000000,sleep=lambda seconds:None)
+                    with patch.object(observations,'time',clock):
+                        projected=observations.observed_snapshot(linux,anchor,deadline_ns=9000000000,scope='process_group')
+                    self.assertTrue(projected['complete']);self.assertEqual(projected['observation_scope'],'process_group')
+                    self.assertIsNone(projected['session_live']);self.assertIsNone(projected['session_members'])
+                    self.assertEqual(len(linux_calls),1)
+                    def incomplete(leader):return dict(full,complete=False)
+                    linux.snapshot=incomplete
+                    with patch.object(observations,'time',clock):
+                        rejected=observations.observed_snapshot(linux,anchor,deadline_ns=9000000000,scope='process_group')
+                    unknown(rejected,1)
+                    def failed(leader):raise RuntimeError('literal incomplete Linux native census')
+                    linux.snapshot=failed
+                    with patch.object(observations,'time',clock):
+                        failed_result=observations.observed_snapshot(linux,anchor,deadline_ns=9000000000,scope='process_group')
+                    unknown(failed_result,1)
+                    self.assertFalse(group_phase_native_predicates(native_checks,projected,projected)['zero_sid_before_reap'])
+                    details=[result,forged,live_full,projected,rejected,failed_result]
+                self.rows.append(dict(mode=name,passed=True,evidence_kind='simulated_independent_process_group_scope',
+                    actual_POSIX_processes_started=0,actual_signals_sent=0,snapshots=details))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output-directory',type=Path,required=True)
@@ -828,12 +1117,12 @@ def main():
     result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(LiteralStateTests))
     unchanged = source_pins() == pins and test_inventory() == before
     write_new(args.output_directory/'RESULT.json',dict(schema='owned_posix_v3_simulated_controls_v1',
-        complete=result.wasSuccessful() and unchanged and len(LiteralStateTests.rows)==101 and result.testsRun==7, unittest_methods=result.testsRun,
-        expected_simulated_rows=101,
+        complete=result.wasSuccessful() and unchanged and len(LiteralStateTests.rows)==113 and result.testsRun==8, unittest_methods=result.testsRun,
+        expected_simulated_rows=113,
         simulated_rows=len(LiteralStateTests.rows), rows=LiteralStateTests.rows, source_pins=pins,
         source_pins_unchanged=unchanged, actual_POSIX_processes_started=0, actual_signals_sent=0,
         native_Linux_or_Darwin_qualified=False, source_qualified=False, scientific_qualified=False))
-    return 0 if result.wasSuccessful() and unchanged and len(LiteralStateTests.rows)==101 and result.testsRun==7 else 1
+    return 0 if result.wasSuccessful() and unchanged and len(LiteralStateTests.rows)==113 and result.testsRun==8 else 1
 
 
 if __name__ == '__main__':
