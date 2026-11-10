@@ -1,4 +1,3 @@
-"""Separate input-only permits. An original F fit grant is never constructed here."""
 for name in (:InputPreparationAuthority,:CandidateValidationAuthority,:IndependentReadAuthority,:SelectedRefitAuthority)
     @eval struct $name
         grant_path::String
@@ -8,6 +7,7 @@ for name in (:InputPreparationAuthority,:CandidateValidationAuthority,:Independe
         qualification_path::String
         qualification_sha256::String
     end
+    @eval @doc "Separate input-only permits. An original F fit grant is never constructed here." $name
 end
 function _spend_generated(directory,d,kind)
     path=directory*(kind===:input ? ".CANDIDATE_FIT_INPUT_ATTEMPT.json" : ".CANDIDATE_VALIDATION_ATTEMPT.json")
@@ -34,7 +34,7 @@ function _checked_native_stage(evidence,operation,authority)
     owner=A._pinned(evidence.receipt_path,evidence.receipt_sha256;limit=262144)
     root=realpath(pkgdir(SolarSINDy));paths=Tuple(joinpath(root,split(name,'/')...) for name in NATIVE_DRIVER_FILES)
     need(all(digest(read(path))==pin for (path,pin) in zip(paths,NATIVE_DRIVER_PINS)) &&
-        NATIVE_DRIVER_PINS[4]=="8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836","native loaded driver changed")
+        NATIVE_DRIVER_PINS[4]=="30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c","native loaded driver changed")
     need(owner["schema"]=="candidate_native_stage_evidence_v1" && owner["complete"]===true && owner["actual_authority"]===true &&
         owner["operation"]==operation && owner["driver_sha256"]==NATIVE_DRIVER_PINS[1] && owner["entry_sha256"]==NATIVE_DRIVER_PINS[2] &&
         owner["runner_sha256"]==NATIVE_DRIVER_PINS[3] && owner["legacy_runner_sha256"]==NATIVE_DRIVER_PINS[4] && owner["source_proof_sha256"]==authority.source_proof_sha256 &&

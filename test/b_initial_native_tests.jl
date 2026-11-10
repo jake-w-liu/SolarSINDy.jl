@@ -10,7 +10,7 @@ end
 const ORIGINAL=OriginalBRoute.BPointSyntheticFixture
 const SUPPORT=CompletedRefitNativeDriver
 const CONTROL=joinpath(@__DIR__,"b_initial_native","run_controls.py")
-const CONTROL_SHA="0d89c24b4d78339625b9c1901f02483e8e4e1af1085ab1f23a505dfa6b2aa44f"
+const CONTROL_SHA="908c5949b78dac4e9bc483adb5d215408f31b5a9f2659507339eead7d886f4e5"
 const TREE_ORACLE=joinpath(@__DIR__,"b_point_training","tree_inventory_oracles_v1.json")
 const INDEPENDENT=joinpath(@__DIR__,"b_point_training","independent_literals_v1.json")
 

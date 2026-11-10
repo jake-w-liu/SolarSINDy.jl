@@ -9,8 +9,8 @@ sys.dont_write_bytecode=True
 ROOT=Path(__file__).resolve().parents[2]
 OWNER=ROOT/'research/dbdt_completed_source/candidate_native_owner.py'
 LEGACY=OWNER.with_name('native_stage.py')
-OWNER_SHA='3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1'
-LEGACY_SHA='8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836'
+OWNER_SHA='c3575532cb67b4bf52d2db8a20e01ca7e8d97cfb0cb1054ded66467823e40c00'
+LEGACY_SHA='30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c'
 RAM=8*1024**3;DISK=16*1024**3;META=2*1024**2;RAW=64*1024**2
 FIELDS={
  'profile':('schema','evidence_mode','operation','qualified_head','implementation_sources','source_proof','component_qualification','contracts','runtime','fixture_spec','limits','budgets','output_directory','owner_directory','request_id'),

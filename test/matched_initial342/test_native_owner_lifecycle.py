@@ -25,12 +25,12 @@ OBSERVER = ROOT/'test/posix_owner_v3/observations.py'
 DARWIN_OBSERVER = ROOT/'test/initial_reference/diagnose_darwin_groups.py'
 MEMORY = ROOT/'tools/run_canonical_harness.py'
 PINS = {
-    TARGET:'32618b32e80b8a88524ddae774bdd80a8a42b0a16c1c3ab98d0869eac0063bb5',
-    OWNER:'3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1',
-    LEGACY:'8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836',
-    OBSERVER:'bc4e0ba607bedd1fd59bdc90f23c048139a072534a64aa68d1fe8d05b4c485e8',
+    TARGET:'ea2f94ec709b5e58086b69fbd142f902499d9a2d2f5dabc8e0c871c452b4533b',
+    OWNER:'c3575532cb67b4bf52d2db8a20e01ca7e8d97cfb0cb1054ded66467823e40c00',
+    LEGACY:'30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c',
+    OBSERVER:'c825fcbf2fbb2a86f41ec5e881dfa301f0908a119c98588b79e9d28d7a480ba3',
     DARWIN_OBSERVER:'3395df92110f61ac1deaae85f1fcfe93125865575e29619623a83737e95a2ee2',
-    MEMORY:'209a6b35ebd820d5928a5a91d70062a2fbf0e7caeb3112a18db34bd0e8cfb4ee',
+    MEMORY:'defbb2a90690acd83ff0dc8eae05fd8622543871ecfa6c7a595b04069d44b331',
 }
 RAW = 4*1024**2
 WHOLE_SECONDS = 180
@@ -87,6 +87,7 @@ class LifecycleTests(unittest.TestCase):
     owner = None
     observer_module = None
     output = None
+    worker_deadline_ns = None
     simulated_rows = []
     native_rows = []
 
@@ -283,11 +284,14 @@ class LifecycleTests(unittest.TestCase):
                 return getattr(self.actual,name)
             def wait(proxy,timeout=None):
                 state['reap_started']=True
-                snap=self.observer_module.observed_snapshot(observer,state['leader'])
+                context=self.observer_module.observation_context(started,self.worker_deadline_ns,
+                    first_wait=True,wait_timeout=timeout)
+                snap=self.observer_module.observed_snapshot(observer,state['leader'],**context)
                 event('before_actual_terminal_wait',signals=state['signals'],snapshot=snap,timeout=timeout)
                 self.assertEqual(state['signals'],1)
                 self.assertIs(snap.get('complete'),True)
                 self.assertEqual(snap.get('session_live'),0)
+                self.assertIs(snap.get('positive_acceptance_eligible'),True)
                 if mode=='repeat_term':
                     self.assertIs(signal.getsignal(signal.SIGTERM),signal.SIG_IGN)
                     state['term_sends']+=1
@@ -404,7 +408,7 @@ class LifecycleTests(unittest.TestCase):
             need(raw.stat().st_size<=RAW,'native lifecycle raw bound')
             raw_ref=dict(path=str(raw),sha256=digest(raw),bytes=raw.stat().st_size)
         zero_observed=any(e['operation']=='before_actual_terminal_wait' and e['snapshot'].get('complete') is True and
-            e['snapshot'].get('session_live')==0 for e in events)
+            e['snapshot'].get('session_live')==0 and e['snapshot'].get('positive_acceptance_eligible') is True for e in events)
         row=dict(case='posix_'+mode,passed=case_failure is None,evidence_kind='actual_POSIX_lifecycle',native_result_returned=returned is not None,
             returned_native=returned,exception_type=None if error is None else type(error).__name__,events=events,
             failure_type=None if case_failure is None else type(case_failure).__name__,
@@ -470,6 +474,7 @@ def main():
     LifecycleTests.observer_module=load(OBSERVER,'independent_lifecycle_observer',PINS[OBSERVER])
     output.mkdir()
     LifecycleTests.output=output
+    LifecycleTests.worker_deadline_ns=started+WHOLE_SECONDS*10**9
     write_new(output/'PREEXECUTION.json',dict(source_pins=protected,available_physical_bytes=available,
         memory_method=method,free_disk_bytes=free,started_ns=started,deadline_ns=started+WHOLE_SECONDS*10**9,
         Julia_launched=False,actual_data_exposed=False,Q_issued=False))

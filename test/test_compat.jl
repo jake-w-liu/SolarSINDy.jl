@@ -140,8 +140,10 @@ function _cross_platform_ci_contract(workflow)
     operating_systems = strip.(split(platforms.captures[1], ','))
     length(operating_systems) == 3 && Set(operating_systems) ==
         Set(["ubuntu-latest", "windows-latest", "macos-latest"]) || return false
+    runners = collect(eachmatch(r"^    runs-on: ([^\n]+)$"m, body))
+    length(runners) == 1 && only(runners).captures[1] ==
+        "\${{ matrix.os == 'macos-latest' && 'macos-26-intel' || matrix.os }}" || return false
     all(fragment -> occursin(fragment, body), (
-        "runs-on: \${{ matrix.os }}",
         "version: \${{ matrix.julia-version }}",
         "arch: 'default'", "shell: bash", "fail-fast: false",
         "uses: julia-actions/julia-runtest@v1",
@@ -166,7 +168,8 @@ end
         # Independent negative mutations enforce coverage and real execution.
         @test !_cross_platform_ci_contract(replace(workflow, ", macos-latest" => ""; count=1))
         @test !_cross_platform_ci_contract(replace(workflow, "'1.12.6', '1.13.1'" => "'1.12.6'"; count=1))
-        @test !_cross_platform_ci_contract(replace(workflow, "runs-on: \${{ matrix.os }}" => "runs-on: ubuntu-latest"; count=1))
+        @test !_cross_platform_ci_contract(replace(workflow, "runs-on: \${{ matrix.os == 'macos-latest' && 'macos-26-intel' || matrix.os }}" => "runs-on: ubuntu-latest"; count=1))
+        @test !_cross_platform_ci_contract(replace(workflow, "runs-on: \${{ matrix.os == 'macos-latest' && 'macos-26-intel' || matrix.os }}" => "runs-on: \${{ matrix.os }}"; count=1))
         @test !_cross_platform_ci_contract(replace(workflow, "fail-fast: false" => "fail-fast: true"; count=1))
         @test !_cross_platform_ci_contract(replace(workflow, "julia-actions/julia-runtest@v1" => "omitted-package-tests"; count=1))
         @test !_cross_platform_ci_contract(replace(workflow, "examples/experiments.jl" => "omitted-experiments.jl"; count=1))

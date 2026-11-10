@@ -17,9 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / 'test/posix_owner_v3'
 OWNER = ROOT / 'research/dbdt_completed_source/candidate_native_owner.py'
 OWNER_PINS = {
-    'tools/initial_reference_audit/owned_process.py': '8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836',
-    'research/dbdt_completed_source/native_stage.py': '8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836',
-    'research/dbdt_completed_source/candidate_native_owner.py': '3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1',
+    'tools/initial_reference_audit/owned_process.py': '30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c',
+    'research/dbdt_completed_source/native_stage.py': '30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c',
+    'research/dbdt_completed_source/candidate_native_owner.py': 'c3575532cb67b4bf52d2db8a20e01ca7e8d97cfb0cb1054ded66467823e40c00',
 }
 WHOLE_SECONDS = 660
 RAW_LIMIT = 4 * 1024**2
@@ -153,16 +153,16 @@ def main():
             previous_term = signal.signal(signal.SIGTERM, interrupted)
         owner = load(OWNER, 'registered_posix_v3_current_owner')
         state, state_receipt = stage('state', 'test_state.py', 90)
-        need(type(state['unittest_methods']) is int and state['unittest_methods'] == 5 and
-             type(state['simulated_rows']) is int and state['simulated_rows'] == state['expected_simulated_rows'] == 85,
-             'all five methods and85 independent simulated rows required')
+        need(type(state['unittest_methods']) is int and state['unittest_methods'] == 6 and
+             type(state['simulated_rows']) is int and state['simulated_rows'] == state['expected_simulated_rows'] == 93,
+             'all six methods and93 independent simulated rows required')
         need(state['source_pins'] == OWNER_PINS and state['source_pins_unchanged'] is True and
              state['actual_POSIX_processes_started'] == state['actual_signals_sent'] == 0 and
              state['native_Linux_or_Darwin_qualified'] is False, 'simulated scope must remain explicit')
-        need(len(state['rows']) == 85 and all(row['passed'] is True for row in state['rows']), 'simulated row failure')
+        need(len(state['rows']) == 93 and all(row['passed'] is True for row in state['rows']), 'simulated row failure')
         need(state['source_qualified'] is False and state['scientific_qualified'] is False,
              'simulated result cannot grant qualification')
-        record.update(state=state_receipt, state_methods=5, simulated_rows=85)
+        record.update(state=state_receipt, state_methods=6, simulated_rows=93)
         if record['native_POSIX_applicable']:
             native, native_receipt = stage('native', 'run_native.py', 500)
             historical = 3 if sys.platform == 'darwin' else 0

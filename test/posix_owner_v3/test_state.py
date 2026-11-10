@@ -13,7 +13,7 @@ sys.dont_write_bytecode = True
 import unittest
 from unittest.mock import patch
 _observations_path = Path(__file__).resolve().with_name('observations.py')
-_observations_sha = 'bc4e0ba607bedd1fd59bdc90f23c048139a072534a64aa68d1fe8d05b4c485e8'
+_observations_sha = 'c825fcbf2fbb2a86f41ec5e881dfa301f0908a119c98588b79e9d28d7a480ba3'
 with _observations_path.open('rb') as _stream:
     _observations_body = _stream.read(256*1024+1)
 if len(_observations_body)>256*1024 or hashlib.sha256(_observations_body).hexdigest()!=_observations_sha:
@@ -434,6 +434,187 @@ class LiteralStateTests(unittest.TestCase):
                 census.assert_not_called()
             self.rows.append(dict(role=role,mode='SIGCHLD_ignored',passed=True,evidence_kind='simulated_prelaunch_admission'))
 
+    def test_independent_fresh_census_retry_literals(self):
+        oracle = observations.read_json(HERE/'census_retry_oracles_v1.json')
+        self.assertEqual(observations.digest(HERE/'census_retry_oracles_v1.json'), observations.RETRY_ORACLE_SHA)
+        self.assertEqual((oracle['max_attempts'],oracle['observation_subcap_ns'],oracle['retry_sleep_ns']),
+                         (8,250000000,5000000))
+        self.assertEqual((oracle['expected_simulated_rows'],oracle['expected_test_methods']),(93,6))
+        names = (
+            'unrelated_enoent_then_fresh_stable_live_census',
+            'all_fresh_censuses_unstable_remain_unknown',
+            'late_nominal_complete_census_rejected',
+            'held_leader_loss_or_changed_identity_not_retried',
+            'permission_or_malformed_record_not_retried',
+            'stable_complete_zero_census_is_observed',
+            'expired_positive_clock_and_ineligible_negative_diagnostic',
+            'negative_diagnostic_deadline_cannot_restart')
+        self.assertEqual(oracle['cases'],list(names))
+        leader = dict(pid=PID,pgid=PID,sid=PID,birth=[100,200],uid=1000,ruid=1000,zombie=True,stopped=False)
+        descendant = dict(leader,pid=PID+1,birth=[101,200],zombie=False)
+        native_checks = load(HERE/'run_native.py','independent_retry_acceptance_predicates')
+        fake_os = SimpleNamespace(CLD_EXITED=1,CLD_KILLED=2,CLD_DUMPED=3,CLD_STOPPED=5,
+            WNOWAIT=8,WEXITED=2,WSTOPPED=16)
+
+        def predicate(group, reap, *, negative=False, forged_result=False):
+            native = dict(pid=PID,native_exit=7,timed_out=False,wall_seconds=.1,
+                ownership='start_new_session=True',descendant_cleanup='owned POSIX session has no live members after stage')
+            events = [dict(operation='spawn',pid=PID),
+                dict(operation='waitid',code=1,flags=10,monotonic_ns=1),
+                dict(operation='group_signal_entry',pid=PID,signal=9,reap_started=False,snapshot=group,monotonic_ns=2),
+                dict(operation='terminal_wait_entry',first=True,signal_started=True,snapshot=reap,monotonic_ns=3)]
+            row = dict(events=events,emergency=False,controller_threads_joined=True,actual_direct_exit=7,
+                native=None if negative else native,error=dict(type='RuntimeError') if negative else None,
+                role=ROLES[0],elapsed_ns=100000000,other_group_live_at_owner_return=True,fixture_expiry_observed=True)
+            if forged_result:
+                row.update(native=native,error=None)
+            with patch.object(native_checks,'os',fake_os),patch.object(native_checks,'sys',SimpleNamespace(platform='linux')):
+                return native_checks.check(row,'other_group_persistent' if negative else 'same_group_descendant')
+
+        def scenario(mode, *, now=0, deadline=1000000000, phase=observations.POSITIVE_PHASE):
+            state = SimpleNamespace(now=now,attempt=0)
+            calls = []
+            observer = object.__new__(NativeObservation)
+            observer._held = {PID:{k:leader[k] for k in ('pid','pgid','sid','birth','uid','ruid')}}
+            observer.darwin = None
+            def identity(pid):
+                calls.append(('identity',state.attempt,pid))
+                if mode=='leader_missing' and pid==PID:
+                    raise FileNotFoundError(errno.ENOENT,'literal held leader missing',f'/proc/{PID}/stat')
+                if mode.startswith('leader_changed_') and pid==PID:
+                    key=mode.removeprefix('leader_changed_')
+                    return dict(leader,**{key:[200,300] if key=='birth' else PID+9 if key=='sid' else 1001})
+                if pid==2333:
+                    if mode in ('vanish','unstable'):
+                        raise FileNotFoundError(errno.ENOENT,'literal unrelated listed PID vanished','/proc/2333/stat')
+                    if mode=='permission':
+                        raise PermissionError(errno.EACCES,'literal unrelated PID denied','/proc/2333/stat')
+                    if mode=='malformed':
+                        raise ValueError('literal malformed independent stat')
+                if pid==PID:
+                    return copy.deepcopy(leader)
+                if pid in (1111,PID+1):
+                    return dict(descendant,pid=pid,birth=[pid,200])
+                raise AssertionError('unexpected literal independent PID')
+            def pids():
+                calls.append(('inventory',state.attempt))
+                if mode=='vanish' and state.attempt==1:
+                    return [1111,2333,PID,PID+1]
+                if mode in ('unstable','permission','malformed'):
+                    return [2333,PID]
+                return [PID,PID+1] if mode in ('vanish','live') else [PID]
+            def snapshot(anchor):
+                state.attempt+=1
+                calls.append(('fresh_attempt',state.attempt))
+                answer=NativeObservation.snapshot(observer,anchor)
+                if mode=='late':
+                    state.now=deadline
+                return answer
+            observer.identity=identity
+            observer._linux_pids=pids
+            observer.snapshot=snapshot
+            fake_time=SimpleNamespace(monotonic_ns=lambda:state.now,
+                sleep=lambda seconds:setattr(state,'now',state.now+int(seconds*10**9)))
+            with patch.object(observations,'time',fake_time):
+                result=observations.observed_snapshot(observer,leader,deadline_ns=deadline,phase=phase)
+            return result,calls,state
+
+        def unknown(result):
+            self.assertIs(result['complete'],False)
+            self.assertIs(result['unknown'],True)
+            self.assertIs(result['positive_acceptance_eligible'],False)
+            self.assertNotIn('group_live',result)
+            self.assertNotIn('session_live',result)
+            checks=predicate(result,result)
+            self.assertFalse(checks['live_group_before_signal'])
+            self.assertFalse(checks['zero_sid_before_reap'])
+
+        for index,name in enumerate(names):
+            with self.subTest(case=name):
+                details=[]
+                if index==0:
+                    result,calls,state=scenario('vanish')
+                    self.assertIs(result['complete'],True)
+                    self.assertEqual((result['group_live'],result['session_live']),(1,1))
+                    self.assertEqual(len(result['observation_attempts']),2)
+                    self.assertEqual(result['observation_attempts'][0]['vanished_pid'],2333)
+                    self.assertEqual(result['observation_attempts'][0]['error_type'],'FileNotFoundError')
+                    self.assertTrue(result['positive_acceptance_eligible'])
+                    self.assertIn(('identity',1,1111),calls)
+                    self.assertNotIn(('identity',2,1111),calls)
+                    self.assertEqual(sum(c[0]=='inventory' and c[1]==2 for c in calls),3)
+                    self.assertTrue(predicate(result,result)['live_group_before_signal'])
+                    details=[result]
+                elif index==1:
+                    result,calls,state=scenario('unstable')
+                    unknown(result)
+                    self.assertEqual((len(result['observation_attempts']),state.attempt),(8,8))
+                    self.assertEqual(state.now,35000000)
+                    self.assertEqual(sum(c[0]=='fresh_attempt' for c in calls),8)
+                    details=[result]
+                elif index==2:
+                    result,calls,state=scenario('late',deadline=50000000)
+                    unknown(result)
+                    self.assertEqual(state.attempt,1)
+                    self.assertTrue(result['observation_attempts'][0]['late'])
+                    self.assertEqual(result['observation_finished_ns'],50000000)
+                    details=[result]
+                elif index==3:
+                    for mode in ('leader_missing','leader_changed_birth','leader_changed_sid','leader_changed_uid'):
+                        result,calls,state=scenario(mode)
+                        unknown(result)
+                        self.assertEqual((state.attempt,len(result['observation_attempts'])),(1,1))
+                        self.assertFalse(result['observation_attempts'][0]['retryable'])
+                        self.assertFalse(any(c[0]=='inventory' for c in calls))
+                        details.append(result)
+                elif index==4:
+                    for mode in ('permission','malformed'):
+                        result,calls,state=scenario(mode)
+                        unknown(result)
+                        self.assertEqual(state.attempt,1)
+                        self.assertFalse(result['observation_attempts'][0]['retryable'])
+                        details.append(result)
+                elif index==5:
+                    result,calls,state=scenario('zero')
+                    self.assertTrue(result['complete'])
+                    self.assertEqual((result['group_live'],result['session_live']),(0,0))
+                    self.assertTrue(result['group_zombie_only'])
+                    self.assertTrue(result['positive_acceptance_eligible'])
+                    self.assertEqual(state.attempt,1)
+                    self.assertEqual(sum(c[0]=='inventory' for c in calls),3)
+                    self.assertTrue(predicate(result,result)['zero_sid_before_reap'])
+                    details=[result]
+                elif index==6:
+                    clock=SimpleNamespace(monotonic_ns=lambda:20165543043)
+                    with patch.object(observations,'time',clock):
+                        positive=observations.observation_context(0,480000000000,first_wait=True,wait_timeout=0)
+                        negative=observations.observation_context(0,480000000000,first_wait=True,wait_timeout=0,expected_negative=True)
+                    self.assertEqual(positive,dict(phase=observations.POSITIVE_PHASE,deadline_ns=20000000000))
+                    self.assertEqual(negative,dict(phase=observations.NEGATIVE_PHASE,deadline_ns=38000000000))
+                    result,calls,state=scenario('live',now=20165543043,deadline=positive['deadline_ns'],phase=positive['phase'])
+                    unknown(result)
+                    self.assertEqual(state.attempt,0)
+                    diagnostic,calls,state=scenario('live',now=20165543043,deadline=negative['deadline_ns'],phase=negative['phase'])
+                    self.assertIs(diagnostic['complete'],True)
+                    self.assertEqual(diagnostic['session_live'],1)
+                    self.assertIs(diagnostic['positive_acceptance_eligible'],False)
+                    self.assertTrue(all(predicate(diagnostic,diagnostic,negative=True).values()))
+                    self.assertFalse(predicate(diagnostic,diagnostic,negative=True,forged_result=True)['real_unclosed_failure'])
+                    self.assertFalse(predicate(diagnostic,diagnostic)['positive_reap_observation_budget'])
+                    details=[result,diagnostic]
+                else:
+                    result,calls,state=scenario('live',now=38000000000,deadline=38000000000,phase=observations.NEGATIVE_PHASE)
+                    unknown(result)
+                    self.assertEqual((state.attempt,len(result['observation_attempts'])),(0,0))
+                    self.assertFalse(predicate(result,result,negative=True)['live_sid_before_failed_reap'])
+                    late,calls,state=scenario('late',now=37990000000,deadline=38000000000,phase=observations.NEGATIVE_PHASE)
+                    unknown(late)
+                    self.assertEqual(state.attempt,1)
+                    self.assertEqual(late['original_deadline_ns'],38000000000)
+                    details=[result,late]
+                self.rows.append(dict(mode=name,passed=True,evidence_kind='simulated_independent_census_read_boundary',
+                    actual_POSIX_processes_started=0,actual_signals_sent=0,snapshots=details))
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -449,12 +630,12 @@ def main():
     result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(LiteralStateTests))
     unchanged = source_pins() == pins and test_inventory() == before
     write_new(args.output_directory/'RESULT.json',dict(schema='owned_posix_v3_simulated_controls_v1',
-        complete=result.wasSuccessful() and unchanged and len(LiteralStateTests.rows)==85, unittest_methods=result.testsRun,
-        expected_simulated_rows=85,
+        complete=result.wasSuccessful() and unchanged and len(LiteralStateTests.rows)==93 and result.testsRun==6, unittest_methods=result.testsRun,
+        expected_simulated_rows=93,
         simulated_rows=len(LiteralStateTests.rows), rows=LiteralStateTests.rows, source_pins=pins,
         source_pins_unchanged=unchanged, actual_POSIX_processes_started=0, actual_signals_sent=0,
         native_Linux_or_Darwin_qualified=False, source_qualified=False, scientific_qualified=False))
-    return 0 if result.wasSuccessful() and unchanged and len(LiteralStateTests.rows)==85 else 1
+    return 0 if result.wasSuccessful() and unchanged and len(LiteralStateTests.rows)==93 and result.testsRun==6 else 1
 
 
 if __name__ == '__main__':

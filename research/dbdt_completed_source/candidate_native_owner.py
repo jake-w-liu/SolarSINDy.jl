@@ -6,7 +6,7 @@ direct leader is reaped here; per-descendant OS reaping is explicitly unobserved
 from pathlib import Path
 import hashlib,importlib.util,os,signal,subprocess,time
 LEGACY=Path(__file__).with_name('native_stage.py')
-LEGACY_SHA='8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836'
+LEGACY_SHA='30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c'
 def _posix_module():
     with LEGACY.open('rb') as stream:actual=hashlib.file_digest(stream,'sha256').hexdigest()
     if actual!=LEGACY_SHA:raise RuntimeError('current native POSIX owner changed')

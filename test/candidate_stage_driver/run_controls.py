@@ -6,9 +6,11 @@ ROOT=Path(__file__).resolve().parents[2]
 SCRIPT=Path(__file__).with_name('test_driver.py')
 FIXTURE=Path(__file__).with_name('native_fixture.py')
 OWNER=ROOT/'research/dbdt_completed_source/candidate_native_owner.py'
-PINS={SCRIPT:'49e3f3a72a6f25762acdc52cbd5768a036e43ea3645adc5c3bd5f2f93a0ca090',
+PINS={SCRIPT:'ce984933c6237a677bfcde96c694ca1b3c44b0f5a45098542ec88b184c111612',
     FIXTURE:'d855e765adf0f1820edf0a25d1c96ed8cb59cf9c3edb5dd6ae2d395bc1cd4f57',
-    OWNER:'3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1'}
+    OWNER:'c3575532cb67b4bf52d2db8a20e01ca7e8d97cfb0cb1054ded66467823e40c00',
+    ROOT/'test/posix_owner_v3/frozen/candidate_native_owner.py':'ccbf1cbd0709e50d0b5080bdbe4977ae80ebd1649237e016588d24800ddf2e21',
+    ROOT/'test/posix_owner_v3/frozen/native_stage.py':'15d2644ae5eb2e87ce31c9913f103f9fa7e940b67403b94f29ef2ed5a4d175b8'}
 def pin(path):
     with Path(path).open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 def write(path,value):

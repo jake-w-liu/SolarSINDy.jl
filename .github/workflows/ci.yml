@@ -15,7 +15,9 @@ concurrency:
 jobs:
   test:
     name: Julia ${{ matrix.julia-version }} / ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    # Intel capacity supports the unchanged 8 GiB available-memory gate.
+    # Keep logical macos-latest job names; this lane does not qualify ARM.
+    runs-on: ${{ matrix.os == 'macos-latest' && 'macos-26-intel' || matrix.os }}
     # Allow the expanded cold native controls, full package suite and experiments.
     timeout-minutes: 180
     strategy:

@@ -14,7 +14,7 @@ jobs:
   native-controls:
     name: V3 engineering / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -34,12 +34,27 @@ jobs:
           PYTHONDONTWRITEBYTECODE: '1'
           PYTHONUTF8: '1'
         run: python -B -X utf8 test/run_posix_owner_v3_controls.py --output-directory "$RUNNER_TEMP/solarsindy-posix-v3-direct"
+      - name: Run independent launch-anchor and cancellation controls
+        if: always()
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONUTF8: '1'
+        run: python -I -B -X utf8 test/run_darwin_anchor_v1_controls.py --output-directory "$RUNNER_TEMP/solarsindy-darwin-anchor-v1-direct"
       - name: Retain engineering evidence including failures
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: posix-v3-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/solarsindy-posix-v3-direct
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14
+      - name: Retain launch-anchor evidence including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: darwin-anchor-v1-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/solarsindy-darwin-anchor-v1-direct
           if-no-files-found: error
           include-hidden-files: true
           retention-days: 14

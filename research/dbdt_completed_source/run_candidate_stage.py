@@ -11,9 +11,9 @@ sys.dont_write_bytecode=True
 ROOT=Path(__file__).resolve().parents[2]
 ENTRY=Path(__file__).with_suffix('.jl')
 OWNER=Path(__file__).with_name('candidate_native_owner.py')
-OWNER_SHA='3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1'
+OWNER_SHA='c3575532cb67b4bf52d2db8a20e01ca7e8d97cfb0cb1054ded66467823e40c00'
 LEGACY_OWNER=Path(__file__).with_name('native_stage.py')
-LEGACY_OWNER_SHA='8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836'
+LEGACY_OWNER_SHA='30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c'
 RAM=8*1024**3;DISK=16*1024**3;SECONDS=7200;RAW_LIMIT=64*1024**2;CHUNK=65536;QUEUE_CHUNKS=8
 OPERATIONS=('inspect-runtime','generated-chain','candidate-input','candidate-fit','candidate-validation','independent-verify','select-R2','selected-refit-input','selected-refit')
 CANDIDATES=tuple('ridge-'+p for p in ('0.01','0.1','1','10','100'))+tuple(f'boost-{d}-{n}' for d in (2,3,4) for n in (50,100,200))+('forest-6-64','forest-9-64')

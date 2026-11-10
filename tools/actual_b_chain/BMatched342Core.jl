@@ -15,8 +15,8 @@ const ACTUAL=:archival_assumed_completion_research
 const GENERATED=:synthetic_only
 const CELLS=((0,4),(0,6),(1,4),(1,6))
 const PROTOCOL_SHA="7b6d6d6dca4b667c890d6cb763016871be0912c3417c23e20110ad2d3d6fe404"
-const OWNER_SHA="3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1"
-const LEGACY_OWNER_SHA="8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836"
+const OWNER_SHA="c3575532cb67b4bf52d2db8a20e01ca7e8d97cfb0cb1054ded66467823e40c00"
+const LEGACY_OWNER_SHA="30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c"
 const RSS_LIMIT=8*1024^3
 const SOURCE_FACT_FIELDS=(:delay_hours,:source_proof_sha256,:source_admission_id,:input_view_id,
     :input_prefix_sha256,:raw_prefix_sha256,:source_sha256,:matched_input_id)

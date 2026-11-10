@@ -19,7 +19,7 @@ import unittest
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
 TARGET = ROOT / 'tools/actual_b_chain/run_matched342_native.py'
-TARGET_SHA = '32618b32e80b8a88524ddae774bdd80a8a42b0a16c1c3ab98d0869eac0063bb5'
+TARGET_SHA = 'ea2f94ec709b5e58086b69fbd142f902499d9a2d2f5dabc8e0c871c452b4533b'
 HEX = 'a' * 64
 HEAD = 'b' * 40
 META = 2 * 1024**2

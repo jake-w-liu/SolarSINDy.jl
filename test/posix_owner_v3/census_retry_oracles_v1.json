@@ -1,0 +1,27 @@
+{
+  "schema": "independent_posix_census_retry_oracles_v1",
+  "precode_sha256": "fa535ad79015a559e37f7123d2e00146860954a72ec92e8c374b8abc4d690f85",
+  "budget_amendment_sha256": "1650e172c719b5ac326fc6ce9b24808b4ce3680bb09f8b08bc7097a20e04efb2",
+  "original_oracle_sha256": "7d4d444771abb90a0a07f297f9a11b669a7dc78645f7511925ce018e7f9f0e98",
+  "max_attempts": 8,
+  "observation_subcap_ns": 250000000,
+  "retry_sleep_ns": 5000000,
+  "stage_ns": 8000000000,
+  "cleanup_ns": 20000000000,
+  "expected_negative_watchdog_ns": 38000000000,
+  "whole_native_ns": 480000000000,
+  "original_simulated_rows": 85,
+  "expected_simulated_rows": 93,
+  "expected_test_methods": 6,
+  "cases": [
+    "unrelated_enoent_then_fresh_stable_live_census",
+    "all_fresh_censuses_unstable_remain_unknown",
+    "late_nominal_complete_census_rejected",
+    "held_leader_loss_or_changed_identity_not_retried",
+    "permission_or_malformed_record_not_retried",
+    "stable_complete_zero_census_is_observed",
+    "expired_positive_clock_and_ineligible_negative_diagnostic",
+    "negative_diagnostic_deadline_cannot_restart"
+  ],
+  "scope": "Literal simulated observer-read/clock controls only; no actual process, signal, closure, source or scientific qualification."
+}

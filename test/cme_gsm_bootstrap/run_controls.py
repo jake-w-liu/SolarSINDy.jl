@@ -8,7 +8,7 @@ ROOT=Path(__file__).resolve().parents[2]
 SCRIPT=Path(__file__).with_name('test_owner_pins.py')
 OWNER=ROOT/'research/dbdt_completed_source/native_stage.py'
 SCRIPT_SHA='401aad1bd271f3b81c03f97b705157c8cb6b62b49032180b5951310d54a732d7'
-OWNER_SHA='8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836'
+OWNER_SHA='30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c'
 SECONDS=180
 NAMES=(
  'research/cme_gsm_bootstrap/bootstrap_indices.jl','research/cme_gsm_bootstrap/bootstrap_entry.jl',

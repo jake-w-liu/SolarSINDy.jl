@@ -16,7 +16,7 @@ RUNTIMES = ('1.12.6', '1.13.1')
 ROLES = ('primary', 'independent')
 LAYOUTS = ('ground-only', 'mixed')
 POLICY = '666f9e8112c4ee7747e2121e4cb3b5ed38cf081484468e4cc2399bea271b8c94'
-OWNER_SHA = '8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836'
+OWNER_SHA = '30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c'
 
 def pin(path):
     with Path(path).open('rb') as stream:

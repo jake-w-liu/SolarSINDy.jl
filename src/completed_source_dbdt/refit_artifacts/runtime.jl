@@ -1,5 +1,5 @@
 const _PACKAGE_ROOT = normpath(joinpath(@__DIR__,"..","..",".."))
-const _OWNED_RUNNER_SHA = "8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836"
+const _OWNED_RUNNER_SHA = "30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c"
 _stream_sha(path) = open(io->bytes2hex(SHA.sha256(io)),path)
 
 function _git_read(arguments...)
@@ -14,7 +14,8 @@ function _code_files(stage::String)
     end
     append!(common,["research/dbdt_completed_source/run_fit_job.jl","research/dbdt_completed_source/finalize_artifact.jl"])
     append!(common,["research/dbdt_completed_source/native_stage.py","research/dbdt_completed_source/run_synthetic_chain.py",
-        "research/dbdt_completed_source/synthetic_sources.py","research/dbdt_completed_source/synthetic_checkpoint.py"])
+        "research/dbdt_completed_source/synthetic_sources.py","research/dbdt_completed_source/synthetic_checkpoint.py",
+        "research/dbdt_completed_source/capture_control_output.py"])
     if stage in ("fit_ridge","fit_independent_check","refit_point","calibrate","cal_independent_check","load_cal_check","calibration")
         append!(common,["src/completed_source_dbdt/refit_artifacts/ridge.jl","src/completed_source_dbdt/refit_artifacts/numerical_audit.jl","src/completed_source_dbdt/refit_artifacts/calibration.jl"])
     end

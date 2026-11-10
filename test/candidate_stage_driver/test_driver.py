@@ -9,6 +9,18 @@ spec=importlib.util.spec_from_file_location('tested_candidate_native_driver',PAT
 FIXTURE=Path(__file__).with_name('native_fixture.py')
 OUT=Path(os.environ['CANDIDATE_DRIVER_CONTROLS_ROOT'] if 'CANDIDATE_DRIVER_CONTROLS_ROOT' in os.environ else tempfile.mkdtemp(prefix='candidate-native-controls-')).resolve()
 OUT.mkdir(exist_ok=True)
+
+
+# Historical V2 inline POSIX event spies; required V3 suites qualify the current owner.
+def historical_posix_owner(name):
+    subject=ROOT/'test/posix_owner_v3/frozen/candidate_native_owner.py'
+    for path,expected in ((subject,'ccbf1cbd0709e50d0b5080bdbe4977ae80ebd1649237e016588d24800ddf2e21'),
+                          (subject.with_name('native_stage.py'),'15d2644ae5eb2e87ce31c9913f103f9fa7e940b67403b94f29ef2ed5a4d175b8')):
+        if hashlib.sha256(path.read_bytes()).hexdigest()!=expected:
+            raise RuntimeError('historical candidate V2 owner bytes differ')
+    return D.module(subject,name)
+
+
 class DriverControls(unittest.TestCase):
     def setUp(self):self.root=Path(tempfile.mkdtemp(prefix=self._testMethodName+'-',dir=OUT)).resolve()
     def command(self,mode):return [sys.executable,'-B','-X','utf8',str(FIXTURE),'--mode',mode,'--root',str(self.root)]
@@ -277,7 +289,7 @@ class DriverControls(unittest.TestCase):
         self.assertEqual(result['native_exit'],0);self.assertTrue(result['leader_reaped']);self.assertTrue(result['ownership_boundary_closed'])
         self.assertFalse(result['all_descendants_os_reaped'])
     def test_POSIX_normal_observe_signal_reap_order_without_native_claim(self):
-        owner=D.module(D.OWNER,'candidate_mock_POSIX_owner');events=[]
+        owner=historical_posix_owner('candidate_mock_POSIX_owner');events=[]
         class Process:
             pid=123
             def poll(self):raise AssertionError('reaping poll forbidden before group signal')
@@ -299,7 +311,7 @@ class DriverControls(unittest.TestCase):
             with self.subTest(mode=mode):
                 root=self.root/mode;root.mkdir();literal.exercise(owner,mode,root)
     def test_POSIX_callback_exception_still_signals_before_reap(self):
-        owner=D.module(D.OWNER,'candidate_mock_exception_owner');events=[]
+        owner=historical_posix_owner('candidate_mock_exception_owner');events=[]
         class Process:
             pid=123
             def wait(self,timeout):events.append('reap');return -9
@@ -311,7 +323,7 @@ class DriverControls(unittest.TestCase):
                 on_launch=lambda pid:(_ for _ in ()).throw(RuntimeError('injected')))
         self.assertEqual(events,['signal','reap'])
     def test_missing_POSIX_feature_fails_before_launch(self):
-        owner=D.module(D.OWNER,'candidate_mock_feature_gate')
+        owner=historical_posix_owner('candidate_mock_feature_gate')
         with mock.patch.object(owner,'os',SimpleNamespace(name='posix')),mock.patch.object(owner.subprocess,'Popen') as start,self.assertRaises(RuntimeError):
             owner.run_owned(['fixed-mock'],cwd=str(self.root),environment={},logpath=self.root/'never.log',timeout=10)
         start.assert_not_called();self.assertFalse((self.root/'never.log').exists())

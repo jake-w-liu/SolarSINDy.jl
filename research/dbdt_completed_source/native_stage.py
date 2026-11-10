@@ -30,6 +30,24 @@ def _identity(row):
     return {key: row[key] for key in ('pid', 'pgid', 'sid', 'birth', 'uid', 'ruid')}
 
 
+class _WaitChildIdentityLost(RuntimeError):
+    """A contradictory wait event invalidates the held-child signal anchor."""
+
+
+def _owned_waitid(pid, flags):
+    try:
+        return os.waitid(os.P_PID, pid, flags)
+    except OSError as error:
+        if isinstance(error, ChildProcessError) or error.errno == errno.ECHILD:
+            raise _WaitChildIdentityLost('owned child is no longer waitable; identity anchor lost') from error
+        raise
+
+
+def _preserve_cancellation(error):
+    if isinstance(error, InterruptedError) and error.errno is None:
+        raise error
+
+
 class _NativeCensus:
     def leader(self, pid):
         row = self._info(pid)
@@ -74,6 +92,7 @@ class _NativeCensus:
                       'native process reader self calibration differs')
                 return
             except (OSError, RuntimeError, StopIteration) as error:
+                _preserve_cancellation(error)
                 last = error
             time.sleep(min(.01, max(0., deadline - time.monotonic())))
         raise RuntimeError('native session census unavailable before launch') from last
@@ -139,6 +158,10 @@ class _DarwinProcesses(_NativeCensus):
     def __init__(self):
         import ctypes as C
         self.C = C
+        self._launch_parent = None
+        self._launch_process = None
+        self._launch_anchor = None
+        self._launch_used = False
 
         class BSDInfo(C.Structure):
             _fields_ = [(n, C.c_uint32) for n in
@@ -186,7 +209,7 @@ class _DarwinProcesses(_NativeCensus):
             raise OSError(error or errno.EPROTO, 'native process information unavailable')
         return value
 
-    def _info(self, pid):
+    def _raw_info(self, pid):
         _need(type(pid) is int and 0 < pid < 2**31, 'native PID outside bound')
         short = self._record(pid, 13, self.ShortBSDInfo)
         zombie = short.status == 5
@@ -196,15 +219,120 @@ class _DarwinProcesses(_NativeCensus):
         full = None
         if short.uid == short.ruid == os.getuid():
             full = self._record(pid, 3, self.BSDInfo)
-            _need(full.pgid == short.pgid and full.uid == short.uid and full.ruid == short.ruid and
+            _need(full.ppid == short.ppid and full.pgid == short.pgid and
+                  full.uid == short.uid and full.ruid == short.ruid and
                   (full.status == 5) == zombie, 'native process identity changed between records')
         flags = int(full.flags if full is not None else short.flags)
         sid = (pid if flags & 0x20 else None) if zombie else os.getsid(pid)
         if full is not None:
             _need(bool(flags & 0x20) == (sid == pid), 'native session-leader flag calibration differs')
-        return dict(pid=pid, ppid=int(short.ppid), pgid=int(short.pgid), sid=sid,
-                    birth=None if full is None else (int(full.start_sec), int(full.start_usec)),
-                    uid=int(short.uid), ruid=int(short.ruid), zombie=zombie)
+        return (dict(pid=pid, ppid=int(short.ppid), pgid=int(short.pgid), sid=sid,
+                     birth=None if full is None else (int(full.start_sec), int(full.start_usec)),
+                     uid=int(short.uid), ruid=int(short.ruid), zombie=zombie), flags)
+
+    @staticmethod
+    def _held_fields(row):
+        return {key: row[key] for key in ('pid', 'ppid', 'pgid', 'birth', 'uid', 'ruid')}
+
+    def _info(self, pid):
+        row, flags = self._raw_info(pid)
+        anchor = getattr(self, '_launch_anchor', None)
+        if anchor is not None and pid == anchor['fields']['pid']:
+            _need(self._launch_process is not None and self._launch_process.pid == pid and
+                  self._launch_process.returncode is None and
+                  self._held_fields(row) == anchor['fields'], 'held Darwin launch identity changed')
+            _need(row['sid'] in (None, anchor['sid']), 'held Darwin launch session identity changed')
+            if anchor['origin'] == 'owned_exec_terminal':
+                _need(row['zombie'] and flags & 0x4000, 'held Darwin terminal exec witness disappeared')
+            if row['sid'] is None:
+                _need(row['zombie'], 'live Darwin session identity is unknown')
+                # Only this exact, still-unreaped launch may use its saved SID.
+                # Unbound process readers retain the raw unknown zombie SID.
+                row = dict(row, sid=anchor['sid'])
+        return row
+
+    def _parent_facts(self):
+        row, _ = self._raw_info(os.getpid())
+        _need(not row['zombie'] and row['birth'] is not None and
+              row['uid'] == row['ruid'] == os.getuid() == os.geteuid() and
+              row['pgid'] == os.getpgrp() and row['sid'] == os.getsid(0),
+              'Darwin native launch-parent calibration differs')
+        return dict(self._held_fields(row), sid=row['sid'])
+
+    def _prepare_launch(self, deadline):
+        _before(deadline)
+        _need(not self._launch_used and self._launch_parent is None and
+              self._launch_process is None and self._launch_anchor is None,
+              'Darwin adapter already used for a launch')
+        self._launch_used = True
+        self._launch_parent = self._parent_facts()
+        _before(deadline)
+
+    def _bind_launch(self, process, deadline):
+        # Called only by the owner immediately after its exact internal Popen
+        # start_new_session=True/no-preexec/no-process_group-override launch.
+        # Process proxies are acceptable; no externally supplied ready/SID flag
+        # or isinstance(Popen) assertion substitutes for native evidence.
+        _need(self._launch_parent is not None and self._launch_process is None and
+              self._launch_anchor is None, 'Darwin launch was not prepared exactly once')
+        self._launch_process = process
+        _before(deadline)
+        _need(self._parent_facts() == self._launch_parent, 'Darwin launch-parent identity changed')
+        parent = self._launch_parent
+        pid = process.pid
+        _need(process.returncode is None and type(pid) is int and 0 < pid < 2**31 and
+              pid not in (parent['pid'], parent['pgid'], parent['sid']),
+              'Darwin launch PID is not a fresh private leader')
+        last = None
+        while time.monotonic() < deadline:
+            try:
+                row, flags = self._raw_info(pid)
+                birth = row['birth']
+                _need(row['pid'] == row['pgid'] == pid and row['ppid'] == parent['pid'] and
+                      row['uid'] == row['ruid'] == parent['uid'] and birth is not None and
+                      len(birth) == 2 and 0 < birth[0] < 2**63 and 0 <= birth[1] < 1000000,
+                      'Darwin direct launch native identity differs')
+                observed = None
+                if row['zombie']:
+                    # Popen error-pipe EOF alone does not prove exec: a child
+                    # killed before setsid/exec also closes that pipe. A fresh
+                    # XNU child does not inherit P_EXEC. Native EXEC plus this
+                    # checked setsid-before-exec launch and PGID/parent identity
+                    # certifies even a child first observed after it exited.
+                    _need(flags & 0x4000, 'Darwin terminal launch has no native exec witness')
+                    _need(row['sid'] in (None, pid), 'Darwin terminal launch session differs')
+                    observed = _owned_waitid(pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                    if observed is not None and observed.si_pid != pid:
+                        raise _WaitChildIdentityLost('waitid returned another process identity during Darwin launch')
+                    # Darwin leaves waitid.si_uid zero in observed terminal
+                    # events. UID identity is checked from both native BSD
+                    # records above, not inferred from this notification.
+                    _need(observed is not None and observed.si_pid == pid and
+                          observed.si_code in (os.CLD_EXITED, os.CLD_KILLED, os.CLD_DUMPED),
+                          'Darwin terminal launch is not the held unreaped child')
+                    origin = 'owned_exec_terminal'
+                else:
+                    _need(row['sid'] == pid and flags & 0x20,
+                          'Darwin live launch session is not natively calibrated')
+                    origin = 'native_live'
+                _before(deadline)
+                self._launch_anchor = dict(fields=self._held_fields(row), sid=pid, origin=origin,
+                                           terminal_observation=observed)
+                return
+            except _WaitChildIdentityLost:
+                raise
+            except (OSError, RuntimeError) as error:
+                _preserve_cancellation(error)
+                last = error
+            time.sleep(min(.01, max(0., deadline - time.monotonic())))
+        raise RuntimeError('Darwin direct-launch proof unavailable within owned deadline') from last
+
+    def _release_launch(self, process):
+        if self._launch_process is not None:
+            _need(self._launch_process is process, 'releasing another Darwin launch')
+        self._launch_anchor = None
+        self._launch_process = None
+        self._launch_parent = None
 
 
 def _processes():
@@ -245,6 +373,7 @@ def _checked_snapshot(adapter, identity, deadline, summary):
             _before(deadline)
             return value
         except (OSError, RuntimeError) as error:
+            _preserve_cancellation(error)
             last = error
         time.sleep(min(.01, max(0., deadline - time.monotonic())))
     raise RuntimeError('native session closure remains unknown at cleanup deadline') from last
@@ -258,6 +387,7 @@ def _acquire_leader(adapter, pid, deadline):
             _before(deadline)
             return identity
         except (OSError, RuntimeError) as error:
+            _preserve_cancellation(error)
             # A child can change from live to zombie between libproc's short
             # and full records. Retry that unknown state without reaping it.
             last = error
@@ -316,6 +446,9 @@ def _cleanup_posix(process, adapter, identity, summary):
     except BaseException as caught:
         if error is None:
             error = caught
+    finally:
+        if isinstance(adapter, _DarwinProcesses):
+            adapter._release_launch(process)
     if time.monotonic() >= deadline and error is None:
         error = RuntimeError('complete POSIX cleanup exceeded its shared20-second deadline')
     if error is not None:
@@ -343,21 +476,38 @@ def _run_posix(argv, cwd, environment, logpath, timeout, on_launch, *, started=N
                    census_attempts=0, stop_notifications_consumed=0)
     with Path(logpath).open('xb', buffering=0) as log:
         _before(deadline)
-        process = subprocess.Popen(argv, cwd=cwd, env=environment, stdout=log,
-                                   stderr=subprocess.STDOUT, start_new_session=True)
+        darwin = isinstance(adapter, _DarwinProcesses)
+        try:
+            if darwin:
+                adapter._prepare_launch(deadline)
+            process = subprocess.Popen(argv, cwd=cwd, env=environment, stdout=log,
+                                       stderr=subprocess.STDOUT, start_new_session=True)
+        except BaseException:
+            if darwin:
+                adapter._release_launch(None)
+            raise
         identity = None
         anchor_held = True
         try:
+            if darwin:
+                adapter._bind_launch(process, deadline)
             identity = _acquire_leader(adapter, process.pid, deadline)
             summary['leader_identity'] = identity.copy()
+            if darwin:
+                summary['leader_identity_origin'] = adapter._launch_anchor['origin']
+                observed_launch = adapter._launch_anchor['terminal_observation']
+                summary['launch_terminal_observation'] = None if observed_launch is None else {
+                    key: int(getattr(observed_launch, key)) for key in
+                    ('si_pid', 'si_code', 'si_status', 'si_signo', 'si_uid')}
             if on_launch:
                 on_launch(process.pid)
             terminal_codes = (os.CLD_EXITED, os.CLD_KILLED, os.CLD_DUMPED)
             while True:
-                observed = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+                observed = _owned_waitid(process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
                 expired = time.monotonic() >= deadline
                 if observed is not None:
-                    _need(observed.si_pid == process.pid, 'waitid returned another process identity')
+                    if observed.si_pid != process.pid:
+                        raise _WaitChildIdentityLost('waitid returned another process identity')
                     if observed.si_code in terminal_codes:
                         summary['terminal_observation'] = {key: int(getattr(observed, key)) for key in
                                                            ('si_pid', 'si_code', 'si_status', 'si_signo', 'si_uid')}
@@ -365,7 +515,7 @@ def _run_posix(argv, cwd, environment, logpath, timeout, on_launch, *, started=N
                     if observed.si_code == os.CLD_STOPPED and sys.platform == 'darwin':
                         # CPython3.14.10 asyncio uses this stop-only consumption;
                         # the terminal child remains unreaped under WNOWAIT.
-                        stopped = os.waitid(os.P_PID, process.pid, os.WSTOPPED | os.WNOHANG)
+                        stopped = _owned_waitid(process.pid, os.WSTOPPED | os.WNOHANG)
                         if stopped is not None and (stopped.si_pid != process.pid or stopped.si_code != os.CLD_STOPPED):
                             anchor_held = False
                             raise RuntimeError('stop-only wait returned an unexpected process/event; anchor not trusted')
@@ -375,16 +525,25 @@ def _run_posix(argv, cwd, environment, logpath, timeout, on_launch, *, started=N
                 if expired:
                     break
                 time.sleep(min(.02, max(0., deadline - time.monotonic())))
+        except _WaitChildIdentityLost as error:
+            anchor_held = False
+            # Preserve the public RuntimeError contract while making identity
+            # loss nonretryable and bypassing every numeric cleanup signal.
+            raise RuntimeError(str(error)) from error
         finally:
-            if not anchor_held:
-                # No numeric signal is safe after loss of the identity anchor.
-                # This is an explicit failed ownership path, never a result.
-                try:
-                    process.wait(timeout=0)
-                except BaseException:
-                    pass
-            else:
-                native = _cleanup_posix(process, adapter, identity, summary)
+            try:
+                if not anchor_held:
+                    # No numeric signal is safe after loss of the identity anchor.
+                    # This is an explicit failed ownership path, never a result.
+                    try:
+                        process.wait(timeout=0)
+                    except BaseException:
+                        pass
+                else:
+                    native = _cleanup_posix(process, adapter, identity, summary)
+            finally:
+                if darwin:
+                    adapter._release_launch(process)
     elapsed = time.monotonic() - started
     _need(summary['session_zero_live_verified'], 'native private-session closure not observed')
     return (dict(pid=process.pid, native_exit=native, timed_out=expired or elapsed >= timeout,

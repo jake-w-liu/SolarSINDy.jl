@@ -42,7 +42,7 @@ using Test,SHA,JSON3,SolarSINDy
 include(joinpath(@__DIR__,"completed_refit_artifacts","run_ci_native_chain.jl"))
 const DRIVER=CompletedRefitNativeDriver
 const FIXED=joinpath(pkgdir(SolarSINDy),"test","cme_gsm_bootstrap","run_controls.py")
-const FIXED_SHA="38d1e279910757ee1cc0cbe2bff09d47fe686d119d71bc5a77f5137c7543926d"
+const FIXED_SHA="e16c7de3015281ea5b1f5f3d05710b26b293678dfa3b5829290691590f2ce82e"
 
 function run_owner_pin_controls()
     @test bytes2hex(sha256(read(FIXED)))==FIXED_SHA

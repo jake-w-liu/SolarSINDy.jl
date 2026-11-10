@@ -6,7 +6,6 @@ import math
 import hashlib
 import importlib.util
 import os
-import platform
 import shutil
 import signal
 import subprocess
@@ -16,7 +15,7 @@ import time
 from unittest.mock import patch
 sys.dont_write_bytecode = True
 _observations_path = Path(__file__).resolve().with_name('observations.py')
-_observations_sha = 'bc4e0ba607bedd1fd59bdc90f23c048139a072534a64aa68d1fe8d05b4c485e8'
+_observations_sha = 'c825fcbf2fbb2a86f41ec5e881dfa301f0908a119c98588b79e9d28d7a480ba3'
 with _observations_path.open('rb') as _stream:
     _observations_body = _stream.read(256*1024+1)
 if len(_observations_body)>256*1024 or hashlib.sha256(_observations_body).hexdigest()!=_observations_sha:
@@ -29,6 +28,7 @@ if _observations.digest(_observations_path)!=_observations_sha:
 HERE,ROOT,ROLES = _observations.HERE,_observations.ROOT,_observations.ROLES
 NativeObservation,digest,load = _observations.NativeObservation,_observations.digest,_observations.load
 observed_snapshot,read_json = _observations.observed_snapshot,_observations.read_json
+observation_context = _observations.observation_context
 source_pins,test_inventory,write_new = _observations.source_pins,_observations.test_inventory,_observations.write_new
 
 REAL_POPEN = subprocess.Popen
@@ -43,7 +43,7 @@ WHOLE = 480.0
 TOKEN = 'owned POSIX session has no live members after stage'
 
 
-def exercise(module, observer, mode, directory):
+def exercise(module, observer, mode, directory, *, worker_deadline_ns):
     directory.mkdir()
     lock = threading.RLock()
     done = threading.Event()
@@ -58,12 +58,15 @@ def exercise(module, observer, mode, directory):
                 raise RuntimeError('native event cap')
             events.append(dict(operation=operation, monotonic_ns=time.monotonic_ns(), **values))
 
-    def before_reap(operation):
+    def before_reap(operation, wait_timeout=None):
         with lock:
             first = not state['reap_started']
             state['reap_started'] = True
-            snap = observed_snapshot(observer, state['leader']) if first else None
-            event(operation, first=first, signal_started=state['signal_started'], snapshot=snap)
+            context = observation_context(started, worker_deadline_ns, first_wait=first and operation=='terminal_wait_entry',
+                wait_timeout=wait_timeout, expected_negative=mode=='other_group_persistent')
+            snap = observed_snapshot(observer, state['leader'], **context) if first else None
+            event(operation, first=first, signal_started=state['signal_started'], snapshot=snap,
+                received_wait_timeout=wait_timeout)
 
     class Process:
         def __init__(self, actual):
@@ -73,7 +76,7 @@ def exercise(module, observer, mode, directory):
             return getattr(self.actual, name)
 
         def wait(self, timeout=None):
-            before_reap('terminal_wait_entry')
+            before_reap('terminal_wait_entry', timeout)
             value = self.actual.wait(timeout=timeout)
             observer.release(self.pid)
             event('terminal_wait_return', native_exit=value)
@@ -132,13 +135,15 @@ def exercise(module, observer, mode, directory):
                 event('repeated_group_signal', pid=pid)
                 raise RuntimeError('test refuses repeated group signal')
             state['signal_started'] = True
-            snap = observed_snapshot(observer, state['leader'])
+            context = observation_context(started, worker_deadline_ns, before_signal=True)
+            snap = observed_snapshot(observer, state['leader'], **context)
             event('group_signal_entry', pid=pid, signal=int(number), reap_started=state['reap_started'], snapshot=snap)
             try:
                 REAL_KILLPG(pid, number)
             except BaseException as error:
                 event('group_signal_error', error_type=type(error).__name__, errno=getattr(error, 'errno', None),
-                      snapshot=observed_snapshot(observer, state['leader']))
+                      snapshot=observed_snapshot(observer, state['leader'],
+                          **observation_context(started, worker_deadline_ns, before_signal=True)))
                 raise
             else:
                 event('group_signal_return')
@@ -288,6 +293,11 @@ def check(row, mode, *, historical=False):
         checks.update(real_unclosed_failure=row['error'] is not None and row['native'] is None,
                       live_other_group=row.get('other_group_live_at_owner_return') is True,
                       fixture_expiry_observed=row.get('fixture_expiry_observed') is True)
+        failed = reaps[0].get('snapshot', {}) if len(reaps)==1 else {}
+        checks['live_sid_before_failed_reap'] = failed.get('complete') is True and \
+            failed.get('observation_phase') == _observations.NEGATIVE_PHASE and \
+            failed.get('positive_acceptance_eligible') is False and \
+            type(failed.get('session_live')) is int and failed['session_live'] >= 1
         return checks
     native = row['native']
     timeout = mode in ('other_group_12s', 'persistent_stop')
@@ -297,6 +307,9 @@ def check(row, mode, *, historical=False):
         timeout=isinstance(native, dict) and native.get('timed_out') is timeout,
         cleanup_token=isinstance(native, dict) and native.get('descendant_cleanup') == TOKEN,
         zero_sid_before_reap=len(reaps) == 1 and reaps[0].get('snapshot', {}).get('complete') is True and reaps[0]['snapshot'].get('session_live') == 0)
+    checks['positive_reap_observation_budget'] = len(reaps)==1 and \
+        reaps[0].get('snapshot',{}).get('positive_acceptance_eligible') is True and \
+        reaps[0]['snapshot'].get('observation_phase') == _observations.POSITIVE_PHASE
     base_keys = {'pid','native_exit','timed_out','ownership','descendant_cleanup','wall_seconds'}
     candidate_keys = base_keys | {'leader_reaped','ownership_boundary_closed','all_descendants_os_reaped','observation_method','descendant_evidence'}
     expected_keys = candidate_keys if row.get('role') == ROLES[2] else base_keys
@@ -313,8 +326,10 @@ def check(row, mode, *, historical=False):
         if event['operation'] == 'group_signal_error' and event['errno'] == 1:
             snap = event['snapshot']
             checks['eperm_native_zombie_only'] = snap.get('complete') is True and snap.get('group_zombie_only') is True and snap.get('group_live') == 0 and snap['held_leader']['zombie'] is True
+            checks['eperm_observation_budget'] = snap.get('positive_acceptance_eligible') is True
     if mode == 'same_group_descendant':
         checks['live_group_before_signal'] = len(signals) == 1 and signals[0]['snapshot'].get('group_live', 0) >= 1
+        checks['positive_group_observation_budget'] = len(signals)==1 and signals[0]['snapshot'].get('positive_acceptance_eligible') is True
     if mode in ('persistent_stop', 'transient_stop') and sys.platform == 'darwin':
         checks['stop_only_consumed'] = len(stops) >= 1
     if mode == 'transient_stop':
@@ -353,7 +368,7 @@ def main():
         for mode in PRINCIPAL + EXTRA:
             if (time.monotonic_ns()-started)/1e9 >= WHOLE:
                 raise RuntimeError('whole native control budget exhausted')
-            row = exercise(module, observer, mode, output / (str(index) + '-' + mode))
+            row = exercise(module, observer, mode, output / (str(index) + '-' + mode), worker_deadline_ns=started+int(WHOLE*10**9))
             row.update(role=role, source_sha256=pins[role], evidence_kind='actual_native_current')
             row['checks'] = check(row, mode)
             row['passed'] = all(row['checks'].values())
@@ -365,7 +380,8 @@ def main():
             name = 'candidate_native_owner.py' if index == 2 else 'native_stage.py'
             path = HERE / 'frozen' / name
             module = load(path, 'v3_historical_stop_owner_' + str(index))
-            row = exercise(module, observer, 'transient_stop', output / ('old-' + str(index) + '-transient_stop'))
+            row = exercise(module, observer, 'transient_stop', output / ('old-' + str(index) + '-transient_stop'),
+                worker_deadline_ns=started+int(WHOLE*10**9))
             row.update(role=role, source_sha256=digest(path), evidence_kind='actual_native_historical_negative')
             row['new_stop_oracle_checks'] = check(row, 'transient_stop', historical=True)
             # Require the semantic stop defect, not merely the historical text.
@@ -375,7 +391,9 @@ def main():
             historical.append(row)
     after = source_pins()
     tests_unchanged = test_inventory() == tests_before
-    runtime_facts = dict(uname=list(platform.uname()), python_version=sys.version,
+    # Keep the legacy six fields; optional processor is explicitly unknown.
+    # Iterating platform.uname() can spawn an unbounded uname -p helper.
+    runtime_facts = dict(uname=list(os.uname())+[''], python_version=sys.version,
         python_binary_sha256=digest(sys.executable), oracle_sha256=digest(HERE / 'oracles_v3.json'),
         fixture_sha256=digest(HERE / 'fixture.py'))
     elapsed = time.monotonic_ns()-started

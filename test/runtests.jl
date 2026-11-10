@@ -1060,3 +1060,12 @@ include(joinpath(@__DIR__, "matched_initial342", "runtests.jl"))
 
 # Current native session regressions; historical V2 fixtures remain separate.
 include(joinpath(@__DIR__, "posix_owner_v3_tests.jl"))
+
+# Exact historical annual-header compatibility; no real observations are read.
+include(joinpath(@__DIR__, "paper_source_schemas_tests.jl"))
+
+# Independent TAI/UTC and leap-boundary controls for source clocks.
+include(joinpath(@__DIR__, "jsoc_time_tests.jl"))
+
+# Native launch identity, loss and cancellation regressions; historical negatives stay explicit.
+include(joinpath(@__DIR__, "darwin_anchor_v1_tests.jl"))

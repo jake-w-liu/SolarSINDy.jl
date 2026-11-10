@@ -1767,3 +1767,83 @@ complete experiments, canonical harness, strict docs, containers, all platforms
 and meaningful full-size32 resource qualification remain required. The new
 Linux development workflow is exploratory and grants no source/scientific or
 actual-data authority. All scientific performance and paper verdicts remain open.
+
+### Superlearner annual schema: independent controls written, not executed
+
+`test/paper_source_schemas_tests.jl` is a mandatory full-suite include. Literal
+expectations cover all six historical aliases, canonical and mixed schemas,
+physical column order, preserved unique extras, missing bounds/comparators,
+raw duplicates, canonical/legacy collisions with equal and unequal payloads,
+LF/CRLF input, malformed quoting, frame/buffer/type/bit identity, all twelve
+2014:2025 raw references, late raw/header failures, and post-plan raw mutation.
+No real annual observations or fitted outputs are used. No tolerance or existing
+test is weakened. The separate actual-parent preflight regression is outside
+package CI until explicitly executed and recorded; package success cannot be
+used to claim that parent integration passed.
+
+Local Julia execution remains withheld below the 8 GiB available-RAM floor.
+Required verification includes the new narrow controls, the actual-parent test,
+unfiltered `Pkg.test()`, complete experiments and the development harness, then
+restoration of the original pinned annual payloads and honest regeneration.
+Static review alone does not qualify any new result, figure, paper or archive.
+
+`test/jsoc_time_tests.jl` is also a mandatory include. Its UTC expectations are
+literal IERS-derived dates, including before/after all supported leap transitions,
+explicit leap rejection, strict label framing, table coverage and lower/upper
+flare-label boundaries. These tests are written and source-reviewed, not executed.
+Neither helper test suite establishes historical SHARP feature availability.
+
+The observer successor plans 93 literal rows across six methods, preserving the
+original 85 rows/five method bodies. Its Linux retry and expected-negative clock
+controls have received static review only. The macOS per-launch identity repair
+is also unexecuted. Its separately planned anchor controls, genuine native runs,
+current-source pin cascade and full package/platform qualification are pending.
+The running development CI is bound to the earlier published `acf5404` source;
+it cannot qualify subsequent working-tree edits documented here.
+
+### Current Windows regression results and retained CI failures, 10 November 2026
+
+The previous development CI is now terminal: both Julia 1.12.6 and 1.13.1 failed
+the canonical audit. Retained package logs independently identify the same
+eight historical owner-subject failures; retained experiment logs identify the
+type-generation-loop documentation error. The historical-subject repairs keep
+the original mathematical/event oracles and all existing assertions intact.
+The generated-type documentation repair still needs native Julia verification.
+
+The current registered V3 controller passed 93 literal rows/six methods on
+Windows, and the separate anchor controller passed 72 rows/three methods.
+Independent readback reconciled raw summaries, source pins, actual launch and
+wait PIDs, untimed native exit zero and closed Windows Job boundaries. Neither
+run launched native POSIX cases, Julia or actual-data fitting. The anchor suite
+requires 16 native Darwin cases, including historical and cleanup negatives;
+these have not yet passed on the current source.
+
+The file-based portable capture suite passed all 35 methods with no failures
+or errors (`Ran 35 tests in 49.396s`, raw SHA256 `46f219c0`). The reviewed file-based
+port's 34 method bodies remain unchanged by the added guard regression, which calls the real pinned owner,
+changes only a temporary helper after native return and requires rejection
+while preserving the identical native receipt and repository helper bytes.
+The outer actual PID was 16112, native exit zero, untimed, with a reaped leader
+and closed Job boundary. A separate post-exit observation read the complete
+terminal and raw evidence within the original 960-second envelope. The
+temporary outer actor lacks general prelaunch remaining-budget and post-output
+clock guards; the timely observation bounds this actual run, and does not
+qualify that actor for arbitrary delayed preflight.
+
+Fresh current-source matched342 owner and lifecycle checks passed eleven and
+three methods respectively; independent reconciliation also verifies eleven
+simulated lifecycle controls and two genuine Windows cases. The candidate17
+attempt failed its 512 MiB physical-memory admission before output creation or
+native launch. Available-memory admission is unchanged. After recovery, its
+seventeen methods passed; an external-checker CRLF matching defect was retained
+as a failed wrapper attempt and corrected before a fresh successful run.
+
+The original six logical platform/runtime names are preserved while the two
+macOS jobs explicitly use the 14 GB Intel runner. The default 7 GB ARM runner
+cannot satisfy the existing 8 GiB available-memory floor. The compatibility
+oracle now requires the exact runner mapping and rejects both a single-Ubuntu
+mapping and a return to the undersized default runner. These new Julia wiring
+assertions and hosted hardware admission have not yet executed.
+Full package, experiments, canonical harness, strict docs, containers,
+native platform/resource checks, scientific comparisons and paper regeneration
+remain required on the final combined committed source.

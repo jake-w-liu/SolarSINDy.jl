@@ -5,54 +5,8 @@ sys.dont_write_bytecode=True
 if sys.flags.optimize:
     raise RuntimeError('optimized Python is unsupported for synthetic source verification')
 MAX_CONTROL_BYTES=8388608
-_CAPTURE_CODE=r'''
-import os,subprocess,sys,threading,time
-if sys.flags.optimize:raise RuntimeError("optimized Python capture is unsupported")
-limit=8388608
-overflow=threading.Event()
-failed=threading.Event()
-def report_failure(stage,error):
-    failed.set()
-    try:
-        text=("capture "+stage+" failure: "+type(error).__name__+": "+str(error)+"\n").encode("utf-8",errors="replace")[:1024]
-        os.write(2,text)
-    except BaseException:pass
-def write_exact(saved,data):
-    if saved.write(data)!=len(data):raise OSError("short control-output write")
-def drain(pipe,path):
-    try:
-        remaining=limit
-        with open(path,"xb",buffering=0) as saved:
-            while True:
-                chunk=pipe.read(min(65536,remaining+1))
-                if not chunk:break
-                if len(chunk)>remaining:
-                    write_exact(saved,chunk[:remaining]);overflow.set();break
-                write_exact(saved,chunk);remaining-=len(chunk)
-            saved.flush()
-    except BaseException as error:report_failure("stream",error)
-    finally:
-        try:pipe.close()
-        except BaseException as error:report_failure("reader close",error)
-def main():
-    process=subprocess.Popen(sys.argv[3:],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-    threads=[threading.Thread(target=drain,args=(process.stdout,sys.argv[1]),daemon=True),
-             threading.Thread(target=drain,args=(process.stderr,sys.argv[2]),daemon=True)]
-    for thread in threads:thread.start()
-    while process.poll() is None:
-        if failed.is_set():os._exit(88)
-        if overflow.is_set():os._exit(86)
-        time.sleep(0.01)
-    for thread in threads:thread.join(5)
-    if failed.is_set():os._exit(88)
-    if overflow.is_set():os._exit(86)
-    if any(thread.is_alive() for thread in threads):os._exit(87)
-    return process.returncode
-try:result=main()
-except BaseException as error:
-    report_failure("main",error);os._exit(88)
-sys.exit(result)
-'''
+_CAPTURE_ENTRY=Path(__file__).with_name('capture_control_output.py')
+_CAPTURE_SHA256='9d3a578bbd707969982feee22e5143984625a655d638f37b32a347abf2c76f7e'
 
 def bounded_file(path,limit=MAX_CONTROL_BYTES):
     path=ordinary(Path(path))
@@ -66,14 +20,19 @@ def captured(arguments,*,timeout=120,environment=None):
     # chunks. The unchanged owner kills its entire child tree/session on every
     # exit, including overflow and timeout; no unbounded communicate fallback.
     directory=Path(tempfile.mkdtemp(prefix='ss-r1-git-capture-')).resolve()
+    capture=ordinary(_CAPTURE_ENTRY)
+    if hashlib.sha256(bounded_file(capture)).hexdigest()!=_CAPTURE_SHA256:
+        raise RuntimeError('fixed capture entry bytes differ')
     runner=Path(__file__).with_name('native_stage.py')
-    if file_sha(runner)!='8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836':
+    if file_sha(runner)!='30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c':
         raise RuntimeError('owned Git capture runner bytes differ')
     spec=importlib.util.spec_from_file_location('fixed_git_capture_owner',runner)
     owned=importlib.util.module_from_spec(spec);spec.loader.exec_module(owned)
-    argv=[str(Path(sys.executable).resolve()),'-B','-c',_CAPTURE_CODE,str(directory/'stdout.log'),str(directory/'stderr.log'),*map(str,arguments)]
+    argv=[str(Path(sys.executable).resolve()),'-B','-X','utf8',str(capture),str(directory/'stdout.log'),str(directory/'stderr.log'),*map(str,arguments)]
     result=owned.run_owned(argv,cwd=str(directory),environment=environment or dict(os.environ),logpath=directory/'capture.log',timeout=timeout)
     (directory/'OWNED_NATIVE_RAW.json').write_text(json.dumps(result,sort_keys=True),encoding='utf-8')
+    if hashlib.sha256(bounded_file(ordinary(capture))).hexdigest()!=_CAPTURE_SHA256:
+        raise RuntimeError('fixed capture entry bytes differ after native return; preserved owner receipt: '+str(directory))
     if result['timed_out'] or result['native_exit'] in (86,87,88):
         raise RuntimeError('bounded Git capture failed; preserved output prefixes and owner receipt: '+str(directory))
     stdout=bounded_file(directory/'stdout.log');stderr=bounded_file(directory/'stderr.log')

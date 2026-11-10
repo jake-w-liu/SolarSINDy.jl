@@ -1,7 +1,7 @@
 # Included in BInitialPointFits. Legacy permit/schema/owner and numerical code stay intact.
 export OwnedInitialPointExecutionPermitV2
-const OWNED_V2_OWNER="3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1"
-const OWNED_V2_LEGACY="8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836"
+const OWNED_V2_OWNER="c3575532cb67b4bf52d2db8a20e01ca7e8d97cfb0cb1054ded66467823e40c00"
+const OWNED_V2_LEGACY="30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c"
 const OWNED_V2_FIELDS=(P.PERMIT_FIELDS...,:execution_directory,:execution_intent_sha256,:native_driver_sha256,:native_entry_sha256,:preserved_native_owner_sha256)
 const OWNED_V2_REQUEST=(:schema,:evidence_mode,:operation,:execution_directory,:intent,:permit,:source_proof,:root_qualification,:b_execution_qualification,:julia,:runtime)
 const OWNED_V2_INTENT=(:schema,:evidence_mode,:stage,:execution_directory,:contract_sha256,:implementation_sources,:input,:reference,:runtime,:programs,:limits,:scope)

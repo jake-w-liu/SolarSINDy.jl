@@ -1898,3 +1898,115 @@ before any native case. Its actual failing field is still under investigation.
 That run does not qualify this changed combined source. Julia tests, complete
 experiments, full-source/platform qualification, full-size32 resource evidence,
 actual baseline production and scientific superiority remain pending.
+
+### Superlearner annual-source header compatibility, development
+
+The standalone `tools/paper_source_schemas/SuperlearnerAnnualSchema.jl` helper
+addresses a confirmed source-schema mismatch: the paper builder admitted the
+original twelve raw annual SHA256 references, then requested six renamed column
+labels absent from the pinned original generator. The adapter accepts exactly
+six literal aliases, rejects duplicate and ambiguous raw headers before parser
+uniquification, verifies all twelve raw references before all twelve headers,
+and changes only column names. It preserves frame and column-buffer identities,
+row and column order, types, values, and every original raw reference. Extra
+unique columns retain their names. It imports no package forecasting module.
+
+Independent Julia controls are registered unconditionally in `test/runtests.jl`.
+They use handwritten legacy/canonical/mixed headers, malformed and ambiguous CSV
+records, bit-level floating-point and missing-value buffer checks, and twelve
+tiny annual fixtures with late-fold provenance/header failures. A separate
+parent-builder integration test copies the actual builder/helper into an
+isolated paper layout and traps its actual first writer. It requires a complete
+preflight before entry and preserves preexisting table/ledger sentinels.
+
+These additions are written but not Julia-executed locally under the existing
+8 GiB available-memory gate. Package CI must exercise the helper controls; the
+parent integration test must also execute against the exact changed builder.
+Historical data, result checksums, manuscripts and archives are unchanged. The
+original annual payloads are not currently restored, so neither regeneration
+nor scientific validity is established by this compatibility correction.
+
+### Source-clock conversion and native-owner follow-up, development
+
+The standalone Dates-only `tools/source_clocks/JSOCTime.jl` converts strict JSOC
+TAI labels to UTC using the IERS effective TAI cutoffs for the 34/35/36/37-second
+offsets. It rejects UTC leap instants that DateTime cannot represent and times
+outside the verified table interval [2009-01-01,2027-06-28). Independent literal
+controls cover all three transitions, both interval boundaries and the strict
+24-hour flare-label endpoints. The parent parser delegates to this helper; its
+old no-offset test was preserved externally and corrected against IERS evidence.
+This does not resolve definitive/centered SHARP product availability at issue.
+The helper and parent regressions remain Julia-unexecuted locally.
+
+The second native-owner run retained an unrelated Linux `/proc` disappearance
+in an independent one-shot census. The observer successor retries only a whole
+fresh census for explicitly classified Linux instability, with eight attempts,
+a 250 ms subcap and the original absolute clocks. Unknown observations remain
+unknown. Eight added literal records extend the original 85/five methods to
+93/six; every original method body and frozen oracle is preserved. A separate
+expected-negative diagnostic phase cannot support positive owner acceptance.
+
+Native macOS telemetry reproduced the held child's lost session-leader flag.
+The development repair retains a per-launch native identity anchor. A child first
+seen as a zombie additionally requires the actual checked launch, native EXEC,
+coherent birth/PPID/PGID/credentials and terminal nonreaping evidence. Unbound
+zombie SID remains unknown. Windows behavior and existing stage/shared-cleanup
+budgets are preserved. An unsupported waitid-UID comparison in the first written
+repair was found from retained native telemetry and removed before execution;
+native credential checks remain. New independent anchor controls, source-pin
+cascade, native reruns and full qualification are still pending. No platform or
+scientific verdict follows from these written repairs.
+
+### Current ownership and capture verification, 10 November 2026
+
+This entry supersedes the execution-status statements in the preceding
+development entries. The current legacy owner is SHA256 `30c7fc96` and its
+checked candidate delegate is `c3575532`. The separate live source-pin cascade
+has been applied and independently reconciled. The owner rejects lost child
+identity immediately and preserves explicit cancellation; the Windows suffix
+and original stage/shared-cleanup limits remain unchanged. The independent
+observer retains the original 85 literal cases and adds eight census cases.
+Its registered Windows run passed all 93 cases across six methods. A separate
+launch-anchor suite passed 72 literal cases across three methods on Windows.
+Its 16 native Darwin cases still require execution. Neither Windows result
+establishes native POSIX or whole-package qualification.
+
+The completed Linux development CI at `acf5404` failed on both Julia 1.12.6 and
+1.13.1. All six artifacts and both logs were retained. Eight historical V2
+portable event tests incorrectly selected the current owner; they now select
+the unchanged frozen V2 subject, preserving every old assertion and method
+body. Three candidate-driver event tests receive the same subject correction;
+their genuine current-owner tests remain unchanged. The examples also failed
+while attaching a docstring to a type-generation loop. The same documentation
+text now attaches to each generated type after its definition. This Julia
+loading correction remains execution-unverified.
+
+The bounded capture child and synthetic fixture children now use ordinary
+Python files. The fixed capture helper is checked before launch and after the
+genuine native return, with its original receipt retained before rejection.
+The full portable suite passed all 35 methods on Windows: the reviewed file-based
+port's 34 bodies plus one temporary-helper mutation after an actual native return.
+Independent observation read the complete evidence before the original whole
+deadline. No repository helper was changed by that negative control. Two
+fresh runs also passed all eleven matched342 owner methods and three lifecycle
+methods, including eleven simulated controls and two genuine Windows cases.
+An attempted candidate17 run stopped at the 512 MiB resource preflight before
+creating output or starting any child; no pass is claimed for that attempt.
+A subsequent admitted candidate run passed all seventeen methods. Its first
+external checker incorrectly included the Windows carriage return in the `OK`
+match; that failure is retained, and the corrected checker passed a fresh run.
+
+The six logical CI platform/runtime cells retain their original names and
+coverage. Only macOS hardware maps to the documented 14 GB Intel runner because
+the default 7 GB ARM runner cannot satisfy the unchanged 8 GiB available-memory
+gate. Actual measured admission remains mandatory. This configuration change
+and its stricter independent wiring mutations remain Julia-unexecuted locally;
+the macOS jobs will provide Intel, rather than ARM, evidence.
+
+The new launch-anchor suite is mandatory in unfiltered package tests and native
+CI. Current source still requires native Linux/Darwin checks, full `Pkg.test()`,
+complete experiments, the canonical harness, both strict documentation builds,
+containers and the full platform/resource gates before promotion. Actual
+archive fits, causal holdout gains, corrected paper results and scientific
+qualification remain unestablished. Local Julia remains withheld below the
+8 GiB available-memory floor.

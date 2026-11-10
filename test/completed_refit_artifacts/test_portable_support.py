@@ -10,6 +10,14 @@ S=importlib.util.module_from_spec(spec);spec.loader.exec_module(S)
 factoryspec=importlib.util.spec_from_file_location('fixed_source_factory_under_test',PACKAGE/'research/dbdt_completed_source/synthetic_sources.py')
 F=importlib.util.module_from_spec(factoryspec);factoryspec.loader.exec_module(F)
 OUT=Path(tempfile.mkdtemp(prefix='ss-r1-support-')).resolve()
+CAPTURE_FIXTURE=PACKAGE/'test/completed_refit_artifacts/fixtures/portable_capture_child.py'
+CAPTURE_FIXTURE_SHA256='d2a95a1a3fdb42d6fad30c48808c9df63ce349b6ee3756d6f95181c66ebb75c9'
+
+def fixture_argv(operation,*arguments):
+    path=S.ordinary(CAPTURE_FIXTURE)
+    if S.file_sha(path)!=CAPTURE_FIXTURE_SHA256:
+        raise RuntimeError('fixed portable capture fixture bytes differ')
+    return [sys.executable,'-B','-X','utf8',str(path),operation,*map(str,arguments)]
 
 def command(path,*arguments):
     return subprocess.run(['git','-C',str(path),*arguments],check=True,capture_output=True,timeout=30).stdout.decode().strip()
@@ -52,8 +60,12 @@ class PosixProbeRaceTests(unittest.TestCase):
                 with self.assertRaises(AssertionError):assert_posix_descendant_stopped(self,12345)
 
 class PosixOwnerLifecycleTests(unittest.TestCase):
+    """Historical V2 event spies; current-owner qualification uses the required V3 suites."""
     def setUp(self):
-        spec=importlib.util.spec_from_file_location('posix_owner_lifecycle',PACKAGE/'research/dbdt_completed_source/native_stage.py')
+        subject=PACKAGE/'test/initial_reference/frozen/owned_process_before_v3.py'
+        if hashlib.sha256(subject.read_bytes()).hexdigest()!='15d2644ae5eb2e87ce31c9913f103f9fa7e940b67403b94f29ef2ed5a4d175b8':
+            raise RuntimeError('historical portable V2 owner bytes differ')
+        spec=importlib.util.spec_from_file_location('historical_portable_posix_owner_v2',subject)
         self.owner=importlib.util.module_from_spec(spec);spec.loader.exec_module(self.owner)
         spec=importlib.util.spec_from_file_location('portable_posix_oracles_v2',PACKAGE/'test/initial_reference/posix_lifetime_oracles_v2.py')
         self.oracles=importlib.util.module_from_spec(spec);spec.loader.exec_module(self.oracles)
@@ -93,10 +105,10 @@ class PosixOwnerLifecycleTests(unittest.TestCase):
 
 class ProjectionTests(unittest.TestCase):
     def test_owned_capture_rejects_partial_and_other_stream_io_failures(self):
-        command=[sys.executable,'-B','-c',"import os;os.write(1,b'complete expected stdout\\n');os.write(2,b'complete expected stderr\\n')"]
+        command=fixture_argv('complete_streams')
         positive=S.captured(command,timeout=30)
         self.assertEqual(positive.returncode,0);self.assertEqual(positive.stdout,b'complete expected stdout\n')
-        original=S._CAPTURE_CODE
+        original=S.bounded_file(S._CAPTURE_ENTRY).decode('utf8')
         for mode in ('write_error','short_write','open_error','flush_error','file_close_error','read_error','reader_close_error'):
             prefix='''import builtins,subprocess,sys
 MODE=FAULT_MODE
@@ -139,7 +151,9 @@ def injected_popen(*args,**kwargs):
 builtins.open=injected_open
 subprocess.Popen=injected_popen
 '''.replace('FAULT_MODE',repr(mode))
-            with mock.patch.object(S,'_CAPTURE_CODE',prefix+original):
+            injected=OUT/('capture-fault-'+mode+'.py')
+            with injected.open('xb') as stream:stream.write((prefix+original).encode('utf8'))
+            with mock.patch.object(S,'_CAPTURE_ENTRY',injected),mock.patch.object(S,'_CAPTURE_SHA256',S.file_sha(injected)):
                 with self.assertRaisesRegex(RuntimeError,'bounded Git capture failed') as context:
                     S.captured(command,timeout=30)
             directory=Path(str(context.exception).split(': ',1)[1])
@@ -148,6 +162,46 @@ subprocess.Popen=injected_popen
             self.assertIn(b'failure:',(directory/'capture.log').read_bytes(),mode)
             for name in ('stdout.log','stderr.log'):
                 if (directory/name).exists():self.assertLessEqual((directory/name).stat().st_size,8388608,mode)
+
+    def test_owned_capture_rechecks_helper_after_real_native_return(self):
+        original_helper=S._CAPTURE_ENTRY
+        original_body=S.bounded_file(original_helper)
+        temporary=OUT/'post-return-capture-copy.py'
+        with temporary.open('xb') as stream:stream.write(original_body)
+        expected_pin=S.file_sha(temporary)
+        observed=[]
+        real_spec=importlib.util.spec_from_file_location
+        def recording_spec(name,path,*arguments,**keywords):
+            spec=real_spec(name,path,*arguments,**keywords)
+            if name=='fixed_git_capture_owner':
+                real_load=spec.loader.exec_module
+                def load_owner(module):
+                    real_load(module)
+                    real_run=module.run_owned
+                    def run_then_mutate(*args,**kwargs):
+                        native=real_run(*args,**kwargs)
+                        observed.append((native,Path(kwargs['logpath'])))
+                        with temporary.open('ab') as stream:stream.write(b'\n# controlled mutation after actual native return\n')
+                        return native
+                    module.run_owned=run_then_mutate
+                spec.loader.exec_module=load_owner
+            return spec
+        with mock.patch.object(S,'_CAPTURE_ENTRY',temporary),mock.patch.object(S,'_CAPTURE_SHA256',expected_pin), \
+             mock.patch.object(S.importlib.util,'spec_from_file_location',side_effect=recording_spec):
+            with self.assertRaisesRegex(RuntimeError,'fixed capture entry bytes differ after native return') as context:
+                S.captured(fixture_argv('complete_streams'),timeout=30)
+        self.assertEqual(len(observed),1)
+        native,raw_path=observed[0]
+        self.assertIs(type(native['pid']),int);self.assertGreater(native['pid'],0)
+        self.assertIs(type(native['native_exit']),int);self.assertEqual(native['native_exit'],0)
+        self.assertIs(native['timed_out'],False)
+        directory=Path(str(context.exception).split(': ',1)[1])
+        self.assertEqual(raw_path,directory/'capture.log');self.assertTrue(raw_path.is_file())
+        receipt=json.loads((directory/'OWNED_NATIVE_RAW.json').read_text())
+        self.assertEqual(receipt,native)
+        self.assertEqual((directory/'stdout.log').read_bytes(),b'complete expected stdout\n')
+        self.assertNotEqual(S.file_sha(temporary),expected_pin)
+        self.assertEqual(S.bounded_file(original_helper),original_body)
 
     def test_owned_capture_distinguishes_internal_launch_failure(self):
         with self.assertRaisesRegex(RuntimeError,'bounded Git capture failed') as context:
@@ -186,20 +240,18 @@ subprocess.Popen=injected_popen
                 S.bounded_file(path,8)
 
     def test_owned_capture_drains_both_streams_at_exact_boundary(self):
-        code="import os; os.write(1,b'a'*8388608); os.write(2,b'b'*8388608)"
-        value=S.captured([sys.executable,'-B','-c',code],timeout=30)
+        value=S.captured(fixture_argv('exact_boundary'),timeout=30)
         self.assertEqual(value.returncode,0)
         self.assertEqual(len(value.stdout),8388608);self.assertEqual(len(value.stderr),8388608)
         self.assertEqual(value.stdout[:1],b'a');self.assertEqual(value.stderr[-1:],b'b')
 
     def test_owned_capture_preserves_nonzero_exit(self):
-        value=S.captured([sys.executable,'-B','-c',"import sys;sys.stderr.write('ordinary failure');sys.exit(2)"],timeout=30)
+        value=S.captured(fixture_argv('ordinary_failure'),timeout=30)
         self.assertEqual(value.returncode,2);self.assertEqual(value.stderr,b'ordinary failure')
 
     def test_owned_capture_overflow_retains_bounded_prefix(self):
-        code="import os; os.write(1,b'a'*8388609); os.write(2,b'b'*8388609)"
         with self.assertRaisesRegex(RuntimeError,'bounded Git capture failed') as context:
-            S.captured([sys.executable,'-B','-c',code],timeout=30)
+            S.captured(fixture_argv('overflow'),timeout=30)
         directory=Path(str(context.exception).split(': ',1)[1])
         receipt=json.loads((directory/'OWNED_NATIVE_RAW.json').read_text())
         self.assertEqual(receipt['native_exit'],86);self.assertFalse(receipt['timed_out'])
@@ -209,10 +261,8 @@ subprocess.Popen=injected_popen
 
     def test_owned_capture_timeout_cleans_descendant(self):
         pidfile=OUT/'owned-descendant.pid'
-        child="import os,time;from pathlib import Path;Path("+repr(str(pidfile))+").write_text(str(os.getpid()));time.sleep(60)"
-        code="import subprocess,sys,time;subprocess.Popen([sys.executable,'-B','-c',"+repr(child)+"]);time.sleep(60)"
         with self.assertRaisesRegex(RuntimeError,'bounded Git capture failed') as context:
-            S.captured([sys.executable,'-B','-c',code],timeout=2)
+            S.captured(fixture_argv('timeout_parent',pidfile),timeout=2)
         directory=Path(str(context.exception).split(': ',1)[1])
         receipt=json.loads((directory/'OWNED_NATIVE_RAW.json').read_text())
         self.assertTrue(receipt['timed_out']);self.assertTrue(pidfile.is_file())
@@ -256,10 +306,18 @@ subprocess.Popen=injected_popen
         command(src,'add','--','Manifest.toml');command(src,'commit','-m','Bounded generated entry fixture')
         (src/'Manifest.toml').write_bytes((b'b'*1024+b'\n')*4500)
         entry=PACKAGE/'research/dbdt_completed_source/run_synthetic_chain.py'
-        parsed=ast.parse(entry.read_bytes())
+        entry_body=entry.read_bytes()
+        parsed=ast.parse(entry_body)
         function=next(node for node in parsed.body if isinstance(node,ast.FunctionDef) and node.name=='git')
         scope={'checkpointmodule':S,'pkg':src}
-        exec(compile(ast.Module(body=[function],type_ignores=[]),str(entry),'exec'),scope)
+        extracted=OUT/'fixed-native-entry-git.py'
+        extracted_body=(ast.get_source_segment(entry_body.decode('utf8'),function)+'\n').encode('utf8')
+        with extracted.open('xb') as stream:stream.write(extracted_body)
+        extracted_spec=importlib.util.spec_from_file_location('fixed_native_entry_git_file',extracted)
+        extracted_module=importlib.util.module_from_spec(extracted_spec)
+        extracted_module.checkpointmodule=S;extracted_module.pkg=src
+        extracted_spec.loader.exec_module(extracted_module)
+        scope['git']=extracted_module.git
         with self.assertRaisesRegex(RuntimeError,'bounded Git capture failed') as context:
             scope['git']('diff','HEAD','--','Manifest.toml')
         directory=Path(str(context.exception).split(': ',1)[1])

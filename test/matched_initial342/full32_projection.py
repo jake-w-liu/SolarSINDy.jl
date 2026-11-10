@@ -10,9 +10,9 @@ import subprocess, sys, threading, time, tomllib, traceback
 
 sys.dont_write_bytecode = True
 OWNER_MEMBER = 'research/dbdt_completed_source/candidate_native_owner.py'
-OWNER_SHA = '3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1'
+OWNER_SHA = 'c3575532cb67b4bf52d2db8a20e01ca7e8d97cfb0cb1054ded66467823e40c00'
 LEGACY_MEMBER = 'research/dbdt_completed_source/native_stage.py'
-LEGACY_SHA = '8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836'
+LEGACY_SHA = '30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c'
 RAM, DISK = 8 * 1024**3, 16 * 1024**3
 FILE_LIMIT, TREE_LIMIT = 64 * 1024**2, 512 * 1024**2
 META_LIMIT, DIAGNOSTIC_LIMIT = 2 * 1024**2, 8 * 1024**2
