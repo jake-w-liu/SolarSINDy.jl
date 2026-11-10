@@ -246,10 +246,10 @@ function run_checks()
         BLAS.set_num_threads(1)
         @testset "Acyclic bounded B source and reference composition" begin
             @test b2_file(LITERAL_PATH)=="94e65b88b4b0a293e0ee111bf8e3a1aebf91f78470aa383e1b307f4e7311c464"
-            source_and_clock_checks(root)
-            source_rejection_checks(root)
-            join_rejection_checks(root)
-            complete_file_handoff(root)
+            source_and_clock_checks(mkdir(joinpath(root,"source-and-clock")))
+            source_rejection_checks(mkdir(joinpath(root,"source-rejections")))
+            join_rejection_checks(mkdir(joinpath(root,"join-rejections")))
+            complete_file_handoff(mkdir(joinpath(root,"complete-file-handoff")))
         end
         success=true
     finally
