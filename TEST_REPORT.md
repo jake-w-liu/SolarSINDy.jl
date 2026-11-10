@@ -1736,3 +1736,21 @@ The immediately preceding 992-source acyclic checkpoint completed with 155 Pytho
 The subsequent Windows Git diagnostic preserved both the ambiguous-show failure and byte-identical explicit blob reads at root length 198 / longest member 259. The new positive fixture retains the existing short eight-file case, all nine method names, all prior rejection controls, and fixed limits. Fixture-local core.longpaths=false must not alter machine policy. An old-source negative and fixed-source positive are required before the fresh full 156-method composite. At this append, those separate runs and the combined 17-path checkpoint have not yet been reconciled here.
 
 The current combined source still requires all native Julia package, complete-example, harness, strict-documentation and platform/resource gates. Current expected harness names are planning metadata, not executed evidence. Actual corrected forecast comparisons and publication results remain unqualified.
+
+### Current V3 ownership controls: Windows execution only
+
+The registered controller completed all85 independently specified simulated rows
+across five unittest methods on Windows. The unchanged historical outer owner
+and current inner owner each returned native exit0, untimed completion, reaped
+leader and closed Job boundary; individual descendant reaping was not claimed.
+All pinned author/test/registration inputs remained unchanged, and the Python
+sources parsed successfully. No Julia or native POSIX test was executed.
+
+The current package suite now requires V3 controls. Its separate native CI
+workflow will run21 current Linux/Darwin cases plus three historical Darwin stop
+negatives, and Windows state controls; none of those hosted outcomes is yet
+claimed. Original full package tests, complete experiments, canonical audit,
+strict documentation, container and platform/resource gates remain required.
+The source-only17-reference documentation correction has not been built here.
+Forecasting superiority, resource qualification, actual-data permission and main
+promotion remain unestablished.

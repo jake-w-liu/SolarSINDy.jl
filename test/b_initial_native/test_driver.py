@@ -91,8 +91,8 @@ class BInitialNativeControls(unittest.TestCase):
                     python_sha256=file_sha(sys.executable), start_ns=1000000000,
                     deadline_ns=7201000000000, driver_sha256=file_sha(PRODUCTION),
                     entry_sha256=file_sha(PRODUCTION.with_suffix('.jl')),
-                    owner_sha256='ccbf1cbd0709e50d0b5080bdbe4977ae80ebd1649237e016588d24800ddf2e21',
-                    legacy_owner_sha256='15d2644ae5eb2e87ce31c9913f103f9fa7e940b67403b94f29ef2ed5a4d175b8')
+                    owner_sha256='3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1',
+                    legacy_owner_sha256='8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836')
 
     def owned_child(self, mode):
         directory = self.root / mode
@@ -212,9 +212,17 @@ class BInitialNativeControls(unittest.TestCase):
                          self.api['v2_additional_fields_exact'])
         self.assertEqual((d.SECONDS, d.RAM, d.DISK, d.RAW_LIMIT),
                          (7200, 8589934592, 17179869184, 67108864))
-        self.assertEqual(d.OWNER_SHA, self.api['fixed_owner_sha256'])
-        self.assertEqual(d.LEGACY_SHA, self.api['fixed_preserved_helper_sha256'])
-        self.assertEqual(file_sha(OWNER), self.api['fixed_owner_sha256'])
+        # The V2 file remains the byte-pinned historical contract. Current
+        # source qualification binds the successor native owners separately.
+        self.assertEqual(self.api['fixed_owner_sha256'],
+                         'ccbf1cbd0709e50d0b5080bdbe4977ae80ebd1649237e016588d24800ddf2e21')
+        self.assertEqual(self.api['fixed_preserved_helper_sha256'],
+                         '15d2644ae5eb2e87ce31c9913f103f9fa7e940b67403b94f29ef2ed5a4d175b8')
+        self.assertEqual(d.OWNER_SHA,
+                         '3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1')
+        self.assertEqual(d.LEGACY_SHA,
+                         '8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836')
+        self.assertEqual(file_sha(OWNER), d.OWNER_SHA)
         self.assertEqual(len(self.literal['generated_numerical']['setting_rows']), 36)
         self.assertEqual(file_sha(HERE / 'closure_oracles_v3.json'),
                          '63c62843c33c6945c35d84689214d1be7453351e6bc72fc85b58260ce8e9f0bc')

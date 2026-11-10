@@ -1,5 +1,5 @@
 const _PACKAGE_ROOT = normpath(joinpath(@__DIR__,"..","..",".."))
-const _OWNED_RUNNER_SHA = "15d2644ae5eb2e87ce31c9913f103f9fa7e940b67403b94f29ef2ed5a4d175b8"
+const _OWNED_RUNNER_SHA = "8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836"
 _stream_sha(path) = open(io->bytes2hex(SHA.sha256(io)),path)
 
 function _git_read(arguments...)
@@ -128,7 +128,7 @@ end
 function _ownership_check(runtime,ownership,cleanup)
     os=_runtime_os(runtime)
     expected=os=="NT" ? ("CREATE_SUSPENDED -> AssignProcessToJobObject -> ResumeThread","private Windows Job Object closed with KILL_ON_JOB_CLOSE") :
-        ("start_new_session=True","owned POSIX session killed after stage")
+        ("start_new_session=True","owned POSIX session has no live members after stage")
     require((ownership,cleanup)==expected,"unsupported, mixed, unowned or wrong-OS native ownership tuple")
     nothing
 end

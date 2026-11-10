@@ -1054,3 +1054,6 @@ include("candidate_campaign_tests.jl")
 include(joinpath(@__DIR__,"b_initial_native_tests.jl"))
 
 include(joinpath(@__DIR__, "b_input_v2", "runtests.jl"))
+
+# Current native session regressions; historical V2 fixtures remain separate.
+include(joinpath(@__DIR__, "posix_owner_v3_tests.jl"))

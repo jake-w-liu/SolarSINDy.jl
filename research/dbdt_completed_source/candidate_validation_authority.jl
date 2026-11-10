@@ -34,7 +34,7 @@ function _checked_native_stage(evidence,operation,authority)
     owner=A._pinned(evidence.receipt_path,evidence.receipt_sha256;limit=262144)
     root=realpath(pkgdir(SolarSINDy));paths=Tuple(joinpath(root,split(name,'/')...) for name in NATIVE_DRIVER_FILES)
     need(all(digest(read(path))==pin for (path,pin) in zip(paths,NATIVE_DRIVER_PINS)) &&
-        NATIVE_DRIVER_PINS[4]=="15d2644ae5eb2e87ce31c9913f103f9fa7e940b67403b94f29ef2ed5a4d175b8","native loaded driver changed")
+        NATIVE_DRIVER_PINS[4]=="8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836","native loaded driver changed")
     need(owner["schema"]=="candidate_native_stage_evidence_v1" && owner["complete"]===true && owner["actual_authority"]===true &&
         owner["operation"]==operation && owner["driver_sha256"]==NATIVE_DRIVER_PINS[1] && owner["entry_sha256"]==NATIVE_DRIVER_PINS[2] &&
         owner["runner_sha256"]==NATIVE_DRIVER_PINS[3] && owner["legacy_runner_sha256"]==NATIVE_DRIVER_PINS[4] && owner["source_proof_sha256"]==authority.source_proof_sha256 &&

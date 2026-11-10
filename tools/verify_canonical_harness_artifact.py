@@ -3,7 +3,7 @@ from pathlib import Path,PurePosixPath
 import hashlib,json,re,stat,zipfile
 
 AUDIT_SHA='c7cb2ad1d05a77cf0462c9af6f82f17394d2fc37476fe8c68e57bd4a625c2b28'
-OWNER_SHA='15d2644ae5eb2e87ce31c9913f103f9fa7e940b67403b94f29ef2ed5a4d175b8'
+OWNER_SHA='8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836'
 
 def digest(body):return hashlib.sha256(body).hexdigest()
 def strict_json(body):

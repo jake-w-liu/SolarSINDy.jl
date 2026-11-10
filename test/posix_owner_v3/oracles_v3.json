@@ -1,0 +1,26 @@
+{
+  "schema": "owned_posix_session_native_oracles_v3",
+  "precode_sha256": "9e40ad949b5ee4389ef07777ca2cf0fd892d508ad8e02dfe8825182af26212e0",
+  "actual8_sha256": "7e24e029f95847918cd878236a75b175121ce9f36eba6af115e9a3e0e42d7d67",
+  "historical_legacy_sha256": "15d2644ae5eb2e87ce31c9913f103f9fa7e940b67403b94f29ef2ed5a4d175b8",
+  "historical_candidate_sha256": "ccbf1cbd0709e50d0b5080bdbe4977ae80ebd1649237e016588d24800ddf2e21",
+  "roles": ["tools/initial_reference_audit/owned_process.py", "research/dbdt_completed_source/native_stage.py", "research/dbdt_completed_source/candidate_native_owner.py"],
+  "stage_seconds": 8,
+  "cleanup_seconds": 20,
+  "whole_native_seconds": 480,
+  "positive_cleanup_token": "owned POSIX session has no live members after stage",
+  "principal_cases": {
+    "no_descendant": {"native_exit": 7, "timed_out": false, "single_original_group_signal": true, "zero_live_sid_before_first_terminal_wait": true},
+    "same_group_descendant": {"native_exit": 7, "timed_out": false, "same_group_live_before_signal": true, "single_original_group_signal": true, "zero_live_sid_before_first_terminal_wait": true},
+    "other_group_12s": {"native_exit": 7, "timed_out": true, "descendant_seconds": 12, "borrowed_signals": 0, "zero_live_sid_before_first_terminal_wait": true},
+    "persistent_stop": {"native_exit": -9, "timed_out": true, "darwin_stop_notification_consumed": true, "zero_live_sid_before_first_terminal_wait": true},
+    "transient_stop": {"native_exit": 7, "timed_out": false, "darwin_stop_notification_consumed": true, "terminal_wnowait_before_signal": true, "controller_cont_before_cleanup_or_reap": true, "zero_live_sid_before_first_terminal_wait": true}
+  },
+  "extra_cases": {
+    "other_group_short": {"native_exit": 7, "timed_out": false, "descendant_seconds": 0.5, "borrowed_signals": 0, "zero_live_sid_before_first_terminal_wait": true},
+    "other_group_persistent": {"raises": true, "descendant_seconds": 32, "live_sid_at_failure": true, "borrowed_signals": 0, "positive_closure": false}
+  },
+  "simulated_rejections": ["missing_feature", "unknown_event", "wrong_event_pid", "eperm_live_group", "eperm_unverified_zombie", "unknown_census", "wrong_birth", "wrong_sid", "wrong_uid", "persistent_other_group", "callback_error", "observation_error", "shared_cleanup_deadline"],
+  "simulated_positive_cases": ["normal_exit", "verified_zombie_eperm", "esrch_with_verified_zero_sid", "stop_then_terminal", "delayed_zero_sid"],
+  "scope": "New current-source regressions; historical V1/V2 diagnostics/oracles retain their original identities. Mock rows are not native observations; no scientific/source qualification is implied."
+}

@@ -1843,3 +1843,25 @@ The held acyclic batch was checked as 156 predeclared Python methods: 155 passed
 A separate generated-repository diagnostic then reproduced a source-preflight failure at a valid Windows path (root 198 characters, longest source 259): ambiguous git show failed, while explicit git cat-file blob read exactly the same committed and working bytes. The portability correction uses an explicit blob read without changing clean-HEAD, source bytes, ordinary-path checks, pinned helpers, data, limits, or numerical behavior. The existing eight-file regression gains a long-root positive case under the same nine method names, with fixture-local Git configuration and no host policy changes. The regression must fail with the old production command on the diagnosed Windows host and pass with the fixed command; other platforms require positive source admission, without requiring that their Git has the Windows defect.
 
 This separate four-path correction and these ledger appends require a fresh 17-path/992-source composite checkpoint. Full unfiltered Pkg.test(), complete experiments, canonical harness, both strict documentation builds, and the original native platform/resource matrix remain pending for current source. No forecasting advantage, paper result, actual fit authority, or serving promotion follows from Python control success.
+
+### Current POSIX session ownership and mandatory V3 regressions
+
+Native Intel Darwin diagnostics reproduced terminal/stop confusion, zombie-only
+group EPERM and a live same-session descendant outside the original group. The
+current owner uses terminal-only observations, Darwin stop-notification
+consumption, a calibrated original-group signal before terminal reaping and
+complete zero-live-session evidence. Linux real and effective user identities
+are read independently from bounded native status records. Unknown identity or
+census evidence fails closed. The Windows implementation and historical V2
+subject/oracles remain preserved; historical tests do not qualify current code.
+
+The independently reviewed V3 suite has85 simulated rows in five methods and21
+native Linux/Darwin cases, with three additional historical negatives on Darwin.
+Its mandatory package include also registers it with the unchanged canonical
+development audit. The registered Windows run passed85 simulated rows under
+genuine nested closed Job boundaries; it launched no Julia or POSIX processes.
+Native POSIX, complete package/examples/harness, strict documentation and full
+platform/source qualification remain pending. The17 missing documentation API
+references are included, but their native Documenter build remains unexecuted.
+No actual-data authority, scientific result or main promotion follows from these
+engineering controls.
