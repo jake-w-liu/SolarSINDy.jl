@@ -1,0 +1,81 @@
+{
+    "schema":  "full_scale_workflow_approved_extensions_v1",
+    "extensions":  [
+                       {
+                           "name":  "Python_provisioning",
+                           "scope":  "matrix",
+                           "anchor_before":  "      - uses: actions/checkout@v4\n",
+                           "anchor_after":  "      - uses: julia-actions/setup-julia@v3\n",
+                           "replacements":  [
+                                                {
+                                                    "current":  "      # Some early Julia controls invoke Python, so provision it before them.\n      # macOS exposes the required nonreaping waitid/WNOWAIT API in this runtime.\n      - uses: actions/setup-python@v5\n        with:\n          python-version: ${{ runner.os == \u0027macOS\u0027 \u0026\u0026 \u00273.14\u0027 || \u00273.12\u0027 }}\n",
+                                                    "original":  ""
+                                                },
+                                                {
+                                                    "current":  "      - name: Verify portable source-bound point input exports\n",
+                                                    "original":  "      - uses: actions/setup-python@v5\n        with:\n          python-version: \u00273.12\u0027\n      - name: Verify portable source-bound point input exports\n"
+                                                }
+                                            ]
+                       },
+                       {
+                           "name":  "hardware",
+                           "scope":  "matrix",
+                           "anchor_before":  "    name: Julia ${{ matrix.julia-version }} / ${{ matrix.os }}\n",
+                           "anchor_after":  "    # Allow the expanded cold native controls, full package suite and experiments.\n",
+                           "replacements":  [
+                                                {
+                                                    "current":  "    # Intel capacity supports the unchanged 8 GiB available-memory gate.\n    # Keep logical macos-latest job names; this lane does not qualify ARM.\n    runs-on: ${{ matrix.os == \u0027macos-latest\u0027 \u0026\u0026 \u0027macos-26-intel\u0027 || matrix.os }}\n",
+                                                    "original":  "    runs-on: ${{ matrix.os }}\n"
+                                                }
+                                            ]
+                       },
+                       {
+                           "name":  "matched_owner_matrix",
+                           "scope":  "matrix",
+                           "anchor_before":  "          if-no-files-found: ignore\n",
+                           "anchor_after":  "      # The suite reports which local-artifact oracles are unavailable in a clean clone.\n",
+                           "replacements":  [
+                                                {
+                                                    "current":  "      - name: Verify matched342 owner contract engineering controls\n        run: python -I -B -X utf8 test/matched_initial342/profile_owner_tests.py --output-directory \"$RUNNER_TEMP/matched342-owner-contracts\"\n      - name: Verify matched342 owner lifecycle engineering controls\n        run: python -I -B -X utf8 test/matched_initial342/test_native_owner_lifecycle.py --output-directory \"$RUNNER_TEMP/matched342-owner-lifecycle\"\n      - name: Record the deliberate owner artifact omission and byte scope\n        if: always()\n        run: |\n          set -euo pipefail\n          printf \u0027%s\\n\u0027 \\\n            \u0027excluded_path=matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw\u0027 \\\n            \u0027fixture_bytes=67108865\u0027 \\\n            \u0027reason=deliberate sparse over-64MiB rejection fixture; ordinary native evidence is retained unchanged\u0027 \\\n            \u0027hardlinks=runtime-only identity assertions; artifacts retain file bytes, not native hardlink relationships\u0027 \\\n            \u0027scope=artifact exclusion pattern; fixture presence is not asserted\u0027 \\\n            \u003e \"$RUNNER_TEMP/matched342-owner-ARTIFACT_NOTES.txt\"\n      - name: Retain complete matched342 owner engineering evidence\n        if: always()\n        uses: actions/upload-artifact@v4\n        with:\n          name: matched342-owner-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}\n          path: |\n            ${{ runner.temp }}/matched342-owner-contracts\n            ${{ runner.temp }}/matched342-owner-lifecycle\n            ${{ runner.temp }}/matched342-owner-ARTIFACT_NOTES.txt\n            !${{ runner.temp }}/matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw\n          include-hidden-files: true\n          if-no-files-found: error\n          compression-level: 6\n",
+                                                    "original":  ""
+                                                }
+                                            ]
+                       },
+                       {
+                           "name":  "matched_owner_canonical",
+                           "scope":  "canonical",
+                           "anchor_before":  "        run: julia --startup-file=no --project=. -e \u0027using Pkg; Pkg.Registry.add(\"General\"); Pkg.instantiate()\u0027\n",
+                           "anchor_after":  "      - name: Run unchanged canonical audit with full tests and experiments\n",
+                           "replacements":  [
+                                                {
+                                                    "current":  "      - name: Verify matched342 owner contract engineering controls\n        run: python -I -B -X utf8 test/matched_initial342/profile_owner_tests.py --output-directory \"$RUNNER_TEMP/matched342-owner-contracts\"\n      - name: Verify matched342 owner lifecycle engineering controls\n        run: python -I -B -X utf8 test/matched_initial342/test_native_owner_lifecycle.py --output-directory \"$RUNNER_TEMP/matched342-owner-lifecycle\"\n      - name: Record the deliberate owner artifact omission and byte scope\n        if: always()\n        run: |\n          set -euo pipefail\n          printf \u0027%s\\n\u0027 \\\n            \u0027excluded_path=matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw\u0027 \\\n            \u0027fixture_bytes=67108865\u0027 \\\n            \u0027reason=deliberate sparse over-64MiB rejection fixture; ordinary native evidence is retained unchanged\u0027 \\\n            \u0027hardlinks=runtime-only identity assertions; artifacts retain file bytes, not native hardlink relationships\u0027 \\\n            \u0027scope=artifact exclusion pattern; fixture presence is not asserted\u0027 \\\n            \u003e \"$RUNNER_TEMP/matched342-owner-ARTIFACT_NOTES.txt\"\n      - name: Retain complete matched342 owner engineering evidence\n        if: always()\n        uses: actions/upload-artifact@v4\n        with:\n          name: matched342-owner-canonical-${{ github.run_id }}-${{ github.run_attempt }}\n          path: |\n            ${{ runner.temp }}/matched342-owner-contracts\n            ${{ runner.temp }}/matched342-owner-lifecycle\n            ${{ runner.temp }}/matched342-owner-ARTIFACT_NOTES.txt\n            !${{ runner.temp }}/matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw\n          include-hidden-files: true\n          if-no-files-found: error\n          compression-level: 6\n",
+                                                    "original":  ""
+                                                }
+                                            ]
+                       },
+                       {
+                           "name":  "Pkg_thread_env",
+                           "scope":  "matrix",
+                           "anchor_before":  "      # The suite reports which local-artifact oracles are unavailable in a clean clone.\n",
+                           "anchor_after":  "      - name: Run the research experiments\n",
+                           "replacements":  [
+                                                {
+                                                    "current":  "      - uses: julia-actions/julia-runtest@v1\n        env:\n          JULIA_NUM_THREADS: \u00271\u0027\n",
+                                                    "original":  "      - uses: julia-actions/julia-runtest@v1\n"
+                                                }
+                                            ]
+                       },
+                       {
+                           "name":  "support_retention",
+                           "scope":  "matrix",
+                           "anchor_before":  "            ${{ runner.temp }}/solarsindy-separate-evaluation-*\n",
+                           "anchor_after":  "          if-no-files-found: ignore\n",
+                           "replacements":  [
+                                                {
+                                                    "current":  "            ${{ runner.temp }}/matched342-*\n            !${{ runner.temp }}/matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw\n",
+                                                    "original":  ""
+                                                }
+                                            ]
+                       }
+                   ]
+}

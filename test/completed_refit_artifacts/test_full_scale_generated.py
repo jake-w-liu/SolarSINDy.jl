@@ -94,10 +94,26 @@ class FullScaleContractTests(unittest.TestCase):
             with self.assertRaises(OSError):H.check_inventory(WalkRace(),expected)
 
     def test_original_nine_jobs_strict_docs_and_corrected_evidence_contract(self):
+        import re
         workflow=(ROOT/'.github/workflows/ci.yml').read_bytes()
         prefix=workflow.split(b'\n  full-scale-generated:',1)[0]
-        # Only this reviewed provisioning change is admitted. The original
-        # nine-job byte oracle remains unchanged; no new observed hash replaces it.
+        fixture_path=ROOT/'test/completed_refit_artifacts/workflow_extensions_v1.json'
+        self.assertTrue(fixture_path.is_file() and not fixture_path.is_symlink())
+        self.assertLessEqual(fixture_path.stat().st_size,65536)
+        fixture_bytes=fixture_path.read_bytes()
+        self.assertLessEqual(len(fixture_bytes),65536)
+        self.assertEqual(hashlib.sha256(fixture_bytes).hexdigest(),
+                         '98c32c023ab746fb666bdab99b2204f60f1f9396371af539bd250a0ac4a56bac')
+        fixture=json.loads(fixture_bytes)
+        self.assertEqual(set(fixture),{'schema','extensions'})
+        self.assertEqual(fixture['schema'],'full_scale_workflow_approved_extensions_v1')
+        extensions=fixture['extensions']
+        self.assertEqual([item['name'] for item in extensions],
+            ['Python_provisioning','hardware','matched_owner_matrix','matched_owner_canonical',
+             'Pkg_thread_env','support_retention'])
+        self.assertEqual(sum(len(item['replacements']) for item in extensions),7)
+        # Require the exact added gates before reversing their independent
+        # literals. Both original workflow hash oracles remain unchanged.
         approved=(
             b'      # Some early Julia controls invoke Python, so provision it before them.\n'
             b'      # macOS exposes the required nonreaping waitid/WNOWAIT API in this runtime.\n'
@@ -123,11 +139,29 @@ class FullScaleContractTests(unittest.TestCase):
             self.assertIn(checkout+approved+julia_setup,matrix)
             self.assertLess(matrix.index(approved),matrix.index(julia_setup))
             self.assertLess(matrix.index(approved),matrix.index(first_consumer))
-            # Invert the exact approved bytes and their exact old insertion site.
-            # This is a test literal, independent of the production workflow code.
-            restored=candidate.replace(approved,b'',1)
-            self.assertEqual(restored.count(old_position),1)
-            restored=restored.replace(old_position,old_setup+old_position,1)
+            jobs=list(re.finditer(rb'(?m)^  ([A-Za-z0-9_-]+):$',current))
+            sections={match[1].decode('ascii'):current[match.start():
+                jobs[index+1].start() if index+1<len(jobs) else len(current)]
+                for index,match in enumerate(jobs)}
+            self.assertEqual(len(sections),len(jobs))
+            self.assertIn('test',sections);self.assertIn('canonical-harness',sections)
+            scopes={'matrix':sections['test'],'canonical':sections['canonical-harness']}
+            restored=candidate
+            for extension in extensions:
+                self.assertEqual(set(extension),{'name','scope','anchor_before','anchor_after','replacements'})
+                self.assertIn(extension['scope'],scopes)
+                scope=scopes[extension['scope']]
+                for replacement in extension['replacements']:
+                    self.assertEqual(set(replacement),{'current','original'})
+                    added=replacement['current'].encode('utf-8')
+                    self.assertTrue(added)
+                    self.assertEqual(candidate.count(added),1)
+                    self.assertEqual(scope.count(added),1)
+                    self.assertEqual(restored.count(added),1)
+                    restored=restored.replace(added,replacement['original'].encode('utf-8'),1)
+                first=extension['replacements'][0]['current'].encode('utf-8')
+                anchored=extension['anchor_before'].encode('utf-8')+first+extension['anchor_after'].encode('utf-8')
+                self.assertEqual(scope.count(anchored),1)
             restored_prefix=restored.split(b'\n  full-scale-generated:',1)[0]
             self.assertEqual(hashlib.sha256(restored_prefix).hexdigest(),'dc262831827339c1eff92ff07d1e16f1942dfb4b53659dbba1a6f117d9312768')
             # Sealed963 SOURCE_INVENTORY2fc9b7fd files_sha256['.github/workflows/ci.yml'].
@@ -175,6 +209,56 @@ class FullScaleContractTests(unittest.TestCase):
             'full-scale layout grid':changed_suffix(b'        layout: [ground-only, mixed]\n',b'        layout: [ground-only]\n'),
             'full-scale raw retention guard':changed_suffix(b'      - name: Retain full-size generated outputs and every raw stage log\n        if: always()\n',b'      - name: Retain full-size generated outputs and every raw stage log\n        if: success()\n'),
         }
+        blocks={item['name']:item['replacements'][0]['current'].encode('utf-8') for item in extensions}
+        for key,block in blocks.items():
+            mutations['missing extension '+key]=workflow.replace(block,b'',1)
+            mutations['duplicated extension '+key]=workflow.replace(block,block+block,1)
+        def extension_change(key,before,after):
+            block=blocks[key]
+            self.assertIn(before,block)
+            return workflow.replace(block,block.replace(before,after,1),1)
+        matrix_owner=blocks['matched_owner_matrix']
+        canonical_owner=blocks['matched_owner_canonical']
+        hardware=blocks['hardware']
+        no_matrix_owner=workflow.replace(matrix_owner,b'',1)
+        no_canonical_owner=workflow.replace(canonical_owner,b'',1)
+        no_hardware=workflow.replace(hardware,b'',1)
+        mutations.update({
+            'matrix owner in canonical job':no_matrix_owner.replace(canonical_owner,matrix_owner+canonical_owner,1),
+            'canonical owner in matrix job':no_canonical_owner.replace(matrix_owner,canonical_owner+matrix_owner,1),
+            'matrix owner after Pkg.test':no_matrix_owner.replace(blocks['Pkg_thread_env'],blocks['Pkg_thread_env']+matrix_owner,1),
+            'canonical owner after harness command':no_canonical_owner.replace(
+                b'        run: python -B tools/run_canonical_harness.py --evidence-dir "$RUNNER_TEMP/canonical-harness"\n',
+                b'        run: python -B tools/run_canonical_harness.py --evidence-dir "$RUNNER_TEMP/canonical-harness"\n'+canonical_owner,1),
+            'hardware moved after checkout':no_hardware.replace(checkout,checkout+hardware,1),
+            'hardware uses logical low RAM runner':extension_change('hardware',
+                b"${{ matrix.os == 'macos-latest' && 'macos-26-intel' || matrix.os }}",b'${{ matrix.os }}'),
+            'hardware wrong macOS target':extension_change('hardware',b'macos-26-intel',b'macos-15-intel'),
+            'hardware all Ubuntu':extension_change('hardware',
+                b"${{ matrix.os == 'macos-latest' && 'macos-26-intel' || matrix.os }}",b'ubuntu-latest'),
+            'hardware conditional changes Windows':extension_change('hardware',b"matrix.os == 'macos-latest'",b"matrix.os == 'windows-latest'"),
+            'Pkg thread count':extension_change('Pkg_thread_env',b"JULIA_NUM_THREADS: '1'",b"JULIA_NUM_THREADS: '2'"),
+            'support catchall omitted':extension_change('support_retention',b'            ${{ runner.temp }}/matched342-*\n',b''),
+            'support exclusion broadened':extension_change('support_retention',b'/test_native_predicates_reject_modified_observations/oversize.raw',b'/**'),
+        })
+        for key in ('matched_owner_matrix','matched_owner_canonical'):
+            for label,before,after in (
+                ('contract command',b'profile_owner_tests.py',b'profile_owner_missing.py'),
+                ('lifecycle command',b'test_native_owner_lifecycle.py',b'profile_owner_tests.py'),
+                ('interpreter isolation',b'python -I -B -X utf8',b'python -B -X utf8'),
+                ('oversize byte note',b'fixture_bytes=67108865',b'fixture_bytes=67108864'),
+                ('exclusion note',b'excluded_path=matched342-owner-contracts/',b'excluded_path=other/'),
+                ('hardlink scope note',b'artifacts retain file bytes, not native hardlink relationships',b'artifacts prove native hardlink relationships'),
+                ('ordinary retention note',b'ordinary native evidence is retained unchanged',b'ordinary native evidence may be omitted'),
+                ('always notes',b'Record the deliberate owner artifact omission and byte scope\n        if: always()',b'Record the deliberate owner artifact omission and byte scope\n        if: success()'),
+                ('always artifact',b'Retain complete matched342 owner engineering evidence\n        if: always()',b'Retain complete matched342 owner engineering evidence\n        if: success()'),
+                ('artifact root',b'${{ runner.temp }}/matched342-owner-contracts\n',b'${{ runner.temp }}/other\n'),
+                ('artifact exclusion',b'/test_native_predicates_reject_modified_observations/oversize.raw\n',b'/**\n'),
+                ('artifact name',b'name: matched342-owner-',b'name: other-owner-'),
+                ('missing artifact rejection',b'if-no-files-found: error',b'if-no-files-found: ignore'),
+                ('hidden evidence',b'include-hidden-files: true',b'include-hidden-files: false'),
+                ('compression',b'compression-level: 6',b'compression-level: 0')):
+                mutations[key+' '+label]=extension_change(key,before,after)
         for name,candidate in mutations.items():
             with self.subTest(unapproved_change=name):
                 with self.assertRaises(AssertionError):check(candidate)
