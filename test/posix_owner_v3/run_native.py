@@ -15,7 +15,7 @@ import time
 from unittest.mock import patch
 sys.dont_write_bytecode = True
 _observations_path = Path(__file__).resolve().with_name('observations.py')
-_observations_sha = 'c825fcbf2fbb2a86f41ec5e881dfa301f0908a119c98588b79e9d28d7a480ba3'
+_observations_sha = 'c68ce8f6c8ef38aef394538b6a9b1915b17988d73e5647531a5a63ce6eacbf36'
 with _observations_path.open('rb') as _stream:
     _observations_body = _stream.read(256*1024+1)
 if len(_observations_body)>256*1024 or hashlib.sha256(_observations_body).hexdigest()!=_observations_sha:

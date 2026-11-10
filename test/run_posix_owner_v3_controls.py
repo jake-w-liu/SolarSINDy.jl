@@ -153,16 +153,16 @@ def main():
             previous_term = signal.signal(signal.SIGTERM, interrupted)
         owner = load(OWNER, 'registered_posix_v3_current_owner')
         state, state_receipt = stage('state', 'test_state.py', 90)
-        need(type(state['unittest_methods']) is int and state['unittest_methods'] == 6 and
-             type(state['simulated_rows']) is int and state['simulated_rows'] == state['expected_simulated_rows'] == 93,
-             'all six methods and93 independent simulated rows required')
+        need(type(state['unittest_methods']) is int and state['unittest_methods'] == 7 and
+             type(state['simulated_rows']) is int and state['simulated_rows'] == state['expected_simulated_rows'] == 101,
+             'all seven methods and101 independent simulated rows required')
         need(state['source_pins'] == OWNER_PINS and state['source_pins_unchanged'] is True and
              state['actual_POSIX_processes_started'] == state['actual_signals_sent'] == 0 and
              state['native_Linux_or_Darwin_qualified'] is False, 'simulated scope must remain explicit')
-        need(len(state['rows']) == 93 and all(row['passed'] is True for row in state['rows']), 'simulated row failure')
+        need(len(state['rows']) == 101 and all(row['passed'] is True for row in state['rows']), 'simulated row failure')
         need(state['source_qualified'] is False and state['scientific_qualified'] is False,
              'simulated result cannot grant qualification')
-        record.update(state=state_receipt, state_methods=6, simulated_rows=93)
+        record.update(state=state_receipt, state_methods=7, simulated_rows=101)
         if record['native_POSIX_applicable']:
             native, native_receipt = stage('native', 'run_native.py', 500)
             historical = 3 if sys.platform == 'darwin' else 0

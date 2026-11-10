@@ -13,7 +13,7 @@ sys.dont_write_bytecode = True
 import unittest
 from unittest.mock import patch
 _observations_path = Path(__file__).resolve().with_name('observations.py')
-_observations_sha = 'c825fcbf2fbb2a86f41ec5e881dfa301f0908a119c98588b79e9d28d7a480ba3'
+_observations_sha = 'c68ce8f6c8ef38aef394538b6a9b1915b17988d73e5647531a5a63ce6eacbf36'
 with _observations_path.open('rb') as _stream:
     _observations_body = _stream.read(256*1024+1)
 if len(_observations_body)>256*1024 or hashlib.sha256(_observations_body).hexdigest()!=_observations_sha:
@@ -227,6 +227,104 @@ def exercise(module, mode, root):
         except BaseException as caught:
             error = caught
     return result, error, events, state
+
+
+def darwin_retry_literal_scenario(module, mode, *, now=2000000000,
+                                  deadline=9000000000, phase='positive_owner_observation'):
+    """Primitive-only Darwin fixture; no real PID, signal, library or process."""
+    held, vanished, live, partial = 16517, 16518, 16519, 16516
+    leader = dict(pid=held,pgid=held,sid=held,birth=[1794290259,821315],uid=501,ruid=501,zombie=True,stopped=False)
+    state = SimpleNamespace(now=now,attempt=0,group_reads=0,global_reads=0,vanished=False,sleeps=0,post_changed=False)
+    calls=[]
+    primitive_path=HERE.parent/'initial_reference'/'diagnose_darwin_groups.py'
+    if observations.digest(primitive_path)!='3395df92110f61ac1deaae85f1fcfe93125865575e29619623a83737e95a2ee2':
+        raise AssertionError('literal Darwin primitive source changed')
+    primitive=load(primitive_path,'darwin_retry_literal_frozen_primitives')
+    def touch(operation,pid=None):
+        calls.append((operation,state.attempt,pid));state.now+=1000
+    def error(pid,short=True,number=3,count=0,wrong=False):
+        prefix='short BSD information unavailable' if short else 'BSD process information unavailable'
+        return OSError(number,f'{prefix}: pid={pid+1 if wrong else pid} bytes={count}')
+    def native_row(pid):
+        row=dict(pid=pid,ppid=1,pgid=held if pid==held else pid,status=5 if pid==held else 1,
+                 uid=501,ruid=501,start_sec=1794290259 if pid==held else 1794290260,start_usec=821315)
+        if pid==held:
+            if mode=='held_info':raise error(pid,short=False)
+            if mode=='held_birth' or state.post_changed:row['start_usec']=821316
+            if mode=='held_pgid':row['pgid']=held+1
+            if mode=='held_uid':row['uid']=502
+            if mode=='held_ruid':row['ruid']=502
+            if mode in ('held_sid','held_getsid'):row['status']=1
+        return row
+    def full(pid):
+        row=native_row(pid)
+        if pid==vanished:
+            if mode=='full_vanish' and state.attempt==1:raise error(pid,short=False)
+            if mode=='info_permission':raise error(pid,short=False,number=1)
+            if mode=='row_conflict':row['pgid']=pid+1
+        return row
+    class Primitives:
+        # The before-negative really calls frozen3395's group/session methods;
+        # the candidate independently composes its actual adapter over these primitives.
+        def snapshot(self,pgid):return primitive.DarwinProcesses.snapshot(self,pgid)
+        def session_snapshot(self,sid):return primitive.DarwinProcesses.session_snapshot(self,sid)
+        def pids(self,pgid,*,all_processes=False):
+            touch('global_inventory' if all_processes else 'group_inventory',pgid)
+            if not all_processes:
+                state.group_reads+=1
+                if mode=='held_group_absent':return ()
+                if mode=='group_change' and state.attempt==1 and state.group_reads%2==0:return (held,vanished)
+                return (held,)
+            state.global_reads+=1
+            if mode=='held_post_change' and state.global_reads==2:state.post_changed=True
+            if mode=='getsid_probe_permission' and state.vanished:raise PermissionError(13,'literal complete inventory denied')
+            if mode=='session_change' and state.attempt==1 and state.global_reads%2==0:return (held,vanished)
+            if mode in ('live_after','partial_then_zero'):
+                if state.attempt==1:return (partial,held,vanished) if mode=='partial_then_zero' else (held,vanished)
+                return (held,live) if mode=='live_after' else (held,)
+            if mode in ('short_vanish','full_vanish','getsid_vanish') and state.attempt>1:return (held,)
+            if mode=='getsid_vanish' and state.vanished:return (held,)
+            if mode in ('zero','late','group_change','session_change') or mode.startswith('held_'):return (held,)
+            return (held,vanished)
+        def info(self,pid):touch('info',pid);return full(pid)
+        def short_info(self,pid):
+            touch('short_info',pid)
+            if pid==held and mode=='held_short':raise error(pid)
+            if pid==vanished:
+                if mode in ('short_vanish','live_after','partial_then_zero') and state.attempt==1 or mode=='unstable':raise error(pid)
+                if mode=='short_permission':raise error(pid,number=13)
+                if mode=='protocol':raise error(pid,number=71)
+                if mode=='partial63':raise error(pid,count=63)
+                if mode=='wrong_message_pid':raise error(pid,wrong=True)
+                if mode=='generic_ESRCH':raise ProcessLookupError(3,'unclassified literal error')
+                if mode=='generic_instability':raise module._CensusInstability('untyped Darwin error',pid)
+            value=native_row(pid)
+            row={k:value[k] for k in ('pid','ppid','pgid','status','uid')}
+            if pid==vanished and mode=='malformed_row':row['uid']=True
+            return row
+    observer=object.__new__(module.NativeObservation)
+    observer._held={held:{k:copy.deepcopy(leader[k]) for k in ('pid','pgid','sid','birth','uid','ruid')}}
+    observer.darwin=Primitives()
+    def getsid(pid):
+        touch('getsid',pid)
+        if pid==held and mode=='held_getsid':raise ProcessLookupError(3,'literal held getsid missing')
+        if pid==held and mode=='held_sid':return held+1
+        if pid==vanished and mode in ('getsid_vanish','getsid_still_listed','getsid_probe_permission'):
+            state.vanished=True;raise ProcessLookupError(3,'literal known getsid missing')
+        return held
+    def snapshot(anchor):
+        state.attempt+=1;state.group_reads=0;state.global_reads=0
+        calls.append(('fresh_attempt',state.attempt,None))
+        value=module.NativeObservation.snapshot(observer,anchor)
+        if mode=='late':state.now=2250000000 if deadline is None else min(deadline,2000000000+250000000)
+        return value
+    observer.snapshot=snapshot
+    fake_os=SimpleNamespace(getsid=getsid,getuid=lambda:501,geteuid=lambda:501)
+    def sleep(seconds):state.sleeps+=1;state.now+=int(seconds*10**9)
+    fake_time=SimpleNamespace(monotonic_ns=lambda:state.now,sleep=sleep)
+    with patch.object(module,'os',fake_os),patch.object(module,'time',fake_time),patch.object(primitive,'os',fake_os):
+        result=module.observed_snapshot(observer,leader,deadline_ns=deadline,phase=phase)
+    return result,calls,state
 
 
 class LiteralStateTests(unittest.TestCase):
@@ -616,6 +714,106 @@ class LiteralStateTests(unittest.TestCase):
                     actual_POSIX_processes_started=0,actual_signals_sent=0,snapshots=details))
 
 
+    def test_independent_darwin_fresh_complete_census_retry_literals(self):
+        oracle=observations.read_json(HERE/'darwin_census_retry_oracles_v1.json')
+        self.assertEqual(observations.digest(HERE/'darwin_census_retry_oracles_v1.json'),
+                         'a9bed3b64c9e3e35190ec7fa406f30e87a789f53ca9023cc53be4901a6477795')
+        self.assertEqual(oracle['schema'],'independent_darwin_census_fresh_retry_oracles_v1')
+        self.assertEqual((oracle['max_attempts'],oracle['observation_subcap_ns'],oracle['retry_sleep_ns']),
+                         (8,250000000,5000000))
+        self.assertEqual((oracle['original_simulated_rows'],oracle['new_simulated_rows'],
+                          oracle['expected_simulated_rows'],oracle['expected_test_methods']),(93,8,101,7))
+        names=(
+            'known_nonheld_zero_byte_ESRCH_requires_fresh_complete_census',
+            'getsid_absence_proof_and_inventory_change_restart_whole_census',
+            'fresh_complete_census_retains_persistent_other_group_live_member',
+            'eight_fresh_instabilities_remain_UNKNOWN_without_partial_acceptance',
+            'expired_and_late_complete_censuses_remain_UNKNOWN',
+            'held_loss_or_changed_identity_is_first_error_UNKNOWN',
+            'permission_protocol_partial_and_unproved_disappearance_are_not_retried',
+            'discard_partial_rows_preserve_phase_and_no_deadline_eligibility')
+        self.assertEqual([r['name'] for r in oracle['cases']],list(names))
+        def run(mode,**kwargs):return darwin_retry_literal_scenario(observations,mode,**kwargs)
+        def unknown(result,attempts):
+            self.assertIs(result['complete'],False);self.assertIs(result['unknown'],True)
+            self.assertIs(result['positive_acceptance_eligible'],False)
+            self.assertNotIn('session_live',result);self.assertNotIn('group_live',result)
+            self.assertEqual(len(result['observation_attempts']),attempts)
+        def zero(result,attempts):
+            self.assertIs(result['complete'],True)
+            self.assertEqual((result['group_live'],result['session_live']),(0,0))
+            self.assertIs(result['group_zombie_only'],True)
+            self.assertEqual(result['session_members'],[])
+            self.assertIs(result['positive_acceptance_eligible'],True)
+            self.assertEqual(len(result['observation_attempts']),attempts)
+            self.assertLess(result['observation_finished_ns'],result['effective_deadline_ns'])
+        for index,name in enumerate(names):
+            with self.subTest(case=name):
+                details=[]
+                if index==0:
+                    for mode in ('short_vanish','full_vanish'):
+                        result,calls,state=run(mode);zero(result,2)
+                        self.assertEqual(state.attempt,2)
+                        self.assertIs(result['observation_attempts'][0]['retryable'],True)
+                        self.assertEqual(result['observation_attempts'][0]['errno'],3)
+                        self.assertEqual(result['observation_attempts'][0]['error_type'],'ProcessLookupError')
+                        self.assertEqual(result['observation_attempts'][0]['vanished_pid'],16518)
+                        self.assertEqual(sum(c[0]=='fresh_attempt' for c in calls),2)
+                        self.assertTrue(any(c[0]=='group_inventory' and c[1]==2 for c in calls))
+                        self.assertTrue(any(c[0]=='global_inventory' and c[1]==2 for c in calls))
+                        details.append(result)
+                elif index==1:
+                    for mode in ('getsid_vanish','group_change','session_change'):
+                        result,calls,state=run(mode);zero(result,2)
+                        self.assertIs(result['observation_attempts'][0]['retryable'],True)
+                        self.assertEqual(state.attempt,2)
+                        if mode=='getsid_vanish':
+                            self.assertGreaterEqual(sum(c[0]=='global_inventory' and c[1]==1 for c in calls),2)
+                        details.append(result)
+                elif index==2:
+                    result,calls,state=run('live_after')
+                    self.assertIs(result['complete'],True);self.assertEqual(len(result['observation_attempts']),2)
+                    self.assertEqual((result['group_live'],result['session_live']),(0,1))
+                    self.assertEqual([(r['pid'],r['pgid'],r['sid']) for r in result['session_members']],[(16519,16519,16517)])
+                    details=[result]
+                elif index==3:
+                    result,calls,state=run('unstable');unknown(result,8)
+                    self.assertEqual((state.attempt,state.sleeps),(8,7))
+                    self.assertEqual(sum(c[0]=='fresh_attempt' for c in calls),8)
+                    self.assertTrue(all(r['retryable'] for r in result['observation_attempts']))
+                    details=[result]
+                elif index==4:
+                    expired,calls,state=run('zero',now=9000000000,deadline=9000000000)
+                    unknown(expired,0);self.assertEqual(state.attempt,0);self.assertEqual(calls,[])
+                    late,calls,state=run('late');unknown(late,1)
+                    self.assertIs(late['observation_attempts'][0]['late'],True)
+                    details=[expired,late]
+                elif index==5:
+                    for mode in ('held_info','held_short','held_getsid','held_birth','held_post_change',
+                                 'held_pgid','held_sid','held_uid','held_ruid','held_group_absent'):
+                        result,calls,state=run(mode);unknown(result,1)
+                        self.assertEqual(state.attempt,1)
+                        self.assertIs(result['observation_attempts'][0]['retryable'],False)
+                        details.append(result)
+                elif index==6:
+                    for mode in ('info_permission','short_permission','protocol','partial63','wrong_message_pid',
+                                 'generic_ESRCH','getsid_still_listed','getsid_probe_permission','generic_instability',
+                                 'malformed_row','row_conflict'):
+                        result,calls,state=run(mode);unknown(result,1)
+                        self.assertEqual(state.attempt,1)
+                        self.assertIs(result['observation_attempts'][0]['retryable'],False)
+                        details.append(result)
+                else:
+                    fresh,calls,state=run('partial_then_zero');zero(fresh,2)
+                    self.assertIn(('info',1,16516),calls);self.assertNotIn(('info',2,16516),calls)
+                    diagnostic,calls,state=run('zero',phase=observations.NEGATIVE_PHASE)
+                    self.assertIs(diagnostic['complete'],True);self.assertIs(diagnostic['positive_acceptance_eligible'],False)
+                    no_clock,calls,state=run('short_vanish',deadline=None);unknown(no_clock,1)
+                    details=[fresh,diagnostic,no_clock]
+                self.rows.append(dict(mode=name,passed=True,evidence_kind='simulated_independent_Darwin_census_read_boundary',
+                    actual_POSIX_processes_started=0,actual_signals_sent=0,snapshots=details))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output-directory',type=Path,required=True)
@@ -630,12 +828,12 @@ def main():
     result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromTestCase(LiteralStateTests))
     unchanged = source_pins() == pins and test_inventory() == before
     write_new(args.output_directory/'RESULT.json',dict(schema='owned_posix_v3_simulated_controls_v1',
-        complete=result.wasSuccessful() and unchanged and len(LiteralStateTests.rows)==93 and result.testsRun==6, unittest_methods=result.testsRun,
-        expected_simulated_rows=93,
+        complete=result.wasSuccessful() and unchanged and len(LiteralStateTests.rows)==101 and result.testsRun==7, unittest_methods=result.testsRun,
+        expected_simulated_rows=101,
         simulated_rows=len(LiteralStateTests.rows), rows=LiteralStateTests.rows, source_pins=pins,
         source_pins_unchanged=unchanged, actual_POSIX_processes_started=0, actual_signals_sent=0,
         native_Linux_or_Darwin_qualified=False, source_qualified=False, scientific_qualified=False))
-    return 0 if result.wasSuccessful() and unchanged and len(LiteralStateTests.rows)==93 and result.testsRun==6 else 1
+    return 0 if result.wasSuccessful() and unchanged and len(LiteralStateTests.rows)==101 and result.testsRun==7 else 1
 
 
 if __name__ == '__main__':

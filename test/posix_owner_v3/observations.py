@@ -1,5 +1,6 @@
 """Independent test observations; never imports the new production census."""
 from pathlib import Path
+import errno
 import hashlib
 import importlib.util
 import json
@@ -88,6 +89,10 @@ class _CensusInstability(RuntimeError):
         super().__init__(reason)
         self.reason = reason
         self.pid = pid
+
+
+class _DarwinCensusInstability(_CensusInstability):
+    """One discarded Darwin census with a proven native inventory/read race."""
 
 
 class NativeObservation:
@@ -180,6 +185,104 @@ class NativeObservation:
             rows.append(row)
         return rows
 
+    def _darwin_held(self, leader):
+        current = self.identity(leader['pid'])
+        if any(current[k] != leader[k] for k in ('pid','pgid','sid','birth','uid','ruid')):
+            raise RuntimeError('independently held Darwin leader changed during census')
+        return current
+
+    def _darwin_inventory(self, pgid, *, all_processes=False):
+        pids = self.darwin.pids(pgid, all_processes=all_processes)
+        if (type(pids) not in (tuple, list) or not 0 < len(pids) < 16384 or
+                any(type(pid) is not int or not 0 <= pid < 2**31 or
+                    (pid == 0 and not all_processes) for pid in pids) or
+                tuple(pids) != tuple(sorted(set(pids)))):
+            raise RuntimeError('incomplete independent Darwin PID inventory')
+        return tuple(pids)
+
+    def _darwin_row(self, operation, pid, leader):
+        if operation not in ('info', 'short_info'):
+            raise ValueError('known independent Darwin native read required')
+        try:
+            row = getattr(self.darwin, operation)(pid)
+        except OSError as error:
+            label = 'BSD process' if operation == 'info' else 'short BSD'
+            expected = f'{label} information unavailable: pid={pid} bytes=0'
+            if (pid != leader['pid'] and error.errno == errno.ESRCH and
+                    error.filename is None and error.strerror == expected):
+                self._darwin_held(leader)
+                raise _DarwinCensusInstability(
+                    'listed non-held Darwin PID native zero-byte ESRCH', pid) from error
+            raise
+        fields = ('pid','ppid','pgid','status','uid')
+        if operation == 'info':
+            fields += ('ruid','start_sec','start_usec')
+        if (type(row) is not dict or set(row) != set(fields) or
+                any(type(row[k]) is not int or row[k] < 0 for k in fields) or row['pid'] != pid):
+            raise RuntimeError('malformed independent Darwin native row')
+        if pid == leader['pid']:
+            if any(row[k] != leader[k] for k in ('pid','pgid','uid')):
+                raise RuntimeError('independently held Darwin leader native row changed')
+            if operation == 'info' and (row['ruid'] != leader['ruid'] or
+                    [row['start_sec'], row['start_usec']] != leader['birth']):
+                raise RuntimeError('independently held Darwin leader birth or real UID changed')
+        return row
+
+    def _darwin_sid(self, pid, leader):
+        try:
+            sid = os.getsid(pid)
+        except OSError as error:
+            if pid != leader['pid'] and error.errno == errno.ESRCH:
+                fresh = self._darwin_inventory(0, all_processes=True)
+                self._darwin_held(leader)
+                if pid not in fresh:
+                    raise _DarwinCensusInstability(
+                        'listed non-held Darwin PID absent after getsid ESRCH', pid) from error
+            raise
+        if type(sid) is not int or sid <= 0:
+            raise RuntimeError('malformed independent Darwin session identity')
+        if pid == leader['pid'] and sid != leader['sid']:
+            raise RuntimeError('independently held Darwin leader SID changed')
+        return sid
+
+    def _darwin_snapshot(self, leader):
+        # Keep the pinned3395 native primitives and whole group/session census,
+        # but retain the exact known PID when a read races process disappearance.
+        before = self._darwin_inventory(leader['pgid'])
+        if leader['pid'] not in before:
+            raise RuntimeError('independently held Darwin leader absent from group')
+        group = [self._darwin_row('info', pid, leader) for pid in before]
+        if any(row['pgid'] != leader['pgid'] for row in group):
+            raise RuntimeError('independent Darwin group member identity differs')
+        after = self._darwin_inventory(leader['pgid'])
+        self._darwin_held(leader)
+        if leader['pid'] not in after:
+            raise RuntimeError('independently held Darwin leader lost from group')
+        if before != after:
+            raise _DarwinCensusInstability('independent Darwin group PID inventory changed')
+        before = self._darwin_inventory(0, all_processes=True)
+        live = []
+        for pid in before:
+            if pid == 0:
+                continue  # Preserve3395's explicit native kernel-PID exclusion.
+            row = self._darwin_row('short_info', pid, leader)
+            if row['status'] == 5:
+                continue  # Known native zombies cannot fork or join a session.
+            sid = self._darwin_sid(pid, leader)
+            if sid == leader['sid']:
+                full = self._darwin_row('info', pid, leader)
+                if (full['status'] == 5 or any(full[k] != row[k] for k in ('pid','ppid','pgid','uid'))):
+                    raise RuntimeError('independent Darwin session member identity changed')
+                live.append(dict(full, sid=sid))
+        after = self._darwin_inventory(0, all_processes=True)
+        held = self._darwin_held(leader)
+        if before != after:
+            raise _DarwinCensusInstability('independent Darwin global PID inventory changed')
+        return dict(complete=True, held_leader=held,
+                    group_live=sum(row['status'] != 5 for row in group),
+                    group_zombie_only=all(row['status'] == 5 for row in group),
+                    session_live=len(live), session_members=live)
+
     def snapshot(self, leader):
         # This is the pre-existing diagnostic's independently observed census,
         # not a call to any new production adapter or its positive summary.
@@ -187,11 +290,7 @@ class NativeObservation:
         if any(held[k] != leader[k] for k in ('pid', 'pgid', 'sid', 'birth', 'uid', 'ruid')):
             raise RuntimeError('independently held leader changed')
         if self.darwin is not None:
-            group = self.darwin.snapshot(leader['pgid'])
-            session = self.darwin.session_snapshot(leader['sid'])
-            return dict(complete=True, held_leader=held,
-                group_live=group['live_members_observed'], group_zombie_only=group['owned_group_zombie_only_observed'],
-                session_live=len(session['live_members']), session_members=session['live_members'])
+            return self._darwin_snapshot(leader)
         before = self._linux_pids()
         rows = self._linux_rows(before, leader)
         if before != self._linux_pids():
@@ -252,7 +351,8 @@ def observed_snapshot(observer, leader, *, deadline_ns=None, phase=POSITIVE_PHAS
             error = caught
         end = time.monotonic_ns()
         late = effective is not None and end >= effective
-        retryable = isinstance(error, _CensusInstability) and observer.darwin is None
+        retryable = ((isinstance(error, _CensusInstability) and observer.darwin is None) or
+                     (isinstance(error, _DarwinCensusInstability) and observer.darwin is not None))
         source_error = error.__cause__ if error is not None and error.__cause__ is not None else error
         trace = dict(index=index+1, started_ns=begin, finished_ns=end, complete=error is None and not late,
             retryable=retryable, error_type=None if source_error is None else type(source_error).__name__,

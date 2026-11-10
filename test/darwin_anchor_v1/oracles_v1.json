@@ -17,7 +17,7 @@
   "current_candidate_sha256": "c3575532cb67b4bf52d2db8a20e01ca7e8d97cfb0cb1054ded66467823e40c00",
   "historical_legacy_sha256": "8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836",
   "historical_candidate_sha256": "3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1",
-  "independent_observer_sha256": "c825fcbf2fbb2a86f41ec5e881dfa301f0908a119c98588b79e9d28d7a480ba3",
+  "independent_observer_sha256": "c68ce8f6c8ef38aef394538b6a9b1915b17988d73e5647531a5a63ce6eacbf36",
   "independent_darwin_abi_sha256": "3395df92110f61ac1deaae85f1fcfe93125865575e29619623a83737e95a2ee2",
   "original_state_rows": 54,
   "original_state_methods": 2,

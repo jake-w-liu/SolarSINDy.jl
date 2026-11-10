@@ -25,9 +25,9 @@ OWNER_PINS = {
     'research/dbdt_completed_source/candidate_native_owner.py': 'c3575532cb67b4bf52d2db8a20e01ca7e8d97cfb0cb1054ded66467823e40c00',
 }
 TEST_PINS = {
-    'oracles_v1.json': '51b90716f70fc35fcd5541ab995e49695957a17378b2de44012617c4e6e25e97',
-    'test_anchor_state.py': '99b72148874d2a103bdc003f748be7b9fd3a0f310a3de02d88b7493fd8e455fd',
-    'run_anchor_native.py': 'f6a4d1a9e5667284db79bde25e2850d0be00787e14235ea6f3e5bcde45802cfb',
+    'oracles_v1.json': '0c3b0f434770a68497c68bddc163de59d5eb084576d3e34fd6737ae6a554ec3d',
+    'test_anchor_state.py': '8c2bcdc9af8b22164278057e2a6a11696358e0df94bb50726293072c4d0a0619',
+    'run_anchor_native.py': '064f2a636867f8863dabafc9d749900914f338269bcdbb835a486f9f5258bb29',
     'fixture.py': 'af87432ffe060ba181766c748297cc4fdedd16f8bb8fb8c6698a1f8d9b65fa0c',
     'frozen/native_stage.py': '8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836',
     'frozen/candidate_native_owner.py': '3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1',
