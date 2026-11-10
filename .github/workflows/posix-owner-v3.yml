@@ -1,0 +1,45 @@
+name: Current POSIX owner V3 native regressions
+
+on:
+  push:
+    branches:
+      - codex/acyclic-b-platform-20261109
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-controls:
+    name: V3 engineering / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-26-intel]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ runner.os == 'macOS' && '3.14.10' || '3.12' }}
+      - name: Run bounded independent current-source controls
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONUTF8: '1'
+        run: python -B -X utf8 test/run_posix_owner_v3_controls.py --output-directory "$RUNNER_TEMP/solarsindy-posix-v3-direct"
+      - name: Retain engineering evidence including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: posix-v3-${{ matrix.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/solarsindy-posix-v3-direct
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 14

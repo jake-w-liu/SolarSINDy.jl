@@ -67,7 +67,7 @@ def captured(arguments,*,timeout=120,environment=None):
     # exit, including overflow and timeout; no unbounded communicate fallback.
     directory=Path(tempfile.mkdtemp(prefix='ss-r1-git-capture-')).resolve()
     runner=Path(__file__).with_name('native_stage.py')
-    if file_sha(runner)!='15d2644ae5eb2e87ce31c9913f103f9fa7e940b67403b94f29ef2ed5a4d175b8':
+    if file_sha(runner)!='8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836':
         raise RuntimeError('owned Git capture runner bytes differ')
     spec=importlib.util.spec_from_file_location('fixed_git_capture_owner',runner)
     owned=importlib.util.module_from_spec(spec);spec.loader.exec_module(owned)

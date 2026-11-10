@@ -8,7 +8,7 @@ FIXTURE=Path(__file__).with_name('native_fixture.py')
 OWNER=ROOT/'research/dbdt_completed_source/candidate_native_owner.py'
 PINS={SCRIPT:'49e3f3a72a6f25762acdc52cbd5768a036e43ea3645adc5c3bd5f2f93a0ca090',
     FIXTURE:'d855e765adf0f1820edf0a25d1c96ed8cb59cf9c3edb5dd6ae2d395bc1cd4f57',
-    OWNER:'ccbf1cbd0709e50d0b5080bdbe4977ae80ebd1649237e016588d24800ddf2e21'}
+    OWNER:'3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1'}
 def pin(path):
     with Path(path).open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 def write(path,value):

@@ -352,3 +352,18 @@ Run `examples/archive_source_bound_calibration_synthetic.jl` and
 `run_archive_source_bound_calibration_synthetic()` for a generated four-family
 publication/reload example. It uses the default 31-phase completion clock.
 
+
+## Locked mixed8 ridge and selected point bindings
+
+```@docs
+SolarSINDy.ArchiveLockedMixed8Ridge
+SolarSINDy.ArchiveLockedMixed8Ridge.Recipe
+SolarSINDy.ArchiveLockedMixed8Ridge.NumericModel
+SolarSINDy.ArchiveLockedMixed8Ridge.fit_numeric
+SolarSINDy.ArchiveLockedMixed8Ridge.predict
+SolarSINDy.ArchiveSelectedPointBindings
+SolarSINDy.ArchiveSelectedPointBindings.SelectedPointBinding
+SolarSINDy.ArchiveSelectedPointBindings.bind_fixed_point
+SolarSINDy.ArchiveSelectedPointBindings.bind_generated_selected_point
+SolarSINDy.ArchiveSelectedPointBindings.publish_metadata
+```

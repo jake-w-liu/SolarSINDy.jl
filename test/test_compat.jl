@@ -197,6 +197,23 @@ end
         without_point_copy=replace(monitor,point_copy=>"";count=1)
         @test !_monitor_copies_point_sources_before_precompile(without_point_copy)
         @test !_monitor_copies_point_sources_before_precompile(without_point_copy*"\n"*point_copy*"\n")
+        # Source identities read these files while loading the Julia package;
+        # the monitor does not need to execute the research Python programs.
+        identity_files=("research/dbdt_completed_source/candidate_native_owner.py",
+            "research/dbdt_completed_source/native_stage.py",
+            "research/dbdt_completed_source/run_candidate_stage.py","tools/run_canonical_harness.py")
+        @test all(name->name in SolarSINDy.DurationPointTraining.SOURCE_FILES,identity_files)
+        for name in identity_files
+            @test occursin(name,monitor)
+            @test !_monitor_copies_point_sources_before_precompile(replace(monitor,name=>"";count=1))
+        end
+        for prefix in ("COPY research/dbdt_completed_source/","COPY tools/run_canonical_harness.py ")
+            line=only(filter(x->startswith(x,prefix),split(monitor,'\n')))
+            omitted=replace(monitor,line=>"";count=1)
+            @test !_monitor_copies_point_sources_before_precompile(omitted)
+            @test !_monitor_copies_point_sources_before_precompile(omitted*"\n"*line*"\n")
+            @test !_monitor_copies_point_sources_before_precompile(replace(monitor,line=>"# "*line;count=1))
+        end
         @test occursin("COPY data ./data",monitor)
         @test occursin("COPY validation/operational/superlearner_live_claim_audit.jl",monitor)
         compose = read(joinpath(PACKAGE_ROOT,"deploy/docker-compose.yml"),String)

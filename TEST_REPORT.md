@@ -1736,3 +1736,34 @@ The immediately preceding 992-source acyclic checkpoint completed with 155 Pytho
 The subsequent Windows Git diagnostic preserved both the ambiguous-show failure and byte-identical explicit blob reads at root length 198 / longest member 259. The new positive fixture retains the existing short eight-file case, all nine method names, all prior rejection controls, and fixed limits. Fixture-local core.longpaths=false must not alter machine policy. An old-source negative and fixed-source positive are required before the fresh full 156-method composite. At this append, those separate runs and the combined 17-path checkpoint have not yet been reconciled here.
 
 The current combined source still requires all native Julia package, complete-example, harness, strict-documentation and platform/resource gates. Current expected harness names are planning metadata, not executed evidence. Actual corrected forecast comparisons and publication results remain unqualified.
+## Source-bound matched342 integration tests: 9 November 2026, unexecuted
+
+The new `test/matched_initial342/runtests.jl` is registered in the unfiltered package suite. Its independent geometry literals cover all four per-lead cells, inclusive completion/receipt embargo equality and the two h4-only tail rows. Additional checks cover source substitution, wrong delay/loss/source closure, detached metadata, mutated cached designs, post-training data changes, four nonlinear comparisons with the previous numerical fitter, data-only save/load replay, immutable export after native mutation, coherent rehash with wrong model context, complete32-fit nonlinear and exact-tie producer/auditor/publication paths, required versus optional missing drivers, changed saved models/reports, restart auditing, exact73-component and22-reference inventories, and completion-last publication.
+
+Peer static review confirmed the four row/count/clock oracles and routing stress at issue hours600/650/700/730. Optional channel missingness at620 remains a model route. Two incorrect typed-keyword exception expectations were corrected to TypeError using the installed Julia keyword-argument tests as primary evidence. The ordinary positional wrong-method expectation remains MethodError. All saved native/scalar comparisons remain bitwise; metric validation tolerances and strict selection are unchanged.
+
+The generated resource fixture's source/spec hashes and signed Julia millisecond calendar constants were independently reconciled. Small generator byte-order/wrap/overwrite checks are written. No Julia parser, test worker or 500000-row generated resource run has executed for these additions. Static review and a matching hash do not establish correctness or resource qualification. CI controls the package worker to one Julia thread; the tests explicitly observe one BLAS/OMP thread and restore scoped settings. Failure fixtures are preserved under the runner's temporary directory and included in failure uploads.
+
+The monitor Docker source-closure fix adds independent negative mutations to the existing compatibility test without weakening its positive assertion. The previous CI build failure is retained as negative evidence. Full new Docker build/runtime verification remains pending.
+
+Required next verification: commit a complete private source snapshot, build the genuine clean whole-source Git proof, execute narrow and full native tests/experiments/harness under admitted resources or CI, fix confirmed failures, rerun, then independently reconcile every raw result before any actual archive permission, main promotion or paper claim.
+
+### Current owner and launcher controls: Windows evidence only
+
+The current matched342 wrapper completed eleven unchanged owner-control methods
+under a preserved outer Windows Job owner. Independent reconciliation bound all
+raw outputs, waits, launch PIDs, resource admissions and current source pins.
+The new lifecycle file separately completed three methods, eleven simulated
+controls and two genuine Windows cases. Its callback-exception case observed
+direct-child termination through a retained handle and returned no primitive
+native result; no exception-path Job-closure or descendant-reaping observation
+was manufactured. Native POSIX lifecycle cases, Julia and actual data were not
+executed by these checks.
+
+Current source includes the owner-port/load-closure correction, the independently
+reviewed repeated-TERM protection and parent deadline correction, and explicit
+mandatory engineering gates in both CI workflows. Full unfiltered package tests,
+complete experiments, canonical harness, strict docs, containers, all platforms
+and meaningful full-size32 resource qualification remain required. The new
+Linux development workflow is exploratory and grants no source/scientific or
+actual-data authority. All scientific performance and paper verdicts remain open.

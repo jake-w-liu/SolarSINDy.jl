@@ -112,3 +112,15 @@ readiness-gated labels.
 ```@docs
 SolarSINDy.CompletedSourceDBDT.DBDTCausalForecaster.ground_cases
 ```
+
+## Completed-source selection primitives
+
+```@docs
+SolarSINDy.CompletedSelectionPrimitives
+SolarSINDy.CompletedSelectionPrimitives.GammaExpectation
+SolarSINDy.CompletedSelectionPrimitives.GammaMetrics
+SolarSINDy.CompletedSelectionPrimitives.NoEligibleGamma
+SolarSINDy.CompletedSelectionPrimitives.choose_gamma
+SolarSINDy.CompletedSelectionPrimitives.choose_R2
+SolarSINDy.CompletedSelectionPrimitives.split_clock_eligible
+```

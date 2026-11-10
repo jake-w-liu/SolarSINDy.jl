@@ -1,0 +1,8 @@
+{
+    "schema":  "owned_posix_current_source_pins_v3",
+    "sources":  {
+                    "tools/initial_reference_audit/owned_process.py":  "8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836",
+                    "research/dbdt_completed_source/native_stage.py":  "8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836",
+                    "research/dbdt_completed_source/candidate_native_owner.py":  "3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1"
+                }
+}

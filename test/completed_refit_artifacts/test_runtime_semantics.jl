@@ -7,7 +7,7 @@ function structural_runtime(tag,path)
 end
 @testset "recorded runtime OS and complete ownership pairs" begin
     windows=("CREATE_SUSPENDED -> AssignProcessToJobObject -> ResumeThread","private Windows Job Object closed with KILL_ON_JOB_CLOSE")
-    posix=("start_new_session=True","owned POSIX session killed after stage")
+    posix=("start_new_session=True","owned POSIX session has no live members after stage")
     for tag in ("x86_64/NT","x86_64/Linux","aarch64/Linux","x86_64/Darwin","aarch64/Darwin")
         nt=endswith(tag,"/NT");runtime=structural_runtime(tag,nt ? "Q:/unopened/julia.exe" : "/unopened/julia")
         good=nt ? windows : posix;bad=nt ? posix : windows

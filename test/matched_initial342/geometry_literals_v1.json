@@ -1,0 +1,23 @@
+{
+  "schema": "matched342_initial_independent_geometry_v1",
+  "derivation": "One-based raw row i has issue hour i, anchor row i-L, target row i+h, completed target hour i+h and label receipt hour i+h+L. Completion and receipt must each precede the relevant boundary by at least 168 hours, including equality.",
+  "hours": 1024,
+  "boundary_hour": 512,
+  "validation_end_hour": 1024,
+  "embargo_hours": 168,
+  "feature_count": 342,
+  "cell_order": [[0, 4], [0, 6], [1, 4], [1, 6]],
+  "cells": [
+    {"delay": 0, "horizon": 4, "train_first": 1, "train_last": 340, "train_count": 340, "validation_first": 512, "validation_last": 852, "validation_count": 341, "union_last": 852, "union_count": 341, "max_fit_complete_hour": 344, "max_fit_receipt_hour": 344, "max_validation_complete_hour": 856, "max_validation_receipt_hour": 856},
+    {"delay": 0, "horizon": 6, "train_first": 1, "train_last": 338, "train_count": 338, "validation_first": 512, "validation_last": 850, "validation_count": 339, "union_last": 852, "union_count": 341, "max_fit_complete_hour": 344, "max_fit_receipt_hour": 344, "max_validation_complete_hour": 856, "max_validation_receipt_hour": 856},
+    {"delay": 1, "horizon": 4, "train_first": 2, "train_last": 339, "train_count": 338, "validation_first": 512, "validation_last": 851, "validation_count": 340, "union_last": 851, "union_count": 340, "max_fit_complete_hour": 343, "max_fit_receipt_hour": 344, "max_validation_complete_hour": 855, "max_validation_receipt_hour": 856},
+    {"delay": 1, "horizon": 6, "train_first": 2, "train_last": 337, "train_count": 336, "validation_first": 512, "validation_last": 849, "validation_count": 338, "union_last": 851, "union_count": 340, "max_fit_complete_hour": 343, "max_fit_receipt_hour": 344, "max_validation_complete_hour": 855, "max_validation_receipt_hour": 856}
+  ],
+  "h4_only_issue_hours": [[851, 852], [850, 851]],
+  "flat_dst_nt": -40,
+  "flat_increment_nt": 0,
+  "strict_tie_selected_setting": 1,
+  "component_noncompletion_members": 73,
+  "reference_noncompletion_members": 21,
+  "reference_total_members": 22
+}

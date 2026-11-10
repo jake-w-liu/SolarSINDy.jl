@@ -1,0 +1,169 @@
+name: Matched342 development checks (not qualification)
+
+# Exploratory software checks only: no actual archive, ResourceQ or science verdict.
+on:
+  push:
+    branches: [codex/matched342-dev-20261110]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  JULIA_NUM_THREADS: '1'
+  OPENBLAS_NUM_THREADS: '1'
+  BLAS_NUM_THREADS: '1'
+  OMP_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
+  JULIA_PKG_PRECOMPILE_AUTO: '0'
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONUTF8: '1'
+
+jobs:
+  development:
+    name: Development only / Julia ${{ matrix.julia-version }} / Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 420
+    strategy:
+      fail-fast: false
+      matrix:
+        julia-version: ['1.12.6', '1.13.1']
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require native Linux resources before Julia setup
+        run: |
+          set -euo pipefail
+          [ "$(uname -s)" = Linux ]
+          mkdir -p "$RUNNER_TEMP/matched342-development-logs"
+          available_kib="$(awk '/^MemAvailable:/ { print $2; found=1 } END { if (!found) exit 1 }' /proc/meminfo)"
+          free_kib="$(df -Pk "$RUNNER_TEMP" | awk 'NR==2 { print $4 }')"
+          [[ "$available_kib" =~ ^(0|[1-9][0-9]*)$ ]]
+          [[ "$free_kib" =~ ^(0|[1-9][0-9]*)$ ]]
+          printf 'linux_mem_available_kib=%s\nlinux_free_disk_kib=%s\n' "$available_kib" "$free_kib" > "$RUNNER_TEMP/matched342-development-logs/resources.log"
+          cat "$RUNNER_TEMP/matched342-development-logs/resources.log"
+          (( available_kib >= 8 * 1024 * 1024 ))
+          (( free_kib >= 16 * 1024 * 1024 ))
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: ${{ matrix.julia-version }}
+          arch: default
+      - uses: julia-actions/cache@v2
+      - name: Verify existing canonical wrapper controls
+        run: |
+          set -euo pipefail
+          set +e
+          {
+            python -B test/completed_refit_artifacts/test_hosted_harness.py &&
+            python -B test/completed_refit_artifacts/test_harness_evidence.py &&
+            python -B test/completed_refit_artifacts/test_canonical_harness_artifact.py
+          } 2>&1 | { head -c 2097152 && cat > /dev/null; } > "$RUNNER_TEMP/matched342-development-logs/wrapper-controls.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          (( statuses[1] == 0 ))
+          exit "${statuses[0]}"
+      - name: Instantiate the committed environment
+        run: |
+          set -euo pipefail
+          set +e
+          julia --startup-file=no --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.instantiate()' 2>&1 | { head -c 2097152 && cat > /dev/null; } > "$RUNNER_TEMP/matched342-development-logs/instantiate.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          (( statuses[1] == 0 ))
+          exit "${statuses[0]}"
+      - name: Verify matched342 owner contract engineering controls
+        run: python -I -B -X utf8 test/matched_initial342/profile_owner_tests.py --output-directory "$RUNNER_TEMP/matched342-owner-contracts"
+      - name: Verify matched342 owner lifecycle engineering controls
+        run: python -I -B -X utf8 test/matched_initial342/test_native_owner_lifecycle.py --output-directory "$RUNNER_TEMP/matched342-owner-lifecycle"
+      - name: Record the deliberate owner artifact omission and byte scope
+        if: always()
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            'excluded_path=matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw' \
+            'fixture_bytes=67108865' \
+            'reason=deliberate sparse over-64MiB rejection fixture; ordinary native evidence is retained unchanged' \
+            'hardlinks=runtime-only identity assertions; artifacts retain file bytes, not native hardlink relationships' \
+            'scope=artifact exclusion pattern; fixture presence is not asserted' \
+            > "$RUNNER_TEMP/matched342-owner-ARTIFACT_NOTES.txt"
+      - name: Retain complete matched342 owner engineering evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matched342-dev-owner-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/matched342-owner-contracts
+            ${{ runner.temp }}/matched342-owner-lifecycle
+            ${{ runner.temp }}/matched342-owner-ARTIFACT_NOTES.txt
+            !${{ runner.temp }}/matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 6
+      - name: Run unchanged canonical audit with unfiltered tests and complete experiments
+        run: |
+          set -euo pipefail
+          set +e
+          python -B tools/run_canonical_harness.py --evidence-dir "$RUNNER_TEMP/matched342-development-harness" 2>&1 | { head -c 2097152 && cat > /dev/null; } > "$RUNNER_TEMP/matched342-development-logs/canonical-wrapper.log"
+          statuses=("${PIPESTATUS[@]}")
+          set -e
+          (( statuses[1] == 0 ))
+          exit "${statuses[0]}"
+      - name: Collect bounded ordinary matched342 failure summaries
+        if: always()
+        run: |
+          set -euo pipefail
+          destination="$RUNNER_TEMP/matched342-development-failure-summaries"
+          mkdir -p "$destination"
+          raw_root="$RUNNER_TEMP/matched342-development-harness/raw"
+          count=0
+          omitted=0
+          truncated=0
+          if [ -d "$raw_root" ]; then
+            index="$RUNNER_TEMP/matched342-development-candidates.nul"
+            trap 'rm -f -- "$index"' EXIT
+            find -P "$raw_root" -maxdepth 8 -type f -links 1 \( -name '*.log' -o -name 'TERMINAL*.json' -o -name 'RESULT*.json' -o -name '*_RESULT.json' -o -name '*CONTROLS*.json' -o -name '*NATIVE*.json' \) -print0 > "$index"
+            (( $(wc -c < "$index") <= 2097152 ))
+            while IFS= read -r -d '' file; do
+              relative="${file#"$raw_root"/}"
+              case "/$relative" in */matched342-*/*) ;; *) continue ;; esac
+              if (( count >= 64 )); then
+                omitted=$((omitted + 1))
+                continue
+              fi
+              target="$destination/$relative"
+              mkdir -p "$(dirname "$target")"
+              if (( $(stat -c %s -- "$file") > 2097152 )); then
+                truncated=$((truncated + 1))
+              fi
+              head -c 2097152 -- "$file" > "$target"
+              count=$((count + 1))
+            done < "$index"
+          fi
+          printf 'copied=%s\nomitted_by_file_limit=%s\ntruncated_files=%s\nmax_files=64\nmax_bytes_per_file=2097152\nfull_ordinary_evidence=canonical-artifact\n' "$count" "$omitted" "$truncated" > "$destination/COLLECTION.txt"
+      - name: Retain canonical ordinary-file artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matched342-dev-canonical-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/matched342-development-harness/artifact
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 6
+      - name: Retain bounded top logs and matched342 failure summaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matched342-dev-diagnostics-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/matched342-development-logs
+            ${{ runner.temp }}/matched342-development-failure-summaries
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 6

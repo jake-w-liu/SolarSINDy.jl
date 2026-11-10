@@ -1,4 +1,4 @@
-"""Cross-platform deterministic POSIX lifetime oracles; no real signals sent."""
+"""Historical V2 POSIX lifetime oracles; no current-owner qualification or signals."""
 import errno
 import hashlib
 import importlib.util
@@ -14,7 +14,13 @@ from unittest.mock import patch
 HERE=Path(__file__).resolve().parent
 TOOLS=HERE.parents[1]/'tools/initial_reference_audit'
 sys.path.insert(0,str(TOOLS))
-import owned_process
+# These frozen V2 spies model the original flags/events, before native session
+# evidence and terminal-code admission. Live owner qualification is V3.
+V2_OWNER=HERE/'frozen/owned_process_before_v3.py'
+if hashlib.sha256(V2_OWNER.read_bytes()).hexdigest()!='15d2644ae5eb2e87ce31c9913f103f9fa7e940b67403b94f29ef2ed5a4d175b8':
+    raise RuntimeError('historical V2 owner bytes differ')
+V2_OWNER_SPEC=importlib.util.spec_from_file_location('historical_owned_process_v2',V2_OWNER)
+owned_process=importlib.util.module_from_spec(V2_OWNER_SPEC);V2_OWNER_SPEC.loader.exec_module(owned_process)
 
 ORACLE=HERE/'frozen/posix_cleanup_oracles_v1.json'
 BEFORE=HERE/'frozen/owned_process_before_v1.py'

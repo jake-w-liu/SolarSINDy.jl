@@ -19,33 +19,39 @@ function _expected_fields(expected::ExpectedModelBindings342)
         "input_admission_sha256"=>expected.admission.admission_id,"feature_contract_sha256"=>FEATURE_CONTRACT_SHA256,
         "loss_contract_sha256"=>expected.loss_contract_sha256)
 end
-function _model_object(model::MatchedScalarTreeReplay342.Model,expected::ExpectedModelBindings342)
-    _check_bindings(expected);grid=GRID342[expected.setting_index]
+# Private data-only payload construction. Typed callers retain their own
+# admission/binding/capsule checks; this helper grants no fitted-state authority.
+function _model_object_data(model::MatchedScalarTreeReplay342.Model,fields,grid)
     _need((model.max_depth,model.nrounds,model.nbins)==(grid.max_depth,grid.nrounds,grid.nbins),"model is outside the exact selected fixed grid")
-    object=_expected_fields(expected)
+    object=copy(fields)
     object["numeric_feature_types"]=fill(true,WIDTH)
     object["edges_f64_bits"]=[_bits.(collect(edge)) for edge in model.edges]
     object["trees"]=[Dict{String,Any}("feature"=>collect(tree.feature),"condition"=>collect(tree.condition),
         "prediction_f32_bits"=>_bits32.(collect(tree.prediction)),"split"=>collect(tree.split)) for tree in model.trees]
     object["model_id"]=bytes2hex(sha256(_canonical(object)));object
 end
+function _model_object(model::MatchedScalarTreeReplay342.Model,expected::ExpectedModelBindings342)
+    _check_bindings(expected);grid=GRID342[expected.setting_index]
+    _model_object_data(model,_expected_fields(expected),grid)
+end
 "Exclusively write a sealed controlled-fit capsule's canonical21-field model under independent expected_bindings."
 function save_model(path,capsule::FittedCell342;expected_bindings::ExpectedModelBindings342)
     _check_capsule(capsule,expected_bindings)
     result=_write_json(path,_model_object(capsule.model,expected_bindings));_check_capsule(capsule,expected_bindings);result
 end
-function _decode_model(object,expected::ExpectedModelBindings342)
-    _check_bindings(expected);_exact_keys(object,_MODEL_KEYS)
+# The same exact21/exact4 numeric grammar is shared without widening the
+# synthetic expected-binding type accepted by the existing public reader.
+function _decode_model_data(object,fields,grid)
+    _exact_keys(object,_MODEL_KEYS)
     integers=("feature_count","cell_delay","cell_horizon","setting_index","max_depth","nrounds","nbins","seed")
     for key in integers;_int(object[key],0,22022026);end
-    fields=_expected_fields(expected)
     _need(all(object[key]==value for (key,value) in fields),"model external context differs")
     _need(_hex(object["model_id"]),"model ID domain differs")
     without_id=Dict(key=>value for (key,value) in object if key!="model_id")
     _need(bytes2hex(sha256(_canonical(without_id)))==object["model_id"],"model self ID differs")
     flags=object["numeric_feature_types"]
     _need(flags isa AbstractVector&&length(flags)==WIDTH&&all(x->x===true,flags),"numeric feature type vector differs")
-    grid=GRID342[expected.setting_index];raw_edges=object["edges_f64_bits"]
+    raw_edges=object["edges_f64_bits"]
     _need(raw_edges isa AbstractVector&&length(raw_edges)==WIDTH,"model edge width differs")
     edges=Vector{Float64}[]
     for raw in raw_edges
@@ -63,6 +69,12 @@ function _decode_model(object,expected::ExpectedModelBindings342)
             prediction=_float32.(tree["prediction_f32_bits"]),split=Bool.(tree["split"])))
     end
     model=MatchedScalarTreeReplay342.Model(edges,trees;max_depth=grid.max_depth,nrounds=grid.nrounds)
+    _need(_model_object_data(model,fields,grid)==object,"decoded model data differs");model
+end
+function _decode_model(object,expected::ExpectedModelBindings342)
+    _check_bindings(expected)
+    model=_decode_model_data(object,_expected_fields(expected),GRID342[expected.setting_index])
+    # Preserve the original typed round-trip and its second binding/source check.
     _need(_model_object(model,expected)==object,"decoded model data differs");model
 end
 "Load immutable scalar model data under external content/context pins; performs no native loading, fitting, execution or qualification."

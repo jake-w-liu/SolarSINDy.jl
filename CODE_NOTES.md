@@ -1843,3 +1843,58 @@ The held acyclic batch was checked as 156 predeclared Python methods: 155 passed
 A separate generated-repository diagnostic then reproduced a source-preflight failure at a valid Windows path (root 198 characters, longest source 259): ambiguous git show failed, while explicit git cat-file blob read exactly the same committed and working bytes. The portability correction uses an explicit blob read without changing clean-HEAD, source bytes, ordinary-path checks, pinned helpers, data, limits, or numerical behavior. The existing eight-file regression gains a long-root positive case under the same nine method names, with fixture-local Git configuration and no host policy changes. The regression must fail with the old production command on the diagnosed Windows host and pass with the fixed command; other platforms require positive source admission, without requiring that their Git has the Windows defect.
 
 This separate four-path correction and these ledger appends require a fresh 17-path/992-source composite checkpoint. Full unfiltered Pkg.test(), complete experiments, canonical harness, both strict documentation builds, and the original native platform/resource matrix remain pending for current source. No forecasting advantage, paper result, actual fit authority, or serving promotion follows from Python control success.
+## Development Ledger: source-bound matched342 initial pipeline, 9 November 2026
+
+Status: source written or in final static review; Julia loading, tests, experiments and resource qualification have NOT executed for this new implementation. No actual archive was exposed, no actual fit was performed, and no paper result or forecasting superiority is established.
+
+Objective: connect the existing 342-feature numerical primitives to two independently admitted delayed-source streams, complete the initial 32-fit reference producer, independently reconstruct all saved states, and publish the unchanged 22-member reference format. Preserve the previous synthetic APIs and their guards.
+
+Contract: separate L0/L1 admissions; h4/h6 training and validation masks; both completion and receipt clocks with inclusive 168-hour embargo; target increment Dst[i+h]-Dst[i-L]; training-only arithmetic means and sample standard deviations; unchanged eight settings and strict first exact RMSE minimum; persistence only for required-driver invalidity. Component completion precedes an independent audit completion; reference completion is written last. No future-output hash enters an upstream authority record.
+
+Independent oracles for 1024 hours, boundary512/end1024:
+
+| Delay | Horizon | Training issue rows | Validation issue rows | Union rows | Last fit completion/receipt hour | Last validation completion/receipt hour |
+|---|---|---|---|---|---|---|
+| 0 | 4 | 1:340 | 512:852 | 512:852 | 344/344 | 856/856 |
+| 0 | 6 | 1:338 | 512:850 | 512:852 | 344/344 | 856/856 |
+| 1 | 4 | 2:339 | 512:851 | 512:851 | 343/344 | 855/856 |
+| 1 | 6 | 2:337 | 512:849 | 512:851 | 343/344 | 855/856 |
+
+`test/matched_initial342` checks these literal intervals and clocks, h4-only tails, source/type separation, detached projections, cache mutation detection and training-only encoder invariance. Four nonlinear cell comparisons use the unchanged `fit_synthetic_cell` numerical entry, including native, immutable snapshot, saved encoder/model and scalar replay. Complete nonlinear and flat initial32 fixtures check routing, exact ties, tampered files, independent audit restart and reference publication. The new suite plans 72 generated native fits; this is a test workload declaration, not an execution count.
+
+The full-shape resource generator and specification are separate from the small fixtures. They declare 500000 generated hourly rows, 17 finite channels and the 1976/2020/2023 calendar, with variable increments. Generator SHA256 f2442be1be3d601841652a466b42f57451e03e8fe362e6a8f35ae23f25ddd149; specification SHA256 c7eb79911b73819d1e8080de2741d8297b54924a0bd7b60ff066ea9354195f0e. Static independent review reconciled specification clocks, ID and generator bytes. This does not prove native execution, 32 genuine nontrivial models, resource use or successful profiling.
+
+Resource qualification must retain genuine native owner receipts and measure the Julia child's process-lifetime peak RSS, whole-scope GC-managed cumulative allocation, elapsed time and descriptor/handle counts. These are different quantities. Preserve prelaunch 8GiB available physical memory, 16GiB disk and existing deadlines; peak RSS remains at most8GiB. Missing evidence rejects actual authority. A source-only change cannot authorize an actual fit.
+
+Confirmed review finding: the shared fit helper initially rejected missing actual authority only after reaching the native fit. The implementation author moved mode/authority/ordered-attempt checks before native work; independent reinspection and execution remain required. Test review also corrected two typed-keyword exception expectations from MethodError to TypeError, without changing production behavior or tolerances.
+
+A separate confirmed deployment failure showed four missing load-time source-identity files in the monitor image. The Dockerfile now explicitly copies the three research process-owner files and tools/run_canonical_harness.py before precompilation. Existing deployment tests retain the positive closure gate and add operand-removal, omission, late-copy and comment mutations. The original CI failure and candidate bytes remain preserved; a new native image build is still required.
+
+Verification gates pending: Julia parse/load; the narrow new suite; unfiltered Pkg.test(); complete examples/experiments.jl; the deterministic development harness; both runtimes on all three operating systems, strict documentation, containers and original full-scale checks; measured full-shape32 qualification; actual-data baseline production and independent audit; downstream experimental and manuscript regeneration. Local Julia launch is currently withheld because available physical memory is below the established8GiB admission floor. No gate, tolerance, baseline or venue requirement is relaxed.
+
+### Current owner integration and lifecycle engineering checks
+
+The matched342 branch now binds the reviewed current process owners throughout
+its producer, independent auditor, profiling launcher and generated-test source
+projection. The port preserves the numerical bodies, original component names,
+historical authority, and frozen fixtures. The missing independent Darwin test
+observer is included. V3 regressions and the separate profile contract oracles
+are registered, while both original and isolated development CI require the
+owner contract and lifecycle controls before package/harness acceptance.
+
+The current wrapper passed the existing eleven engineering controls on Windows.
+Its separate lifecycle file passed three methods, eleven simulated controls and
+two real Windows process cases with independent reconciliation. Exception cases
+retain observed handle termination without inventing a returned native receipt
+or an independently observed Job closure. The native three POSIX lifecycle cases
+remain unexecuted. The wrapper now unwinds on SIGTERM, suppresses repeat TERM
+during cleanup and restores the prior handler; the full32 parent has post-wait
+and post-output deadline checks and allows the existing cleanup to finish before
+bounded hard escalation. Numerical/resource/permission/schema gates are intact.
+
+Separate native V3 CI for the earlier d070 candidate passed Linux and Windows;
+macOS completed its85 simulated controls then failed identity reacquisition
+before any native case. Its actual failing field is still under investigation.
+That run does not qualify this changed combined source. Julia tests, complete
+experiments, full-source/platform qualification, full-size32 resource evidence,
+actual baseline production and scientific superiority remain pending.

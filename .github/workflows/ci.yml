@@ -122,8 +122,38 @@ jobs:
           name: completed-ridge-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/solarsindy-r1-native-*
           if-no-files-found: ignore
+      - name: Verify matched342 owner contract engineering controls
+        run: python -I -B -X utf8 test/matched_initial342/profile_owner_tests.py --output-directory "$RUNNER_TEMP/matched342-owner-contracts"
+      - name: Verify matched342 owner lifecycle engineering controls
+        run: python -I -B -X utf8 test/matched_initial342/test_native_owner_lifecycle.py --output-directory "$RUNNER_TEMP/matched342-owner-lifecycle"
+      - name: Record the deliberate owner artifact omission and byte scope
+        if: always()
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            'excluded_path=matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw' \
+            'fixture_bytes=67108865' \
+            'reason=deliberate sparse over-64MiB rejection fixture; ordinary native evidence is retained unchanged' \
+            'hardlinks=runtime-only identity assertions; artifacts retain file bytes, not native hardlink relationships' \
+            'scope=artifact exclusion pattern; fixture presence is not asserted' \
+            > "$RUNNER_TEMP/matched342-owner-ARTIFACT_NOTES.txt"
+      - name: Retain complete matched342 owner engineering evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matched342-owner-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/matched342-owner-contracts
+            ${{ runner.temp }}/matched342-owner-lifecycle
+            ${{ runner.temp }}/matched342-owner-ARTIFACT_NOTES.txt
+            !${{ runner.temp }}/matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 6
       # The suite reports which local-artifact oracles are unavailable in a clean clone.
       - uses: julia-actions/julia-runtest@v1
+        env:
+          JULIA_NUM_THREADS: '1'
       - name: Run the research experiments
         run: julia --startup-file=no --project=. examples/experiments.jl
       - name: Retain full package support failure evidence
@@ -134,6 +164,8 @@ jobs:
           path: |
             ${{ runner.temp }}/solarsindy-r1-support-log-*
             ${{ runner.temp }}/solarsindy-separate-evaluation-*
+            ${{ runner.temp }}/matched342-*
+            !${{ runner.temp }}/matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw
           if-no-files-found: ignore
 
   canonical-harness:
@@ -160,6 +192,34 @@ jobs:
           python -B test/completed_refit_artifacts/test_canonical_harness_artifact.py
       - name: Instantiate the committed environment
         run: julia --startup-file=no --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.instantiate()'
+      - name: Verify matched342 owner contract engineering controls
+        run: python -I -B -X utf8 test/matched_initial342/profile_owner_tests.py --output-directory "$RUNNER_TEMP/matched342-owner-contracts"
+      - name: Verify matched342 owner lifecycle engineering controls
+        run: python -I -B -X utf8 test/matched_initial342/test_native_owner_lifecycle.py --output-directory "$RUNNER_TEMP/matched342-owner-lifecycle"
+      - name: Record the deliberate owner artifact omission and byte scope
+        if: always()
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            'excluded_path=matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw' \
+            'fixture_bytes=67108865' \
+            'reason=deliberate sparse over-64MiB rejection fixture; ordinary native evidence is retained unchanged' \
+            'hardlinks=runtime-only identity assertions; artifacts retain file bytes, not native hardlink relationships' \
+            'scope=artifact exclusion pattern; fixture presence is not asserted' \
+            > "$RUNNER_TEMP/matched342-owner-ARTIFACT_NOTES.txt"
+      - name: Retain complete matched342 owner engineering evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matched342-owner-canonical-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/matched342-owner-contracts
+            ${{ runner.temp }}/matched342-owner-lifecycle
+            ${{ runner.temp }}/matched342-owner-ARTIFACT_NOTES.txt
+            !${{ runner.temp }}/matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 6
       - name: Run unchanged canonical audit with full tests and experiments
         run: python -B tools/run_canonical_harness.py --evidence-dir "$RUNNER_TEMP/canonical-harness"
       - name: Retain canonical source proof and every raw verification log

@@ -13,8 +13,8 @@ ORIGINAL=ROOT/'test/selected_point_bindings/full_codec_oracles.json'
 PINS={
  'test/candidate_campaign/test_campaign.py':'e4399df43a566f80423553316beee9a9fbdf441e614d7eb20197d1d672f0449a',
  'examples/candidate_campaign_plan_synthetic.py':'06d7528ee3c7c85187ff599492ae027e6dcb2b4afc7b2c7dfafe276a0610b3c7',
- 'research/dbdt_completed_source/candidate_native_owner.py':'ccbf1cbd0709e50d0b5080bdbe4977ae80ebd1649237e016588d24800ddf2e21',
- 'research/dbdt_completed_source/native_stage.py':'15d2644ae5eb2e87ce31c9913f103f9fa7e940b67403b94f29ef2ed5a4d175b8',
+ 'research/dbdt_completed_source/candidate_native_owner.py':'3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1',
+ 'research/dbdt_completed_source/native_stage.py':'8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836',
  'research/dbdt_completed_source/run_candidate_campaign.py':'9993b20e1a3dd9c2f7232e4c2e44bd281ad1953072c869e3815ed3f2ad58f2da',
  'research/dbdt_completed_source/run_candidate_descriptor_preview.jl':'6c10f28c46d3040f2e37afff6a67a346430388451c288148cfe8a0f7cdc10909',
  'research/dbdt_completed_source/candidate_descriptor_metadata.jl':'87d7c4561336badb780c5f6e83d111e358d88a557730d116d11f3ec8bcd72f39',

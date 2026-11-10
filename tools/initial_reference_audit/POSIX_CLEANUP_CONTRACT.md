@@ -48,3 +48,49 @@ https://raw.githubusercontent.com/apple-oss-distributions/xnu/main/bsd/kern/kern
 This supports the redundant-cleanup mechanism. Hypothesis: the failed runner
 had only zombie members at its second call. Its kernel process state was not
 retained; that precise postmortem state is not a verified claim.
+
+## Current V3 ownership scope
+
+The sections above retain the historical V2 control contract. V3 corrects two
+additional behaviors observed in the native Intel Darwin25.6 diagnostic: an
+unreaped zombie-only leader group can yield EPERM, and WEXITED can return a
+CLD_STOPPED notification. A live member in another process group of the same
+private session also survives a signal addressed only to the leader group.
+Those observations do not establish the precise process state of older CI runs.
+
+V3 ends its observation phase only for the owned child's CLD_EXITED,
+CLD_KILLED or CLD_DUMPED event. Darwin stop notifications are consumed with the
+stop-only WSTOPPED|WNOHANG call before returning to terminal WNOWAIT observation,
+following [CPython3.14.10's child watcher](https://github.com/python/cpython/blob/v3.14.10/Lib/asyncio/unix_events.py#L868-L884).
+Consuming a stop notification is distinct from terminal-child reaping. A
+persistent stop still reaches the original finite stage deadline; production
+does not send an implicit CONT signal.
+
+At most one SIGKILL addresses the original private group while its leader's
+native identity remains held. EPERM is accepted only with calibrated native
+proof that this held leader and its group have no live signalable members.
+Permission errors with a live member, changed identity or unknown evidence
+remain failures. ESRCH and a successful group signal also require independent
+whole-session evidence; neither proves session closure on its own.
+
+Positive cleanup requires a native zero-live-member census of the complete
+private SID before the first terminal wait. Failed or racy censuses are unknown,
+never zero. Other groups in that SID are observed without signaling borrowed
+PIDs or PGIDs. Their natural exit may complete cleanup within the single
+20-second cleanup allowance shared by censuses and terminal waiting. A member
+that persists past that allowance causes an unclosed failure. Cleanup elapsed
+still counts against the original stage deadline, including when the leader's
+actual exit code is zero. The current POSIX cleanup tuple is exactly
+`start_new_session=True` with
+`owned POSIX session has no live members after stage`; current source pins and
+runtime validators bind this tuple together. Historical tuples are not
+silently relabeled as V3 evidence.
+
+The required [independent V3 controls](../../test/posix_owner_v3/) cover the
+three current public owners, native exit/descendant/stop transitions, temporary
+STOP followed by externally controlled CONT, late and unknown cleanup, real and
+effective UID evidence, and the one shared cleanup deadline. Frozen V2 spies
+remain historical checks and cannot substitute for V3 qualification. Windows'
+native Job implementation remains byte-identical. Individual descendant OS
+reaping remains unobserved; Julia, archive and scientific qualification remain
+separate requirements.
