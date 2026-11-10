@@ -1,6 +1,6 @@
 """Fixed, finite observation launcher; never issues an ownership qualification.
 
-The pinned production candidate owner is exercised unchanged. Its exception,
+The pinned historical V2 candidate owner is exercised unchanged. Its exception,
 including Darwin EPERM, remains a failure even when the diagnostic child exited
 normally. The native direct-child wait is recorded separately from group/session
 closure, which this launcher does not establish.
@@ -14,6 +14,7 @@ import platform
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -27,11 +28,33 @@ CHILD_SECONDS = 150.
 RAW_CAP = 4 * 1024**2
 MIN_RAM = 512 * 1024**2
 MIN_DISK = 8 * 1024**3
+SOURCE_CAP = 64 * 1024
 
 
 def pin(path):
     with Path(path).open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def source_bytes(path):
+    for item in (path, *path.parents):
+        info = item.lstat()
+        if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_file_attributes', 0) & 0x400:
+            raise RuntimeError('historical source link/reparse component refused')
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= SOURCE_CAP:
+        raise RuntimeError('historical source ordinary-file/byte bound')
+    with path.open('rb') as stream:
+        body = stream.read(SOURCE_CAP + 1)
+    after = path.lstat()
+    fields = ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns')
+    if len(body) != before.st_size or any(getattr(before, key) != getattr(after, key) for key in fields):
+        raise RuntimeError('historical source changed during bounded read')
+    return body
+
+
+def source_pin(path):
+    return hashlib.sha256(source_bytes(path)).hexdigest()
 
 
 def write_new(path, value):
@@ -75,14 +98,19 @@ def main():
         raise RuntimeError('fixed diagnostic evidence must be outside the checkout')
     output = parent / 'solarsindy-darwin-owner-diagnostic-v2'
     output.mkdir()  # A prior attempt is preserved; no overwrite or retry.
+    frozen = checkout/'test/posix_owner_v3/frozen'
+    mirror = output/'historical-checkout'
+    observation_parent = output/'observations'
     paths = {
-        'candidate_owner': checkout/'research/dbdt_completed_source/candidate_native_owner.py',
-        'legacy_owner': checkout/'research/dbdt_completed_source/native_stage.py',
-        'audit_owner': checkout/'tools/initial_reference_audit/owned_process.py',
+        'candidate_owner': frozen/'candidate_native_owner.py',
+        'legacy_owner': frozen/'native_stage.py',
+        'audit_owner': mirror/'tools/initial_reference_audit/owned_process.py',
+        'historical_stage_owner': mirror/'research/dbdt_completed_source/native_stage.py',
         'diagnostic': Path(__file__).with_name('diagnose_darwin_groups.py'),
     }
     expected = {'candidate_owner': OWNER_SHA, 'legacy_owner': LEGACY_SHA,
-                'audit_owner': LEGACY_SHA, 'diagnostic': DIAGNOSTIC_SHA}
+                'audit_owner': LEGACY_SHA, 'historical_stage_owner': LEGACY_SHA,
+                'diagnostic': DIAGNOSTIC_SHA}
     before = {}
     outcome = owner_error = launch_error = post_error = None
     launched = False
@@ -100,9 +128,9 @@ def main():
             raise RuntimeError('Darwin diagnostic requires its native macOS runner')
         if sys.version_info[:3] != (3, 14, 10):
             raise RuntimeError('diagnostic requires exact Python 3.14.10')
-        before = {key: pin(path) for key, path in paths.items()}
-        if before != expected:
-            raise RuntimeError('fixed diagnostic/production owner pins differ')
+        inputs = ('candidate_owner', 'legacy_owner', 'diagnostic')
+        if {key: source_pin(paths[key]) for key in inputs} != {key: expected[key] for key in inputs}:
+            raise RuntimeError('fixed diagnostic/historical owner pins differ')
         memory = physical_available()
         disk = shutil.disk_usage(output).free
         admission = dict(available_physical_bytes=memory, free_disk_bytes=disk,
@@ -111,6 +139,23 @@ def main():
         write_new(output/'ADMISSION.json', admission)
         if memory < MIN_RAM or disk < MIN_DISK:
             raise RuntimeError('physical RAM/disk admission failed before Python child')
+        mirror.mkdir()
+        observation_parent.mkdir()
+        legacy_body = source_bytes(paths['legacy_owner'])
+        if hashlib.sha256(legacy_body).hexdigest() != LEGACY_SHA:
+            raise RuntimeError('historical mirror input changed')
+        for key in ('audit_owner', 'historical_stage_owner'):
+            target = paths[key]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open('xb') as stream:
+                if stream.write(legacy_body) != len(legacy_body):
+                    raise RuntimeError('historical mirror short write')
+                stream.flush()
+                os.fsync(stream.fileno())
+            target.chmod(0o444)
+        before = {key: source_pin(path) for key, path in paths.items()}
+        if before != expected:
+            raise RuntimeError('historical source/mirror pins differ before launch')
         if time.monotonic() - started >= 10:
             raise RuntimeError('prelaunch reserve exhausted')
         spec = importlib.util.spec_from_file_location('observed_fixed_candidate_owner', paths['candidate_owner'])
@@ -221,7 +266,7 @@ def main():
                 group['signal_returned'] = True
 
         owner.subprocess, owner.os = ObservedSubprocess, ObservedOS()
-        environment = dict(os.environ, RUNNER_TEMP=str(output),
+        environment = dict(os.environ, RUNNER_TEMP=str(observation_parent),
                            PYTHONDONTWRITEBYTECODE='1', PYTHONUTF8='1')
 
         def on_launch(pid):
@@ -232,7 +277,7 @@ def main():
 
         try:
             outcome = owner.run_owned(
-                [sys.executable, '-B', '-X', 'utf8', str(paths['diagnostic']), '--checkout', str(checkout)],
+                [sys.executable, '-B', '-X', 'utf8', str(paths['diagnostic']), '--checkout', str(mirror)],
                 cwd=str(output), environment=environment, logpath=output/'native.log',
                 timeout=CHILD_SECONDS, on_launch=on_launch)
         except BaseException as error:
@@ -241,9 +286,11 @@ def main():
         launch_error = failure(error)
     after = {}
     try:
-        after = {key: pin(path) for key, path in paths.items()}
+        after = {key: source_pin(path) for key, path in paths.items()}
         if before != expected or after != expected:
             raise RuntimeError('source pre/post pins not identical to fixed expected values')
+        if any(paths[key].stat().st_mode & 0o222 for key in ('audit_owner', 'historical_stage_owner')):
+            raise RuntimeError('historical mirror is no longer read-only')
         if any(reader.is_alive() for reader in reader_holder):
             raise RuntimeError('raw capture thread unresolved; capture cannot be accepted')
     except BaseException as error:
@@ -253,7 +300,7 @@ def main():
         path=str(raw), bytes=raw.stat().st_size, sha256=pin(raw))
     capture_snapshot = (dict(capture) if not any(reader.is_alive() for reader in reader_holder)
                         else dict(thread_joined=False, mutable_capture_state_accepted=False))
-    observations = list(output.glob('solarsindy-darwin-owner-diag-*/OBSERVATIONS.json'))
+    observations = list(observation_parent.glob('solarsindy-darwin-owner-diag-*/OBSERVATIONS.json'))
     observation_refs = [dict(path=str(path), bytes=path.stat().st_size, sha256=pin(path)) for path in observations]
     python_sha = pin(sys.executable)
     actor_sha = pin(__file__)
@@ -271,6 +318,7 @@ def main():
               len(observations) == 1 and elapsed < OUTER_SECONDS and
               outcome is not None and outcome.get('timed_out') is False)
     terminal = dict(schema='darwin_owner_diagnostic_native_observer_v2',
+                    subject_kind='historical_v2_only', current_owner_exercised=False,
                     observation_launcher_passed=passed, native=native, capture=capture_snapshot,
                     owner_returned_claims_unqualified=outcome, owner_exception=owner_error,
                     launcher_exception=launch_error, postcheck_exception=post_error,

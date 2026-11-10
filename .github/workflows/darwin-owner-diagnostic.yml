@@ -1,4 +1,4 @@
-name: Darwin owner observation diagnostic
+name: Historical Darwin V2 owner observation diagnostic
 
 on:
   workflow_dispatch:
@@ -25,7 +25,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14.10'
-      - name: Observe pinned owner without changing cleanup semantics
+      - name: Observe frozen historical V2 helpers without changing cleanup semantics
         env:
           PYTHONDONTWRITEBYTECODE: '1'
           PYTHONUTF8: '1'
