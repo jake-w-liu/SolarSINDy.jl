@@ -5,6 +5,8 @@ import copy, hashlib, importlib.util, json, tempfile, unittest
 ROOT=Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('full_scale_contracts',ROOT/'tools/run_full_scale_generated.py')
 H=importlib.util.module_from_spec(spec);spec.loader.exec_module(H)
+workflow_spec=importlib.util.spec_from_file_location('workflow_setup_contract',ROOT/'tools/workflow_setup_contract.py')
+W=importlib.util.module_from_spec(workflow_spec);workflow_spec.loader.exec_module(W)
 
 def literal_report(runtime='1.12.6',role='primary',layout='ground-only'):
     tables=[]
@@ -146,7 +148,7 @@ class FullScaleContractTests(unittest.TestCase):
             self.assertEqual(len(sections),len(jobs))
             self.assertIn('test',sections);self.assertIn('canonical-harness',sections)
             scopes={'matrix':sections['test'],'canonical':sections['canonical-harness']}
-            restored=candidate
+            restored=W.normalize_precompile_setup_extension(candidate)
             for extension in extensions:
                 self.assertEqual(set(extension),{'name','scope','anchor_before','anchor_after','replacements'})
                 self.assertIn(extension['scope'],scopes)
@@ -266,6 +268,117 @@ class FullScaleContractTests(unittest.TestCase):
         self.assertEqual(workflow.count(b'\n  full-scale-agreement:'),1)
         self.assertIn(b'needs: full-scale-generated',workflow)
         self.assertNotIn(b'continue-on-error:',workflow)
+
+    def test_precompile_setup_extension_exact_output_and_frozen_oracles(self):
+        oracle_path=ROOT/'test/completed_refit_artifacts/precompile_setup_normalization_oracles_v1.json'
+        oracle_bytes=oracle_path.read_bytes()
+        self.assertLessEqual(len(oracle_bytes),65536)
+        self.assertEqual(hashlib.sha256(oracle_bytes).hexdigest(),
+                         '4479e6bc4a3ae1f323f6a7a0cd12af16dc98ca2e4437c344287fd716031b59f4')
+        oracle=json.loads(oracle_bytes)
+        self.assertEqual(oracle['schema'],'precompile_setup_normalization_independent_oracles_v1')
+        workflow=(ROOT/'.github/workflows/ci.yml').read_bytes()
+        current=oracle['current_step'].encode('utf-8')
+        original=oracle['original_step'].encode('utf-8')
+        before=oracle['anchor_before'].encode('utf-8')
+        after=oracle['anchor_after'].encode('utf-8')
+        self.assertEqual(workflow.count(current),1)
+        self.assertEqual(workflow.count(before+current+after),1)
+        self.assertEqual(workflow.count(b'JULIA_NUM_PRECOMPILE_TASKS'),1)
+        expected=workflow.replace(current,original,1)
+        actual=W.normalize_precompile_setup_extension(workflow)
+        self.assertIs(type(actual),bytes)
+        self.assertEqual(actual,expected)
+        self.assertEqual(len(workflow)-len(actual),
+                         len(b"        env:\n          JULIA_NUM_PRECOMPILE_TASKS: '1'\n"))
+        self.assertEqual(actual.count(b'JULIA_NUM_PRECOMPILE_TASKS'),0)
+        fixture_path=ROOT/'test/completed_refit_artifacts/workflow_extensions_v1.json'
+        fixture_bytes=fixture_path.read_bytes()
+        self.assertEqual(hashlib.sha256(fixture_bytes).hexdigest(),
+                         '98c32c023ab746fb666bdab99b2204f60f1f9396371af539bd250a0ac4a56bac')
+        fixture=json.loads(fixture_bytes)
+        self.assertEqual(len(fixture['extensions']),6)
+        self.assertEqual(sum(len(item['replacements']) for item in fixture['extensions']),7)
+        restored=actual
+        for extension in fixture['extensions']:
+            for replacement in extension['replacements']:
+                current_extension=replacement['current'].encode('utf-8')
+                self.assertEqual(restored.count(current_extension),1)
+                restored=restored.replace(current_extension,replacement['original'].encode('utf-8'),1)
+        self.assertEqual(hashlib.sha256(restored).hexdigest(),
+                         'ae8c23a3faad1a0071c8ef4fe75c9ef364f1bde62095cf2590a689471410a680')
+        self.assertEqual(hashlib.sha256(restored.split(b'\n  full-scale-generated:',1)[0]).hexdigest(),
+                         'dc262831827339c1eff92ff07d1e16f1942dfb4b53659dbba1a6f117d9312768')
+
+    def test_precompile_setup_extension_corruption_and_type_rejection(self):
+        oracle_path=ROOT/'test/completed_refit_artifacts/precompile_setup_normalization_oracles_v1.json'
+        oracle_bytes=oracle_path.read_bytes()
+        self.assertLessEqual(len(oracle_bytes),65536)
+        self.assertEqual(hashlib.sha256(oracle_bytes).hexdigest(),
+                         '4479e6bc4a3ae1f323f6a7a0cd12af16dc98ca2e4437c344287fd716031b59f4')
+        oracle=json.loads(oracle_bytes)
+        workflow=(ROOT/'.github/workflows/ci.yml').read_bytes()
+        current=oracle['current_step'].encode('utf-8')
+        original=oracle['original_step'].encode('utf-8')
+        before=oracle['anchor_before'].encode('utf-8')
+        after=oracle['anchor_after'].encode('utf-8')
+        cap=b"        env:\n          JULIA_NUM_PRECOMPILE_TASKS: '1'\n"
+        self.assertEqual(current.count(cap),1)
+        self.assertEqual(workflow.count(current),1)
+        self.assertEqual(workflow.count(before+current+after),1)
+        def replace_step(value):
+            self.assertNotEqual(value,current)
+            return workflow.replace(current,value,1)
+        without=workflow.replace(current,b'',1)
+        harness_marker=b'\n  canonical-harness:\n'
+        self.assertEqual(without.count(harness_marker),1)
+        test_part,harness_and_later=without.split(harness_marker,1)
+        next_job=b'\n  docs:\n'
+        self.assertEqual(harness_and_later.count(next_job),1)
+        harness_part,later_jobs=harness_and_later.split(next_job,1)
+        checkout=b'      - uses: actions/checkout@v4\n'
+        self.assertEqual(harness_part.count(checkout),1)
+        moved_canonical=(test_part+harness_marker+
+            harness_part.replace(checkout,checkout+current,1)+next_job+later_jobs)
+        cold_name=b'      - name: Verify cold ordinary duration API\n'
+        cold_step=(cold_name+b'        timeout-minutes: 10\n'
+                   b'        run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/duration_forcing/cold_public_api.jl\n')
+        self.assertEqual(without.count(cold_step),1)
+        self.assertEqual(without.count(cold_name),1)
+        job_header=b'\n  test:\n'
+        self.assertEqual(workflow.count(job_header),1)
+        mutations={
+            'N01 missing cap':replace_step(original),
+            'N02 duplicate step':workflow.replace(current,current+current,1),
+            'N03 value zero':replace_step(current.replace(b"JULIA_NUM_PRECOMPILE_TASKS: '1'",b"JULIA_NUM_PRECOMPILE_TASKS: '0'",1)),
+            'N04 value two':replace_step(current.replace(b"JULIA_NUM_PRECOMPILE_TASKS: '1'",b"JULIA_NUM_PRECOMPILE_TASKS: '2'",1)),
+            'N05 boolean value':replace_step(current.replace(b"JULIA_NUM_PRECOMPILE_TASKS: '1'",b'JULIA_NUM_PRECOMPILE_TASKS: True',1)),
+            'N06 empty value':replace_step(current.replace(b"JULIA_NUM_PRECOMPILE_TASKS: '1'",b"JULIA_NUM_PRECOMPILE_TASKS: ''",1)),
+            'N07 unquoted value':replace_step(current.replace(b"JULIA_NUM_PRECOMPILE_TASKS: '1'",b'JULIA_NUM_PRECOMPILE_TASKS: 1',1)),
+            'N08 wrong variable':replace_step(current.replace(b"JULIA_NUM_PRECOMPILE_TASKS: '1'",b"JULIA_PKG_PRECOMPILE_AUTO: '0'",1)),
+            'N09 extra env':replace_step(current.replace(cap,cap+b"          OPENBLAS_NUM_THREADS: '1'\n",1)),
+            'N10 wrong step name':replace_step(current.replace(b'Resolve the package environment',b'Resolve another package environment',1)),
+            'N11 changed command':replace_step(current.replace(b'Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate()',b'Pkg.Registry.add("General"); Pkg.resolve(); Pkg.status()',1)),
+            'N12 changed comment':replace_step(current.replace(b'# resolve() does not bootstrap registries in a fresh Julia depot.',b'# resolve() has different behavior.',1)),
+            'N13 canonical scope':moved_canonical,
+            'N14 job env scope':workflow.replace(current,original,1).replace(job_header,
+                job_header+b"    env:\n      JULIA_NUM_PRECOMPILE_TASKS: '1'\n",1),
+            'N15 after consumer':without.replace(cold_step,cold_step+current,1),
+            'N16 before consumer wrong position':without.replace(cold_name,current+cold_name,1),
+            'N17 changed preceding anchor':workflow.replace(before,before.replace(b'frontend_freshness.cjs',b'other.cjs'),1),
+            'N18 changed following anchor':workflow.replace(after,after.replace(b'no generated study output',b'generated study output'),1),
+            'N19 extra global token':workflow+b"\n# JULIA_NUM_PRECOMPILE_TASKS\n",
+            'N20 duplicate test job':workflow.replace(job_header,job_header+b'    steps: []\n'+job_header,1),
+            'N20 absent test job':workflow.replace(job_header,b'\n  other-test:\n',1),
+        }
+        self.assertEqual(len(mutations),21)
+        for name,candidate in mutations.items():
+            with self.subTest(precompile_extension_corruption=name):
+                self.assertNotEqual(candidate,workflow)
+                with self.assertRaises(ValueError):W.normalize_precompile_setup_extension(candidate)
+        for candidate in (workflow.decode('utf-8'),bytearray(workflow),memoryview(workflow),None,True,1):
+            with self.subTest(precompile_extension_type=type(candidate).__name__):
+                with self.assertRaises(TypeError):W.normalize_precompile_setup_extension(candidate)
 
     def test_maximum_primitive_wrong_rows_rejected_before_chunks(self):
         reader=H.module(ROOT/'tools/point_input_export/resource_values.py','primitive_contract_controls')

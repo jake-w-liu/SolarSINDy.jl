@@ -1,0 +1,196 @@
+{
+    "schema":  "precompile_setup_normalization_independent_oracles_v1",
+    "phase":  "precode",
+    "helper_read":  false,
+    "helper_implemented":  false,
+    "api":  "tools/workflow_setup_contract.py normalize_precompile_setup_extension(workflow: bytes) -\u003e bytes",
+    "input_policy":  "Current cohort requires exactly one approved cap extension in test job with exact anchors; no legacy pass-through",
+    "current_step":  "      - name: Resolve the package environment\n        env:\n          JULIA_NUM_PRECOMPILE_TASKS: \u00271\u0027\n        # resolve() does not bootstrap registries in a fresh Julia depot.\n        run: julia --project=. -e \u0027using Pkg; Pkg.Registry.add(\"General\"); Pkg.resolve(); Pkg.instantiate()\u0027\n",
+    "original_step":  "      - name: Resolve the package environment\n        # resolve() does not bootstrap registries in a fresh Julia depot.\n        run: julia --project=. -e \u0027using Pkg; Pkg.Registry.add(\"General\"); Pkg.resolve(); Pkg.instantiate()\u0027\n",
+    "anchor_before":  "      - name: Verify the dashboard frontend directly\n        run: node --test --test-reporter=tap app/test/frontend_freshness.cjs\n",
+    "anchor_after":  "      - name: Confirm the checkout carries no generated study output\n",
+    "required_global_token":  "JULIA_NUM_PRECOMPILE_TASKS",
+    "required_value":  "\u00271\u0027",
+    "frozen_fixture_sha256":  "98c32c023ab746fb666bdab99b2204f60f1f9396371af539bd250a0ac4a56bac",
+    "frozen_whole_sha256":  "ae8c23a3faad1a0071c8ef4fe75c9ef364f1bde62095cf2590a689471410a680",
+    "frozen_prefix_sha256":  "dc262831827339c1eff92ff07d1e16f1942dfb4b53659dbba1a6f117d9312768",
+    "old_assertions_and_mutations":  "Byte-exact preservation except one restored=normalizer(candidate) integration line plus import/additive method",
+    "cases":  [
+                  {
+                      "id":  "P01",
+                      "layer":  "normalizer",
+                      "case":  "Exact current one approved step in test job with exact adjacent anchors",
+                      "expected":  "bytes equal exact two-env-line removal; no other byte changes"
+                  },
+                  {
+                      "id":  "P02",
+                      "layer":  "frozen_checker",
+                      "case":  "New normalization then unchanged six extensions/seven reverse replacements",
+                      "expected":  "old whole ae8c23... and old prefix dc262... both exactly restored"
+                  },
+                  {
+                      "id":  "N01",
+                      "layer":  "normalizer",
+                      "case":  "No resource-cap env extension (old step input)",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N02",
+                      "layer":  "normalizer",
+                      "case":  "Duplicate full approved step globally/in matrix",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N03",
+                      "layer":  "normalizer",
+                      "case":  "Task value 0",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N04",
+                      "layer":  "normalizer",
+                      "case":  "Task value 2",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N05",
+                      "layer":  "normalizer",
+                      "case":  "Task value YAML True",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N06",
+                      "layer":  "normalizer",
+                      "case":  "Task value empty quoted string",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N07",
+                      "layer":  "normalizer",
+                      "case":  "Task value unquoted 1",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N08",
+                      "layer":  "normalizer",
+                      "case":  "Wrong variable JULIA_PKG_PRECOMPILE_AUTO=0",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N09",
+                      "layer":  "normalizer",
+                      "case":  "Extra env variable in step",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N10",
+                      "layer":  "normalizer",
+                      "case":  "Renamed Resolve step",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N11",
+                      "layer":  "normalizer",
+                      "case":  "Changed Pkg Registry/resolve/instantiate command",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N12",
+                      "layer":  "normalizer",
+                      "case":  "Changed unchanged resolve bootstrap comment",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N13",
+                      "layer":  "normalizer",
+                      "case":  "Approved step moved from test to canonical-harness job",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N14",
+                      "layer":  "normalizer",
+                      "case":  "Resource variable moved to job env",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N15",
+                      "layer":  "normalizer",
+                      "case":  "Step moved after cold API consumer",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N16",
+                      "layer":  "normalizer",
+                      "case":  "Step moved immediately before cold API consumer (still before it, wrong adjacent anchors)",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N17",
+                      "layer":  "normalizer",
+                      "case":  "Changed or removed preceding frontend anchor",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N18",
+                      "layer":  "normalizer",
+                      "case":  "Changed or removed following clean-checkout anchor",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N19",
+                      "layer":  "normalizer",
+                      "case":  "Duplicate resource variable token elsewhere globally",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N20",
+                      "layer":  "normalizer",
+                      "case":  "Duplicate test job or no test job",
+                      "expected":  "ValueError"
+                  },
+                  {
+                      "id":  "N21",
+                      "layer":  "normalizer",
+                      "case":  "Nonbytes inputs str, bytearray, memoryview, None, True, int",
+                      "expected":  "TypeError"
+                  },
+                  {
+                      "id":  "N22",
+                      "layer":  "frozen_checker",
+                      "case":  "Pkg test action mutation outside approved normalization span",
+                      "expected":  "unchanged frozen whole/prefix checker rejects"
+                  },
+                  {
+                      "id":  "N23",
+                      "layer":  "frozen_checker",
+                      "case":  "Complete experiments changed to incomplete entry",
+                      "expected":  "unchanged frozen whole/prefix checker rejects"
+                  },
+                  {
+                      "id":  "N24",
+                      "layer":  "frozen_checker",
+                      "case":  "Full-scale workload command changed to preview",
+                      "expected":  "unchanged frozen whole checker rejects"
+                  },
+                  {
+                      "id":  "N25",
+                      "layer":  "frozen_checker",
+                      "case":  "Full-scale role grid reduced",
+                      "expected":  "unchanged frozen whole checker rejects"
+                  },
+                  {
+                      "id":  "N26",
+                      "layer":  "frozen_checker",
+                      "case":  "Disabled full-scale or agreement job",
+                      "expected":  "unchanged frozen whole checker rejects"
+                  },
+                  {
+                      "id":  "N27",
+                      "layer":  "frozen_checker",
+                      "case":  "Raw retention if always changed to success",
+                      "expected":  "unchanged frozen whole checker rejects"
+                  }
+              ],
+    "test_execution":  false,
+    "scientific_qualified":  false
+}

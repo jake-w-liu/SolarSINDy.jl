@@ -37,6 +37,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Admit native memory and disk before any Julia launch
         run: bash test/syntax_audit/preflight.sh "$RUNNER_TEMP/julia-source-syntax-${{ matrix.julia-version }}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify full-size workflow contracts before Julia setup
+        run: python -B test/completed_refit_artifacts/test_full_scale_generated.py
       - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.julia-version }}
