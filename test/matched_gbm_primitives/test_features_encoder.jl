@@ -89,6 +89,27 @@ function run_tests()
         input=M.HourlyInputs342(tags,bad;source_sha256=repeat("f",64))
         @test_throws ArgumentError M.build_features(input,DateTime[T0+Hour(100)])
     end
+    @testset "Matched342 empty and repeated issues and missing encoder inputs" begin
+        tags, values = raw_constant(100)
+        input = M.HourlyInputs342(tags, values; delay_hours=0, source_sha256=repeat("a",64))
+        issue = T0 + Hour(100)
+        @test_throws ArgumentError M.build_features(input, DateTime[])
+        single = M.build_features(input, [issue])
+        repeated = M.build_features(input, [issue, issue])
+        @test size(single.matrix) == (1,342)
+        @test size(repeated.matrix) == (2,342)
+        @test reinterpret(UInt64,vec(repeated.matrix[1:1,:])) == reinterpret(UInt64,vec(single.matrix))
+        @test reinterpret(UInt64,vec(repeated.matrix[2:2,:])) == reinterpret(UInt64,vec(single.matrix))
+        missing_input = M.HourlyInputs342(tags, fill(NaN,17,100); delay_hours=0, source_sha256=repeat("b",64))
+        allmissing = M.build_features(missing_input, [issue, issue])
+        for rows in ([1],[1,2])
+            encoder = M.fit_encoder(allmissing.matrix, rows)
+            @test collect(encoder.finite_counts) == zeros(Int,165)
+            @test reinterpret(UInt64,collect(encoder.imputation)) == zeros(UInt64,165)
+            @test collect(encoder.scale) == ones(342)
+            @test all(isfinite,M.transform(encoder,allmissing.matrix))
+        end
+    end
     @testset "Matched342 training-only encoder binary characterization" begin
         data=read_fixture("boundary_inputs_v1.json");binary=read_fixture("binary_clock_v1.json")["binary_scaler"]
         X=matrix_of(data["scaler_primitive"]["matrix"]);encoder=M.fit_encoder(X,[1,2,3])

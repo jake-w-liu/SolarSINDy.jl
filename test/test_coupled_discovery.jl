@@ -83,15 +83,6 @@ end
     θ = evaluate_library(coupled, point)
     @test dst[2] - dst[1] == dot(θ[1, :], ξ_dst)
     @test ae[2] - ae[1] == dot(θ[1, :], ξ_ae)
-    long_swd = SolarWindData(
-        collect(0.0:999.0), fill(400.0, 1000), fill(-5.0, 1000),
-        fill(2.0, 1000), fill(5.0, 1000), fill(1.5, 1000),
-        fill(-10.0, 1000), fill(-10.0, 1000),
-    )
-    simulate_coupled(ξ_dst, ξ_ae, base, long_swd, 100.0, 1.0; dst0=-10.0)
-    @test (@allocated simulate_coupled(
-        ξ_dst, ξ_ae, base, long_swd, 100.0, 1.0; dst0=-10.0,
-    )) < 100_000
     @test_throws DimensionMismatch simulate_coupled(
         ξ_dst[1:end-1], ξ_ae, base, swd, 100.0, 1.0,
     )
@@ -130,21 +121,6 @@ end
     @test overflow_fit.ae == overflow_oracle.ae
     @test all(!iszero, overflow_fit.dst)
     @test all(!iszero, overflow_fit.ae)
-    _paired_coupled_stlsq(
-        ensemble_theta, ensemble_dst, 2 .* ensemble_dst; lambda=0.05,
-    )
-    _independent_coupled_stlsq(
-        ensemble_theta, ensemble_dst, 2 .* ensemble_dst, 0.05,
-    )
-    GC.gc()
-    shared_allocations = @allocated _paired_coupled_stlsq(
-        ensemble_theta, ensemble_dst, 2 .* ensemble_dst; lambda=0.05,
-    )
-    GC.gc()
-    independent_allocations = @allocated _independent_coupled_stlsq(
-        ensemble_theta, ensemble_dst, 2 .* ensemble_dst, 0.05,
-    )
-    @test shared_allocations < independent_allocations
     paired = _paired_coupled_ensemble(
         ensemble_design, 0.0; n_models=3, subsample_fraction=0.8, seed=7,
     )

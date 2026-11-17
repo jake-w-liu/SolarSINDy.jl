@@ -124,34 +124,6 @@ using Sockets
         @test all(isequal.(actual_y, expected_y))
     end
 
-    @testset "INGEST-01: hourly ingestion allocation scales linearly" begin
-        function dense_feed(n_hours)
-            t0 = DateTime(2026, 1, 1)
-            times = collect(t0:Minute(1):t0 + Hour(n_hours))
-            n = length(times)
-            plasma = DataFrame(time_tag=times, density=fill(5.0, n),
-                               speed=fill(400.0, n), temperature=fill(1.0e5, n))
-            mag = DataFrame(time_tag=times, bx_gsm=fill(1.0, n),
-                            by_gsm=fill(2.0, n), bz_gsm=fill(-5.0, n),
-                            bt=fill(5.5, n))
-            return plasma, mag
-        end
-
-        plasma_24, mag_24 = dense_feed(24)
-        plasma_168, mag_168 = dense_feed(168)
-        fetch_realtime_solar_wind(hours=24; plasma=plasma_24, mag=mag_24)
-        fetch_realtime_solar_wind(hours=168; plasma=plasma_168, mag=mag_168)
-        bytes_24 = @allocated fetch_realtime_solar_wind(
-            hours=24; plasma=plasma_24, mag=mag_24)
-        bytes_168 = @allocated fetch_realtime_solar_wind(
-            hours=168; plasma=plasma_168, mag=mag_168)
-
-        # Seven times the data/window should remain near-linear. The old
-        # full-feed mask per bin allocated 1,368,160 bytes for this 168 h case.
-        @test bytes_168 <= 8 * bytes_24
-        @test bytes_168 < 300_000
-    end
-
     @testset "A/D: RTSW named-key parsers retry truncated JSON, keep active source, guard schema" begin
         # Captured-sample payloads matching the live NOAA SWPC RTSW products (arrays of OBJECTS
         # with named keys). Each time_tag carries an active primary (SOLAR1) and an inactive

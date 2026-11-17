@@ -18,12 +18,6 @@ function _feed_aci!(ac::AdaptiveConformal, n::Int, offset::Int=0)
     return nothing
 end
 
-function _allocated_aci_run(n::Int)
-    points = zeros(n)
-    observations = [10sin(i) for i in 1:n]
-    return @allocated run_adaptive_conformal(points, observations; warmup=30)
-end
-
 @testset "Conformal UQ" begin
 
     @testset "super-learner A1 calibration-shadow interval" begin
@@ -308,23 +302,6 @@ end
         _feed_aci!(ac, 5_000)
         @test length(ac.history) == 500
         @test all(isfinite, ac.history)
-    end
-
-    @testset "ACI steady-state allocation stays bounded" begin
-        ac = init_adaptive_conformal(; warmup=0)
-        _feed_aci!(ac, 1_000) # compile and fill both bounded buffers
-        _feed_aci!(ac, 10, 1_000)
-        alloc_500 = @allocated _feed_aci!(ac, 500, 2_000)
-        alloc_1_000 = @allocated _feed_aci!(ac, 1_000, 3_000)
-        @test alloc_1_000 <= 65_536
-        @test alloc_1_000 <= 2alloc_500 + 65_536
-        @test length(ac.history) == 500
-        @test Base.summarysize(ac.history) + Base.summarysize(ac.scratch) < 20_000
-
-        alloc_2_000 = _allocated_aci_run(2_000)
-        alloc_4_000 = _allocated_aci_run(4_000)
-        @test alloc_2_000 <= 500_000
-        @test alloc_4_000 <= 2alloc_2_000 + 131_072
     end
 
     @testset "CF-1: conformal quantile uses finite-sample (n+1) index exactly" begin

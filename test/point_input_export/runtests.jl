@@ -30,7 +30,6 @@ const MODULE_PIN=bytes2hex(sha256(read(MODULE_PATH)))
     denied=joinpath(parent,"actual-denied")
     @test_throws ArgumentError P.export_archival(reread,1,denied;start,stop,asof)
     @test !ispath(denied)
-    @test Sys.maxrss()<=8*1024^3
 end
 println("PORTABLE_POINT_INPUT_PATH_AND_DENIALS_PASSED;ACTUAL_FITS=0;PEAK_RSS_BYTES=",Sys.maxrss())
 end

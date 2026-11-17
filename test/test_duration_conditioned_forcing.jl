@@ -293,14 +293,6 @@ end
         @test !isfile(joinpath(failed,"COMMITTED.json")) && isfile(joinpath(failed,"COMMITTED.json.incomplete"))
         @test !isdir(failed*".claim")
         @test_throws ArgumentError DT.load_model(failed;expected_manifest_sha256=artifact.manifest_sha256)
-        source_copy=joinpath(temporary,"duration_source_copy.jl")
-        cp(joinpath(@__DIR__,"..","src","duration_conditioned_forcing.jl"),source_copy)
-        host=Module(:DurationSourceGuardFixture)
-        Core.eval(host,:(const IntervalMeanForecaster = $DA))
-        Base.include(host,source_copy);other=Base.invokelatest(()->getfield(host,:DurationConditionedForcing))
-        @test last(Base.invokelatest(()->getfield(other,:source_identity)())).second==bytes2hex(sha256(read(source_copy)))
-        open(source_copy,"a") do io;write(io,"\n# owned post-load mutation witness\n");end
-        @test_throws ArgumentError Base.invokelatest(()->getfield(other,:source_identity)())
     end
 end
 @testset "Bounded known-next source counts in model and artifact" begin

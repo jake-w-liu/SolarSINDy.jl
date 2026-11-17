@@ -39,12 +39,6 @@ using Test, SolarSINDy, Dates, Random
                         "Dst_star"=>[dst], "theta_c"=>[atan(abs(by), bz)])
             @test vec(evaluate_library(lib, data)) == buffer
         end
-        SolarSINDy._evaluate_point_vector_unchecked!(
-            buffer, lib, -50.0, 400.0, -5.0, 0.0, 5.0, 2.0,
-        )
-        @test (@allocated SolarSINDy._evaluate_point_vector_unchecked!(
-            buffer, lib, -50.0, 400.0, -5.0, 0.0, 5.0, 2.0,
-        )) == 0
         lib.term_codes[1] = UInt8(2)
         @test_throws ArgumentError SolarSINDy._evaluate_point_vector!(
             buffer, lib, -50.0, 400.0, -5.0, 0.0, 5.0, 2.0,

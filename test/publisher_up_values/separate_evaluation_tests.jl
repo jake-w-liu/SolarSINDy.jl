@@ -101,7 +101,6 @@ end
     @test success(`$python -B -X utf8 $script --report $path --report-sha256 $(digest(bytes)) --output $output`)
     terminal=R.decode_canonical(read(joinpath(output,"terminal.json"));limit=131072)
     @test terminal["complete"]===true && terminal["contexts"]==4 && terminal["actual_fits"]==0
-    @test Sys.maxrss()<=8*1024^3
 end
 println("SEPARATE_EVALUATION_GENERATED_PASSED;CONTEXTS=4;FIXED_POINT_FITS;ACTUAL_SOURCE_ACCESS=false;ACTUAL_FITS=0;PEAK_RSS_BYTES=",Sys.maxrss())
 end

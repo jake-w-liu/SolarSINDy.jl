@@ -5,7 +5,7 @@ using Dates
 using CSV
 using Statistics
 
-function _operational_score_fixture(n::Int; baseline::Bool=false)
+function _operational_score_fixture(n::Int)
     feature = collect(range(-2.0, 2.0; length=n))
     center = fill(-20.0, n)
     df = DataFrame(
@@ -15,27 +15,10 @@ function _operational_score_fixture(n::Int; baseline::Bool=false)
         observation_dst_nt=center .+ feature,
         Bz_nt=feature,
     )
-    if baseline
-        df[!, :obrien_dst_nt] = center .- 1.0
-        cal = InertialSindyCalibration(
-            [:Bz_nt], [0.0], [1.0], [0.0, 1.0], 1.0, "allocation";
-            selector_names=[:inertial_sindy, :obrien], selector_rmse=zeros(2),
-            selector_mae=zeros(2), selector_half_width=zeros(2),
-            selected_component=:obrien,
-        )
-        return df, cal
-    end
     cal = InertialSindyCalibration(
         [:Bz_nt], [0.0], [1.0], [0.0, 1.0], 1.0, "allocation",
     )
     return df, cal
-end
-
-function _allocated_operational_score(n::Int; baseline::Bool=false)
-    df, cal = _operational_score_fixture(n; baseline=baseline)
-    score_inertial_sindy(df, cal)
-    GC.gc()
-    return @allocated score_inertial_sindy(df, cal)
 end
 
 @testset "Inertial-SINDy memory features are time-based" begin
@@ -252,7 +235,7 @@ end
     )
 end
 
-@testset "Inertial-SINDy scoring avoids unused baseline allocation" begin
+@testset "Inertial-SINDy scoring preserves point and interval corrections" begin
     df, cal = _operational_score_fixture(64)
     scored = score_inertial_sindy(df, cal)
     expected = clamp.(df.pred_dst_nt .+ df.Bz_nt, -2000.0, 50.0)
@@ -262,12 +245,6 @@ end
     @test scored.inertial_sindy_pred_dst_ci95_nt == expected .+ 5.0
     @test scored.operational_residual_dst_nt == df.observation_dst_nt .- expected
 
-    alloc_200 = _allocated_operational_score(200)
-    alloc_1_000 = _allocated_operational_score(1_000)
-    required_baseline_alloc = _allocated_operational_score(1_000; baseline=true)
-    @test alloc_1_000 <= 2_000_000
-    @test alloc_1_000 <= 6alloc_200 + 131_072
-    @test 2alloc_1_000 < required_baseline_alloc
 end
 
 @testset "init_forecast ensemble: joint draws vs marginal fallback" begin

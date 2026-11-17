@@ -11,7 +11,6 @@ include(joinpath(@__DIR__,"test_catalog_primary.jl"))
 include(joinpath(@__DIR__,"test_catalog_independent.jl"))
 include(joinpath(@__DIR__,"test_catalog_wind_coverage.jl"))
 include(joinpath(@__DIR__,"test_catalog_hidden_raw.jl"))
-include(joinpath(@__DIR__,"test_catalog_maximum.jl"))
 
 include(joinpath(@__DIR__,"windows","runtests.jl"))
 include(joinpath(@__DIR__,"source_job","runtests.jl"))

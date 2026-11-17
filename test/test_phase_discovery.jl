@@ -160,10 +160,6 @@
     @test switching_oracle ≈ simulate_sindy(
         single_selection.model, lib, training[1].swd, 1.0,
     )
-    _simulate_phase_switching(identical_phase_model, lib, training[1].swd, 1.0)
-    @test (@allocated _simulate_phase_switching(
-        identical_phase_model, lib, training[1].swd, 1.0,
-    )) < 200_000
 
     scored_storm = training[end]
     score = _score_phase_storm(

@@ -105,7 +105,6 @@ end
         @test sum(values(result.audit.rejection_reasons))==16 && result.audit.actual_fits==0
     end
 end
-@test Sys.maxrss()<=8*1024^3
 println("SOURCE_BOUND_SHARED_REPLAY_GENERATED_PASSED;ACTUAL_SOURCE_ACCESS=false;ACTUAL_FITS=0;PEAK_RSS_BYTES=",Sys.maxrss())
 println("SOURCE_BOUND_STATIC_INVENTORY_PASSED;METHODS=4;ACTUAL_SOURCE_ACCESS=false;ACTUAL_FITS=0")
 end

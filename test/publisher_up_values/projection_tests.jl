@@ -98,6 +98,5 @@ end
     insert!(duplicated,at+1,duplicated[at])
     @test_throws ArgumentError run_project(merge(s,(;events=duplicated)))
 end
-@test Sys.maxrss()<=8*1024^3
 println("PUBLISHER_UP_SHARED_PROJECTION_PASSED;ACTUAL_SOURCE_ACCESS=false;ACTUAL_FITS=0;PEAK_RSS_BYTES=",Sys.maxrss())
 end

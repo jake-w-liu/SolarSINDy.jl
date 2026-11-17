@@ -17,9 +17,6 @@ end
         text=join(rand(rng,alphabet,rand(rng,0:200)))
         @test collect(A._AuditLines(text))==collect(eachline(IOBuffer(text)))
     end
-    text=repeat("\n",8*1024*1024)
-    @test count(_->true,A._AuditLines(text))==8*1024*1024
-    @test sum(ncodeunits,A._AuditLines(text))==0
 end
 println("LINE_ITERATOR_LITERAL_AND_BASE_ORACLES_PASS")
 

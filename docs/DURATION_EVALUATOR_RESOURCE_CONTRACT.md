@@ -1,3 +1,6 @@
+> Historical resource audit. The frozen implementation parity harness has been
+> retired from the default tests. Direct rational/decimal mixture, interval,
+> fitting and causal-boundary oracles remain in the package suite.
 # Duration evaluator resource contract
 
 The original pre-code mean contract is retained unchanged. A separately reviewed

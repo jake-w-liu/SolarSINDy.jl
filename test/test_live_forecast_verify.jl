@@ -1644,7 +1644,7 @@ using .SuperlearnerServingFixture
         end
     end
 
-    @testset "LOG-01: steady-state append allocation is independent of log length" begin
+    @testset "LOG-01: append preserves the existing file identity" begin
         mktempdir() do tmp
             function verified_log(path, n)
                 base = DateTime(2026, 1, 1)
@@ -1673,23 +1673,13 @@ using .SuperlearnerServingFixture
                 )
             end
 
-            warm = joinpath(tmp, "warm.csv")
-            verified_log(warm, 2)
-            _append_forecast!(warm, next_row(2))
-
-            small = joinpath(tmp, "small.csv")
-            large = joinpath(tmp, "large.csv")
-            verified_log(small, 100)
-            verified_log(large, 20_000)
-            inode_small = stat(small).inode
-            inode_large = stat(large).inode
-            GC.gc()
-            alloc_small = @allocated _append_forecast!(small, next_row(100))
-            GC.gc()
-            alloc_large = @allocated _append_forecast!(large, next_row(20_000))
-            @test stat(small).inode == inode_small
-            @test stat(large).inode == inode_large
-            @test alloc_large <= 2 * alloc_small + 1_000_000
+            for n in (2,3)
+                path = joinpath(tmp, "rows-$n.csv")
+                verified_log(path, n)
+                inode_before = stat(path).inode
+                _append_forecast!(path, next_row(n))
+                @test stat(path).inode == inode_before
+            end
         end
     end
 

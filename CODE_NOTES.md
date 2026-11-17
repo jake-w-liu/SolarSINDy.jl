@@ -2157,3 +2157,20 @@ The duplicate daemon lifecycle suite, launchd render/config permutations and
 public-binding documentation counter are also removed. The old seventeen-worker
 interval fixture tree is removed; the concise direct numerical suite remains.
 No forecasting implementation, numerical expectation or tolerance changed.
+### Complete default profile cleanup (2026-11-18)
+
+The follow-up include audit found additional capacity and allocation benchmarks
+in the default package run: a 32-body/1.6-million-row catalog with repeated
+builders and lookup sweeps; 600,000 predictions through 400 trees; a 30,000-hour
+A-chain disk/certificate profile; maximum B342 geometry and allocation sweeps;
+and frozen evaluator parity. These workloads and their exclusive helpers are
+removed. Small independent math, parser grammar, clocks, repeated/empty inputs,
+missing-data encoders, model round trips, row/byte-limit rejection and recovery
+checks remain. Global process-RSS ceilings and micro-allocation comparisons are
+removed from unit tests. Production numerical code and tolerances are unchanged.
+
+The retained scientific integration cases still exercise both B gain pipelines,
+all candidate recipes/refits, small matched342 native fits and independent saved
+prediction replay. The previous 5537faa CI remained live with six package jobs;
+its elapsed time alone did not establish which workload dominated. A new full
+Pkg.test/examples run is required on the final cleanup commit.

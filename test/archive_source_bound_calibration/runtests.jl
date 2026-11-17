@@ -183,6 +183,5 @@ else
     J._ordinary(dirname(abspath(requested));directory=true);@test !ispath(requested)&&!islink(requested)
     mkdir(requested);run_scope(realpath(requested))
 end
-@test Sys.maxrss()<=8*1024^3
 println("SOURCE_BOUND_CALIBRATION_PASSED;ACTUAL_SOURCE_ACCESS=false;ACTUAL_FITS=0;PEAK_RSS_BYTES=",Sys.maxrss())
 end

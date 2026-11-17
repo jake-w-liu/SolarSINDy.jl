@@ -20,6 +20,8 @@ function run_tests()
         end
         model=hand_model(342);X=zeros(4,342);X[:,342].=[prevfloat(.5),.5,nextfloat(.5),floatmax(Float64)]
         @test R.predict_deltas(model,X)==[0.,0.,4.,4.]
+        empty_result = R.predict_deltas(model,zeros(0,342))
+        @test empty_result isa Vector{Float64} && isempty(empty_result)
         @test_throws ArgumentError R.predict_delta(model,zeros(341))
         @test_throws MethodError R.predict_delta(model,zeros(Float32,342))
         for x in (NaN,Inf,-Inf)
@@ -93,9 +95,6 @@ function run_tests()
         rawedges[342][1]=2.;values=zeros(342);values[342]=1.
         @test R.predict_delta(model,values)==4. # no mutable caller-array alias
         @test_throws MethodError setindex!(model.edges[342],2.,1)
-        maximum_model=R.Model([collect(1.0:254.0) for _ in 1:342],vcat([bias],[constant_tree(0.,63) for _ in 1:400]);max_depth=6,nrounds=400)
-        @test length(maximum_model.trees)==401
-        @test R.predict_delta(maximum_model,zeros(342))==0.
     end
 end
 run_tests()

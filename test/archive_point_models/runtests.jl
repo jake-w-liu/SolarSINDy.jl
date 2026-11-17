@@ -86,20 +86,8 @@ end
 struct BeyondRows <: AbstractMatrix{Float64} end
 Base.size(::BeyondRows)=(600001,11)
 Base.getindex(::BeyondRows,indices...)=error("row cap must reject before reading values")
-@testset "Joint maximum numeric model and matrix geometry" begin
-    split=Bool[index<=31 for index in 1:63]
-    features=Int[flag ? 1 : 0 for flag in split]
-    conditions=Int[flag ? 127 : 0 for flag in split]
-    tree=P.NumericTree(features,conditions,zeros(Float32,63),split)
-    model=P.NumericModel(:ground11,[collect(1.:254.) for _ in 1:11],vcat([constant_tree(2,1)],fill(tree,400));depth=6,rounds=400,bins=255)
-    bytes=P.encode_model(model);@test length(bytes)<P.MAX_BYTES
-    @test P.encode_model(P.decode_model(bytes))==bytes
-    @test_throws ArgumentError P.predict(model,BeyondRows())
-    X=zeros(600000,11);prediction=P.predict(model,X)
-    @test length(prediction)==600000
-    @test all(==(2.),prediction)
-    @test Sys.maxrss()<=8*1024^3
-    println("POINT_TREE_MAXIMUM_ROWS=600000;ROUNDS=400;DEPTH=6;PEAK_RSS_BYTES=",Sys.maxrss())
+@testset "Prediction row limit rejects before reading values" begin
+    @test_throws ArgumentError P.predict(threshold_model(:ground11),BeyondRows())
 end
 println("GENERATED_POINT_TREE_PRIMITIVE_PASSED;ACTUAL_FITS=0")
 

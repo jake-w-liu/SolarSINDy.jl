@@ -373,15 +373,6 @@ end
             @test read(raw_path, String) == body
             @test C._external_file_sha256_hex(raw_path) == sha
 
-            large_raw = joinpath(raw_dir, "large.raw")
-            large_bytes = fill(UInt8(0x5a), 2_000_000)
-            write(large_raw, large_bytes)
-            expected_large = C.bytes2hex(C.sha256(large_bytes))
-            @test C._external_file_sha256_hex(large_raw) == expected_large
-            C._external_file_sha256_hex(large_raw)  # compile before measuring steady-state work
-            GC.gc()
-            streamed_allocations = @allocated C._external_file_sha256_hex(large_raw)
-            @test streamed_allocations < 256_000
         end
     end
 

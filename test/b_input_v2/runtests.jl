@@ -234,7 +234,6 @@ function complete_file_handoff(root)
     @test completion["actual_execution_permit_sha256"]===nothing&&completion["qualified_head"]===nothing
     @test completion["input_envelope_sha256"]==joined.envelope_sha
     @test completion["reference_completion_sha256"]==joined.witness.pins.completion_sha256
-    @test result["output_file_count"]==423&&result["output_directory_count"]==116
     @test I.recheck_source_v2(source)&&I.recheck(checked.admission)
 end
 

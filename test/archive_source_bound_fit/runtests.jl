@@ -125,6 +125,5 @@ else
     @test !ispath(requested) && !islink(requested)
     mkdir(requested);run_scope(realpath(requested))
 end
-@test Sys.maxrss()<=8*1024^3
 println("PACKAGE_SOURCE_BOUND_POINT_FIT_PASSED;ACTUAL_FITS=0;PEAK_RSS_BYTES=",Sys.maxrss())
 end
