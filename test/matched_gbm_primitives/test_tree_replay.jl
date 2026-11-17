@@ -25,9 +25,6 @@ function run_tests()
         for x in (NaN,Inf,-Inf)
             bad=zeros(342);bad[342]=x;@test_throws ArgumentError R.predict_delta(model,bad)
         end
-        source=read(joinpath(@__DIR__,"..","..","tools","initial_reference_audit","IndependentScalarTreeReplay.jl"),String)
-        @test occursin("length(raw_edges) == 29",source)
-        @test occursin("length(values) == 29",source)
     end
     @testset "Independent342 bin boundaries and total order" begin
         edge=f64.(oracle["edges_254_f64_bits"]);model=hand_model(1;edges=[copy(edge) for _ in 1:342])

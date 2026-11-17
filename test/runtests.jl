@@ -833,7 +833,6 @@ end
                        0.9728734135554586; rtol=1e-12)
     end
 
-    include("test_compat.jl")
     include("test_interval_mean_forecaster.jl")
     include("test_initial_reference_import.jl")
     include("test_actual_a_chain.jl")
@@ -856,7 +855,6 @@ end
     include("test_calibration_diagnosis.jl")
     include("test_ground_adaptive_calibration.jl")
     include("test_daily_review.jl")
-    include("test_documentation.jl")
     include("test_discovery_provenance.jl")
     include("test_storm_lambda_selection.jl")
     include("test_synthetic_equation_recovery.jl")
@@ -875,8 +873,6 @@ end
     include("test_static_stack_recoverability_probe.jl")
     include("test_l1_receipt_collector.jl")
     include("test_l1_receipt_pairing.jl")
-    include("test_l1_collector_launchd.jl")
-    include("test_shadow_trial_launchers.jl")
     include("test_l1_prospective_issue_capture.jl")
     include("test_static_stack.jl")
     include("test_static_stack_residual.jl")
@@ -910,7 +906,6 @@ end
     include("test_external_dst_snapshot_collector.jl")
     include("test_external_dst_receipt_timing.jl")
     include("test_cli_smoke.jl")
-    include("test_cli_process.jl")
     include("test_analog_gbm.jl")
     include("test_analog_base_table.jl")
     include("test_analog_features.jl")

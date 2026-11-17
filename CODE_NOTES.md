@@ -2146,3 +2146,14 @@ One strict documentation job builds both Julia versions. Production numerical
 implementations and tolerances are unchanged. Legacy CI18 certificate tools do
 not receive qualifying evidence from this new CI; no predictive-gain or paper
 qualification follows from this test cleanup.
+
+### Remaining metadata and launcher cleanup (2026-11-18)
+
+The first lean CI run reached the package tests and exposed two remaining
+assertions about the old CI YAML layout in test_compat.jl. That file only checked
+repository metadata, dependency scans, Docker text and workflow structure; it is
+removed. Real resolution and execution on the supported runtimes remain in CI.
+The duplicate daemon lifecycle suite, launchd render/config permutations and
+public-binding documentation counter are also removed. The old seventeen-worker
+interval fixture tree is removed; the concise direct numerical suite remains.
+No forecasting implementation, numerical expectation or tolerance changed.

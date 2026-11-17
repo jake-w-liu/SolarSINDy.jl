@@ -12,25 +12,6 @@ const W=load("WIND_LITERAL_ORACLES_V1.json")
 const IDS=load("STATE_ID_LITERAL_ORACLES_V1.json")
 const O=load("A_ANALYTIC_LITERAL_ORACLES_V1.json")
 const P=load("A_PREFIX_LITERAL_ORACLES_V1.json")
-include("isolated_sources.jl")
-@testset "Frozen pre-code oracle and A187 source byte pins" begin
-    for (name,hash) in (
-        "A_ANALYTIC_LITERAL_ORACLES_V1.json"=>"4bcc23a61bdaf5b576c6686765d960eea1157487a5084b8bdb94f7a489df0133",
-        "A_PREFIX_LITERAL_ORACLES_V1.json"=>"16c4a07c91a14dc77807648caaa4f8bcbd9c2706bf3bc0f856b8377c5594d4d1",
-        "GUARD_LITERAL_ORACLES_V1.json"=>"d09a0c19f34334136edae37f7e259b69265aa55243253fce6161a27fdb4917c1",
-        "STATE_ID_LITERAL_ORACLES_V1.json"=>"f19e098dc76c0f2dabdf24b386f19347d4167df3a968469e67804a34c094b511",
-        "WIND_LITERAL_ORACLES_V1.json"=>"7e5a798b7b2ccbac74f652a00d9ed6f45dac48bb93682f2ba30608502e3f0686")
-        @test bytes2hex(sha256(read(joinpath(@__DIR__,name))))==hash
-    end
-    for (name,hash) in (
-        "DstIntervalObserver.jl"=>"48e2af386d2b9b1a2b8afb4366e1c48508261e54a81447d438fd8a419581b816",
-        "DstIntervalReplay.jl"=>"f2962c092bc6bfd6be82a5b8ad95e2c494dddbc4a2addda4f57140e31d0c6fa5",
-        "sandu_fullchannel_features.jl"=>"2306f63cadfb5d4ae16579cabb114b813f1f41678aaa6dbdd90caad316ff792c",
-        "DstIntervalAdapter.jl"=>"b432a8fc65d3e425a67ff2b225a6c0e5323ae7fdb8822dd228677b7998a5fe5a",
-        "DstIntervalStream.jl"=>"7a6319dd3b572f9337c3573a50620cf666ada77c4b4c13bb995564807c1f037d")
-        @test bytes2hex(sha256(read(joinpath(@__DIR__,"frozen_a187",name))))==hash
-    end
-end
 f64(x)=x===nothing ? NaN : Float64(x)
 wind()=[D.WindHour(T0+Hour(Int(r.hour)),T0+Hour(Int(r.hour)+1),
     DateTime(Dates.UTInstant{Millisecond}(Millisecond(Int64(r.receipt_ms)))),f64(r.bz),f64(r.q)) for r in W.rows]
@@ -165,33 +146,6 @@ end
     end
 end
 
-@testset "Loaded source mutation rejects at entry and final success boundary" begin
-    IsolatedBridgeSources.with_sources() do parent,src
-        M=parent.DurationCurrentStateStream;E=parent.DurationConditionedForcing
-        rows=[E.WindHour(r.tag,r.completed,r.received,r.bz,r.q) for r in wind()]
-        path=joinpath(src,"duration_current_state_stream.jl");body=read(path)
-        for altered in (path,joinpath(src,"duration_conditioned_forcing.jl"),joinpath(src,"interval_mean_forecaster","DstIntervalStream.jl"))
-            original=read(altered)
-            try
-                write(altered,vcat(original,UInt8[0x0a]))
-                @test_throws ArgumentError Base.invokelatest(M.with_current_state_tracker,_->nothing,rows;source_sha256=SOURCE)
-            finally
-                write(altered,original)
-            end
-        end
-        try
-            alter=callbacks->begin
-                advance=first(callbacks)
-                advance(T0+Hour(3));write(path,vcat(body,UInt8[0x0a]));nothing
-            end
-            @test_throws ArgumentError Base.invokelatest(M.with_current_state_tracker,alter,rows;source_sha256=SOURCE)
-        finally
-            write(path,body)
-        end
-        @test Base.invokelatest(M.source_identity)==C.source_identity()
-    end
-end
-
 function a_fixture(n;gap=false)
     values=ones(17,n);values[8,:].=400.
     values[6,:]=[-5+3sin(i/43) for i in 1:n]
@@ -267,53 +221,4 @@ end
     @test_throws ArgumentError run_a(a_fixture(1),0;issue_sink=1)
 end
 
-# Regression comparison comes from immutable A187 source bytes, distinct from
-# the independent arithmetic expectations above. Serialize fields by value,
-# including Float64 bits, so different module paths cannot mask differences.
-module FrozenA187
-include("frozen_a187/DstIntervalAdapter.jl")
-include("frozen_a187/DstIntervalStream.jl")
-end
-function token(io,x)
-    if x isa Float64;write(io,UInt8('F'),htol(reinterpret(UInt64,x)))
-    elseif x isa DateTime;write(io,UInt8('D'),htol(Int64(Dates.value(x))))
-    elseif x isa Bool;write(io,UInt8('B'),UInt8(x))
-    elseif x isa Integer;write(io,UInt8('I'),htol(Int64(x)))
-    elseif x isa AbstractString||x isa Symbol
-        s=String(x);write(io,UInt8('S'),htol(UInt64(ncodeunits(s))),codeunits(s))
-    elseif x===nothing;write(io,UInt8('0'))
-    elseif x isa NamedTuple
-        write(io,UInt8('N'),htol(UInt64(length(x))));for (k,v) in pairs(x);token(io,k);token(io,v);end
-    elseif x isa Tuple||x isa AbstractArray
-        write(io,UInt8('T'),htol(UInt64(length(x))));x isa AbstractArray&&token(io,size(x));for v in x;token(io,v);end
-    elseif x isa AbstractDict
-        write(io,UInt8('M'));for k in sort(collect(keys(x));by=string);token(io,k);token(io,x[k]);end
-    else
-        token(io,String(nameof(typeof(x))));for k in fieldnames(typeof(x));token(io,k);token(io,getfield(x,k));end
-    end
-end
-payload(x)=begin io=IOBuffer();token(io,x);take!(io) end
-@testset "Tolerance-free old A full-grid row/summary/checkpoint parity" begin
-    original=FrozenA187.DstIntervalStream
-    input=a_fixture(180;gap=true)
-    old=original.HourlyInputs(input.time,input.values;source_sha256=SOURCE)
-    for tau in S.A.TAUS,sigma in S.A.SIGMAS,delay in (0,1)
-        expected=NamedTuple[]
-        baseline=original.stream_basis(old;delay_hours=delay,taus=tau,sigma,chunk_hours=24,sink=p->append!(expected,p))
-        actual,summary=run_a(input,delay,tau,sigma)
-        @test payload((actual,summary))==payload((expected,baseline))
-        hooked,hs=run_a(input,delay,tau,sigma;issue_sink=_->nothing)
-        @test payload((hooked,hs))==payload((expected,baseline))
-        prefix,partial=run_a(input,delay,tau,sigma;stop=90,issue_sink=_->nothing)
-        tail,resumed=run_a(input,delay,tau,sigma;checkpoint=partial.checkpoint,issue_sink=_->nothing)
-        @test payload(vcat(prefix,tail))==payload(expected)
-        @test payload(resumed.checkpoint)==payload(baseline.checkpoint)
-        for chunk in (1,7,4096)
-            rows,rs=run_a(input,delay,tau,sigma;chunk,issue_sink=_->nothing)
-            @test payload(rows)==payload(expected) && payload(rs.checkpoint)==payload(baseline.checkpoint)
-        end
-    end
-end
-
-println("B_STREAM_BRIDGE_FOCUSED_COMPLETE")
 end # module

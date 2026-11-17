@@ -1430,10 +1430,6 @@ const INERTIAL_SINDY_DRIVER_TOKEN =
         @test superlearner_serving_depth_safe_center(-88.0, -95.0) ==
               static_stack_serving_depth_safe_center(-88.0, -95.0)
         @test count(f -> isfile(f), _DEPTH_SAFE_CANDIDATES) >= 1
-        api_source = read(joinpath(APPSRC, "forecast_api.jl"), String)
-        @test !occursin("min(Float64(served), Float64(previous))", api_source)
-        # A second copy of the rule inside the application is exactly how the two could drift.
-        @test !occursin("function superlearner_serving_depth_safe_center", api_source)
     end
 
     @eval @testset "the watch edge is the deepest predecessor edge, not the served band shifted" begin
@@ -1685,17 +1681,6 @@ const INERTIAL_SINDY_DRIVER_TOKEN =
         @test served_product_name("staticstack+x") == "static stack"
         @test served_product_name(CURRENT_OPERATIONAL_SERVED_MODEL_VERSION) == "super-learner"
         @test served_product_name(nothing) == "unknown"
-        # The dashboard names every stage of the served label it can be handed; an unknown token falls
-        # back to the raw label rather than claiming a capability the pipeline does not have.
-        app_js = read(joinpath(dirname(APPSRC), "public", "app.js"), String)
-        for token in ("sindyfloor", "conformal")
-            @test occursin(token, app_js)
-        end
-        app_source = read(joinpath(dirname(APPSRC), "public", "app.js"), String)
-        @test !occursin("Forecast: inertial-SINDy", app_source)
-        @test !occursin("Product forecast: inertial-SINDy.", app_source)
-        @test !occursin("inertial-SINDy core trajectory (display)", app_source)
-        @test occursin("issued centers as a visual guide", app_source)
     end
 
     @eval @testset "a cycle whose stack stage healed mid-cycle stays available" begin
@@ -2114,7 +2099,6 @@ const INERTIAL_SINDY_DRIVER_TOKEN =
         script = read(joinpath(@__DIR__, "..", "desktop.sh"), String)
         block = match(r"(?s)\n(ready=0\n.*?)(?=\nopen_window\(\))", script)
         @test block !== nothing
-        @test occursin("readiness_deadline=\$((SECONDS + 60))", block.captures[1])
         # Run the shipped loop against a real TCP listener that never sends an HTTP
         # response. Shorten only the test's deadline; a missing curl timeout still hangs.
         # SRV=$$ binds the aliveness check to the probe bash itself: it is guaranteed
@@ -2149,24 +2133,9 @@ const INERTIAL_SINDY_DRIVER_TOKEN =
         end
     end
 
-    @eval @testset "dashboard launch uses normal compilation" begin
-        template = read(joinpath(@__DIR__, "..", "..", "deploy",
-                                 "com.example.solarsindy.dashboard.plist"), String)
-        @test occursin("<string>--startup-file=no</string>", template)
-        @test !occursin("<string>--compile=", template)
-        @test first(findfirst("<string>--startup-file=no</string>", template)) <
-              first(findfirst("<string>--project=__APP_DIR__</string>", template))
-    end
-
     @eval @testset "launchd installer retries bootstrap without restart-killing the service" begin
         project_root = normpath(joinpath(@__DIR__, "..", ".."))
         installer_path = joinpath(project_root, "deploy", "install_launchd.sh")
-        installer = read(installer_path, String)
-        @test startswith(installer, "#!/bin/bash\n")
-        @test occursin("for attempt in 1 2 3", installer)
-        @test occursin("bootstrap_service \"\$label\" \"\$dst\"", installer)
-        @test occursin("launchctl kickstart \"\$DOMAIN/\$label\"", installer)
-        @test !occursin("launchctl kickstart -k", installer)
 
         if Sys.isapple()
             mktempdir() do dir
@@ -2226,12 +2195,6 @@ esac
     @eval @testset "external watchdog outage state machine" begin
         wd = normpath(joinpath(@__DIR__, "..", "..", "deploy", "watchdog.sh"))
         @test isfile(wd)
-        wd_src = read(wd, String)
-        # Structural pins (hold even where bash/curl differ): the data-route wedge class, the stable
-        # kind-keyed dedup signature, and the sentinel-ownership marker the recovery branch keys on.
-        @test occursin("dash_wedged", wd_src)
-        @test occursin("PROBLEM: \$kinds", wd_src)
-        @test occursin("Source: external watchdog", wd_src)
 
         bash = Sys.isunix() ? Sys.which("bash") : nothing
         if bash === nothing
@@ -3321,104 +3284,8 @@ esac
         end
     end
 
-    @eval @testset "launchers reserve capacity for background refresh" begin
-        app_root = normpath(joinpath(@__DIR__, ".."))
-        for launcher in ("run.sh", "desktop.sh")
-            source = read(joinpath(app_root, launcher), String)
-            @test occursin(r"SWM_JULIA_THREADS:-4", source)
-            @test occursin(r"--threads=\"\$JULIA_THREADS\"", source)
-            @test occursin("VERSION >= v\"1.12.6\"", source)
-        end
-        @test !occursin("Pkg.instantiate()' >/dev/null 2>&1 || true",
-                        read(joinpath(app_root, "desktop.sh"), String))
-        desktop_source = read(joinpath(app_root, "desktop.sh"), String)
-        @test occursin("Pkg.instantiate()' >/dev/null\n", desktop_source)
-        @test occursin("press Ctrl-C here to stop the backend", desktop_source)
-        @test !occursin("close the window or press Ctrl-C", desktop_source)
-        dockerfile = read(joinpath(app_root, "Dockerfile"), String)
-        @test occursin("FROM julia:1.12.7-bookworm", dockerfile)
-        @test occursin(
-            "julia = \"1.12.6\"",
-            read(joinpath(app_root, "Project.toml"), String),
-        )
-        @test occursin(r"JULIA_NUM_THREADS=4", dockerfile)
-        @test occursin("COPY data/operational_validation", dockerfile)
-        @test occursin("COPY app/models ./models", dockerfile)
-        @test occursin(
-            "SOLARSINDY_OPERATIONAL_EVIDENCE_DIR=/app/data/operational_validation",
-            dockerfile,
-        )
-        @test occursin("-f app/Dockerfile .", dockerfile)
-    end
-
-    @eval @testset "frontend product freshness and body timeout" begin
-        node = Sys.which("node")
-        if node === nothing
-            @test_skip "node is unavailable; frontend freshness checks need a JS runtime"
-        else
-            script = joinpath(@__DIR__, "frontend_freshness.cjs")
-            # success(AbstractCmd) discards the child's streams. Keep every
-            # frontend assertion, and expose the native failure to CI logs.
-            process = run(ignorestatus(`$node --test --test-reporter=tap $script`))
-            @test process.exitcode == 0
-            @test process.termsignal == 0
-        end
-    end
-
-    @eval @testset "threat watch remains in layout flow" begin
-        css = read(joinpath(@__DIR__, "..", "public", "style.css"), String)
+    @eval @testset "Dashboard labels and alert text" begin
         js = read(joinpath(@__DIR__, "..", "public", "app.js"), String)
-        html = read(joinpath(@__DIR__, "..", "public", "index.html"), String)
-        readme = read(joinpath(@__DIR__, "..", "README.md"), String)
-        served_source = join(
-            (read(joinpath(APPSRC, name), String)
-             for name in sort(filter(name -> endswith(name, ".jl"), readdir(APPSRC)))),
-            "\n",
-        )
-        @test occursin("grid-template-areas: \"left right\" \"watch watch\"", css)
-        @test occursin("grid-template-areas: \"left\" \"right\" \"watch\"", css)
-        @test occursin("grid-area: watch; position: static", css)
-        @test !occursin("position: absolute; right: 18px; bottom: 12px", css)
-        @test occursin("justify-self: stretch", css)
-        @test occursin("wf.textContent = \"\"", js)
-        @test occursin("wf.classList.add(\"hidden\")", js)
-        @test occursin("renderThreat(null);", js)
-        @test count(occursin("delete upd.dataset.reltime", line)
-                    for line in eachline(IOBuffer(js))) == 2
-        @test count(occursin("upd.textContent = \"forecast unavailable\"", line)
-                    for line in eachline(IOBuffer(js))) == 2
-        @test occursin("history = history || { rows: [] };", js)
-        @test occursin("if (!history || !Array.isArray(history.rows))", js)
-        @test occursin("\$(\"dbdt-forecast\").innerHTML = \"\";", js)
-        @test occursin("if (status.available === false) \$(\"health-dot\")", js)
-        @test occursin("const lvl = Math.max(pointLevel, watchLevel);", js)
-        @test occursin("const alertLabel = watchLevel > pointLevel ? th.watch_label : th.label;", js)
-        @test occursin("const body = watchLevel > pointLevel", js)
-        @test occursin("The conservative 90% alerting edge reaches", js)
-        @test occursin("interval_lower_edge_min_dst_nt", js)
-        # The alerting numbers are quoted by the alert text, so they must actually be displayed:
-        # a number an operator is alerted on that appears nowhere on the page is not auditable.
-        @test occursin("id=\"severity-line\"", html)
-        @test occursin("function renderSeverityLine", js)
-        @test occursin("renderSeverityLine(H);", js)
-        @test occursin("renderSeverityLine(null);", js)
-        @test occursin("severity_dst_nt", js)
-        @test occursin("severity_ci05_dst_nt", js)
-        @test occursin("severity_ci05_source", js)
-        @test occursin("Conservative alerting envelope across these horizons", js)
-        for token in ("the Static stack predecessor safety band", "the inertial-SINDy predecessor safety band")
-            @test occursin(token, js)
-        end
-        # An unrecognised pipeline stage falls back to the raw label for the whole pipeline instead of
-        # being dropped from the capability list, and the lookup cannot resolve Object.prototype names.
-        @test occursin("Object.prototype.hasOwnProperty.call(PIPELINE_CAPS, p)", js)
-        @test occursin("return String(label);", js)
-        @test !occursin("}).filter(Boolean);", js)
-        @test occursin("const PIPELINE_VERSION_TOKENS = new Set(", js)
-
-        # The capability list is executed, not only read: the two defects here are behavioural and a
-        # source scan cannot tell a reachable fallback from an unreachable one. The block is extracted
-        # verbatim between its own sentinels, so the code under test is the shipped code.
         node = Sys.which("node")
         if node === nothing
             @test_skip "node is unavailable; the pipeline-capability behaviour test needs a JS runtime"
@@ -3441,21 +3308,14 @@ esac
             console.log(JSON.stringify(out));
             """
             caps = JSON3.read(read(pipeline(ignorestatus(`$node -e $probe`)), String))
-            # Every stage recognised: the capability list is served.
             @test caps[1] == "ten-forecast fitted combination (SINDy-family floor), conformal interval"
-            # One unrecognised stage: the raw label is served for the whole pipeline rather than a
-            # partial list that would describe a future build by this build's capabilities.
             @test caps[2] == "superlearner+sindy20x11+superlearner10floor+quantumtail"
-            # A token that resolves through Object.prototype is not a capability.
             @test caps[3] == "superlearner+sindy20x11+toString"
             @test caps[4] == "superlearner+sindy20x11+constructor"
             @test caps[5] == "unknown.9+madeup"
             @test caps[6] == "L1 look-ahead, regime-aware tail, rapid-deepening projection, one-hour inertia blend, state-conditioned inertia, extreme-Dst inertia guard, static regime stack"
             @test caps[7] == ""
 
-            # The alerting line is executed too, against a synthetic payload, so the numbers an
-            # operator is alerted on are checked as rendered text rather than as source that mentions
-            # the right field names.
             severity_block = match(
                 r"// ---- severity-line block[^\n]*\n(.*?)// ---- end severity-line block ----"s,
                 js,
@@ -3485,30 +3345,19 @@ esac
             rendered = JSON3.read(read(pipeline(ignorestatus(`$node -e $severity_probe`)), String))
             @test occursin("centre -95 nT", rendered[1].text)
             @test occursin("90% lower edge -105 nT", rendered[1].text)
-            # The deepest edge belongs to the inertial-SINDy operator, so that is the stage named.
             @test occursin("set by the inertial-SINDy predecessor safety band", rendered[1].text)
             @test rendered[1].hidden == false
-            # No alerting values in the payload leaves the line empty and hidden rather than showing
-            # an em dash where a warning number belongs.
             @test rendered[2].text == ""
             @test rendered[2].hidden == true
-            # A source token that resolves through Object.prototype is rendered as the token, never as
-            # whatever that property happens to be: the stage that set a warning must be a name.
             @test occursin("set by toString", rendered[3].text)
             @test !occursin("function", rendered[3].text)
         end
-        # The pooled served row of the live-skill table is a mixed-pipeline record until every
-        # verified row matured under the current served label; it must not carry the current
-        # product's name alone before then. Executed, not pattern-matched.
         if node !== nothing
             label_block = match(
                 r"// ---- served-row label helper[^\n]*\n(.*?)// ---- end served-row label helper ----"s,
                 js,
             )
             @test label_block !== nothing
-            @test occursin("const servedRowName = servedRowLabel(product, nServedLabel, nAllVerified);", js)
-            @test occursin("[servedRowName, c.operational_matched_rmse_nt]", js)
-            @test !occursin("[`\${product} served`, c.operational_matched_rmse_nt]", js)
             label_probe = label_block.captures[1] * """
             console.log(JSON.stringify([
               servedRowLabel("super-learner", 0, 212),
@@ -3525,14 +3374,6 @@ esac
             @test labels[4] == "super-learner served"
             @test labels[5] == "served pipelines (mixed record; 0 of 212 rows under super-learner)"
 
-            # The superseded-cycle disclosure reaches all three payloads and was rendered nowhere:
-            # the panel showed a forecast as current with no indication that the newest issuance had
-            # not completed. It is a notice on the forecast panel and nowhere else, so it is checked
-            # where it is written and executed against the three payload shapes it can receive.
-            @test occursin("id=\"forecast-supersede\"", html)
-            @test occursin("renderSupersededNotice(forecast);", js)
-            @test count(occursin("forecast-supersede", line)
-                        for line in eachline(IOBuffer(js))) == 1
             notice_block = match(
                 r"// ---- superseded-cycle notice block[^\n]*\n(.*?)// ---- end superseded-cycle notice block ----"s,
                 js,
@@ -3557,28 +3398,20 @@ esac
             console.log(JSON.stringify(out));
             """
             notice = JSON3.read(read(pipeline(ignorestatus(`$node -e $notice_probe`)), String))
-            # Stated, not alarming: the forecast on the panel is real and the situation is named.
             @test occursin("most recent hourly issuance has not completed", notice[1].text)
             @test occursin("most recent complete forecast cycle", notice[1].text)
             @test !occursin("<", notice[1].text)
             @test notice[1].hidden == false
-            # And it is absent, not merely emptied, whenever the newest issuance did complete or the
-            # payload does not say — a notice left standing would be its own false statement.
             for index in 2:4
                 @test notice[index].text == ""
                 @test notice[index].hidden == true
             end
 
-            # The interval method the panel names comes from the published cycle, which can carry
-            # more than one. Executed, because the failure the fix repairs was a rendered string.
             method_block = match(
                 r"// ---- interval-method label block[^\n]*\n(.*?)// ---- end interval-method label block ----"s,
                 js,
             )
             @test method_block !== nothing
-            @test occursin("live interval method: \${intervalMethodText(st.calibration)}", js)
-            @test occursin("const liveSrc = intervalMethodText(c);", js)
-            @test !occursin("c.current_interval_source || \"—\"", js)
             method_probe = method_block.captures[1] * """
             console.log(JSON.stringify([
               intervalMethodText({ current_interval_source: "superlearner_conformal_depth",
@@ -3603,57 +3436,12 @@ esac
             @test methods[2] == "aci and superlearner_conformal_depth"
             @test methods[3] == "aci, conformal and superlearner_conformal_depth"
             @test methods[4] == "unknown"
-            # No published cycle and no set: an em dash, never the word "nothing" and never a method.
             for index in 5:7
                 @test methods[index] == "—"
             end
             @test methods[8] == true
             @test methods[9] == false
             @test methods[10] == false
-        end
-        @test !occursin("? status.threat.level : 0", js)
-        # The product name is derived from the served label the log recorded, so no hardcoded version
-        # string may remain in the rendering path; the frozen-tail ablation keeps its inertial-SINDy name because
-        # that comparator really is the inertial-SINDy frozen-tail center.
-        for label in ("Forecast: \${productName(st)} (", "Verified issued",
-                      "Product forecast: \${esc(product)}.",
-                      "served RMSE nT", "verified forecasts",
-                      "issued centers as a visual guide",
-                      "inertial-SINDy frozen-tail ablation", "SINDy core", "Persistence",
-                      "Burton full", "O'Brien–McPherron", "live_skill_mature",
-                      "matched point forecast (n=\${matchedN})", "no best method is highlighted",
-                      "by_served_model", "n_verified_current_served_model")
-            @test occursin(label, js)
-        end
-        for retired_label in ("Forecast: Operational (", "name:\"Verified Operational\"",
-                              "Operational 90% coverage", "Operational RMSE nT", "Operational verified",
-                              "headline score", "(online, distribution-free)",
-                              "calibrated 90% interval",
-                              "Forecast: inertial-SINDy (", "Product forecast: inertial-SINDy.",
-                              "inertial-SINDy RMSE nT", "inertial-SINDy verified forecasts")
-            @test !occursin(retired_label, js)
-        end
-        @test occursin("mature && v != null", js)
-        @test !occursin("calibrated uncertainty", html)
-        @test occursin("Normal cycles use Operational super-learner", readme)
-        @test occursin("exactly the same", readme)
-        @test occursin(r"48\s+common rows", readme)
-        @test occursin("**Operational super-learner**", readme)
-        @test !occursin("package's inertial-SINDy forecaster", readme)
-        @test !occursin("project's **inertial-SINDy** nowcaster", readme)
-        @test !occursin("package's Operational forecaster", readme)
-        @test !occursin("Operational and every baseline", readme)
-        for unsupported in ("GIC driver", "GIC forecast", "GIC alert thresholds",
-                            "Pulkkinen tier", "GIC risk", "storm cannot be excluded",
-                            "90% lower bound")
-            @test !occursin(unsupported, js)
-            @test !occursin(unsupported, html)
-            @test !occursin(unsupported, served_source)
-        end
-        @test occursin("GIC-hazard indicator", html)
-        @test occursin("conservative 90% alerting edge", html)
-        for metric in ("cur-dst", "worst-dst", "horizon")
-            @test occursin("\$(\"" * metric * "\").textContent = \"—\"", js)
         end
     end
 
@@ -4246,26 +4034,8 @@ esac
             @test header(response, "X-Content-Type-Options") == "nosniff"
             @test header(response, "Referrer-Policy") == "no-referrer"
         end
-        # The page must not need inline script under that policy: the plotting fallback was an
-        # inline onerror attribute and is now registered from the same-origin bundle.
-        html = read(joinpath(@__DIR__, "..", "public", "index.html"), String)
-        @test !occursin("onerror=", html)
-        @test !occursin(r"<script(?![^>]*\ssrc=)", html)
-        js = read(joinpath(@__DIR__, "..", "public", "app.js"), String)
-        @test occursin("cdn.plot.ly", js)          # the documented offline fallback still exists
-        @test occursin("cdn.plot.ly", CONTENT_SECURITY_POLICY)   # and the policy admits exactly it
-        # The plot toolbar's PNG export renders the chart into a blob URL and loads it as an image
-        # before the browser saves it, so a policy that admits only 'self' and data: makes the
-        # download fail with the library's own notice and nothing else. The bundle is the evidence:
-        # it creates the object URL and assigns it to an image source.
-        vendor = joinpath(@__DIR__, "..", "public", "vendor", "plotly.min.js")
-        if isfile(vendor)
-            bundle = read(vendor, String)
-            @test occursin("createObjectURL", bundle)
-        end
         img = only(filter(d -> startswith(d, "img-src"), strip.(split(CONTENT_SECURITY_POLICY, ";"))))
         @test "blob:" in split(img)[2:end]
-        @test occursin("displayModeBar", js)
 
         # A traversal rejection is a response too, and carries the same policy.
         forbidden = handler(HTTP.Request("GET", "/../secret.txt"))
@@ -4285,82 +4055,15 @@ esac
         rm(dir; recursive=true, force=true)
     end
 
-    @eval @testset "the network base map is fetched from an origin the policy admits" begin
-        # `connect-src` governs one request the page does not write itself. A scattergeo has no
-        # coastlines, borders or subunit outlines of its own: the plotting library fetches a topojson
-        # file for the requested scope and resolution when the subplot is created, and its built-in
-        # source is the plotting CDN. Closing `connect-src` to this origin without redirecting that
-        # fetch leaves the network panel's markers floating over an empty frame, and nothing in the
-        # page or in the policy says so. Everything below is derived — from the shipped page and, for
-        # the parts that are the library's own behaviour, from the shipped bundle — so a bundle
-        # upgrade or a panel change that moves the base map cannot pass this silently.
-        public_dir = normpath(joinpath(@__DIR__, "..", "public"))
-        js = read(joinpath(public_dir, "app.js"), String)
-
-        directives = strip.(split(CONTENT_SECURITY_POLICY, ";"))
-        connect = only(filter(d -> startswith(d, "connect-src"), directives))
-        sources = split(connect)[2:end]
-
-        # The page names exactly one base-map source, and it is a path on this origin.
-        url_match = match(r"const TOPOJSON_URL = \"([^\"]+)\";", js)
-        @test url_match !== nothing
-        topojson_url = url_match.captures[1]
-        @test startswith(topojson_url, "/") && !startswith(topojson_url, "//")
-        @test endswith(topojson_url, "/")
-        @test occursin("Plotly.setPlotConfig({ topojsonURL: TOPOJSON_URL });", js)
-        # A same-origin path is admitted by 'self' and by nothing else in the directive, so the
-        # directive has to carry it. An absolute URL here would have to name its own origin.
-        @test "'self'" in sources
-
-        # The map the panel needs, named by the library's own rule from the geo request the panel
-        # actually makes. A panel that changes scope or resolution needs a different file.
-        geo = match(r"geo:\s*\{\s*scope:\s*\"([^\"]+)\",\s*resolution:\s*(\d+)", js)
-        @test geo !== nothing
-        map_name = replace(geo.captures[1], " " => "-") * "_" * geo.captures[2] * "m"
-        @test map_name == "north-america_50m"
-        asset = joinpath(public_dir, splitpath(lstrip(topojson_url, '/'))...,
-                         map_name * ".json")
-        @test isfile(asset)
-        topology = JSON3.read(read(asset, String))
-        @test topology.type == "Topology"
-        for layer in ("coastlines", "countries", "subunits", "land")
-            @test haskey(topology.objects, Symbol(layer))
-        end
-        # It is served, as an asset of a whitelisted type, through the same guarded static route.
-        served = serve_static(topojson_url * map_name * ".json")
+    @eval @testset "Same-origin map asset serves valid topology" begin
+        served = serve_static("/vendor/topojson/north-america_50m.json")
         @test served.status == 200
         @test HTTP.header(served, "Content-Type", "") == "application/json; charset=utf-8"
-        @test length(served.body) == filesize(asset)
-
-        # Keyed to the shipped bundle: the default source the override exists to replace, and the
-        # rule that turns the panel's geo request into that filename, are read from the bundle's own
-        # bytes. The bundle is vendored, not versioned, so a checkout without it checks the rest.
-        bundle = joinpath(public_dir, "vendor", "plotly.min.js")
-        if !isfile(bundle)
-            @test_skip "the plotting bundle is not vendored here; the base-map pairing is bundle-keyed"
-        else
-            bundle_source = read(bundle, String)
-            default = match(r"topojsonURL:\{valType:\"string\",noBlank:!0,dflt:\"([^\"]+)\"\}",
-                            bundle_source)
-            @test default !== nothing
-            default_url = default.captures[1]
-            # The default really is cross-origin — this is why the override is not optional …
-            @test startswith(default_url, "http")
-            default_origin = match(r"^https?://[^/]+", default_url).match
-            # … and the policy does not admit it as a fetch destination, so leaving the default in
-            # place would block the map rather than merely route it off-origin.
-            @test !any(source -> occursin(default_origin, source), sources)
-            # The filename rule and the path rule, verbatim from the bundle: `map_name` above is
-            # computed by exactly these two, so a bundle that changes either fails here.
-            @test occursin(
-                "getTopojsonName=function(t){return[t.scope.replace(/ /g,\"-\"),\"_\"," *
-                "t.resolution.toString(),\"m\"].join(\"\")}", bundle_source)
-            @test occursin("getTopojsonPath=function(t,e){return t+e+\".json\"}", bundle_source)
-            # The bundle is the version the page's own CDN fallback names, so the vendored copy and
-            # the fallback cannot drift apart into two different libraries.
-            version = match(r"plotly\.js v([0-9]+\.[0-9]+\.[0-9]+)", bundle_source)
-            @test version !== nothing
-            @test occursin("cdn.plot.ly/plotly-" * version.captures[1] * ".min.js", js)
+        @test !isempty(served.body)
+        topology = JSON3.read(String(served.body))
+        @test topology.type == "Topology"
+        for layer in (:coastlines, :countries, :subunits, :land)
+            @test haskey(topology.objects, layer)
         end
     end
 

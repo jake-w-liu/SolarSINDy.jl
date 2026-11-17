@@ -1987,3 +1987,24 @@ passed 17/17. Literal include references and shell syntax were checked. Julia
 Pkg.test, examples and strict docs execution on this trimmed source remain
 pending hosted CI because local available physical memory is below 8 GiB.
 Earlier CI results on 70ee527 do not validate this later test cleanup.
+
+### Follow-up removal verification (2026-11-18)
+
+Authenticated CI run 44114671729 reported two failures in test_compat.jl on Linux
+and Windows Julia 1.13.1: a CI command-count assertion and a YAML-layout predicate.
+Both checked retired workflow structure. Its package summary contained no errors.
+Strict documentation builds passed on both Julia versions. These results do not
+validate the later direct suites after that failed include. Removed the complete
+metadata suite and redundant launcher/worker machinery under the user's explicit
+essential-tests-only instruction. A fresh complete package/examples CI run is
+required before main is updated.
+The follow-up also removes frozen A187 implementation copies, source-byte guard
+mutation workers and duplicated frontend execution inside Pkg.test. The bridge
+still checks independent OU values, causal timestamps, ownership, resumed replay
+and value-copy isolation. Dashboard tests retain real API, alert, stale-data,
+concurrency, XSS and rendering behavior; source-layout and README/Docker scans
+are removed. The CLI suite is 88 lines of isolated help/error/config/status and
+stale-PID behavior, with no monitor/dashboard launches. Local Bash syntax,
+help, malformed/CRLF config and unknown-command checks passed. Windows status
+needs the Julia identity helper and is assigned to hosted CI; local Julia
+execution remains blocked by the 8 GiB available-memory requirement.

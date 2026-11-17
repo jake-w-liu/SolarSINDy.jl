@@ -1,2 +1,0 @@
-import SolarSINDy
-const IntervalMeanForecaster = SolarSINDy.IntervalMeanForecaster
