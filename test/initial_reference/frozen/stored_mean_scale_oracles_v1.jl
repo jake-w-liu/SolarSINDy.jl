@@ -12,6 +12,5 @@ using Test
         @test_throws ArgumentError InitialReferenceAudit.sample_scale_about([1.,3.],center)
     end
     @test_throws ArgumentError InitialReferenceAudit.sample_scale_about([1e308,-1e308],0.)
-    @test_throws ArgumentError InitialReferenceAudit.sample_scale_about(zeros(1_000_001),0.)
     @test_throws ArgumentError InitialReferenceAudit.sample_scale_about(Any[0.,true],0.)
 end

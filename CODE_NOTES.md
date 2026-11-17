@@ -2239,3 +2239,16 @@ saved-state replay tests, candidate loss/selection/refit and corruption checks.
 Remove certificate-only fixtures/assertions. Run the narrow affected tests,
 then complete Pkg.test/examples/docs on the resulting commit before promotion.
 No scientific performance, publication or serving promotion is implied.
+
+### Final essential-test reduction (2026-11-18)
+
+Remove source-map census/rehashing, empty inventory/hash fixtures and repeated
+large row/string/vector capacity cases from ordinary tests. Keep direct path
+safety, small parser grammar/limit rejection, mathematical and causal oracles,
+all declared candidate/refit experiments and saved-state corruption checks.
+No production calculation, data limit, split/grid or tolerance changes here.
+The earlier blanket8GiB prohibition on every local Julia launch was incorrect:
+that budget belongs to scoped large-experiment/resource runners. Lightweight
+strict syntax checks have run on both supported Julia versions. Current local
+native execution is blocked by Windows Smart App Control rejecting dependency
+DLLs; hosted full package/examples verification remains required.

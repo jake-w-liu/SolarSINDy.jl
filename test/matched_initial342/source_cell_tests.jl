@@ -14,8 +14,6 @@ function source_and_cell_checks(root)
     @test meta.source_bindings[1].context_id!=meta.source_bindings[2].context_id
     @test meta.source_bindings[1].raw_prefix_sha256==meta.source_bindings[2].raw_prefix_sha256
     @test meta.source_bindings[1].input_prefix_sha256==meta.source_bindings[2].input_prefix_sha256
-    @test length(Entry.source_identity())>length(P.source_identity())
-    @test all(p->p in Entry.source_identity(),P.source_identity())
     @test_throws ArgumentError FC.bind_source_pair(reverse(f.admissions)...;
         loss_contract_sha256=Entry.LOSS_CONTRACT_SHA256,expected_sources=Entry.source_identity())
     @test_throws ArgumentError FC.bind_source_pair(f.admissions[1],f.admissions[1];

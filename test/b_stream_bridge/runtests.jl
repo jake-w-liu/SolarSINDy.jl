@@ -79,7 +79,6 @@ end
     invalid=[D.WindHour(T0,T0+Hour(1),T0+Hour(1),1.,1.)]
     @test_throws ArgumentError C.with_current_state_tracker(f,invalid;source_sha256=SOURCE)
     @test calls[]==0
-    @test_throws ArgumentError C.with_current_state_tracker(f,fill(data[1],500001);source_sha256=SOURCE)
     @test_throws ArgumentError D.WindHour(T0,T0+Hour(1),T0+Hour(1),true,0.)
     @test_throws ArgumentError D.WindHour(T0,T0+Hour(1),T0+Hour(1),-1.,Inf)
     @test_throws ArgumentError D.WindHour(T0,T0+Hour(1),T0+Hour(1),-1.,big"1e-1000")

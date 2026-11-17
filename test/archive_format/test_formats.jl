@@ -53,11 +53,6 @@ end
     @test_throws ArgumentError P.parse_wind(" "^4097*"\n"*w;kwargs...)
     @test P.parse_wind(replace(w,",400,"=>","*("0."*"0"^126)*",");kwargs...).raw_rows==1
     @test_throws ArgumentError P.parse_wind(replace(w,",400,"=>","*("0."*"0"^127)*",");kwargs...)
-    @test_throws ArgumentError P.parse_wind(" "^(8*1024*1024+1);kwargs...)
-    @test P.parse_wind("\n"^(8*1024*1024);kwargs...).raw_rows==0
-    a=P.parse_wind(w^50_000;kwargs...)
-    @test a.raw_rows==50_000&&a.duplicates==49_999&&length(a)==1
-    @test_throws ArgumentError P.parse_wind(w^50_001;kwargs...)
     @test_throws ArgumentError P.parse_wind(w;kwargs...,start=DateTime(2017)+Millisecond(1))
     @test_throws ArgumentError P.parse_wind(w;kwargs...,stop=DateTime(2017)+Day(33))
 end

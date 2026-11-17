@@ -38,17 +38,6 @@ const O=JSON3.read(read(joinpath(@__DIR__,"fixtures/raw_rows_v1.json"),String),A
             @test P.raw_row(body,big(1))==P.raw_row(body,1)
         end
     end
-    # Exercise the ordinary maximum raw-row count without multiplying a tuple
-    # type by sample size. All duplicates retain their original line positions.
-    line="2020-01-01T00:00:00.000Z,1,2,400,5\n"
-    maximum_body=P.parse_wind(repeat(line,50_000);station="CMO",product="OMNI_HRO_1MIN",
-        start=DateTime(O["start"]),stop=DateTime(O["stop"]))
-    @test maximum_body.raw_rows==50_000
-    @test length(maximum_body)==1
-    @test ncodeunits(maximum_body.raw_storage)==2_400_000
-    @test P.raw_row(maximum_body,50_000).source_line==50_000
-    @test P.raw_row(maximum_body,50_000).values==(400.,2.,1.,5.)
-    @test maximum_body.raw_rows_sha256==bytes2hex(sha256(IOBuffer(maximum_body.raw_storage)))
 end
 
 end

@@ -32,7 +32,7 @@ F.with_single_blas() do
     println("B_POINT_STAGE nine_task_protocol");flush(stdout)
     @test protocol_checks()
     mktempdir() do root
-        println("B_POINT_STAGE tree_inventory");flush(stdout)
+        println("B_POINT_STAGE output_path_safety");flush(stdout)
         @test tree_checks(realpath(root))
         println("B_POINT_STAGE basis_integer_grammar");flush(stdout)
         @test basis_integer_checks(realpath(root))

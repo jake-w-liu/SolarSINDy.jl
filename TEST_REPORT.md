@@ -80,6 +80,16 @@ both module testsets execute and a child failure still rejects the whole group.
 The one-use verification file was removed; no new persistent test runner or
 skip policy was added.
 
+Final capacity-fixture cleanup removes repeated source-map hashing, the empty
+423-file/116-directory inventory fixture, duplicate 50,000-row parser runs,
+8 MiB padding cases and large arrays created only to trip size limits. Direct
+path traversal/output isolation, small parser limits, malformed input and all
+independent numerical, causal and saved-state checks remain. Production limits,
+candidate grids, split definitions and tolerances are unchanged. Both strict
+documentation builds passed on9685e8f; its six package jobs were still running
+when this final test-only reduction was prepared. Complete CI on the final
+source is still required before main is advanced.
+
 ## Archival shared replay verification contract (28 October 2026)
 
 The complete prior generated worker is frozen by SHA256
