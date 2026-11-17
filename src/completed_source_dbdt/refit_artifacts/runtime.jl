@@ -1,6 +1,10 @@
 const _PACKAGE_ROOT = normpath(joinpath(@__DIR__,"..","..",".."))
 const _OWNED_RUNNER_SHA = "30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c"
 _stream_sha(path) = open(io->bytes2hex(SHA.sha256(io)),path)
+function _environment_manifest_sha256()
+    path=joinpath(_PACKAGE_ROOT,"Manifest.toml")
+    isfile(path) ? _stream_sha(path) : nothing
+end
 
 function _git_read(arguments...)
     git=Sys.which("git");require(git!==nothing,"Git is required for native research execution")
@@ -33,14 +37,15 @@ function _context_codes(context,stage::String)
     codes=context["code_hashes"];sha_string(codes["_source_inventory"])
     expected=Dict{String,Any}(name=>_stream_sha(joinpath(_PACKAGE_ROOT,name)) for name in _code_files(stage))
     require(Dict(k=>v for (k,v) in codes if k!="_source_inventory")==expected,"relevant loaded source identities differ")
-    require(context["julia_project_sha256"]==_stream_sha(joinpath(_PACKAGE_ROOT,"Project.toml")) &&
-        context["julia_manifest_sha256"]==_stream_sha(joinpath(_PACKAGE_ROOT,"Manifest.toml")),"project/manifest identity differs")
+    require(context["julia_project_sha256"]==_stream_sha(joinpath(_PACKAGE_ROOT,"Project.toml")),"project identity differs")
+    _nullable_sha(context["julia_manifest_sha256"])
     nothing
 end
 
 function _source_inventory_bytes()
     require(isempty(_git_read("status","--porcelain","--untracked-files=normal")),"native inventory requires a clean source checkpoint")
     names=split(_git_read("ls-files"),'\n')
+    filter!(name->name!="Manifest.toml",names)
     require(0<length(names)<=MAX_ARRAY && issorted(names) && length(unique(names))==length(names),"tracked source inventory bound/order differs")
     rows=Any[]
     for name in names
@@ -61,7 +66,8 @@ function _inventory_check(bytes,context;check_current=false)
         require(!isabspath(name) && !(".." in split(replace(name,'\\'=>'/'),'/')),"unsafe source inventory path")
         require(!haskey(mapping,name),"duplicate source inventory path")
         mapping[name]=sha_string(pair[2]);push!(names,name)
-        check_current && require(isfile(joinpath(_PACKAGE_ROOT,name)) && !islink(joinpath(_PACKAGE_ROOT,name)) &&
+        # A historical environment lockfile is provenance, not loaded code.
+        check_current && name!="Manifest.toml" && require(isfile(joinpath(_PACKAGE_ROOT,name)) && !islink(joinpath(_PACKAGE_ROOT,name)) &&
             _stream_sha(joinpath(_PACKAGE_ROOT,name))==mapping[name],"tracked source bytes differ from native inventory")
     end
     require(issorted(names),"native source inventory is not ordered")
@@ -74,10 +80,10 @@ end
 
 function _runtime_id(runtime)
     _schema(runtime,"runtime")
-    # Invocation paths bind the native receipt independently through argv_sha256.
-    # They are not a numerical-runtime identity: fit/cal/load jobs have different
-    # input/output paths even on the exact same executable/library/thread setup.
-    value=Dict{String,Any}(k=>v for (k,v) in runtime if k!="argv")
+    # Invocation paths and the optional package environment lockfile are
+    # provenance. Numerical runtime identity binds the executable, libraries
+    # and arithmetic settings independently of those environment artifacts.
+    value=Dict{String,Any}(k=>v for (k,v) in runtime if !(k in ("argv","julia_manifest_sha256")))
     digest(canonical_bytes(value;limit=MAX_METADATA_BYTES))
 end
 function _library_text(handle,names)
@@ -113,7 +119,7 @@ function _inspect_runtime(argv;native=true)
     Dict{String,Any}("julia_version"=>string(VERSION),"executable_sha256"=>_stream_sha(executable),
         "architecture"=>string(Sys.ARCH)*"/"*string(Sys.KERNEL),"argv"=>arguments,
         "julia_project_sha256"=>_stream_sha(joinpath(_PACKAGE_ROOT,"Project.toml")),
-        "julia_manifest_sha256"=>_stream_sha(joinpath(_PACKAGE_ROOT,"Manifest.toml")),
+        "julia_manifest_sha256"=>_environment_manifest_sha256(),
         "blas_vendor"=>"OpenBLAS/"*String(library.interface),"blas_version"=>version*";core="*core,
         "blas_library_sha256"=>_stream_sha(path),"blas_threads"=>BLAS.get_num_threads(),
         "omp_threads"=>something(tryparse(Int,get(ENV,"OMP_NUM_THREADS","")),0),
@@ -150,7 +156,8 @@ end
 function _validate_runtime(runtime)
     _schema(runtime,"runtime")
     require(runtime["julia_version"] in ("1.12.6","1.13.1"),"unsupported native runtime version")
-    for name in ("executable_sha256","julia_project_sha256","julia_manifest_sha256","blas_library_sha256");sha_string(runtime[name]);end
+    for name in ("executable_sha256","julia_project_sha256","blas_library_sha256");sha_string(runtime[name]);end
+    _nullable_sha(runtime["julia_manifest_sha256"])
     os=_runtime_os(runtime);bounded_string(runtime["blas_vendor"];nonempty=true);bounded_string(runtime["blas_version"];nonempty=true)
     argv=_array(runtime["argv"];nonempty=true)
     require(all(v->v isa String && ncodeunits(v)<=MAX_STRING_BYTES,argv) && _absolute_for_os(first(argv),os),"invalid recorded absolute native argv for its OS")

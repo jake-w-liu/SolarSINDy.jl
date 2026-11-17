@@ -23,13 +23,7 @@ function write_reference(root,v;delay=0,variant=:good,kind=:matched_information_
     issue(i)=start+Hour(i)
     mask(indices,h,role)=T._id((;schema="b_reference_per_lead_mask_v1",source_sha256=v.source_sha256,input_view_id=v.view_id,role,horizon=h,delay_hours=delay,training_boundary=boundary,validation_start=boundary,validation_end=stop,clocks=[(;issue=issue(i),target_complete=issue(i)+Hour(h),target_receipt=issue(i)+Hour(h+delay)) for i in indices]))
     feature=Dict(BASELINE_SOURCES)["contracts/features.json"];loss=Dict(BASELINE_SOURCES)["contracts/loss.json"]
-    qualified_head=repeat("a",40)
-    qualification=(;schema="b_reference_component_software_qualification_v1",evidence_mode=:synthetic_only,head=qualified_head,complete=true,harness=(;counts=(;PASS=438,WARN=3,FAIL=0),all17_independent_workers_complete=true,unfiltered_pkg_test_complete=true,experiments_entry_complete=true),native_jobs=[(;name="Julia $v / $os",conclusion="success",receipt_sha256=T._sha("synthetic gate receipt $v/$os"),log_sha256=T._sha("synthetic gate log $v/$os")) for v in ("1.12.6","1.13.1") for os in ("ubuntu-latest","windows-latest","macos-latest")],docs_and_containers=[(;name,conclusion="success",receipt_sha256=T._sha("synthetic gate receipt $name"),log_sha256=T._sha("synthetic gate log $name")) for name in ("Documentation build","Julia 1.12 deployment images")],source_sha256=Dict(BASELINE_SOURCES),root_qualification_sha256=T._sha("synthetic root gate verification"),source_proof_sha256=T._sha("synthetic exact source proof"),canonical_harness_sha256=T._sha("synthetic harness raw receipt"),software_qualification_only=true,actual_panel_fit_or_outcome_qualified=false,serving_promotion=false)
-    if variant==:qualification_head;qualification=merge(qualification,(;head=repeat("b",40)));end
-    if variant==:qualification_float_FAIL;qualification=merge(qualification,(;harness=merge(qualification.harness,(;counts=(;PASS=438,WARN=3,FAIL=0.)))));end
-    if variant==:qualification_bool_FAIL;qualification=merge(qualification,(;harness=merge(qualification.harness,(;counts=(;PASS=438,WARN=3,FAIL=false)))));end
-    P._exclusive(joinpath(root,"qualification.json"),collect(codeunits(JSON3.write(qualification)*"\n")));qpin=hash(joinpath(root,"qualification.json"))
-    common=(;complete=true,evidence_mode=:synthetic_only,reference_kind=kind,source_sha256=v.source_sha256,input_prefix_sha256=v.input_prefix_sha256,input_view_id=v.view_id,delay_hours=delay,training_boundary=boundary,validation_start=boundary,validation_end=stop,training_history_start=start,feature_contract_sha256=feature,tuning_loss_contract_sha256=loss,baseline_qualification_sha256=qpin,baseline_sources=T._hashdata(T._hashmap(BASELINE_SOURCES)))
+    common=(;complete=true,evidence_mode=:synthetic_only,reference_kind=kind,source_sha256=v.source_sha256,input_prefix_sha256=v.input_prefix_sha256,input_view_id=v.view_id,delay_hours=delay,training_boundary=boundary,validation_start=boundary,validation_end=stop,training_history_start=start,feature_contract_sha256=feature,tuning_loss_contract_sha256=loss,baseline_sources=T._hashdata(T._hashmap(BASELINE_SOURCES)))
     errors=([3.,2.,2.,4.,5.,6.,7.,8.],[4.,3.,1.,1.,6.,7.,8.,9.])
     selected=[2,3]
     if variant in (:near_tie_stored,:exact_tie_wrong)
@@ -64,11 +58,11 @@ function write_reference(root,v;delay=0,variant=:good,kind=:matched_information_
     end
     audit=identified(merge((;schema=matched ? "b_matched_reference_audit_v2" : "b_original_reference_audit_v1"),common,(;audit_contract_sha256=T._sha("synthetic independently pinned audit contract"),raw_row_identity_sha256=S._row_identity(rows),prediction_panel_sha256=ppin,grid_sha256=gridpin,tuning_sha256=tuningpin,all_eight_settings_checked=matched,full_per_lead_cohorts_checked=true,feature_receipt_history_checked=true,selected_prediction_columns_checked=true,initial_only=true)),:audit_id)
     P._exclusive(joinpath(root,"audit.json"),T._bytes(audit));apin=hash(joinpath(root,"audit.json"))
-    names=matched ? vcat(["audit.json","grid.json","tuning.json","predictions.bin","qualification.json"],["candidates/h$h/setting-$s.bin" for h in (4,6) for s in 1:8]) : ["audit.json","predictions.bin","qualification.json"]
+    names=matched ? vcat(["audit.json","grid.json","tuning.json","predictions.bin"],["candidates/h$h/setting-$s.bin" for h in (4,6) for s in 1:8]) : ["audit.json","predictions.bin"]
     members=[(;name,bytes=filesize(joinpath(root,name)),sha256=hash(joinpath(root,name))) for name in sort(names)]
     completion=identified(merge((;schema=matched ? "b_matched_reference_completion_v2" : "b_original_reference_completion_v1"),common,(;audit_contract_sha256=audit.audit_contract_sha256,model_ids=modelids,selected_setting_ids=selected,raw_row_identity_sha256=S._row_identity(rows),prediction_panel_sha256=ppin,grid_sha256=gridpin,tuning_sha256=tuningpin,audit_sha256=apin,members)),:completion_id)
     P._exclusive(joinpath(root,"completion.json"),T._bytes(completion))
-    pins=I.BReferencePins(;completion_sha256=hash(joinpath(root,"completion.json")),audit_sha256=apin,grid_sha256=gridpin,tuning_sha256=tuningpin,prediction_sha256=ppin,feature_contract_sha256=feature,tuning_loss_contract_sha256=loss,baseline_qualification_sha256=qpin,baseline_sources=BASELINE_SOURCES,baseline_qualified_head=qualified_head,feature_contract_member="contracts/features.json",tuning_loss_contract_member="contracts/loss.json")
+    pins=I.BReferencePins(;completion_sha256=hash(joinpath(root,"completion.json")),audit_sha256=apin,grid_sha256=gridpin,tuning_sha256=tuningpin,prediction_sha256=ppin,feature_contract_sha256=feature,tuning_loss_contract_sha256=loss,baseline_sources=BASELINE_SOURCES,feature_contract_member="contracts/features.json",tuning_loss_contract_member="contracts/loss.json")
     (;root,pins,view=v,expected_sources=P.source_identity())
 end
 admit(f)=I.admit_reference(joinpath(f.root,"completion.json");trusted_pins=f.pins,roots=Dict("reference"=>f.root),view=f.view,expected_sources=f.expected_sources)
@@ -83,7 +77,7 @@ original=admit(write_reference(joinpath(OUT,"original-good"),v;kind=:original_re
 @test_throws ArgumentError S._check_reference(original;matched=true)
 metric=I._reference_metric([-3.,1.,-2.,4.],zeros(4));@test metric.n==4&&metric.rmse_nt==sqrt(7.5)&&metric.mae_nt==2.5&&metric.bias_nt==0.
 results=NamedTuple[]
-for variant in (:wrong_grid,:near_tie_stored,:exact_tie_wrong,:qualification_head,:qualification_float_FAIL,:qualification_bool_FAIL)
+for variant in (:wrong_grid,:near_tie_stored,:exact_tie_wrong)
     witness=write_reference(joinpath(OUT,String(variant)),variant in (:near_tie_stored,:exact_tie_wrong) ? view_fixture(true) : v;variant)
     rejected=false;error=""
     try admit(witness) catch e;rejected=e isa ArgumentError;error=sprint(showerror,e);end

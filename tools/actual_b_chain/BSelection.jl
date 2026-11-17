@@ -11,22 +11,20 @@ struct BReferencePins
     prediction_sha256::String
     feature_contract_sha256::String
     tuning_loss_contract_sha256::String
-    baseline_qualification_sha256::String
     baseline_sources::T.HashMap
-    baseline_qualified_head::String
     feature_contract_member::String
     tuning_loss_contract_member::String
     pins_id::String
 end
 function _pins_data(p::BReferencePins)
-    (;completion_sha256=p.completion_sha256,audit_sha256=p.audit_sha256,grid_sha256=p.grid_sha256,tuning_sha256=p.tuning_sha256,prediction_sha256=p.prediction_sha256,feature_contract_sha256=p.feature_contract_sha256,tuning_loss_contract_sha256=p.tuning_loss_contract_sha256,baseline_qualification_sha256=p.baseline_qualification_sha256,baseline_sources=T._hashdata(p.baseline_sources),baseline_qualified_head=p.baseline_qualified_head,feature_contract_member=p.feature_contract_member,tuning_loss_contract_member=p.tuning_loss_contract_member)
+    (;completion_sha256=p.completion_sha256,audit_sha256=p.audit_sha256,grid_sha256=p.grid_sha256,tuning_sha256=p.tuning_sha256,prediction_sha256=p.prediction_sha256,feature_contract_sha256=p.feature_contract_sha256,tuning_loss_contract_sha256=p.tuning_loss_contract_sha256,baseline_sources=T._hashdata(p.baseline_sources),feature_contract_member=p.feature_contract_member,tuning_loss_contract_member=p.tuning_loss_contract_member)
 end
-function BReferencePins(;completion_sha256,audit_sha256,grid_sha256,tuning_sha256,prediction_sha256,feature_contract_sha256,tuning_loss_contract_sha256,baseline_qualification_sha256,baseline_sources,baseline_qualified_head,feature_contract_member,tuning_loss_contract_member)
-    hashes=(completion_sha256,audit_sha256,grid_sha256,tuning_sha256,prediction_sha256,feature_contract_sha256,tuning_loss_contract_sha256,baseline_qualification_sha256)
-    T._need(all(T._hex,hashes)&&baseline_qualified_head isa AbstractString&&occursin(r"\A[0-9a-f]{40}\z",baseline_qualified_head),"B independently supplied reference pins/head differ")
+function BReferencePins(;completion_sha256,audit_sha256,grid_sha256,tuning_sha256,prediction_sha256,feature_contract_sha256,tuning_loss_contract_sha256,baseline_sources,feature_contract_member,tuning_loss_contract_member)
+    hashes=(completion_sha256,audit_sha256,grid_sha256,tuning_sha256,prediction_sha256,feature_contract_sha256,tuning_loss_contract_sha256)
+    T._need(all(T._hex,hashes),"B independently supplied reference pins differ")
     sources=T._hashmap(baseline_sources);mapping=Dict(sources)
     T._need(get(mapping,feature_contract_member,nothing)==feature_contract_sha256&&get(mapping,tuning_loss_contract_member,nothing)==tuning_loss_contract_sha256,"B feature/loss members absent from independently pinned component sources")
-    fields=(String.(hashes)...,sources,String(baseline_qualified_head),String(feature_contract_member),String(tuning_loss_contract_member))
+    fields=(String.(hashes)...,sources,String(feature_contract_member),String(tuning_loss_contract_member))
     provisional=BReferencePins(fields...,repeat("0",64));BReferencePins(fields...,T._id(_pins_data(provisional)))
 end
 struct BReferenceAudit

@@ -67,11 +67,15 @@ function _publish_payloads(directory,payloads,schema;limit,closecheck)
 end
 function _publish_input(d,summary,auth,directory;attempt_bytes,closecheck=()->nothing)
     request=canonical(d);body=canonical(summary)
-    receipt=canonical(Dict("schema"=>"candidate_fit_input_receipt_v1","complete"=>true,
+    ordinary=d["actual_source_access"]
+    receipt_value=Dict("schema"=>(ordinary ? "candidate_fit_input_receipt_v2" : "candidate_fit_input_receipt_v1"),"complete"=>true,
         "descriptor_sha256"=>digest(request),"summary_sha256"=>digest(body),"authorization"=>auth,
-        "attempt_sha256"=>digest(attempt_bytes),"native_fits"=>0,"actual_source_access"=>d["actual_source_access"],"software_qualification"=>false);limit=65536)
-    pins=_publish_payloads(directory,[("request.json",request),("summary.json",body),("receipt.json",receipt),("attempt.json",attempt_bytes)],
-        "candidate_fit_input";limit=MAX_INPUT_BYTES,closecheck)
+        "native_fits"=>0,"actual_source_access"=>ordinary,"software_qualification"=>false)
+    ordinary || (receipt_value["attempt_sha256"]=digest(attempt_bytes))
+    receipt=canonical(receipt_value;limit=65536)
+    payloads=[("request.json",request),("summary.json",body),("receipt.json",receipt)]
+    ordinary || push!(payloads,("attempt.json",attempt_bytes))
+    pins=_publish_payloads(directory,payloads,"candidate_fit_input";limit=MAX_INPUT_BYTES,closecheck)
     allpins=(;descriptor_sha256=digest(request),summary_sha256=digest(body),receipt_sha256=digest(receipt),pins...)
     input=read_fit_input(directory;allpins...)
     (;input,pins=allpins)
@@ -128,8 +132,10 @@ function _check_input(input::FitInput)
         s["point_source_sha256"]==F.source_identity(),"candidate input summary semantics")
     J._sha(s["input_sha256"]);J._sha(s["cohort_sha256"])
     _check_counts(s["counts"],s["rows"])
-    J._object(receipt,Set(("schema","complete","descriptor_sha256","summary_sha256","authorization","attempt_sha256","native_fits","actual_source_access","software_qualification")))
-    need(receipt["schema"]=="candidate_fit_input_receipt_v1" && receipt["complete"]===true &&
+    fields=Set(("schema","complete","descriptor_sha256","summary_sha256","authorization","native_fits","actual_source_access","software_qualification"))
+    receipt["schema"]=="candidate_fit_input_receipt_v1" && push!(fields,"attempt_sha256")
+    J._object(receipt,fields)
+    need(receipt["schema"] in ("candidate_fit_input_receipt_v1","candidate_fit_input_receipt_v2") && receipt["complete"]===true &&
         receipt["descriptor_sha256"]==input.pins.descriptor_sha256 && receipt["summary_sha256"]==input.pins.summary_sha256 &&
         receipt["actual_source_access"]===d["actual_source_access"] && receipt["software_qualification"]===false &&
         receipt["native_fits"]===0 && (receipt["authorization"]!==nothing)===d["actual_source_access"],"candidate input receipt")
@@ -145,18 +151,26 @@ function read_fit_input(directory;descriptor_sha256,summary_sha256,receipt_sha25
     pins=(;descriptor_sha256=J._sha(descriptor_sha256),summary_sha256=J._sha(summary_sha256),receipt_sha256=J._sha(receipt_sha256),
         manifest_sha256=J._sha(manifest_sha256),complete_sha256=J._sha(complete_sha256))
     p=_read_payloads(directory,"candidate_fit_input",manifest_sha256,complete_sha256;maximum=6,limit=MAX_INPUT_BYTES);b=p.bodies
-    need(Set(keys(b))==Set(("request.json","summary.json","receipt.json","attempt.json")),"candidate input fileset")
+    ordinary=decode(b["receipt.json"];limit=65536)["schema"]=="candidate_fit_input_receipt_v2"
+    need(Set(keys(b))==Set(ordinary ? ("request.json","summary.json","receipt.json") :
+        ("request.json","summary.json","receipt.json","attempt.json")),"candidate input fileset")
     need(digest(b["request.json"])==descriptor_sha256 && digest(b["summary.json"])==summary_sha256 && digest(b["receipt.json"])==receipt_sha256,"candidate input external member pins")
     input=FitInput(String(copy(b["request.json"])),String(copy(b["summary.json"])),String(copy(b["receipt.json"])),pins,directory,_InputToken())
     _check_input(input);receipt=decode(b["receipt.json"];limit=65536)
-    need(digest(b["attempt.json"])==J._sha(receipt["attempt_sha256"]),"candidate input attempt binding")
-    receipt["authorization"]===nothing || need(receipt["authorization"]["attempt_sha256"]==receipt["attempt_sha256"],"candidate input authority/attempt binding")
+    if !ordinary
+        need(digest(b["attempt.json"])==J._sha(receipt["attempt_sha256"]),"candidate input attempt binding")
+    else
+        _check_operation_binding(receipt["authorization"],input.descriptor)
+    end
     p.unchanged();input
 end
 function _publish_validation(context,records,ranks,metric,auth,directory;attempt_bytes=UInt8[],closecheck=()->nothing)
     request=canonical(context["descriptor"]);cb=canonical(context);mb=canonical(metric;limit=16384)
-    receipt=canonical(Dict("schema"=>"candidate_validation_receipt_v1","complete"=>true,"context_sha256"=>digest(cb),
-        "authorization"=>auth,"attempt_sha256"=>digest(attempt_bytes),"actual_source_access"=>context["descriptor"]["actual_source_access"],"native_fits"=>0,"software_qualification"=>false);limit=65536)
+    ordinary=context["descriptor"]["actual_source_access"]
+    receipt_value=Dict("schema"=>(ordinary ? "candidate_validation_receipt_v2" : "candidate_validation_receipt_v1"),"complete"=>true,
+        "context_sha256"=>digest(cb),"authorization"=>auth,"actual_source_access"=>ordinary,"native_fits"=>0,"software_qualification"=>false)
+    ordinary || (receipt_value["attempt_sha256"]=digest(attempt_bytes))
+    receipt=canonical(receipt_value;limit=65536)
     payloads=[("request.json",request),("context.json",cb),("metric.json",mb),("receipt.json",receipt),("ranks.bin",ranks)]
     n=context["calibration_numeric_context"]["rows"];need(2<=n<=MAX_ROWS && length(records)==56n && length(ranks)==4n,"candidate validation geometry")
     for (i,start) in enumerate(1:8192:n)
@@ -186,8 +200,11 @@ function read_validation(directory,pins::ValidationPins)
     need(metric["clipped"]===false && metric["scale_normalized"]===false && F.isint(metric["rows"]),"candidate metric strict types")
     need(metric==Dict("schema"=>"candidate_raw_log_mse_v1","definition"=>"Statistics.mean(abs2,log1p(raw_target)-raw_log_prediction)",
         "loss_bits"=>C.bits(log_mse(rows.targets,rows.predictions)),"rows"=>n,"clipped"=>false,"scale_normalized"=>false),"candidate raw metric reconstruction")
-    J._object(receipt,Set(("schema","complete","context_sha256","authorization","attempt_sha256","actual_source_access","native_fits","software_qualification")))
-    need(receipt["schema"]=="candidate_validation_receipt_v1" && receipt["complete"]===true && receipt["context_sha256"]==pins.context_sha256 &&
+    fields=Set(("schema","complete","context_sha256","authorization","actual_source_access","native_fits","software_qualification"))
+    receipt["schema"]=="candidate_validation_receipt_v1" && push!(fields,"attempt_sha256")
+    J._object(receipt,fields)
+    receipt["schema"]=="candidate_validation_receipt_v2" && _check_operation_binding(receipt["authorization"],context["descriptor"])
+    need(receipt["schema"] in ("candidate_validation_receipt_v1","candidate_validation_receipt_v2") && receipt["complete"]===true && receipt["context_sha256"]==pins.context_sha256 &&
         receipt["actual_source_access"]===context["descriptor"]["actual_source_access"] && receipt["native_fits"]===0 &&
         receipt["software_qualification"]===false && (receipt["authorization"]!==nothing)===receipt["actual_source_access"],"candidate validation receipt")
     p.unchanged();ValidationArtifact(String(copy(b["context.json"])),String(copy(b["metric.json"])),String(copy(b["receipt.json"])),records,ranks,pins,directory,_ValidationToken())

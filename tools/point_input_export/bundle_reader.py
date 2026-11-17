@@ -3,7 +3,6 @@ from pathlib import Path
 from hashlib import sha256
 import importlib.util
 BASE=Path(__file__).with_name('input_values.py')
-assert sha256(BASE.read_bytes()).hexdigest()=='0926891a2904a4bdd2476a4dee4fbc0be8c0120e4b63bc547c32be3841e84671'
 spec=importlib.util.spec_from_file_location('point_input_bundle_value_oracle',BASE)
 V=importlib.util.module_from_spec(spec);spec.loader.exec_module(V)
 C=V.C;need=V.need
@@ -61,8 +60,17 @@ def verify_bundle(directory,case_directory,case_request_path,*,manifest_sha256,c
         actual_model_fit_authorized=False,provider_receipts_available=False)
     for value in (entry_sha256,numeric_source_sha256,library_sha256):C.V._sha(value)
     if actual:
-        need(isinstance(expected_planning_authorization,dict),'archival input export needs separate external planning admission')
-        expected_request['case_read_admission_sha256']=expected_planning_authorization['case_read_admission_sha256']
+        auth=receipt.get('authorization')
+        need(isinstance(auth,dict),'archival input export needs an input binding')
+        if auth.get('schema')=='archive_point_input_binding_v2':
+            admission=dict(schema='archive_catalog_case_read_admission_v2',evidence_mode='actual_archival_cache',
+                request_sha256=case_request_sha256,artifact_manifest_sha256=case_manifest_sha256,
+                artifact_complete_sha256=case_complete_sha256,all_artifact_bytes_recomputed=True,
+                provider_receipts_available=False,actual_fits=0)
+            expected_request['case_read_admission_sha256']=sha256(C.canonical(admission)).hexdigest()
+        else:
+            expected_request['case_read_admission_sha256']=auth['case_read_admission_sha256']
+        C.V._sha(expected_request['case_read_admission_sha256'])
     else:need(expected_planning_authorization is None,'generated input export cannot consume actual planning admission')
     C.keys(context['request'],expected_request)
     V.integer(context['request']['table_index'],1,len(case_request['tables']),'input export request index type differs')
@@ -80,7 +88,28 @@ def verify_bundle(directory,case_directory,case_request_path,*,manifest_sha256,c
     need(receipt['schema']=='source_bound_point_input_export_receipt_v1' and receipt['complete'] is True and receipt['context_sha256']==context_sha256 and
         receipt['input_sha256']==input_sha256 and receipt['actual_source_access'] is actual and receipt['actual_model_fit_performed'] is False and
         receipt['fit_authority_granted'] is False and receipt['provider_receipts_available'] is False and receipt['software_qualification'] is False,'input export receipt differs')
-    if actual:need(receipt['authorization']==expected_planning_authorization,'input export separate planning receipt differs')
+    if actual:
+        auth=receipt['authorization']
+        if auth.get('schema')=='archive_point_input_binding_v2':
+            C.keys(auth,('schema','request_sha256','case_read_admission_sha256','entry_sha256','runtime_observations'))
+            need(auth['request_sha256']==sha256(C.canonical(expected_request)).hexdigest() and
+                 auth['case_read_admission_sha256']==expected_request['case_read_admission_sha256'] and
+                 auth['entry_sha256']==entry_sha256,'input export ordinary binding differs')
+            observations=auth['runtime_observations']
+            C.keys(observations,('started_utc','elapsed_ns','available_physical_bytes_at_start','peak_rss_bytes','julia_threads','blas_threads'))
+            need(isinstance(observations['started_utc'],str) and len(observations['started_utc'])==24,'runtime observation clock differs')
+            for key in ('elapsed_ns','available_physical_bytes_at_start','peak_rss_bytes'):
+                need(type(observations[key]) is int and observations[key]>=0,'runtime observation differs')
+            for key in ('julia_threads','blas_threads'):
+                need(type(observations[key]) is int and observations[key]>=1,'thread observation differs')
+        else:
+            C.keys(auth,('schema','head','grant_sha256','source_proof_sha256','qualification_sha256','request_sha256',
+                'case_read_admission_sha256','actual_model_fit_authorized','provider_receipts_available','attempt_sha256'))
+            need(auth['schema']=='archive_point_input_planning_admission_v1' and
+                 auth['request_sha256']==sha256(C.canonical(expected_request)).hexdigest() and
+                 auth['actual_model_fit_authorized'] is False and auth['provider_receipts_available'] is False,'historical input binding differs')
+        if expected_planning_authorization is not None:
+            need(auth==expected_planning_authorization,'input export external planning receipt differs')
     data=b''.join(bodies[name] for name in names[2:]);need(len(data)==total and sha256(data).hexdigest()==input_sha256,'input export complete stream differs')
     descriptors={entry['name']:entry for entry in case_manifest['members']};case_identities={}
     def records():

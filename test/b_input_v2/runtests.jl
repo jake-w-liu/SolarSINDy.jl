@@ -231,7 +231,6 @@ function complete_file_handoff(root)
     completion=b2_json(joinpath(stage.directory,"completion.json"))
     @test completion["admitted_input_seal"]==checked.admission.admission_id
     @test completion["input_view_id"]==b2_expected_view(f).view_id
-    @test completion["actual_execution_permit_sha256"]===nothing&&completion["qualified_head"]===nothing
     @test completion["input_envelope_sha256"]==joined.envelope_sha
     @test completion["reference_completion_sha256"]==joined.witness.pins.completion_sha256
     @test I.recheck_source_v2(source)&&I.recheck(checked.admission)

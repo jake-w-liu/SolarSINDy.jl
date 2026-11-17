@@ -18,9 +18,7 @@ end
 function write_json(path,value;limit=131072)
     bytes=R.canonical_bytes(value;limit);R._exclusive_write(path,bytes);digest(bytes)
 end
-function producer(absent,pin)
-    A.Authority(absent,pin,absent,pin,absent,pin,absent,pin,absent,pin,absent,pin)
-end
+
 @testset "Existing-case reader generated recomputation and immutable receipt" begin
     for role in ("primary","independent"),layout in ("ground-only","mixed")
         mktempdir() do temporary
@@ -75,8 +73,8 @@ end
                 @test length(Q.split_arrays(value.cases,index;start=START+Minute(32),stop=equal+Millisecond(1),asof=START+Minute(121)).targets)==1
             end
             absent=joinpath(root,"never-created");pin="0"^64
-            for (p,r) in ((producer(absent,pin),nothing),(nothing,B.ReaderAuthority(absent,pin,absent,pin,absent,pin)),(true,true))
-                failure(()->reread(;producer=p,reader=r),"generated case rereads cannot consume actual authorities")
+            for (p,r) in ((true,nothing),(nothing,true),(true,true))
+                @test_throws ArgumentError reread(;producer=p,reader=r)
             end
             failure(()->reread(;m=pin),"case reader metadata pin")
             changed=joinpath(root,"changed");Base.cp(directory,changed)
@@ -96,52 +94,4 @@ end
         end
     end
 end
-@testset "Existing-case read permit negatives fail before producer or source bodies" begin
-    mktempdir() do temporary
-        root=realpath(temporary);absent=joinpath(root,"never-created");pin="0"^64;different="1"^64
-        p=producer(absent,pin);reader=B.ReaderAuthority(absent,pin,absent,pin,absent,pin)
-        request=Dict("schema"=>"archive_catalog_case_request_v1","evidence_mode"=>"actual_archival_cache",
-            "layout"=>"ground-only","role"=>"primary","runtime"=>string(VERSION),
-            "source"=>Dict("directory"=>absent,"manifest_sha256"=>pin,"complete_sha256"=>pin),
-            "tables"=>[Dict("id"=>"CMO-declaration-only","station"=>"CMO","start_inclusive"=>"2017-01-01T00:00:00.000Z",
-                "stop_exclusive"=>"2017-01-01T00:01:00.000Z","label_asof"=>"2017-01-01T00:32:00.000Z")])
-        request_path=joinpath(root,"request.json");rp=write_json(request_path,request)
-        for (old,new) in ((nothing,nothing),(p,nothing),(nothing,reader),(reader,p),(Dict(),Dict()))
-            failure(()->B.read_reverified(request_path,absent;request_sha256=rp,manifest_sha256=pin,complete_sha256=pin,
-                producer=old,reader=new),"existing archival cases require distinct producer and reader authorities")
-        end
-        # These deliberately invalid permits are rejection fixtures. No positive
-        # archival qualification, feature grant or source artifact is fabricated.
-        base=Dict("schema"=>"archive_catalog_existing_case_read_grant_v1","operation"=>"verify_existing_cases_only",
-            "request_sha256"=>rp,"artifact_manifest_sha256"=>pin,"artifact_complete_sha256"=>pin,
-            "producer_grant_sha256"=>pin,"producer_source_proof_sha256"=>pin,"producer_qualification_sha256"=>pin,
-            "reader_source_proof_sha256"=>pin,"reader_qualification_sha256"=>pin,"head"=>"0"^40,
-            "actual_source_access_authorized"=>true,"actual_model_fit_authorized"=>false,
-            "new_case_generation_authorized"=>false,"dataset_discovery"=>false,"provider_receipts_available"=>false)
-        changes=[("schema","wrong"),("operation","fit"),("request_sha256",different),
-            ("artifact_manifest_sha256",different),("artifact_complete_sha256",different),
-            ("producer_grant_sha256",different),("producer_source_proof_sha256",different),
-            ("producer_qualification_sha256",different),("reader_source_proof_sha256",different),
-            ("reader_qualification_sha256",different),("actual_source_access_authorized",false),
-            ("actual_model_fit_authorized",true),("new_case_generation_authorized",true),
-            ("dataset_discovery",true),("provider_receipts_available",true)]
-        for (index,(field,bad)) in enumerate(changes)
-            grant=copy(base);grant[field]=bad;path=joinpath(root,"invalid-permit-$index.json");gp=write_json(path,grant)
-            supplied=B.ReaderAuthority(path,gp,absent,pin,absent,pin)
-            failure(()->B.read_reverified(request_path,absent;request_sha256=rp,manifest_sha256=pin,complete_sha256=pin,
-                producer=p,reader=supplied),"existing-case read grant differs")
-        end
-        @test !ispath(absent)
-        @test length(readdir(root))==length(changes)+1
-    end
-end
-@testset "Loaded reader inventory remains strict" begin
-    inventory=Dict(name=>"0"^64 for name in ("src/archive_format/ArchiveCatalogCaseAuthority.jl",
-        "src/archive_format/ArchiveCatalogCaseJob.jl","src/archive_format/ArchiveCatalogCaseComparison.jl",
-        "src/archive_format/ArchiveCatalogSnapshotFilesystem.jl","src/archive_format/ArchiveCatalogSnapshotValues.jl",
-        "src/archive_format/ArchiveCatalogSourceJob.jl"))
-    proof=Dict("complete"=>true,"all_commit_filters_match"=>true,"source_sha256"=>inventory)
-    failure(()->A._qualification_loaded(proof),"loaded package differs from qualified source proof")
-end
-println("GENERATED_CASE_READER_TRANSITION_PASSED;ACTUAL_SOURCE_ACCESS=false;ACTUAL_FITS=0")
 end

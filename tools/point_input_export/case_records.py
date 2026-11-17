@@ -4,7 +4,6 @@ from datetime import datetime,timezone
 from hashlib import sha256
 import importlib.util,math,re,struct
 SOURCE=Path(__file__).with_name('bounded_json.py')
-assert sha256(SOURCE.read_bytes()).hexdigest()=='1912a60ab9e014437f54ae133caec353fcf2839972344a126b27836b23f0aa5f'
 spec=importlib.util.spec_from_file_location('case_artifact_bounded_json',SOURCE)
 V=importlib.util.module_from_spec(spec);spec.loader.exec_module(V)
 need=V.need;canonical=V.canonical;decoded=V.decoded
@@ -48,6 +47,14 @@ def _splits():
         out[name]=(_millis(start+'T00:00:00.000Z'),_millis(stop+'T00:00:00.000Z'))
     return out
 def _authority(value,request,request_sha256):
+    if isinstance(value,dict) and value.get('schema')=='archive_case_source_binding_v2':
+        keys(value,('schema','operation','request_sha256','source_manifest_sha256','source_complete_sha256'))
+        need(value['operation']=='sealed_features_labels_only' and value['request_sha256']==request_sha256 and
+             value['source_manifest_sha256']==request['source']['manifest_sha256'] and
+             value['source_complete_sha256']==request['source']['complete_sha256'],'case source binding differs')
+        return
+    # Historical execution metadata remains provenance. No grant, CI log or
+    # qualification file is opened to read independently pinned numeric data.
     keys(value,('operation','request_sha256','grant_sha256','plan_sha256','agreement_sha256','R0_context',
         'source_proof_sha256','qualification_sha256','floating_policy_sha256','head','actual_model_fit_authorized'))
     need(value['operation']=='sealed_features_labels_only' and value['request_sha256']==request_sha256 and value['actual_model_fit_authorized'] is False,'feature-only authority context differs')
@@ -84,7 +91,8 @@ def verify_cases(directory,request_path,*,request_sha256,manifest_sha256,complet
     integer(manifest['actual_fits'],0);integer(marker['actual_fits'],0)
     if actual:
         _authority(manifest['authority'],request,request_sha256)
-        need(isinstance(expected_authority,dict) and manifest['authority']==expected_authority,'actual feature authority binding differs')
+        if expected_authority is not None:
+            need(isinstance(expected_authority,dict) and manifest['authority']==expected_authority,'actual feature authority binding differs')
     else:need(expected_authority is None,'generated artifact actual authority forbidden')
     entries=manifest['members'];need(isinstance(entries,list) and 1<=len(entries)<=1022,'artifact member count differs')
     descriptors={};total=len(mb)

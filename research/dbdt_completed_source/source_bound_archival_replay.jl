@@ -8,7 +8,6 @@ const K=S.K
 const F=SolarSINDy.ArchiveSourceBoundPointFit
 const B=SolarSINDy.ArchiveCatalogCaseReader
 const J=SolarSINDy.ArchiveCatalogSourceJob
-const A=SolarSINDy.ArchiveCatalogCaseAuthority
 const D=SolarSINDy.CompletedSourceDBDT
 const E=D.CompletedLabelEvents
 const R=D.CompletedRefitArtifacts
@@ -19,17 +18,8 @@ const JOB_FILES=Tuple(sort!(unique([T.JOB_FILES...,
     "source_bound_archival_replay.jl","source_bound_archival_replay_trace.jl","source_bound_shared_replay.jl",
     "source_bound_evaluation_binding.jl","publisher_up_projection.jl","publisher_up_values.jl","retained_publisher_up.jl"])))
 const JOB_PINS=Tuple(digest(read(joinpath(@__DIR__,name))) for name in JOB_FILES)
-export ReplayAuthority,prepare_request,replay_archival,result_digest
+export prepare_request,replay_archival,result_digest
 
-"""Pins for one fixed existing-case replay, with no fitting or discovery permission."""
-struct ReplayAuthority
-    grant_path::String
-    grant_sha256::String
-    source_proof_path::String
-    source_proof_sha256::String
-    qualification_path::String
-    qualification_sha256::String
-end
 function job_identity()
     root=realpath(pkgdir(SolarSINDy))
     for (name,pin) in zip(JOB_FILES,JOB_PINS)
@@ -59,21 +49,22 @@ function _read_admission(value::B.ReverifiedCases)
     need(cases.actual_source_authority_granted===true && cases.actual_fit_performed===false,
         "archival replay requires reverified actual cases without fit permission")
     admission=R.decode_canonical(B.admission_bytes(value);limit=131072)
-    J._object(admission,Set(("schema","evidence_mode","request_sha256","artifact_manifest_sha256","artifact_complete_sha256",
-        "producer_head","producer_grant_sha256","producer_source_proof_sha256","producer_qualification_sha256",
-        "reader_head","reader_grant_sha256","reader_source_proof_sha256","reader_qualification_sha256",
-        "all_artifact_bytes_recomputed","new_case_generation_authorized","actual_model_fit_authorized","provider_receipts_available","actual_fits")))
-    need(admission["schema"]=="archive_catalog_case_read_admission_v1" && admission["evidence_mode"]=="actual_archival_cache" &&
-        admission["request_sha256"]==cases.request_sha256 && admission["artifact_manifest_sha256"]==cases.manifest_sha256 &&
-        admission["artifact_complete_sha256"]==cases.complete_sha256 && admission["all_artifact_bytes_recomputed"]===true &&
-        admission["new_case_generation_authorized"]===false && admission["actual_model_fit_authorized"]===false &&
-        admission["provider_receipts_available"]===false && F.isint(admission["actual_fits"]) && admission["actual_fits"]==0,
-        "archival replay case admission differs")
-    for key in ("producer_grant_sha256","producer_source_proof_sha256","producer_qualification_sha256",
-                "reader_grant_sha256","reader_source_proof_sha256","reader_qualification_sha256");J._sha(admission[key]);end
-    for key in ("producer_head","reader_head")
-        need(admission[key] isa String && occursin(r"\A[0-9a-f]{40}\z",admission[key]),"archival replay case source head")
+    # Historical producer certificates are provenance only. The reader has
+    # independently reconstructed the case payloads identified by these pins.
+    fields=Set(("schema","evidence_mode","request_sha256","artifact_manifest_sha256","artifact_complete_sha256",
+        "all_artifact_bytes_recomputed","provider_receipts_available","actual_fits"))
+    if get(admission,"schema",nothing)=="archive_catalog_case_read_admission_v1"
+        union!(fields,Set(("producer_head","producer_grant_sha256","producer_source_proof_sha256","producer_qualification_sha256",
+            "reader_head","reader_grant_sha256","reader_source_proof_sha256","reader_qualification_sha256",
+            "new_case_generation_authorized","actual_model_fit_authorized")))
     end
+    J._object(admission,fields)
+    need(get(admission,"schema",nothing) in ("archive_catalog_case_read_admission_v1","archive_catalog_case_read_admission_v2") &&
+        admission["evidence_mode"]=="actual_archival_cache" && admission["request_sha256"]==cases.request_sha256 &&
+        admission["artifact_manifest_sha256"]==cases.manifest_sha256 && admission["artifact_complete_sha256"]==cases.complete_sha256 &&
+        admission["all_artifact_bytes_recomputed"]===true && admission["provider_receipts_available"]===false &&
+        F.isint(admission["actual_fits"]) && admission["actual_fits"]==0,"archival replay case admission differs")
+    for key in ("request_sha256","artifact_manifest_sha256","artifact_complete_sha256");J._sha(admission[key]);end
     admission
 end
 function _metadata(fitting::B.ReverifiedCases,fitting_index,evaluation::B.ReverifiedCases,index,point,calibration,expected,static;
@@ -127,54 +118,16 @@ function prepare_request(fitting::B.ReverifiedCases,fitting_index,evaluation::B.
         start,stop,asof,subscribers,nominal,grace_ms,warmup)
     (;request_bytes=copy(prepared.bytes),request_sha256=digest(prepared.bytes))
 end
-function _admit(fitting,fitting_index,point,calibration,expected,prepared,authority,static_producer,calibration_producer,point_producer)
-    need(authority isa ReplayAuthority,"archival replay requires distinct replay-only authority")
-    need(static_producer isa T.StaticFitAuthority,"archival replay needs original static producer evidence")
-    grant=A._pinned(authority.grant_path,authority.grant_sha256;canonical=true,limit=131072)
-    J._object(grant,Set(("schema","operation","request_sha256","job_sha256","source_proof_sha256","qualification_sha256","head",
-        "actual_source_access_authorized","replay_authorized","actual_model_fit_authorized","actual_uncertainty_fit_authorized",
-        "new_case_generation_authorized","dataset_discovery","provider_receipts_available","expected_replays","execution_directory")))
-    need(grant["schema"]=="archival_shared_replay_grant_v1" && grant["operation"]=="fixed_models_completed_source_shared31_replay_only" &&
-        grant["request_sha256"]==digest(prepared.bytes) && grant["job_sha256"]==job_identity() &&
-        grant["source_proof_sha256"]==J._sha(authority.source_proof_sha256)==prepared.fitting_admission["reader_source_proof_sha256"]==prepared.evaluation_admission["reader_source_proof_sha256"] &&
-        grant["qualification_sha256"]==J._sha(authority.qualification_sha256)==prepared.fitting_admission["reader_qualification_sha256"]==prepared.evaluation_admission["reader_qualification_sha256"] &&
-        grant["actual_source_access_authorized"]===true && grant["replay_authorized"]===true && grant["actual_model_fit_authorized"]===false &&
-        grant["actual_uncertainty_fit_authorized"]===false && grant["new_case_generation_authorized"]===false &&
-        grant["dataset_discovery"]===false && grant["provider_receipts_available"]===false &&
-        F.isint(grant["expected_replays"]) && grant["expected_replays"]==1,"archival replay grant differs")
-    execution=J._text(grant["execution_directory"];limit=4096);need(isabspath(execution),"archival replay execution path must be absolute")
-    J._ordinary(execution;directory=true)
-    need(J._same(realpath(execution),realpath(dirname(authority.grant_path))),"archival replay permit outside execution directory")
-    root_parts=splitpath(realpath(pkgdir(SolarSINDy)));execution_parts=splitpath(realpath(execution))
-    need(!(length(execution_parts)>=length(root_parts) && all(J._same(a,b) for (a,b) in zip(root_parts,execution_parts))),
-        "archival replay execution would modify qualified source")
-    proof=A._pinned(authority.source_proof_path,authority.source_proof_sha256;limit=1048576)
-    qualification=A._pinned(authority.qualification_path,authority.qualification_sha256;limit=1048576)
-    A._qualification(proof,qualification,authority,grant)
-    need(proof["head"]==prepared.fitting_admission["reader_head"]==prepared.evaluation_admission["reader_head"] &&
-        all(get(proof["source_sha256"],PREFIX*name,nothing)==pin for (name,pin) in zip(JOB_FILES,JOB_PINS)),"archival replay job absent from qualification")
-    original=T._admit(fitting,fitting_index,point,calibration,expected,prepared.static_request,static_producer,calibration_producer,point_producer)
-    static_receipt=R.decode_canonical(prepared.static_checked.receipt_bytes;limit=65536)["authorization"]
-    need(original==Dict(key=>value for (key,value) in static_receipt if key!="attempt_sha256"),"archival replay static producer admission differs")
-    T._retained_attempt(realpath(dirname(static_producer.grant_path)),"STATIC_FIT_ATTEMPT.json",static_receipt["attempt_sha256"])
-    Dict("schema"=>"archival_shared_replay_admission_v1","head"=>proof["head"],"grant_sha256"=>authority.grant_sha256,
-        "source_proof_sha256"=>authority.source_proof_sha256,"qualification_sha256"=>authority.qualification_sha256,
-        "request_sha256"=>digest(prepared.bytes),"static_grant_sha256"=>static_receipt["grant_sha256"],
-        "static_attempt_sha256"=>static_receipt["attempt_sha256"],"replay_authorized"=>true,
-        "actual_model_fit_authorized"=>false,"actual_uncertainty_fit_authorized"=>false,"provider_receipts_available"=>false)
-end
 include("source_bound_archival_replay_trace.jl")
 """Replay admitted existing cases once with all fixed comparisons and no new fitting."""
 function replay_archival(fitting::B.ReverifiedCases,fitting_index,evaluation::B.ReverifiedCases,index,point,calibration,expected,static;
         start,stop,asof,subscribers,nominal,grace_ms=0,warmup=true,authority=nothing,
         static_producer=nothing,calibration_producer=nothing,point_producer=nothing)
-    need(authority isa ReplayAuthority,"archival replay requires distinct replay-only authority")
+    need(authority===nothing && static_producer===nothing && calibration_producer===nothing && point_producer===nothing,
+        "archival replay uses case/model bindings, not execution permits")
+    started=time_ns();started_utc=F.clock(now(UTC));available=Sys.free_memory()
     prepared=_metadata(fitting,fitting_index,evaluation,index,point,calibration,expected,static;
         start,stop,asof,subscribers,nominal,grace_ms,warmup)
-    auth=_admit(fitting,fitting_index,point,calibration,expected,prepared,authority,static_producer,calibration_producer,point_producer)
-    attempt=R.canonical_bytes(Dict("schema"=>"archival_shared_replay_attempt_v1","grant_sha256"=>authority.grant_sha256,
-        "request_sha256"=>digest(prepared.bytes),"started_utc"=>F.clock(now(UTC)));limit=16384)
-    path=joinpath(realpath(dirname(authority.grant_path)),"REPLAY_ATTEMPT.json");R._exclusive_write(path,attempt)
     request_pin=digest(prepared.bytes)
     input=S._common_inputs(evaluation.cases,index,point,calibration,expected,start,stop,asof,prepared.pc,prepared.kc,
         prepared.request,prepared.table,request_pin)
@@ -196,17 +149,19 @@ function replay_archival(fitting::B.ReverifiedCases,fitting_index,evaluation::B.
     output_pin=result_digest(result,feature_rows;request_sha256=request_pin)
     fresh=_metadata(fitting,fitting_index,evaluation,index,point,calibration,expected,static;
         start,stop,asof,subscribers,nominal,grace_ms,warmup)
-    need(fresh.bytes==prepared.bytes && _admit(fitting,fitting_index,point,calibration,expected,fresh,authority,
-        static_producer,calibration_producer,point_producer)==auth,"archival replay source or producer admission changed")
-    T._retained_attempt(dirname(path),basename(path),digest(attempt));auth["attempt_sha256"]=digest(attempt)
+    need(fresh.bytes==prepared.bytes,"archival replay inputs changed during evaluation")
     need(result_digest(result,feature_rows;request_sha256=request_pin)==output_pin,"archival replay output changed during recheck")
+    auth=Dict("schema"=>"archival_shared_replay_binding_v2","request_sha256"=>request_pin,"job_sha256"=>job_identity(),
+        "fitting_case_read_admission_sha256"=>prepared.context["fitting_case_read_admission_sha256"],
+        "evaluation_case_read_admission_sha256"=>prepared.context["evaluation_case_read_admission_sha256"],
+        "static_receipt_sha256"=>digest(prepared.static_checked.receipt_bytes),
+        "runtime_observations"=>K.execution_observations(started,started_utc,available))
     receipt=R.canonical_bytes(Dict("schema"=>"archival_shared_replay_receipt_v1","complete"=>true,"request_sha256"=>request_pin,
         "result_sha256"=>output_pin,"scheduled"=>audit.scheduled,"feature_eligible"=>audit.features_accepted,
         "feature_rejected"=>audit.features_rejected,"source_bound_provenance_verified"=>true,"actual_source_access"=>true,
         "actual_model_fits"=>0,"actual_uncertainty_parameter_fits"=>0,"provider_receipts_available"=>false,
         "software_qualification"=>false,"scientific_coverage_qualified"=>false,"independent_confirmation_qualified"=>false,
         "authorization"=>auth);limit=65536)
-    R._exclusive_write(joinpath(dirname(path),"REPLAY_RECEIPT.json"),receipt)
     receipt_pin=digest(receipt)
     (;result,feature_rows,request=String(copy(prepared.bytes)),request_sha256=request_pin,result_sha256=output_pin,
       receipt=String(copy(receipt)),receipt_sha256=receipt_pin)

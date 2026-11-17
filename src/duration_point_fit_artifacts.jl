@@ -10,20 +10,18 @@ struct BExpectedProvenance
     validation_end::DateTime
     reference_completion_sha256::String
     independent_audit_completion_sha256::String
-    actual_execution_permit_sha256::Union{Nothing,String}
     delay_hours::Int
     scope_id::String
 end
 function _scope_data(s::BExpectedProvenance)
-    (;stage=s.stage,evidence_mode=s.evidence_mode,source_sha256=s.source_sha256,input_view_id=s.input_view_id,input_admission_sha256=s.input_admission_sha256,input_prefix_sha256=s.input_prefix_sha256,training_boundary=s.training_boundary,validation_start=s.validation_start,validation_end=s.validation_end,reference_completion_sha256=s.reference_completion_sha256,independent_audit_completion_sha256=s.independent_audit_completion_sha256,actual_execution_permit_sha256=s.actual_execution_permit_sha256,delay_hours=s.delay_hours)
+    (;stage=s.stage,evidence_mode=s.evidence_mode,source_sha256=s.source_sha256,input_view_id=s.input_view_id,input_admission_sha256=s.input_admission_sha256,input_prefix_sha256=s.input_prefix_sha256,training_boundary=s.training_boundary,validation_start=s.validation_start,validation_end=s.validation_end,reference_completion_sha256=s.reference_completion_sha256,independent_audit_completion_sha256=s.independent_audit_completion_sha256,delay_hours=s.delay_hours)
 end
-function _expected_scope(;stage,evidence_mode,source_sha256,input_view_id,input_admission_sha256,input_prefix_sha256,training_boundary,validation_start,validation_end,reference_completion_sha256,independent_audit_completion_sha256,actual_execution_permit_sha256,delay_hours)
+function _expected_scope(;stage,evidence_mode,source_sha256,input_view_id,input_admission_sha256,input_prefix_sha256,training_boundary,validation_start,validation_end,reference_completion_sha256,independent_audit_completion_sha256,delay_hours)
     delay=T._int(delay_hours,0,0)
     _need(stage===:initial_l0&&evidence_mode in (:synthetic_only,:archival_assumed_completion_research),"B publication scope differs")
     _need(training_boundary<=validation_start<validation_end,"B expected publication split differs")
     for hash in (source_sha256,input_view_id,input_admission_sha256,input_prefix_sha256,reference_completion_sha256,independent_audit_completion_sha256);_need(T._hex(hash),"B expected authority digest differs");end
-    _need(evidence_mode==:synthetic_only ? actual_execution_permit_sha256===nothing : T._hex(actual_execution_permit_sha256),"B expected permit/mode differs")
-    fields=(stage,evidence_mode,String(source_sha256),String(input_view_id),String(input_admission_sha256),String(input_prefix_sha256),training_boundary,validation_start,validation_end,String(reference_completion_sha256),String(independent_audit_completion_sha256),actual_execution_permit_sha256===nothing ? nothing : String(actual_execution_permit_sha256),delay)
+    fields=(stage,evidence_mode,String(source_sha256),String(input_view_id),String(input_admission_sha256),String(input_prefix_sha256),training_boundary,validation_start,validation_end,String(reference_completion_sha256),String(independent_audit_completion_sha256),delay)
     provisional=BExpectedProvenance(fields...,repeat("0",64))
     BExpectedProvenance(fields...,_id(_scope_data(provisional)))
 end
@@ -43,10 +41,12 @@ function _expected_provenance(model::T.BPointModel,context::BFitExportContext)
     _need(model.boundary==b.boundary==s.training_boundary&&model.delay_hours==b.delay_hours==s.delay_hours,"B expected provenance model clock differs")
     manifest,body=_json(_member(p.replay.directory,"manifest.json");fields=BASIS_MANIFEST_FIELDS)
     _need(_sha(body)==p.replay.manifest_sha256&&T._clock(manifest.boundary)==s.training_boundary&&T._clock(manifest.validation_start)==s.validation_start&&T._clock(manifest.validation_end)==s.validation_end&&T._int(manifest.delay_hours,0,1)==s.delay_hours,"B expected validation authority differs from independently replayed basis")
-    (;schema="b_point_fit_provenance_v1",stage=s.stage,evidence_mode=s.evidence_mode,source_sha256=s.source_sha256,input_view_id=s.input_view_id,input_admission_sha256=s.input_admission_sha256,input_prefix_sha256=s.input_prefix_sha256,reference_completion_sha256=s.reference_completion_sha256,independent_audit_completion_sha256=s.independent_audit_completion_sha256,training_boundary=s.training_boundary,validation_start=s.validation_start,validation_end=s.validation_end,basis_sha256=p.basis_sha256,fit_input_manifest_sha256=model.fit_input_manifest_sha256,initial_hazard_fit_count=2,initial_gain_fit_count=36,final_fit_count=0,calibration_fit_count=0,exposed_development_scoring=false,scientific_verdict=false,serving_promotion=false,actual_execution_permit_sha256=s.actual_execution_permit_sha256)
+    (;schema="b_point_fit_provenance_v1",stage=s.stage,evidence_mode=s.evidence_mode,source_sha256=s.source_sha256,input_view_id=s.input_view_id,input_admission_sha256=s.input_admission_sha256,input_prefix_sha256=s.input_prefix_sha256,reference_completion_sha256=s.reference_completion_sha256,independent_audit_completion_sha256=s.independent_audit_completion_sha256,training_boundary=s.training_boundary,validation_start=s.validation_start,validation_end=s.validation_end,basis_sha256=p.basis_sha256,fit_input_manifest_sha256=model.fit_input_manifest_sha256,initial_hazard_fit_count=2,initial_gain_fit_count=36,final_fit_count=0,calibration_fit_count=0,exposed_development_scoring=false,scientific_verdict=false,serving_promotion=false)
 end
 function _check_provenance(data,model,context)
-    _fields(data,PROVENANCE_FIELDS)
+    legacy=hasproperty(data,:actual_execution_permit_sha256) ? (:actual_execution_permit_sha256,) : ()
+    _fields(data,(PROVENANCE_FIELDS...,legacy...))
+    data=NamedTuple{PROVENANCE_FIELDS}(Tuple(getproperty(data,key) for key in PROVENANCE_FIELDS))
     for (field,value) in ((:initial_hazard_fit_count,2),(:initial_gain_fit_count,36),(:final_fit_count,0),(:calibration_fit_count,0));_need(T._int(getproperty(data,field),0,36)==value,"B provenance count differs");end
     _need(_bytes(data)==_bytes(_expected_provenance(model,context)),"B provenance differs from independently admitted authority")
     true

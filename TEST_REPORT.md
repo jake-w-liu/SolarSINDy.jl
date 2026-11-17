@@ -1,5 +1,39 @@
 # Receipt-report integration test plan
 
+## Current essential-suite verification (18 November 2026)
+
+Historical certificate, frozen-source and fixed-count requirements below are
+superseded by the user's essential-tests-only instruction. Retained coverage
+checks numerical oracles, source/label causality, candidate/refit behavior,
+saved predictions, input errors, dashboard behavior and process cleanup.
+Numerical tolerances and scientific split/grid definitions are unchanged.
+
+For cleanup commit5b4bfe6, authenticated CI run44133857316 passed full Pkg.test
+and examples on Linux1.12.6, Linux1.13.1 and Windows1.13.1. Those jobs then failed
+the strict source-change check on root Manifest.toml alone. Strict docs passed
+both versions. One macOS1.12.6 hosted runner lost communication during setup;
+its unavailable log establishes no Julia root cause. Remaining jobs were still
+running when this record was written. These results do not verify this later
+ordinary-execution/Manifest follow-up.
+
+After the current changes, local Python bundle/input/evaluation/ridge-reader
+tests passed24/24, native process tests passed3/3, and dashboard frontend tests
+passed17/17. Python CLI
+help checks and CRLF-aware whitespace checks passed. Independent source review
+found the preserved B feature/encoder/prediction/metric calculations unchanged.
+Static checks are not Julia parsing or numerical execution. Julia Pkg.test,
+examples, strict docs and the canonical development harness remain unverified
+on this follow-up. Local available RAM is about1GiB, below the established
+8GiB local launch requirement; no local Julia was started.
+
+The final test-graph review also removes the archived replay implementation
+clone, maximum-size codec packing/serialization fixture, capacity-only member
+file test and optional native checkpoint test/example wrappers. Small bounds,
+ownership, roundtrip/corruption, independent trace and causal timing checks
+remain. Static traversal found no missing target among458 literal includes.
+Unused synthetic clone/checkpoint code is removed; the retained research
+driver's bounded Git utilities and numerical/artifact checks are unchanged.
+
 ## Archival shared replay verification contract (28 October 2026)
 
 The complete prior generated worker is frozen by SHA256

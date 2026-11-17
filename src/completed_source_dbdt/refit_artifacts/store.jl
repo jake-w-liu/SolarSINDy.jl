@@ -67,7 +67,7 @@ function _context_shape(context,protocol::RefitProtocol,kind::String)
         require(context[key]==spec[key],"context identity differs: "*key)
     end
     _gitsha(context["package_commit"]);_gitsha(context["package_tree"])
-    sha_string(context["julia_project_sha256"]);sha_string(context["julia_manifest_sha256"]);sha_string(context["runtime_id"])
+    sha_string(context["julia_project_sha256"]);_nullable_sha(context["julia_manifest_sha256"]);sha_string(context["runtime_id"])
     codes=context["code_hashes"]
     require(codes isa AbstractDict && 0<length(codes)<=MAX_FIELDS,"invalid loaded code identity map")
     for (name,pin) in codes;bounded_string(name;nonempty=true);sha_string(pin);end

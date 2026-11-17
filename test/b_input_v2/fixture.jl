@@ -110,7 +110,7 @@ end
 function b2_pin_record(pins)
     data=Dict{String,Any}()
     for field in (:completion_sha256,:audit_sha256,:grid_sha256,:tuning_sha256,:prediction_sha256,:feature_contract_sha256,
-            :tuning_loss_contract_sha256,:baseline_qualification_sha256,:baseline_qualified_head,:feature_contract_member,:tuning_loss_contract_member)
+            :tuning_loss_contract_sha256,:feature_contract_member,:tuning_loss_contract_member)
         data[String(field)]=getproperty(pins,field)
     end
     data["baseline_sources"]=[Dict("name"=>first(p),"sha256"=>last(p)) for p in pins.baseline_sources]

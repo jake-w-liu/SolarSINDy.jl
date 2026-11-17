@@ -56,17 +56,10 @@ function run_chain(N,root)
             scored=N.validate_candidate_generated(cases,index,id,validation,fit.point,joinpath(station_root,id*"-validation"))
             check=N.verify_candidate_validation_generated(cases,index,id,validation,fit,scored.artifact.directory,scored.pins)
             witness_directory=joinpath(station_root,id*"-independent-witness");witness_pins=N.publish_generated_verification(check,witness_directory)
-            raw_path=joinpath(station_root,id*"-completion-fixture.log")
-            raw=Vector{UInt8}(codeunits("GENERATED FIXTURE ONLY; no native execution or actual authority.\n"));R._exclusive_write(raw_path,raw)
-            owner=Dict("schema"=>"generated_candidate_completion_fixture_v1","actual_authority"=>false,"native_execution_evidence"=>false,
-                "declared_fixture_native_exit"=>0,"timed_out"=>false,"job_sha256"=>N.job_identity(),"output_witness_sha256"=>check.witness_sha256,
-                "output_manifest_sha256"=>witness_pins.manifest_sha256,"output_complete_sha256"=>witness_pins.complete_sha256,"raw_sha256"=>digest(raw))
-            owner_path=joinpath(station_root,id*"-completion-fixture.json");owner_bytes=N.canonical(owner);R._exclusive_write(owner_path,owner_bytes)
-            completion=N.NativeEvidence(owner_path,digest(owner_bytes),raw_path,digest(raw))
             restored=N.read_completed_generated_candidate(cases,index,id,validation,fit,scored.artifact.directory,scored.pins,
-                witness_directory,witness_pins;completion)
+                witness_directory,witness_pins)
             @assert restored.witness_sha256==check.witness_sha256 && !restored.actual
-            push!(verified,restored);push!(fits,fit);push!(validations,scored);push!(completed,(;witness_directory,witness_pins,completion))
+            push!(verified,restored);push!(fits,fit);push!(validations,scored);push!(completed,(;witness_directory,witness_pins))
         end
         decision=N.choose_verified_R2(verified);refits=Any[]
         for winner in decision.decision.family_winners

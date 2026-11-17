@@ -14,47 +14,19 @@ with zero/nonfinite scales replaced by1, an unpenalized intercept and an explici
 candidate from the five fixed penalties. A selected ground refit requires the
 separate verified selection chain and is rejected here.
 
-## Reproduce the generated-source chain
+## Numerical APIs and checks
 
-Run the fixed synthetic driver from a repository checkout with Python3.11 or
-newer available:
+The artifact API separates source admission, feature scheduling, fit-input
+construction, ridge fitting and independent numerical checking. Use
+`open_audited_sources`, `seal_feature_schedule` and `build_fit_input` to obtain the
+source-bound inputs for `fit_point` and `check_ridge_fit`. Publication and loading
+use the explicit artifact pins described below. The package tests exercise the
+ridge arithmetic, codec roundtrips, source reconstruction and chronological
+calibration directly.
 
-```sh
-julia --startup-file=no --pkgimages=no --threads=1 --project=. test/completed_refit_artifacts/run_ci_native_chain.jl
-```
+An environment `Manifest.toml` is optional provenance. Its presence and digest
+do not enter the numerical runtime identity.
 
-The driver preserves a new output directory containing raw generated source
-bodies, the exact caller resolution maps, every native log and ownership
-receipt, and immutable point/calibration bundles. Each layout performs the
-actual ridge solve twice, independently checks it, publishes the full signed
-calibration chronology, then loads it in a fresh owned process. The Julia
-numeric worker always uses the prescribed startup, compiled-module, package
-image and thread flags. Linux and macOS use the same fixed entry with owned
-POSIX sessions; the complete ownership runner is shipped byte-for-byte.
-
-The ordinary native entry requires a clean source checkpoint. Dependency
-resolution in a test checkout may change only its tracked `Manifest.toml`.
-The explicit test wrapper then creates a separate clone, preserves every other
-source byte, records the exact lock diff, and makes a truthful local test
-checkpoint. The original checkout is unchanged. Native artifacts identify that
-actual child checkpoint. They do not imply execution under the parent commit
-or compatibility with another dependency lock.
-
-The driver prints its preserved output directory. To reuse that same reviewed
-synthetic proof for package tests and examples, set
-`SOLARSINDY_SYNTHETIC_REFIT_TEST_ROOT` to that absolute directory. An explicit
-Python interpreter can be selected with the absolute
-`SOLARSINDY_RESEARCH_PYTHON` path. The source identity and receipt graph are
-checked again when loading; either environment variable alone is insufficient
-evidence. No actual source format, model selection study or serving path is
-enabled by this driver.
-
-Python optimization modes are rejected before argument processing or source
-generation. Source-lock reads and Git-control output have fixed byte limits;
-overflow and timeouts fail the route while retaining bounded logs and owned
-process receipts.
-Partial writes and stream I/O errors also fail the capture process, even if the
-underlying Git command has already exited successfully.
 Native requests also validate every field before use, including the request's
 own runtime types and which recipe/source pins must be null. Data-only loading
 applies the same recorded-field grammar without opening recorded work paths.

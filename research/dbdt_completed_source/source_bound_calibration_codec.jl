@@ -2,6 +2,17 @@ const CONTEXT_FIELDS=Set(("schema","evidence_mode","case_request_sha256","case_m
     "point_context_sha256","point_recipe_sha256","point_model_sha256","point_receipt_sha256","point_source_sha256","job_sha256","runtime",
     "start_inclusive","stop_exclusive","target_asof","first_evaluation_issue","point_training_stop","rows","input_sha256","records_sha256","ranks_sha256",
     "score_definition","rank_definition","availability_kind","measured_receipts_available"))
+function _check_observations(value)
+    J._object(value,Set(("started_utc","elapsed_ns","available_physical_bytes_at_start","peak_rss_bytes","julia_threads","blas_threads")))
+    F._fit_clock(value["started_utc"])
+    for key in ("elapsed_ns","available_physical_bytes_at_start","peak_rss_bytes")
+        need(F.isint(value[key]) && value[key]>=0,"invalid runtime observation")
+    end
+    for key in ("julia_threads","blas_threads")
+        need(F.isint(value[key]) && value[key]>=1,"invalid runtime thread observation")
+    end
+    nothing
+end
 function _decode_records(bytes,n)
     need(length(bytes)==n*ROW_BYTES,"calibration record length")
     rows=Vector{Int}(undef,n);issues=Vector{DateTime}(undef,n);ready=Vector{DateTime}(undef,n)
@@ -64,6 +75,18 @@ function _checked(value::CalibrationCapsule,point,expected::ExpectedCalibration)
         receipt["software_qualification"]===false,"calibration receipt differs")
     if actual
         auth=receipt["authorization"]
+        if get(auth,"schema",nothing)=="archive_calibration_binding_v2"
+            J._object(auth,Set(("schema","case_read_admission_sha256","point_context_sha256","point_model_sha256",
+                "point_receipt_sha256","context_sha256","input_sha256","job_sha256","runtime_observations")))
+            need(auth["case_read_admission_sha256"]==J._sha(context["case_read_admission_sha256"]) &&
+                auth["point_context_sha256"]==point.expected.context_sha256 && auth["point_model_sha256"]==pins.model &&
+                auth["point_receipt_sha256"]==pins.receipt && auth["context_sha256"]==expected.context_sha256 &&
+                auth["input_sha256"]==expected.input_sha256 && auth["job_sha256"]==job_identity(),"calibration archival binding differs")
+            _check_observations(auth["runtime_observations"])
+        else
+        # Existing v1 producer metadata is retained provenance; no grant files
+        # are opened. Numeric contexts, predictions, records and ranks above
+        # are checked independently of these historical execution receipts.
         J._object(auth,Set(("schema","head","grant_sha256","source_proof_sha256","qualification_sha256","case_read_admission_sha256",
             "producer_grant_sha256","producer_source_proof_sha256","producer_qualification_sha256","calibration_authorized",
             "actual_model_fit_authorized","provider_receipts_available","attempt_sha256")))
@@ -74,6 +97,7 @@ function _checked(value::CalibrationCapsule,point,expected::ExpectedCalibration)
             auth["producer_qualification_sha256"]==pins.checked.receipt["authorization"]["qualification_sha256"],"calibration archival admission differs")
         need(auth["head"] isa String && occursin(r"\A[0-9a-f]{40}\z",auth["head"]),"calibration source head")
         for key in ("grant_sha256","source_proof_sha256","qualification_sha256","attempt_sha256");J._sha(auth[key]);end
+        end
     end
     (;context,receipt,context_bytes,receipt_bytes,records,ranks,arrays,order,actual,first_issue)
 end

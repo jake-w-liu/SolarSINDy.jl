@@ -51,17 +51,6 @@ end
             @test length(unique(arrays.targets))>1
             @test first.loss==Statistics.mean(abs2,log1p.(arrays.targets).-F.predict_log(fit.point,arrays.features))
             @test F.predict_log(fit.point,arrays.features)==C.predict(fit.point.model,arrays.features)
-            completion=station.completed[1]
-            fixture_owner=N.decode(R.bounded_read(completion.completion.receipt_path;limit=16384))
-            @test fixture_owner["native_execution_evidence"]===false && fixture_owner["actual_authority"]===false
-            for (key,bad_value) in (("job_sha256","0"^64),("output_witness_sha256","1"^64),("timed_out",true),
-                ("output_complete_sha256","2"^64),("declared_fixture_native_exit",false))
-                damaged=copy(fixture_owner);damaged[key]=bad_value;bytes=N.canonical(damaged)
-                path=joinpath(root,"bad-native-shape-$index-"*key*".json");R._exclusive_write(path,bytes)
-                wrong=N.NativeEvidence(path,N.digest(bytes),completion.completion.raw_path,completion.completion.raw_sha256)
-                @test_throws ArgumentError N.read_completed_generated_candidate(result.cases,index,"ridge-0.01",result.validation,
-                    fit,score.artifact.directory,score.pins,completion.witness_directory,completion.witness_pins;completion=wrong)
-            end
             if index==1
                 # Rehash every affected enclosing artifact after changing one
                 # prediction, score, rank and scalar loss consistently. Strict

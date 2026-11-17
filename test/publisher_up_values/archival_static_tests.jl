@@ -170,10 +170,6 @@ end
         invalid=AS.B.ReverifiedCases(value,"{}\n",AS.B._ReadToken())
         @test_throws ArgumentError AS.prepare_request(invalid,1,point,calibration,ce)
         @test_throws ArgumentError AS.calibrate_archival(invalid,1,point,calibration,ce)
-        missing=AS.StaticFitAuthority(joinpath(root,"missing.json"),repeat("0",64),
-            joinpath(root,"missing-proof.json"),repeat("0",64),joinpath(root,"missing-qualification.json"),repeat("0",64))
-        @test_throws ArgumentError AS.calibrate_archival(invalid,1,point,calibration,ce;authority=missing)
-        @test !ispath(joinpath(root,"STATIC_FIT_ATTEMPT.json"))
     end
 end
 end

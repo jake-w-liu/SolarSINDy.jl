@@ -102,10 +102,10 @@ source-bound A/B artifacts keep strict source checks. Descendant implementation
 bytes have new identities; old artifacts are never relabeled to match them.
 
 The synthetic example `examples/b_stream_bridge_synthetic.jl` connects the two
-primitives without fitting. Independent literal tests cover prefix/state hashes
-and integrated-OU issue states, while a separate A187 source fixture checks old
-A numeric outputs by bits. Generated resource observations are software checks,
-not forecasting skill, publication timing or calibrated probability evidence.
+primitives without fitting. Direct numerical tests cover integrated-OU issue
+states, causal clocks, source selection, resume behavior and mutation isolation.
+These checks do not establish forecasting skill, publication timing or
+calibrated probability evidence.
 
 ```@docs
 SolarSINDy.DurationCurrentStateStream

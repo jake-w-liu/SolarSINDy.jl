@@ -51,11 +51,14 @@ def frame(domain,chunks):
 
 runner=Path(__file__).with_name('native_stage.py')
 assert file_sha(runner)=='30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c'
-manifest=ordinary(pkg/'Manifest.toml')
-if manifest.stat().st_size>checkpointmodule.MAX_CONTROL_BYTES:
- raise ValueError('Manifest exceeds bounded source size')
+manifest=pkg/'Manifest.toml';manifest_sha256=None
+if manifest.exists() or manifest.is_symlink():
+ ordinary(manifest)
+ if manifest.stat().st_size>checkpointmodule.MAX_CONTROL_BYTES:
+  raise ValueError('Manifest exceeds bounded source size')
+ manifest_sha256=file_sha(manifest)
 assert git('status','--porcelain','--untracked-files=normal')=='','native route requires a clean source checkout'
-head=git('rev-parse','HEAD');tree=git('rev-parse','HEAD^{tree}');tracked=git('ls-files').splitlines()
+head=git('rev-parse','HEAD');tree=git('rev-parse','HEAD^{tree}');tracked=[name for name in git('ls-files').splitlines() if name!='Manifest.toml']
 assert 0<len(tracked)<=8192 and tracked==sorted(tracked)
 source={}
 checked_directories=set()
@@ -176,7 +179,7 @@ def job(operation,name,inputpin,datapin,dependencies=None,recipe=None):
  bundle,pin=finalize('native',name,[requestpath,work,externalpath,directory/'native.log'])
  data=json.loads(chunks[0]);metadata=data.get('metadata') if isinstance(data,dict) else None
  return bundle,pin,metadata
-terminal={'schema':'synthetic_chain_development_terminal_v1','complete':False,'source_head':head,'source_tree':tree,'layout':args.layout,'runtime':runtime_base['julia_version'],'scope':'synthetic development chain; no actual-source or full qualification claim','source_bound_provenance_verified':False,'controller_sha256':file_sha(__file__),'runtime_inspection_raw_sha256':file_sha(inspection/'OWNED_NATIVE_RAW.json'),'python_executable_sha256':file_sha(pythonexe)}
+terminal={'schema':'synthetic_chain_development_terminal_v1','complete':False,'source_head':head,'source_tree':tree,'layout':args.layout,'runtime':runtime_base['julia_version'],'environment_manifest_sha256':manifest_sha256,'scope':'synthetic development chain; no actual-source or full qualification claim','source_bound_provenance_verified':False,'controller_sha256':file_sha(__file__),'runtime_inspection_raw_sha256':file_sha(inspection/'OWNED_NATIVE_RAW.json'),'python_executable_sha256':file_sha(pythonexe)}
 try:
  primary,primarypin,metadata=job('source_audit','source-primary',None,factory['source_permission_sha256'])
  checker,checkerpin,_=job('source_independent_audit','source-check',primarypin,metadata['source_audit_data_sha256'])

@@ -17,9 +17,13 @@ def encode(value):return (json.dumps(value,sort_keys=True,separators=(',',':'),e
 def sha(body):return hashlib.sha256(body).hexdigest()
 def clock(minute):return (datetime(2020,1,1)+timedelta(minutes=minute)).isoformat(timespec='milliseconds')+'Z'
 
-def fixture(root,role='primary',layout='ground-only',runtime='1.12.6',corrupt=None):
+def fixture(root,role='primary',layout='ground-only',runtime='1.12.6',corrupt=None,actual=False):
+    # Literal archived-format records test the ordinary reader path, not a
+    # claim of real observations or source reconstruction by this fixture.
+    first=datetime(2017 if actual else 2020,1,1)
+    def clock(minute):return (first+timedelta(minutes=minute)).isoformat(timespec='milliseconds')+'Z'
     cases=root/'cases';cases.mkdir();bundle=root/'input';bundle.mkdir()
-    width=11 if layout=='ground-only' else 8;features=[];labels=[];epoch=1577836800000
+    width=11 if layout=='ground-only' else 8;features=[];labels=[];epoch=int(first.replace(tzinfo=timezone.utc).timestamp()*1000)
     for k in range(121):
         feature=bytearray(160);label=bytearray(64);accepted=k not in (37,52);label_ok=k!=41
         struct.pack_into('<qqBB',feature,0,epoch+k*60000,epoch+k*60000+1845000,int(accepted),0 if accepted else 1)
@@ -35,7 +39,8 @@ def fixture(root,role='primary',layout='ground-only',runtime='1.12.6',corrupt=No
     fb=b''.join(features);lb=b''.join(labels)
     source=dict(directory='never-opened-source-root',manifest_sha256=sha(b'fixed source manifest'),complete_sha256=sha(b'fixed source completion'))
     declaration=dict(id='CMO-literal',station='CMO',start_inclusive=clock(0),stop_exclusive=clock(121),label_asof=clock(151))
-    request=dict(schema='generated_catalog_case_request_v1',evidence_mode='generated',layout=layout,role=role,runtime=runtime,source=source,tables=[declaration])
+    mode='actual_archival_cache' if actual else 'generated';stem='archive' if actual else 'generated'
+    request=dict(schema=stem+'_catalog_case_request_v1',evidence_mode=mode,layout=layout,role=role,runtime=runtime,source=source,tables=[declaration])
     request_bytes=encode(request);request_path=root/'case-request.json';request_path.write_bytes(request_bytes)
     entries=[]
     for name,body in (('table-01-features-0001.bin',fb),('table-01-labels-0001.bin',lb)):
@@ -44,10 +49,14 @@ def fixture(root,role='primary',layout='ground-only',runtime='1.12.6',corrupt=No
         feature_schedule_sha256=sha(b'opaque fixed feature schedule'),label_payload_sha256=sha(lb),label_audit_sha256=sha(b'opaque fixed label audit'),
         counts=dict(scheduled=121,features_accepted=119,labels_accepted=120,supervised=118,features_rejected=2,labels_rejected=1),
         feature_shards=[entries[0]['name']],label_shards=[entries[1]['name']])
-    manifest=dict(schema='generated_catalog_case_artifact_v1',request_sha256=sha(request_bytes),source=source,runtime=runtime,role=role,
-        layout=layout,tables=[table],members=entries,actual_source_authority_granted=False,provider_receipts_available=False,actual_fits=0)
+    manifest=dict(schema=stem+'_catalog_case_artifact_v1',request_sha256=sha(request_bytes),source=source,runtime=runtime,role=role,
+        layout=layout,tables=[table],members=entries,actual_source_authority_granted=actual,provider_receipts_available=False,actual_fits=0)
+    if actual:
+        manifest['authority']=dict(schema='archive_case_source_binding_v2',operation='sealed_features_labels_only',
+            request_sha256=sha(request_bytes),source_manifest_sha256=source['manifest_sha256'],source_complete_sha256=source['complete_sha256'])
+        if corrupt=='case_source_binding':manifest['authority']['source_manifest_sha256']='1'*64
     mb=encode(manifest);(cases/'manifest.json').write_bytes(mb)
-    marker=encode(dict(schema='generated_catalog_case_complete_v1',manifest_sha256=sha(mb),members=4,snapshot_bytes_without_marker=len(mb)+len(fb)+len(lb),actual_fits=0))
+    marker=encode(dict(schema=stem+'_catalog_case_complete_v1',manifest_sha256=sha(mb),members=4,snapshot_bytes_without_marker=len(mb)+len(fb)+len(lb),actual_fits=0))
     (cases/'COMPLETE.json').write_bytes(marker)
     # Independently specified strict membership; minute60's label is ready at
     # minute90:45 and must be excluded from a minute90 split stop.
@@ -66,16 +75,28 @@ def fixture(root,role='primary',layout='ground-only',runtime='1.12.6',corrupt=No
     entry=sha((ROOT/'research/dbdt_completed_source/point_input_export.jl').read_bytes())
     args=dict(case_directory=cases,case_request_path=request_path,case_request_sha256=sha(request_bytes),case_manifest_sha256=sha(mb),case_complete_sha256=sha(marker),
         table_index=1,start=clock(35),stop=clock(90),asof=clock(120),entry_sha256=entry,numeric_source_sha256=sha(b'fixed generated numeric source'),library_sha256=sha(b'fixed generated library'))
-    planning=dict(schema='source_bound_point_input_planning_request_v1',evidence_mode='generated',case_request_sha256=args['case_request_sha256'],
+    planning=dict(schema='source_bound_point_input_planning_request_v1',evidence_mode=mode,case_request_sha256=args['case_request_sha256'],
         case_manifest_sha256=args['case_manifest_sha256'],case_complete_sha256=args['case_complete_sha256'],table_index=1,table=declaration,runtime=runtime,role=role,layout=layout,
         start_inclusive=args['start'],stop_exclusive=args['stop'],target_asof=args['asof'],entry_sha256=entry,numeric_source_sha256=args['numeric_source_sha256'],
         library_sha256=args['library_sha256'],feature_payload_sha256=sha(fb),label_payload_sha256=sha(lb),actual_model_fit_authorized=False,provider_receipts_available=False)
+    if actual:
+        admission=dict(schema='archive_catalog_case_read_admission_v2',evidence_mode=mode,
+            request_sha256=args['case_request_sha256'],artifact_manifest_sha256=args['case_manifest_sha256'],
+            artifact_complete_sha256=args['case_complete_sha256'],all_artifact_bytes_recomputed=True,provider_receipts_available=False,actual_fits=0)
+        planning['case_read_admission_sha256']=sha(encode(admission))
     context=dict(schema='source_bound_point_input_export_context_v1',request=planning,rows=22,columns=width,first_row=36,last_row=60,input_sha256=sha(data),input_bytes=len(data),
         strict_label_ready_before=args['stop'],target_transform='log1p_rate_reference_1_nt_per_min',availability_kind='assumed_completed_source_intervals',measured_receipts_available=False)
     if corrupt=='rows':context['rows']-=1
     if corrupt=='request_index':context['request']['table_index']=True
     cb=encode(context);receipt=dict(schema='source_bound_point_input_export_receipt_v1',complete=True,context_sha256=sha(cb),input_sha256=sha(data),
-        actual_source_access=False,actual_model_fit_performed=False,fit_authority_granted=False,provider_receipts_available=False,software_qualification=False)
+        actual_source_access=actual,actual_model_fit_performed=False,fit_authority_granted=False,provider_receipts_available=False,software_qualification=False)
+    if actual:
+        receipt['authorization']=dict(schema='archive_point_input_binding_v2',request_sha256=sha(encode(planning)),
+            case_read_admission_sha256=planning['case_read_admission_sha256'],entry_sha256=entry,
+            runtime_observations=dict(started_utc='2026-11-18T00:00:00.000Z',elapsed_ns=1,available_physical_bytes_at_start=1024,
+                peak_rss_bytes=512,julia_threads=1,blas_threads=1))
+        if corrupt=='input_binding':receipt['authorization']['request_sha256']='1'*64
+        if corrupt=='case_admission':receipt['authorization']['case_read_admission_sha256']='1'*64
     if corrupt=='fit_authority':receipt['fit_authority_granted']=True
     rb=encode(receipt);members=[]
     for name,body in (('context.json',cb),('receipt.json',rb),('input-0001.bin',data)):
@@ -90,6 +111,18 @@ def fixture(root,role='primary',layout='ground-only',runtime='1.12.6',corrupt=No
     return bundle,args
 
 class BundleReaderTests(unittest.TestCase):
+    def test_archival_format_needs_data_bindings_without_ci_certificates(self):
+        with tempfile.TemporaryDirectory(prefix='ordinary-input-bundle-') as directory:
+            root=Path(directory).resolve()
+            for layout in ('ground-only','mixed'):
+                base=root/layout;base.mkdir();path,args=fixture(base,layout=layout,actual=True)
+                result=M.verify_bundle(path,**args)
+                self.assertTrue(result['actual_source_access'])
+                self.assertEqual((result['rows'],result['first_row'],result['last_row']),(22,36,60))
+                self.assertFalse(result['case_verification']['independent_numeric_source_reconstruction'])
+            for corruption in ('case_source_binding','input_binding','case_admission','feature'):
+                base=root/corruption;base.mkdir();path,args=fixture(base,actual=True,corrupt=corruption)
+                with self.subTest(corruption=corruption),self.assertRaises(ValueError):M.verify_bundle(path,**args)
     def test_all_eight_literal_generated_contexts(self):
         with tempfile.TemporaryDirectory(prefix='portable-input-bundle-') as directory:
             root=Path(directory).resolve()

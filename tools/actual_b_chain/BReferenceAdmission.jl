@@ -2,7 +2,8 @@
 # ordinary files; no array-only construction supplies matched/actual authority.
 const BReferencePins=Selection.BReferencePins
 export BReferencePins,admit_reference
-const REFERENCE_COMMON=(:complete,:evidence_mode,:reference_kind,:source_sha256,:input_prefix_sha256,:input_view_id,:delay_hours,:training_boundary,:validation_start,:validation_end,:training_history_start,:feature_contract_sha256,:tuning_loss_contract_sha256,:baseline_qualification_sha256,:baseline_sources)
+_reference_json(path;fields=nothing)=P._json(path;fields,legacy_fields=(:baseline_qualification_sha256,))
+const REFERENCE_COMMON=(:complete,:evidence_mode,:reference_kind,:source_sha256,:input_prefix_sha256,:input_view_id,:delay_hours,:training_boundary,:validation_start,:validation_end,:training_history_start,:feature_contract_sha256,:tuning_loss_contract_sha256,:baseline_sources)
 const REFERENCE_COMPLETION_FIELDS=(:schema,REFERENCE_COMMON...,:audit_contract_sha256,:model_ids,:selected_setting_ids,:raw_row_identity_sha256,:prediction_panel_sha256,:grid_sha256,:tuning_sha256,:audit_sha256,:members,:completion_id)
 const REFERENCE_AUDIT_FIELDS=(:schema,REFERENCE_COMMON...,:audit_contract_sha256,:raw_row_identity_sha256,:prediction_panel_sha256,:grid_sha256,:tuning_sha256,:all_eight_settings_checked,:full_per_lead_cohorts_checked,:feature_receipt_history_checked,:selected_prediction_columns_checked,:initial_only,:audit_id)
 const REFERENCE_TUNING_FIELDS=(:schema,REFERENCE_COMMON...,:grid_sha256,:lead_order,:leads,:tuning_id)
@@ -12,12 +13,6 @@ const REFERENCE_GRID=Tuple((max_depth=d,nrounds=r,nbins=b) for d in (4,6) for r 
 function _reference_id(data,field)
     names=Tuple(Symbol(k) for k in keys(data) if Symbol(k)!=field)
     T._need(T._id(NamedTuple{names}(Tuple(getproperty(data,k) for k in names)))==getproperty(data,field),"B reference metadata identity differs")
-end
-function _reference_qualification(path,pins,evidence_mode)
-    body=P._bound(path);T._need(T._sha(body)==pins.baseline_qualification_sha256,"B reference component qualification pin differs")
-    mode=evidence_mode==:synthetic_only ? "synthetic_only" : "software_qualified"
-    P._software_qualification(body;schema="b_reference_component_software_qualification_v1",evidence_mode=mode,head=pins.baseline_qualified_head,sources=pins.baseline_sources)
-    body
 end
 function _reference_geometry(v,boundary,start,stop,delay)
     masks=T._masks(v,boundary,start,stop,delay);indices=findall(masks.forecast)
@@ -47,7 +42,8 @@ function _reference_metric(values,labels)
     result
 end
 function _reference_tree(root,matched)
-    names=String["completion.json","audit.json","predictions.bin","qualification.json"]
+    names=String["completion.json","audit.json","predictions.bin"]
+    isfile(joinpath(root,"qualification.json"))&&push!(names,"qualification.json")
     if matched
         append!(names,["grid.json","tuning.json"])
         append!(names,["candidates/h$h/setting-$s.bin" for h in (4,6) for s in 1:8])
@@ -69,13 +65,13 @@ function _check_reference_common(data,base,pins,v)
     for field in REFERENCE_COMMON;T._need(T._bytes(getproperty(data,field))==T._bytes(getproperty(base,field)),"B reference shared field differs: $field");end
     T._need(data.evidence_mode==String(v.evidence_mode)&&data.source_sha256==v.source_sha256&&data.input_prefix_sha256==v.input_prefix_sha256&&data.input_view_id==v.view_id,"B reference admitted view/source differs")
     T._int(data.delay_hours,0,1)
-    for (field,value) in ((:feature_contract_sha256,pins.feature_contract_sha256),(:tuning_loss_contract_sha256,pins.tuning_loss_contract_sha256),(:baseline_qualification_sha256,pins.baseline_qualification_sha256));T._need(getproperty(data,field)==value,"B reference external contract/qualification pin differs");end
+    for (field,value) in ((:feature_contract_sha256,pins.feature_contract_sha256),(:tuning_loss_contract_sha256,pins.tuning_loss_contract_sha256));T._need(getproperty(data,field)==value,"B reference external contract pin differs");end
     T._need(P._sources(data.baseline_sources)==pins.baseline_sources,"B reference external component source map differs")
 end
 function _decode_reference(root,pins::BReferencePins,v,expected_sources)
     sources=P._source(expected_sources);T._recheck(v)
     T._need(pins.pins_id==T._id(Selection._pins_data(pins)),"B reference trusted pins mutated")
-    c,cb=P._json(P._member(root,"completion.json");fields=REFERENCE_COMPLETION_FIELDS)
+    c,cb=_reference_json(P._member(root,"completion.json");fields=REFERENCE_COMPLETION_FIELDS)
     T._need(T._sha(cb)==pins.completion_sha256,"B reference completion external pin differs");_reference_id(c,:completion_id)
     kind=Symbol(c.reference_kind);matched=kind==:matched_information_gbm_initial_v1
     T._need(kind in (:matched_information_gbm_initial_v1,:original_reference_diagnostic_only),"B reference role differs")
@@ -91,8 +87,7 @@ function _decode_reference(root,pins::BReferencePins,v,expected_sources)
     T._need(T._clock(c.training_history_start)==first(v.input.time)&&first(v.input.time)<boundary<=start<stop<=T.Adapter._shift(last(v.input.time),1),"B reference exact history/split differs")
     T._need(matched||delay==0,"original diagnostic adapter is L0 only")
     T._need(c.audit_sha256==pins.audit_sha256&&c.grid_sha256==pins.grid_sha256&&c.tuning_sha256==pins.tuning_sha256&&c.prediction_panel_sha256==pins.prediction_sha256&&T._hex(c.audit_contract_sha256),"B reference external audit/tuning/prediction pins differ")
-    qb=_reference_qualification(P._member(root,"qualification.json"),pins,v.evidence_mode)
-    audit,ab=P._json(P._member(root,"audit.json");fields=REFERENCE_AUDIT_FIELDS)
+    audit,ab=_reference_json(P._member(root,"audit.json");fields=REFERENCE_AUDIT_FIELDS)
     T._need(T._sha(ab)==pins.audit_sha256&&audit.schema==(matched ? "b_matched_reference_audit_v2" : "b_original_reference_audit_v1"),"B reference independent audit pin/schema differs");_reference_id(audit,:audit_id)
     _check_reference_common(audit,c,pins,v)
     for field in (:audit_contract_sha256,:raw_row_identity_sha256,:prediction_panel_sha256,:grid_sha256,:tuning_sha256);T._need(getproperty(audit,field)==getproperty(c,field),"B reference audit repeated pin differs");end
@@ -114,13 +109,13 @@ function _decode_reference(root,pins::BReferencePins,v,expected_sources)
     T._need(length(c.model_ids)==length(c.selected_setting_ids)==2&&all(T._hex,c.model_ids),"B reference model/selection ID shape differs")
     maxima=Tuple{DateTime,DateTime}[]
     if matched
-        grid,gb=P._json(P._member(root,"grid.json");fields=(:schema,:complete,:evidence_mode,:feature_contract_sha256,:settings,:grid_id))
+        grid,gb=_reference_json(P._member(root,"grid.json");fields=(:schema,:complete,:evidence_mode,:feature_contract_sha256,:settings,:grid_id))
         T._need(T._sha(gb)==pins.grid_sha256&&grid.schema=="fixed_eight_gbm_settings_v2"&&grid.complete===true&&grid.evidence_mode==String(v.evidence_mode)&&grid.feature_contract_sha256==pins.feature_contract_sha256&&length(grid.settings)==8,"B reference fixed grid differs");_reference_id(grid,:grid_id)
         for (i,item) in enumerate(grid.settings)
             T._fields(item,(:index,:max_depth,:nrounds,:nbins))
             T._need(T._int(item.index,1,8)==i&&all(T._int(getproperty(item,k),1,10000)==getproperty(REFERENCE_GRID[i],k) for k in keys(REFERENCE_GRID[i])),"B exact eight ordered configurations required")
         end
-        tuning,tb=P._json(P._member(root,"tuning.json");fields=REFERENCE_TUNING_FIELDS)
+        tuning,tb=_reference_json(P._member(root,"tuning.json");fields=REFERENCE_TUNING_FIELDS)
         T._need(T._sha(tb)==pins.tuning_sha256&&tuning.schema=="b_matched_reference_tuning_v2"&&tuning.grid_sha256==pins.grid_sha256&&length(tuning.leads)==2&&collect(tuning.lead_order)==[4,6]&&all(x->x isa Integer&&!(x isa Bool),tuning.lead_order),"B reference tuning proof differs");_reference_id(tuning,:tuning_id)
         _check_reference_common(tuning,c,pins,v)
         for k in 1:2
@@ -166,7 +161,7 @@ function _decode_reference(root,pins::BReferencePins,v,expected_sources)
     metadata=(;schema="b_point_reference_panel_v1",evidence_mode=v.evidence_mode,reference_kind=kind,source_sha256=v.source_sha256,delay_hours=delay,training_boundary=boundary,validation_start=start,validation_end=stop,training_history_start=first(v.input.time),model_ids=String.(c.model_ids),max_fit_target_complete=maximum(first,maxima),max_fit_label_receipt=maximum(last,maxima),feature_contract_sha256=pins.feature_contract_sha256,fixed_grid_manifest_sha256=pins.grid_sha256,selected_setting_ids=Int.(c.selected_setting_ids),tuning_loss_contract_sha256=pins.tuning_loss_contract_sha256,tuning_proof_completion_sha256=pins.tuning_sha256,prediction_panel_sha256=pins.prediction_sha256,raw_row_identity_sha256=String(c.raw_row_identity_sha256),reference_completion_sha256=pins.completion_sha256,audit_completion_sha256=pins.audit_sha256)
     provisional=Selection.BReferenceAudit(root,pins.audit_sha256,pins,v,copy(sources),repeat("0",64));witness=Selection.BReferenceAudit(root,pins.audit_sha256,pins,v,copy(sources),T._id(Selection._audit_data(provisional)))
     ref=Selection._reference(metadata,rows;audit=witness)
-    T._need(P._bound(P._member(root,"completion.json"))==cb&&P._bound(P._member(root,"audit.json"))==ab&&P._bound(P._member(root,"qualification.json"))==qb&&P._file_sha(selected)==(ph,pbytes)&&T._bytes(_reference_tree(root,matched))==T._bytes(members),"B reference members changed during admission")
+    T._need(P._bound(P._member(root,"completion.json"))==cb&&P._bound(P._member(root,"audit.json"))==ab&&P._file_sha(selected)==(ph,pbytes)&&T._bytes(_reference_tree(root,matched))==T._bytes(members),"B reference members changed during admission")
     T._recheck(v);T._need(P._source(expected_sources)==sources,"B reference admission sources changed");ref
 end
 function admit_reference(completion_path;trusted_pins::BReferencePins,roots,view::T.PointInputView,expected_sources)

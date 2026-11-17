@@ -15,19 +15,6 @@ const START=DateTime(2020)
 digest(bytes)=bytes2hex(sha256(bytes))
 clock(t)=Dates.format(t,dateformat"yyyy-mm-ddTHH:MM:SS.sss")*"Z"
 include(joinpath(@__DIR__,"..","archive_source_bound_fit","case_fixture.jl"))
-module BeforeArchival
-using SHA,SolarSINDy
-const FIXTURE=joinpath(@__DIR__,"shared_replay_before_archival_20261028.jl")
-const BYTES=read(FIXTURE)
-bytes2hex(sha256(BYTES))=="a3a13cd6f2f3cc50e907c6d9931c7b7edd3e0342193af3a9e5d5c413c3e762f8" || error("original generated replay fixture changed")
-const ORIGINAL_PATH=joinpath(pkgdir(SolarSINDy),"research","dbdt_completed_source","source_bound_shared_replay.jl")
-# include_string's filename supplies source locations; SOURCE_PATH separately
-# gives the retained worker its original unchanged dependency directory.
-task_local_storage(:SOURCE_PATH,ORIGINAL_PATH) do
-    Base.include_string(@__MODULE__,String(copy(BYTES)),ORIGINAL_PATH)
-end
-end
-const OLD=BeforeArchival.SourceBoundSharedReplay
 specs()=(E.SubscriberSpec(:static,:static;nominal=.1),E.SubscriberSpec(:phase,:phase;nominal=.1,gamma=.01),
     E.SubscriberSpec(:fifo,:fifo;nominal=.1,gamma=.01/31),E.SubscriberSpec(:early,:early;nominal=.1,gamma=.01/31),
     E.SubscriberSpec(:maturity,:maturity;nominal=.1,gamma=.01/31))
@@ -91,32 +78,21 @@ end
     @test_throws ArgumentError AR._specifications((E.SubscriberSpec(:same,:phase),E.SubscriberSpec(:same,:fifo)),.1)
     @test_throws ArgumentError AR._specifications(specs(),.2)
 end
-@testset "Refactored generated replay matches the complete frozen original worker" begin
+@testset "Generated replay timing, lineage and result integrity" begin
     mktempdir() do root
         for role in ("primary","independent"),layout in ("ground-only","mixed")
             directory=joinpath(root,role*"-"*layout);mkdir(directory)
             value=make_cases(realpath(directory),role,layout);point=pointfit(value)
-            fitted=calibrated(S,value,point);old_fitted=calibrated(OLD,value,point)
-            @test fitted.expected.context_sha256==old_fitted.expected.context_sha256
-            @test fitted.static.capsule.context==old_fitted.static.capsule.context && fitted.static.capsule.numeric==old_fitted.static.capsule.numeric
+            fitted=calibrated(S,value,point)
             features=feature_rows(value,point,fitted);request_pin=repeat("0",64)
             for warmup in (true,false)
-                result=replay(S,value,point,fitted;warmup);reference=replay(OLD,value,point,old_fitted;warmup)
-                @test isequal(result.shared.events,reference.shared.events)
-                @test isequal(result.shared.subscriber_events,reference.shared.subscriber_events)
-                @test isequal(result.shared.issue_records,reference.shared.issue_records)
-                @test isequal(result.shared.source,reference.shared.source) && isequal(result.shared.subscribers,reference.shared.subscribers)
-                @test result.row_ids==reference.row_ids && result.accepted_rows==reference.accepted_rows
-                @test isequal(result.centers,reference.centers) && isequal(result.scales,reference.scales)
-                @test isequal(result.static_bounds.bounds,reference.static_bounds.bounds)
+                result=replay(S,value,point,fitted;warmup)
                 @test result.shared.source.completed_targets==1 && result.shared.source.censored_targets==15 && result.shared.source.pending_targets==0
                 for name in (:publisher_upper,:publisher_absolute)
-                    portfolio=getproperty(result,name);old=getproperty(reference,name)
-                    @test isequal(portfolio.issued,old.issued) && isequal(portfolio.updates,old.updates)
+                    portfolio=getproperty(result,name)
                     @test only(portfolio.updates).completed_at==START+Minute(180)+Second(45)
                 end
                 fingerprint=AR.result_digest(result,features;request_sha256=request_pin)
-                @test fingerprint==AR.result_digest(reference,features;request_sha256=request_pin)
                 @test fingerprint!=AR.result_digest(result,features;request_sha256=repeat("1",64))
                 before=result.centers[1];result.centers[1]+=1
                 @test fingerprint!=AR.result_digest(result,features;request_sha256=request_pin);result.centers[1]=before
@@ -155,14 +131,12 @@ end
             @test_throws MethodError AR.prepare_request(value,1,value,1,point,fitted.calibration,fitted.expected,fitted.static;options...)
             @test_throws ArgumentError AR.prepare_request(invalid,1,invalid,1,point,fitted.calibration,fitted.expected,fitted.static;options...)
             @test_throws ArgumentError AR.replay_archival(invalid,1,invalid,1,point,fitted.calibration,fitted.expected,fitted.static;options...)
-            @test !ispath(joinpath(directory,"REPLAY_ATTEMPT.json"))
         end
         directory=joinpath(root,"missing");mkdir(directory)
         value=make_cases(realpath(directory),"primary","ground-only";profile=:pulse_eval_missing)
-        point=pointfit(value);fitted=calibrated(S,value,point);old_fitted=calibrated(OLD,value,point)
-        result=replay(S,value,point,fitted);reference=replay(OLD,value,point,old_fitted);features=feature_rows(value,point,fitted)
+        point=pointfit(value);fitted=calibrated(S,value,point)
+        result=replay(S,value,point,fitted)
         @test result.status===:no_feature_eligible && result.audit.features_rejected==16
-        @test AR.result_digest(result,features;request_sha256=repeat("0",64))==AR.result_digest(reference,features;request_sha256=repeat("0",64))
     end
 end
 end

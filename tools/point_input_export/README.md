@@ -8,7 +8,8 @@ completion appears only after final source and admission checks.
 `bundle_reader.py` verifies every exported input value against every scheduled
 sealed case record. Its adjacent helpers use only the Python standard library;
 they never load a model, open the declared source catalogue, discover data, or
-grant permission. All dependency imports are relative to the package and pinned.
+grant permission. Dependency imports resolve relative to the package; exported
+data and artifact identities remain externally pinned.
 
 The input stream uses little-endian dimensions, row indices, Julia DateTime
 milliseconds, column-major features, targets, transformed targets, current rates,
@@ -23,12 +24,13 @@ and the existing bounded canonical metadata and case-artifact limits. Files and
 path components must be ordinary; extra, missing, linked, changed, or incorrectly
 pinned members fail verification.
 
-Generated export grants no actual-data authority. Archival export is confined to
-2017 and requires a distinct fixed-split read-only planning grant, a separately
-qualified case reread, the exact whole-package qualification, and the qualified
-exporter path and hash. It does not grant fitting, discovery, case generation,
-provider-receipt claims, or scientific qualification. Generated positive tests
-cannot substitute for actual admission or full-size qualification.
+Archival export is confined to 2017 and takes reverified actual cases, an
+explicit split and a fresh destination. Its `archive_point_input_binding_v2`
+records the case-read admission, request and implementation identities. The
+independent reader checks those bindings and every input value without requiring
+CI certificates or a planning grant. Historical v1 authority fields remain
+provenance only. Generated fixtures exercise formats and numerical checks; they
+do not establish archival source reconstruction or forecasting performance.
 
 `evaluation_binding.py` independently reconstructs the generated-only metadata
 connection from a fixed point/calibration pair to a separately sealed evaluation

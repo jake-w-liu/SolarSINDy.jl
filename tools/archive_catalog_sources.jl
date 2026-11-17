@@ -1,11 +1,9 @@
 #!/usr/bin/env julia
-# Explicit request/destination and, for actual-cache jobs, four caller path/hash
-# pairs: grant, admission plan, source proof, completed software qualification.
+# Explicit pinned source request and fresh snapshot destination.
 using SolarSINDy
 function main(args)
-    length(args) in (2,10) || throw(ArgumentError("expected request, destination and optionally four authority path/SHA256 pairs"))
-    authority = length(args)==2 ? nothing : SolarSINDy.ArchiveCatalogSourceJob.Authority(args[3:10]...)
-    SolarSINDy.ArchiveCatalogSourceJob.reconstruct(args[1],args[2];authority)
+    length(args)==2 || throw(ArgumentError("expected REQUEST DESTINATION"))
+    SolarSINDy.ArchiveCatalogSourceJob.reconstruct(args[1],args[2])
     println("Archive catalog snapshot completed; independent reconstruction remains a separate check.")
 end
 main(ARGS)

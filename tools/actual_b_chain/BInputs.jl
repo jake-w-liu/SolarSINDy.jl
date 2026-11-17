@@ -142,7 +142,7 @@ const SOURCE_V2_ROLES=("raw_prefix","raw_provenance","independent_audit")
 const JOIN_V2_ROLES=("raw_prefix","raw_provenance","independent_audit","source_admission","reference_completion","reference_audit","reference_join_audit")
 const SOURCE_FORMAT_V2="ab7cc12ea18d178ed3b529d603b867c9e948df419275a4cea56a8da08042feee"
 const SOURCE_PARSER_V2="src/interval_mean_forecaster/sandu_fullchannel_features.jl"
-const REFERENCE_PINS_V2_FIELDS=(:completion_sha256,:audit_sha256,:grid_sha256,:tuning_sha256,:prediction_sha256,:feature_contract_sha256,:tuning_loss_contract_sha256,:baseline_qualification_sha256,:baseline_sources,:baseline_qualified_head,:feature_contract_member,:tuning_loss_contract_member)
+const REFERENCE_PINS_V2_FIELDS=(:completion_sha256,:audit_sha256,:grid_sha256,:tuning_sha256,:prediction_sha256,:feature_contract_sha256,:tuning_loss_contract_sha256,:baseline_sources,:feature_contract_member,:tuning_loss_contract_member)
 export BSourcePrefixAdmissionV2,admit_source_prefix_v2,recheck_source_v2,admit_prefix_v2
 
 struct BSourcePrefixAdmissionV2
@@ -285,12 +285,11 @@ function _joined_metadata_v2(path;expected_envelope_sha256,roots,expected_source
 end
 function _reference_pins_metadata_v2(ref)
     T._fields(ref,(:path,:sha256));T._need(T._hex(ref.sha256),"B v2 reference pins SHA grammar differs")
-    d,body=P._json(_ordinary_input_v2(ref.path);fields=REFERENCE_PINS_V2_FIELDS)
+    d,body=P._json(_ordinary_input_v2(ref.path);fields=REFERENCE_PINS_V2_FIELDS,legacy_fields=(:baseline_qualification_sha256,:baseline_qualified_head))
     T._need(T._sha(body)==ref.sha256,"B v2 reference pins changed")
-    for field in (:completion_sha256,:audit_sha256,:grid_sha256,:tuning_sha256,:prediction_sha256,:feature_contract_sha256,:tuning_loss_contract_sha256,:baseline_qualification_sha256)
+    for field in (:completion_sha256,:audit_sha256,:grid_sha256,:tuning_sha256,:prediction_sha256,:feature_contract_sha256,:tuning_loss_contract_sha256)
         T._need(T._hex(getproperty(d,field)),"B v2 reference pin grammar differs")
     end
-    T._need(d.baseline_qualified_head isa AbstractString&&occursin(r"\A[0-9a-f]{40}\z",d.baseline_qualified_head),"B v2 baseline head grammar differs")
     sources=Dict(P._sources(d.baseline_sources))
     T._need(d.feature_contract_member isa AbstractString&&d.tuning_loss_contract_member isa AbstractString&&get(sources,d.feature_contract_member,nothing)==d.feature_contract_sha256&&get(sources,d.tuning_loss_contract_member,nothing)==d.tuning_loss_contract_sha256,"B v2 baseline contract members differ")
     d
@@ -298,7 +297,7 @@ end
 function _reference_headers_v2(info;reference_pins=nothing)
     member=_role_v2(info.members,"reference_completion");audit_member=_role_v2(info.members,"reference_audit")
     T._need(basename(member.absolute)=="completion.json"&&audit_member.absolute==P._member(dirname(member.absolute),"audit.json"),"B v2 reference header paths differ")
-    c,cb=P._json(member.absolute;fields=REFERENCE_COMPLETION_FIELDS);audit,ab=P._json(audit_member.absolute;fields=REFERENCE_AUDIT_FIELDS)
+    c,cb=_reference_json(member.absolute;fields=REFERENCE_COMPLETION_FIELDS);audit,ab=_reference_json(audit_member.absolute;fields=REFERENCE_AUDIT_FIELDS)
     T._need(T._sha(cb)==member.sha256&&T._sha(ab)==audit_member.sha256,"B v2 reference header changed")
     matched=info.data.reference_kind=="matched_information_gbm_initial_v1"
     T._need(c.schema==(matched ? "b_matched_reference_completion_v2" : "b_original_reference_completion_v1")&&audit.schema==(matched ? "b_matched_reference_audit_v2" : "b_original_reference_audit_v1")&&c.complete===true&&audit.complete===true,"B v2 reference header schema/completion differs")
@@ -308,7 +307,7 @@ function _reference_headers_v2(info;reference_pins=nothing)
         T._need(getproperty(c,field)==value,"B v2 reference header source/clock/view differs")
     end
     T._need(T._int(c.delay_hours,0,1)==info.metadata.delay_hours,"B v2 reference header delay differs")
-    for field in (:feature_contract_sha256,:tuning_loss_contract_sha256,:baseline_qualification_sha256,:audit_contract_sha256,:raw_row_identity_sha256,:prediction_panel_sha256,:grid_sha256,:tuning_sha256,:audit_sha256)
+    for field in (:feature_contract_sha256,:tuning_loss_contract_sha256,:audit_contract_sha256,:raw_row_identity_sha256,:prediction_panel_sha256,:grid_sha256,:tuning_sha256,:audit_sha256)
         T._need(T._hex(getproperty(c,field)),"B v2 reference header hash grammar differs")
     end
     T._need(!isempty(P._sources(c.baseline_sources)),"B v2 reference component sources are empty")
@@ -321,7 +320,8 @@ function _reference_headers_v2(info;reference_pins=nothing)
     T._need(audit.all_eight_settings_checked===matched&&c.audit_sha256==audit_member.sha256,"B v2 reference audit scope/pin differs")
     T._need(c.model_ids isa AbstractVector&&c.selected_setting_ids isa AbstractVector&&length(c.model_ids)==length(c.selected_setting_ids)==2&&all(T._hex,c.model_ids),"B v2 reference model ID shape differs")
     for id in c.selected_setting_ids;T._int(id,1,matched ? 8 : 10000);end
-    names=String["audit.json","predictions.bin","qualification.json"]
+    names=String["audit.json","predictions.bin"]
+    isfile(joinpath(dirname(member.absolute),"qualification.json"))&&push!(names,"qualification.json")
     if matched;append!(names,["grid.json","tuning.json"]);append!(names,["candidates/h$h/setting-$s.bin" for h in (4,6) for s in 1:8]);end
     sort!(names);T._need(c.members isa AbstractVector&&length(c.members)==length(names),"B v2 reference member ledger count differs")
     ledger=Dict{String,NamedTuple}();total=length(cb);directory=dirname(member.absolute)
@@ -333,7 +333,7 @@ function _reference_headers_v2(info;reference_pins=nothing)
         ledger[name]=(;bytes,sha256=String(row.sha256))
     end
     pred=ledger["predictions.bin"];T._need(pred.bytes>=32&&(pred.bytes-16)%16==0&&1<=(pred.bytes-16)÷16<=info.metadata.prefix_rows,"B v2 prediction header geometry differs")
-    T._need(ledger["audit.json"].sha256==audit_member.sha256&&pred.sha256==c.prediction_panel_sha256&&ledger["qualification.json"].sha256==c.baseline_qualification_sha256,"B v2 reference member/header pins differ")
+    T._need(ledger["audit.json"].sha256==audit_member.sha256&&pred.sha256==c.prediction_panel_sha256,"B v2 reference member/header pins differ")
     if matched
         T._need(ledger["grid.json"].sha256==c.grid_sha256&&ledger["tuning.json"].sha256==c.tuning_sha256,"B v2 grid/tuning header pins differ")
         count=(pred.bytes-16)÷16
@@ -342,7 +342,7 @@ function _reference_headers_v2(info;reference_pins=nothing)
     if reference_pins!==nothing
         pins=_reference_pins_metadata_v2(reference_pins)
         T._need(pins.completion_sha256==member.sha256&&pins.audit_sha256==audit_member.sha256,"B v2 outside reference header pins differ")
-        for field in (:grid_sha256,:tuning_sha256,:feature_contract_sha256,:tuning_loss_contract_sha256,:baseline_qualification_sha256)
+        for field in (:grid_sha256,:tuning_sha256,:feature_contract_sha256,:tuning_loss_contract_sha256)
             T._need(getproperty(c,field)==getproperty(pins,field),"B v2 outside reference component pin differs")
         end
         T._need(c.prediction_panel_sha256==pins.prediction_sha256&&P._sources(c.baseline_sources)==P._sources(pins.baseline_sources),"B v2 outside reference sources/predictions differ")

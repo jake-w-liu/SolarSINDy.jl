@@ -7,23 +7,14 @@ using Dates,SHA,SolarSINDy
 const F=SolarSINDy.ArchiveSourceBoundPointFit
 const Q=SolarSINDy.ArchiveCatalogCaseJob
 const B=SolarSINDy.ArchiveCatalogCaseReader
-const A=SolarSINDy.ArchiveCatalogCaseAuthority
 const J=SolarSINDy.ArchiveCatalogSourceJob
 const R=SolarSINDy.CompletedSourceDBDT.CompletedRefitArtifacts
 const ENTRY_PIN=bytes2hex(sha256(read(@__FILE__)))
 const CHUNK_BYTES=8_388_608
 const MAX_BYTES=134_217_728
-export PlanningAuthority,planning_request,export_generated,export_archival
+export planning_request,export_generated,export_archival
 need(ok,message)=ok || throw(ArgumentError(message))
 digest(bytes)=bytes2hex(sha256(bytes))
-struct PlanningAuthority
-    grant_path::String
-    grant_sha256::String
-    source_proof_path::String
-    source_proof_sha256::String
-    qualification_path::String
-    qualification_sha256::String
-end
 function _request(value::Q.VerifiedCases,index,start,stop,asof;admission=nothing)
     actual=admission!==nothing
     need(value.actual_source_authority_granted===actual && value.actual_fit_performed===false,"planning case authority differs")
@@ -52,43 +43,6 @@ function planning_request(value::B.ReverifiedCases,index;start,stop,asof)
     F._archival_request(value,index,start,stop,asof)
     _request(value.cases,index,start,stop,asof;admission=value)
 end
-function _qualified_entry(proof)
-    name="research/dbdt_completed_source/point_input_export.jl"
-    root=realpath(pkgdir(SolarSINDy))
-    need(J._same(realpath(@__FILE__),joinpath(root,split(name,'/')...)),"actual planning entry outside qualified package")
-    need(get(proof["source_sha256"],name,nothing)==ENTRY_PIN,"actual planning entry absent from whole-package qualification")
-    nothing
-end
-function _admit(value,index,start,stop,asof,authority)
-    need(authority isa PlanningAuthority,"archival input planning requires distinct read-only authority")
-    admission=F._archival_request(value,index,start,stop,asof)
-    request=planning_request(value,index;start,stop,asof)
-    request_pin=digest(R.canonical_bytes(request;limit=131072))
-    grant=A._pinned(authority.grant_path,authority.grant_sha256;canonical=true,limit=131072)
-    J._object(grant,Set(("schema","operation","request_sha256","case_read_admission_sha256","entry_sha256","source_proof_sha256",
-        "qualification_sha256","head","actual_source_access_authorized","actual_model_fit_authorized","new_case_generation_authorized",
-        "input_planning_authorized","dataset_discovery","provider_receipts_available","execution_directory")))
-    need(grant["schema"]=="archive_point_input_planning_grant_v1" && grant["operation"]=="fixed_split_2017_input_export_only" &&
-        grant["request_sha256"]==request_pin && grant["case_read_admission_sha256"]==request["case_read_admission_sha256"] &&
-        grant["entry_sha256"]==ENTRY_PIN && grant["source_proof_sha256"]==J._sha(authority.source_proof_sha256)==admission["reader_source_proof_sha256"] &&
-        grant["qualification_sha256"]==J._sha(authority.qualification_sha256)==admission["reader_qualification_sha256"] &&
-        grant["actual_source_access_authorized"]===true && grant["actual_model_fit_authorized"]===false &&
-        grant["new_case_generation_authorized"]===false && grant["input_planning_authorized"]===true &&
-        grant["dataset_discovery"]===false && grant["provider_receipts_available"]===false,"planning grant differs")
-    execution=J._text(grant["execution_directory"];limit=4096)
-    need(isabspath(execution),"planning execution path must be absolute");J._ordinary(execution;directory=true)
-    need(J._same(realpath(execution),realpath(dirname(authority.grant_path))),"planning grant outside execution directory")
-    proof=A._pinned(authority.source_proof_path,authority.source_proof_sha256;limit=1048576)
-    qualification=A._pinned(authority.qualification_path,authority.qualification_sha256;limit=1048576)
-    A._qualification(proof,qualification,authority,grant)
-    _qualified_entry(proof)
-    need(proof["head"]==admission["reader_head"],"planning reader qualification differs")
-    auth=Dict("schema"=>"archive_point_input_planning_admission_v1","head"=>proof["head"],"grant_sha256"=>authority.grant_sha256,
-        "source_proof_sha256"=>authority.source_proof_sha256,"qualification_sha256"=>authority.qualification_sha256,
-        "request_sha256"=>request_pin,"case_read_admission_sha256"=>request["case_read_admission_sha256"],
-        "actual_model_fit_authorized"=>false,"provider_receipts_available"=>false)
-    request,auth
-end
 function _stream(arrays)
     expected,y=F._data_sha(arrays);n,p=size(arrays.features)
     bytes=length(codeunits("SOURCE_BOUND_POINT_INPUT_V1\n"))+16+8n*(p+6)
@@ -109,6 +63,7 @@ function _export(value,index,destination,start,stop,asof,request,auth)
     J._ordinary(dirname(destination);directory=true)
     need(!ispath(destination)&&!islink(destination),"planning export destination exists")
     actual=auth!==nothing
+    started=time_ns();started_utc=F.clock(now(UTC));available=Sys.free_memory()
     need(value.actual_source_authority_granted===actual,"planning output evidence differs")
     arrays=Q.split_arrays(value,index;start,stop,asof);body,input=_stream(arrays)
     context=Dict("schema"=>"source_bound_point_input_export_context_v1","request"=>request,
@@ -120,7 +75,13 @@ function _export(value,index,destination,start,stop,asof,request,auth)
     receipt=Dict("schema"=>"source_bound_point_input_export_receipt_v1","complete"=>true,"context_sha256"=>digest(context_bytes),
         "input_sha256"=>input,"actual_source_access"=>actual,"actual_model_fit_performed"=>false,
         "fit_authority_granted"=>false,"provider_receipts_available"=>false,"software_qualification"=>false)
-    actual && (receipt["authorization"]=auth)
+    if actual
+        binding=copy(auth)
+        binding["runtime_observations"]=Dict("started_utc"=>started_utc,"elapsed_ns"=>Int(time_ns()-started),
+            "available_physical_bytes_at_start"=>Int(available),"peak_rss_bytes"=>Int(Sys.maxrss()),
+            "julia_threads"=>Threads.nthreads(),"blas_threads"=>F.BLAS.get_num_threads())
+        receipt["authorization"]=binding
+    end
     receipt_bytes=R.canonical_bytes(receipt;limit=65536)
     mkdir(destination);J._ordinary(destination;directory=true);members=Any[]
     for (name,bytes) in (("context.json",context_bytes),("receipt.json",receipt_bytes))
@@ -154,19 +115,17 @@ function export_generated(value::Q.VerifiedCases,index,destination;start,stop,as
     request=planning_request(value,index;start,stop,asof)
     _complete(destination,_export(value,index,destination,start,stop,asof,request,nothing))
 end
-"""Export only one separately admitted2017input stream, without fitting a model."""
+"""Export one strict 2017 input stream from reverified archival cases."""
 function export_archival(value::B.ReverifiedCases,index,destination;start,stop,asof,authority=nothing)
-    request,auth=_admit(value,index,start,stop,asof,authority)
-    need(isabspath(destination) && J._same(normpath(destination),joinpath(realpath(dirname(authority.grant_path)),"input")),
-        "archival input destination outside fixed execution directory")
-    attempt=R.canonical_bytes(Dict("schema"=>"archive_point_input_planning_attempt_v1","grant_sha256"=>authority.grant_sha256,
-        "request_sha256"=>auth["request_sha256"],"started_utc"=>F.clock(now(UTC)));limit=16384)
-    path=joinpath(realpath(dirname(authority.grant_path)),"POINT_INPUT_PLANNING_ATTEMPT.json")
-    R._exclusive_write(path,attempt);auth["attempt_sha256"]=digest(attempt)
+    need(authority===nothing,"input export uses case/input bindings, not execution permits")
+    F._archival_request(value,index,start,stop,asof)
+    request=planning_request(value,index;start,stop,asof)
+    auth=Dict("schema"=>"archive_point_input_binding_v2","request_sha256"=>digest(R.canonical_bytes(request;limit=131072)),
+        "case_read_admission_sha256"=>request["case_read_admission_sha256"],"entry_sha256"=>ENTRY_PIN)
     prepared=_export(value.cases,index,destination,start,stop,asof,request,auth)
-    after_request,after_auth=_admit(value,index,start,stop,asof,authority)
-    need(after_request==request && all(auth[k]==v for (k,v) in after_auth) && R.bounded_read(path;limit=16384)==attempt,
-        "planning admission changed during export")
+    F._archival_request(value,index,start,stop,asof)
+    need(planning_request(value,index;start,stop,asof)==request,"planning inputs changed during export")
     _complete(destination,prepared)
+
 end
 end

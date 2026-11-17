@@ -14,7 +14,7 @@ function fit_header_grammar_checks(root,result)
     end
     replay()=P._verify_basis(a.view,laws,joinpath(stage,"basis");expected_manifest_sha256=T._sha(read(joinpath(stage,"basis/manifest.json"))),expected_sources=P.source_identity(),chunk_hours=7)
     proof=replay();panel=P._read_verified_panel(proof,a.view,1,1)
-    context=B.BInitialPointFits._export_context(a,panel,nothing)
+    context=B.BInitialPointFits._export_context(a,panel)
     bundle=joinpath(stage,"models/setting-1")
     loaded=P.load_point_bundle(bundle;expected_manifest_sha256=T._sha(read(joinpath(bundle,"manifest.json"))),expected_sources=P.source_identity(),expected_binding=context)
     fit=joinpath(stage,"fits/setting-1")

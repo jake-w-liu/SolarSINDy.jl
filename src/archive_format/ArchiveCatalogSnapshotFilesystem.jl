@@ -1,7 +1,7 @@
 """Read explicitly pinned source snapshots through ordinary bounded files.
 
 The generated entry point rejects archival inputs. The internal reader provides
-no authority; archival jobs must admit their separate feature grant first.
+no archival identity; archival jobs explicitly bind their request and source pins.
 Recorded cache paths are passive metadata and are never opened.
 """
 module ArchiveCatalogSnapshotFilesystem

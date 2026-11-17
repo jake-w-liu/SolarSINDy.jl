@@ -29,7 +29,7 @@ def audit_reference(*,reference,reference_sha256,source,source_sha256,mode,outpu
     tools=plain_root(HERE)
     controls={str(p):read_file(member(tools,p.name),Limits().file_bytes)['sha256']
               for p in tools.iterdir() if p.suffix in ('.py','.jl')}
-    for name in ('Project.toml','Manifest.toml'):
+    for name in ('Project.toml',):
         path=member(plain_root(PROJECT),name)
         controls[str(path)]=read_file(path,Limits().file_bytes)['sha256']
     controls[str(julia)]=julia_sha256

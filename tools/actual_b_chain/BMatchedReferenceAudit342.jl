@@ -36,15 +36,15 @@ const SOURCE8=(:delay_hours,:source_proof_sha256,:source_admission_id,:input_vie
 const SOURCE9=(SOURCE8...,:context_id)
 const CONTRACTS=(:protocol_sha256,:feature_contract_sha256,:feature_schema_sha256,:loss_contract_sha256,:audit_contract_sha256,:evotrees_source_sha256)
 const RUNTIME=(:julia_version,:julia_binary_sha256,:evotrees_version,:evotrees_source_sha256,:threads,:blas_threads,:omp_threads)
-const REQUEST=(:schema,:evidence_mode,:operation,:component,:component_qualification,:source_proof,:source_bindings,:contracts,:runtime,:execution_authority,:drafts,:output_directory,:request_id)
-const COMPONENT=(:schema,:complete,:evidence_mode,:initial_only,:pair_id,:source_bindings,:training_boundary,:validation_start,:validation_end,:feature_contract_sha256,:feature_schema_sha256,:tuning_loss_contract_sha256,:evotrees_source_sha256,:baseline_qualified_head,:baseline_qualification_sha256,:baseline_sources,:runtime,:execution_authority_sha256,:cells,:drafts,:members,:component_id)
+const REQUEST=(:schema,:evidence_mode,:operation,:component,:source_bindings,:contracts,:runtime,:drafts,:output_directory,:request_id)
+const COMPONENT=(:schema,:complete,:evidence_mode,:initial_only,:pair_id,:source_bindings,:training_boundary,:validation_start,:validation_end,:feature_contract_sha256,:feature_schema_sha256,:tuning_loss_contract_sha256,:evotrees_source_sha256,:baseline_sources,:runtime,:cells,:drafts,:members,:component_id)
 const CELL=(:delay_hours,:horizon,:context_id,:matched_input_id,:training_count,:validation_count,:union_count,:validation_persistence_count,:model_training_mask_sha256,:reference_training_mask_sha256,:reference_validation_cohort_sha256,:fit_input_sha256,:preprocessing_sha256,:training_design_sha256,:max_fit_target_complete,:max_fit_label_receipt,:max_validation_target_complete,:max_validation_label_receipt,:encoder_member,:models)
 const MODELREC=(:setting_index,:model_id,:model_member,:fit_receipt_member,:candidate_member,:native_increment_sha256,:reloaded_increment_sha256,:n,:rmse_nt,:mae_nt,:bias_nt)
-const FITREC=(:schema,:complete,:evidence_mode,:pair_id,:context_id,:delay_hours,:horizon,:setting_index,:model_training_mask_sha256,:reference_training_mask_sha256,:reference_validation_cohort_sha256,:fit_input_sha256,:preprocessing_sha256,:training_design_sha256,:runtime_sha256,:recipe,:model_id,:model_sha256,:encoder_sha256,:native_increment_sha256,:reloaded_increment_sha256,:union_count,:fit_elapsed_ns,:execution_authority_sha256,:receipt_id)
+const FITREC=(:schema,:complete,:evidence_mode,:pair_id,:context_id,:delay_hours,:horizon,:setting_index,:model_training_mask_sha256,:reference_training_mask_sha256,:reference_validation_cohort_sha256,:fit_input_sha256,:preprocessing_sha256,:training_design_sha256,:runtime_sha256,:recipe,:model_id,:model_sha256,:encoder_sha256,:native_increment_sha256,:reloaded_increment_sha256,:union_count,:fit_elapsed_ns,:receipt_id)
 const DRAFT=(:delay_hours,:root,:raw_row_identity_sha256,:prediction_panel_sha256,:grid_sha256,:tuning_sha256,:routing_member,:model_count,:persistence_count,:model_ids,:selected_setting_ids,:members)
 const MODELKEYS=(:schema,:feature_count,:feature_schema_sha256,:evotrees_version,:evotrees_source_sha256,:cell_delay,:cell_horizon,:setting_index,:max_depth,:nrounds,:nbins,:seed,:training_mask_sha256,:preprocessing_sha256,:input_admission_sha256,:feature_contract_sha256,:loss_contract_sha256,:numeric_feature_types,:edges_f64_bits,:trees,:model_id)
 const ENCODERKEYS=(:schema,:feature_count,:feature_schema_sha256,:feature_contract_sha256,:training_rows,:finite_counts,:imputation_f64_bits,:center_f64_bits,:scale_f64_bits,:training_design_sha256)
-const REF_COMMON=(:complete,:evidence_mode,:reference_kind,:source_sha256,:input_prefix_sha256,:input_view_id,:delay_hours,:training_boundary,:validation_start,:validation_end,:training_history_start,:feature_contract_sha256,:tuning_loss_contract_sha256,:baseline_qualification_sha256,:baseline_sources)
+const REF_COMMON=(:complete,:evidence_mode,:reference_kind,:source_sha256,:input_prefix_sha256,:input_view_id,:delay_hours,:training_boundary,:validation_start,:validation_end,:training_history_start,:feature_contract_sha256,:tuning_loss_contract_sha256,:baseline_sources)
 const TUNING=(:schema,REF_COMMON...,:grid_sha256,:lead_order,:leads,:tuning_id)
 const LEAD=(:horizon,:training_mask_sha256,:validation_cohort_sha256,:validation_count,:max_fit_target_complete,:max_fit_label_receipt,:max_selection_target_complete,:max_selection_label_receipt,:candidates,:selected_index,:selected_model_id)
 const CANDIDATE=(:index,:max_depth,:nrounds,:nbins,:model_id,:fit_input_sha256,:prediction_member,:prediction_bytes,:prediction_sha256,:n,:rmse_nt,:mae_nt,:bias_nt)
@@ -53,9 +53,7 @@ const CELLCHECK=(:delay_hours,:horizon,:context_id,:training_count,:validation_c
 const MODELCHECK=(:setting_index,:model_id,:model_sha256,:fit_receipt_sha256,:native_increment_sha256,:reloaded_increment_sha256,:audited_increment_sha256,:candidate_prediction_sha256,:n,:rmse_nt,:mae_nt,:bias_nt)
 const REPORT=(:schema,:complete,:evidence_mode,:pair_id,:component_completion_sha256,:source_bindings,:cells,:references,:fitting_performed,:native_model_deserialization,:report_id)
 const AUDIT_NAMES=("audit-completion.json","audit-report.json","reference-audit-L0.json","reference-audit-L1.json")
-const CA=(:schema,:complete,:evidence_mode,:operation,:qualified_head,:implementation_sources,:pair_id,:source_proof_sha256,:source_proof,:source_bindings,:contracts,:runtime,:component_root,:component_completion_sha256,:component_qualification,:execution_authority_sha256,:execution_authority,:references,:report_sha256,:members,:audit_id)
-const PERMIT=(:schema,:complete,:evidence_mode,:operation,:qualified_head,:implementation_sources,:contracts,:sources,:source_proof,:root_qualification,:component_qualification,:resource_qualification,:runtime,:execution,:scope,:limits,:permit_id)
-const SCOPE=(:training_boundary_ms,:validation_start_ms,:validation_end_ms,:embargo_hours,:cell_order,:setting_order,:fit_count,:encoder_count,:final_fit_count,:calibration_fit_count,:exposed_development_scoring,:joint_primary_selection,:scientific_verdict,:serving_promotion)
+const CA=(:schema,:complete,:evidence_mode,:operation,:implementation_sources,:pair_id,:source_bindings,:contracts,:runtime,:component_root,:component_completion_sha256,:references,:report_sha256,:members,:audit_id)
 
 need(x,msg)=x||throw(ArgumentError(msg))
 is_sequence(x)=x isa AbstractVector||x isa Tuple
@@ -74,7 +72,16 @@ freeze(x::AbstractString)=String(x)
 freeze(x)=x
 function fields(x,names)
     need(x isa NamedTuple||x isa AbstractDict,"audit object required")
-    T._fields(x,names);x
+    # Old certificate fields remain readable provenance, never execution grants.
+    legacy = names == REQUEST ? (:component_qualification,:source_proof,:execution_authority) :
+        names == COMPONENT ? (:baseline_qualified_head,:baseline_qualification_sha256,:execution_authority_sha256) :
+        names == FITREC ? (:execution_authority_sha256,) :
+        names == CA ? (:qualified_head,:source_proof_sha256,:source_proof,:component_qualification,:execution_authority_sha256,:execution_authority) :
+        :baseline_sources in names ? (:baseline_qualification_sha256,:baseline_qualified_head) : ()
+    observed=Set(Symbol(k) for k in keys(x));required=Set(names)
+    need(length(observed)==length(keys(x)),"audit duplicate object fields")
+    need(issubset(required,observed)&&issubset(setdiff(observed,required),Set(legacy)),"audit object fields differ")
+    T._fields(x,Tuple(Symbol(k) for k in keys(x)));x
 end
 function check_identity(x,key)
     names=Tuple(Symbol(k) for k in keys(x) if Symbol(k)!=key)
@@ -155,15 +162,25 @@ function fixed_members(root,entries,names;payload=false)
     expected=sort!(collect(names));need(length(entries)==length(expected),"audit exact member count differs")
     Tuple(filemember(root,e;name=n,limit=payload&&(endswith(n,".model.json")||endswith(n,"encoder.json")) ? PAYLOAD : n in ("routing/L0.bin","routing/L1.bin") ? MAXROWS+16 : startswith(n,"candidates/") ? 16+8MAXROWS : n=="predictions.bin" ? 16+16MAXROWS : META) for (e,n) in zip(entries,expected))
 end
-function component_names()
-    names=String["qualification.json","feature-contract","loss-contract","routing/L0.bin","routing/L1.bin"]
+function legacy_qualification_member(entries)
+    need(is_sequence(entries),"audit member list required")
+    found=false
+    for entry in entries
+        fields(entry,(:name,:bytes,:sha256))
+        found|=entry.name=="qualification.json"
+    end
+    found
+end
+function component_names(entries=())
+    names=String["feature-contract","loss-contract","routing/L0.bin","routing/L1.bin"]
+    legacy_qualification_member(entries)&&push!(names,"qualification.json")
     for (L,h) in CELLS
         push!(names,"L$L-h$h/encoder.json")
         for s in 1:8;push!(names,"L$L-h$h/setting-$s.model.json","L$L-h$h/setting-$s.fit.json");end
     end
     sort!(names)
 end
-draft_names()=sort!(vcat(["grid.json","tuning.json","predictions.bin","qualification.json"],["candidates/h$h/setting-$s.bin" for h in (4,6) for s in 1:8]))
+draft_names(entries=())=sort!(vcat(["grid.json","tuning.json","predictions.bin"],legacy_qualification_member(entries) ? ["qualification.json"] : String[],["candidates/h$h/setting-$s.bin" for h in (4,6) for s in 1:8]))
 function exact_tree(root,names,dirs;cap=TOTAL,optional=())
     need(isdir(P._ordinary(root)),"audit ordinary root required")
     observed=String[];directories=String[];total=0
@@ -406,9 +423,13 @@ function check_bindings(x,expected)
     need(same(x,expected),"audit independent source bindings differ")
     freeze(x)
 end
-function check_common(x,a,L,qsha)
-    base=(;complete=true,evidence_mode=a.mode,reference_kind="matched_information_gbm_initial_v1",source_sha256=a.bindings[L+1].source_sha256,input_prefix_sha256=a.bindings[L+1].input_prefix_sha256,input_view_id=a.bindings[L+1].input_view_id,delay_hours=L,training_boundary=clock(a.boundary),validation_start=clock(a.start),validation_end=clock(a.stop),training_history_start=clock(first(a.times)),feature_contract_sha256=FEATURE,tuning_loss_contract_sha256=LOSS,baseline_qualification_sha256=qsha,baseline_sources=a.sources)
+function check_common(x,a,L)
+    base=(;complete=true,evidence_mode=a.mode,reference_kind="matched_information_gbm_initial_v1",source_sha256=a.bindings[L+1].source_sha256,input_prefix_sha256=a.bindings[L+1].input_prefix_sha256,input_view_id=a.bindings[L+1].input_view_id,delay_hours=L,training_boundary=clock(a.boundary),validation_start=clock(a.start),validation_end=clock(a.stop),training_history_start=clock(first(a.times)),feature_contract_sha256=FEATURE,tuning_loss_contract_sha256=LOSS,baseline_sources=a.sources)
     for k in REF_COMMON;need(same(getproperty(x,k),getproperty(base,k)),"audit B reference common fact differs: $k");end
+    if hasproperty(x,:baseline_qualification_sha256)
+        need(is_digest(x.baseline_qualification_sha256),"audit legacy provenance digest grammar differs")
+        base=merge(base,(;baseline_qualification_sha256=String(x.baseline_qualification_sha256)))
+    end
     base
 end
 function member_headers(entries,names;payload=false)
@@ -425,9 +446,9 @@ function component_headers(c,a)
     need(c.schema=="matched342_initial_component_completion_v1"&&c.complete===true&&c.initial_only===true&&c.evidence_mode==a.mode&&c.pair_id==a.pair_id,"audit completed initial component header differs")
     check_bindings(c.source_bindings,a.bindings);check_runtime(c.runtime)
     need(c.training_boundary==clock(a.boundary)&&c.validation_start==clock(a.start)&&c.validation_end==clock(a.stop)&&c.feature_contract_sha256==FEATURE&&c.feature_schema_sha256==SCHEMA&&c.tuning_loss_contract_sha256==LOSS&&c.evotrees_source_sha256==EVO,"audit component split/contracts differ")
-    need(c.baseline_qualified_head isa AbstractString&&occursin(r"\A[0-9a-f]{40}\z",c.baseline_qualified_head)&&is_digest(c.baseline_qualification_sha256)&&same(c.baseline_sources,a.sources),"audit component externally qualified source/head differs")
+    need(same(c.baseline_sources,a.sources),"audit component implementation sources differ")
     need(is_sequence(c.cells)&&length(c.cells)==4&&is_sequence(c.drafts)&&length(c.drafts)==2,"audit complete four cells/two drafts required")
-    member_headers(c.members,component_names();payload=true)
+    member_headers(c.members,component_names(c.members);payload=true)
     for (cell,(L,h)) in zip(c.cells,CELLS)
         fields(cell,CELL);need(int(cell.delay_hours,0,1)==L&&int(cell.horizon,4,6)==h&&cell.context_id==a.bindings[L+1].context_id&&cell.matched_input_id==a.bindings[L+1].matched_input_id,"audit component ordered cell binding differs")
         for k in (:training_count,:validation_count,:union_count);int(getproperty(cell,k),1,MAXROWS);end
@@ -451,45 +472,9 @@ function component_headers(c,a)
         int(d.model_count,0,MAXROWS);int(d.persistence_count,0,MAXROWS)
         need(is_sequence(d.model_ids)&&is_sequence(d.selected_setting_ids)&&length(d.model_ids)==length(d.selected_setting_ids)==2&&all(is_digest,d.model_ids),"audit selected model shape differs")
         for x in d.selected_setting_ids;int(x,1,8);end
-        member_headers(d.members,draft_names())
+        member_headers(d.members,draft_names(d.members))
     end
     nothing
-end
-function qualification(ref,a,head,proofsha,pins)
-    qref=fileref(ref);body=P._bound(qref.path);need(sha(body)==qref.sha256,"audit qualification changed before parse");pin!(pins,qref.path;limit=META,expected=qref.sha256)
-    q=P._software_qualification(body;schema="b_reference_component_software_qualification_v1",evidence_mode=a.mode=="synthetic_only" ? "synthetic_only" : "software_qualified",head,sources=collect(source_map(a.sources)))
-    need(q.source_proof_sha256==proofsha,"audit component qualification whole-source proof differs")
-    qref,q
-end
-function historical_permit(ref,a,c,qref,proofref,contracts,runtime,pins)
-    if a.mode=="synthetic_only"
-        need(ref===nothing&&c.execution_authority_sha256===nothing,"audit generated component cannot carry actual authority")
-        return nothing
-    end
-    pref=fileref(ref);need(pref.sha256==c.execution_authority_sha256,"audit historical permit SHA differs")
-    p,_=readjson(pref.path;expected=pref.sha256,names=PERMIT);check_identity(p,:permit_id);pin!(pins,pref.path;limit=META,expected=pref.sha256)
-    need(p.schema=="qualified_actual_initial_matched342_permit_v1"&&p.complete===true&&p.evidence_mode==a.mode&&p.operation=="initial_matched342_32fits"&&p.qualified_head==c.baseline_qualified_head&&same(p.implementation_sources,a.sources),"audit historical permit completed code/scope differs")
-    check_bindings(p.sources,a.bindings);need(same(p.runtime,runtime),"audit historical fitted runtime differs")
-    names=Tuple(k for k in CONTRACTS if k!=:audit_contract_sha256);fields(p.contracts,names)
-    for k in names;need(getproperty(p.contracts,k)==getproperty(contracts,k),"audit historical permit contract differs");end
-    need(same(fileref(p.source_proof),proofref)&&same(fileref(p.component_qualification),qref),"audit historical source/component qualification differs")
-    fields(p.scope,SCOPE);s=p.scope
-    need(T._clock(s.training_boundary_ms)==a.boundary&&T._clock(s.validation_start_ms)==a.start&&T._clock(s.validation_end_ms)==a.stop&&int(s.embargo_hours,168,168)==168&&same(s.cell_order,[[0,4],[0,6],[1,4],[1,6]])&&same(s.setting_order,1:8)&&int(s.fit_count,32,32)==32&&int(s.encoder_count,4,4)==4&&int(s.final_fit_count,0,0)==0&&int(s.calibration_fit_count,0,0)==0,"audit historical initial-only fit scope differs")
-    for k in (:exposed_development_scoring,:joint_primary_selection,:scientific_verdict,:serving_promotion);need(getproperty(s,k)===false,"audit historical permit expands scope");end
-    fields(p.execution,(:directory,:native_owner_sha256,:preserved_native_owner_sha256,:intent))
-    need(p.execution.directory isa AbstractString&&isabspath(p.execution.directory)&&p.execution.native_owner_sha256=="c3575532cb67b4bf52d2db8a20e01ca7e8d97cfb0cb1054ded66467823e40c00"&&p.execution.preserved_native_owner_sha256=="30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c","audit historical fixed owner provenance differs")
-    intentref=fileref(p.execution.intent);intent,_=readjson(intentref.path;expected=intentref.sha256,names=(:schema,:evidence_mode,:operation,:qualified_head,:implementation_sources,:contracts,:sources,:runtime,:execution_directory,:scope,:limits));pin!(pins,intentref.path;limit=META,expected=intentref.sha256)
-    need(intent.schema=="matched342_initial_execution_intent_v1"&&intent.evidence_mode==p.evidence_mode&&intent.operation==p.operation&&intent.qualified_head==p.qualified_head&&intent.execution_directory==p.execution.directory,"audit historical execution intent differs")
-    for k in (:implementation_sources,:contracts,:sources,:runtime,:scope,:limits);need(same(getproperty(intent,k),getproperty(p,k)),"audit historical execution intent repeated fact differs");end
-    # These are retained outside evidence, never new fitting permission. Their
-    # immutable bytes are reopened on every restart; no active clock is reset.
-    for k in (:root_qualification,:resource_qualification)
-        r=fileref(getproperty(p,k));pin!(pins,r.path;limit=META,expected=r.sha256)
-    end
-    fields(p.limits,(:source_rows,:model_member_bytes,:total_model_member_bytes,:required_available_bytes,:required_disk_bytes,:stage_wall_seconds,:fit_wall_seconds))
-    need(int(p.limits.source_rows,MAXROWS,MAXROWS)==MAXROWS&&int(p.limits.model_member_bytes,PAYLOAD,PAYLOAD)==PAYLOAD&&int(p.limits.total_model_member_bytes,TOTAL,TOTAL)==TOTAL&&int(p.limits.required_available_bytes,8*1024^3,typemax(Int64))>=8*1024^3,"audit historical native limits differ")
-    for k in (:required_disk_bytes,:stage_wall_seconds,:fit_wall_seconds);int(getproperty(p.limits,k),1,typemax(Int64));end
-    pref
 end
 function candidate_values(path,n)
     need(filesize(path)==16+8n,"audit candidate full-union length differs")
@@ -553,7 +538,7 @@ function maxima(a,L,h,rows)
     receipt=maximum(shift(a.times[i],h+1+L) for i in rows)
     (;complete,receipt)
 end
-function grid_and_tuning(root,draft,a,L,qsha,pins)
+function grid_and_tuning(root,draft,a,L,pins)
     grid,gb=readjson(P._member(root,"grid.json");expected=draft.grid_sha256,names=(:schema,:complete,:evidence_mode,:feature_contract_sha256,:settings,:grid_id));check_identity(grid,:grid_id)
     need(grid.schema=="fixed_eight_gbm_settings_v2"&&grid.complete===true&&grid.evidence_mode==a.mode&&grid.feature_contract_sha256==FEATURE&&is_sequence(grid.settings)&&length(grid.settings)==8,"audit exact eight-setting grid differs")
     for (s,g) in enumerate(grid.settings)
@@ -562,7 +547,7 @@ function grid_and_tuning(root,draft,a,L,qsha,pins)
     end
     tuning,tb=readjson(P._member(root,"tuning.json");expected=draft.tuning_sha256,names=TUNING);check_identity(tuning,:tuning_id)
     need(tuning.schema=="b_matched_reference_tuning_v2"&&tuning.grid_sha256==draft.grid_sha256&&same(tuning.lead_order,(4,6))&&is_sequence(tuning.leads)&&length(tuning.leads)==2,"audit B tuning header differs")
-    check_common(tuning,a,L,qsha)
+    check_common(tuning,a,L)
     for (k,h) in enumerate((4,6))
         lead=tuning.leads[k];fields(lead,LEAD);need(int(lead.horizon,4,6)==h&&is_sequence(lead.candidates)&&length(lead.candidates)==8&&is_digest(lead.training_mask_sha256)&&is_digest(lead.validation_cohort_sha256)&&is_digest(lead.selected_model_id),"audit B per-lead tuning header differs")
         int(lead.validation_count,1,MAXROWS);int(lead.selected_index,1,8)
@@ -577,11 +562,11 @@ function grid_and_tuning(root,draft,a,L,qsha,pins)
     pin!(pins,P._member(root,"grid.json");limit=META,expected=draft.grid_sha256);pin!(pins,P._member(root,"tuning.json");limit=META,expected=draft.tuning_sha256)
     grid,tuning
 end
-function fit_receipt(root,record,cell,a,L,h,s,encoder,fitsha,mask,trainmask,valmask,increment,authoritysha,runtimesha,pins)
+function fit_receipt(root,record,cell,a,L,h,s,encoder,fitsha,mask,trainmask,valmask,increment,runtimesha,pins)
     member=filemember(root,record.fit_receipt_member;name="L$L-h$h/setting-$s.fit.json")
     path=P._member(root,member.name);f,_=readjson(path;expected=member.sha256,names=FITREC);check_identity(f,:receipt_id)
     need(f.schema=="matched342_initial_fit_receipt_v1"&&f.complete===true&&f.evidence_mode==a.mode&&f.pair_id==a.pair_id&&f.context_id==a.bindings[L+1].context_id&&int(f.delay_hours,0,1)==L&&int(f.horizon,4,6)==h&&int(f.setting_index,1,8)==s,"audit fit receipt header/cell differs")
-    expected=(;model_training_mask_sha256=mask,reference_training_mask_sha256=trainmask,reference_validation_cohort_sha256=valmask,fit_input_sha256=fitsha,preprocessing_sha256=encoder.sha256,training_design_sha256=encoder.object.training_design_sha256,runtime_sha256=runtimesha,recipe=recipe(s),model_id=record.model_id,model_sha256=record.model_member.sha256,encoder_sha256=cell.encoder_member.sha256,native_increment_sha256=increment,reloaded_increment_sha256=increment,union_count=cell.union_count,execution_authority_sha256=authoritysha)
+    expected=(;model_training_mask_sha256=mask,reference_training_mask_sha256=trainmask,reference_validation_cohort_sha256=valmask,fit_input_sha256=fitsha,preprocessing_sha256=encoder.sha256,training_design_sha256=encoder.object.training_design_sha256,runtime_sha256=runtimesha,recipe=recipe(s),model_id=record.model_id,model_sha256=record.model_member.sha256,encoder_sha256=cell.encoder_member.sha256,native_increment_sha256=increment,reloaded_increment_sha256=increment,union_count=cell.union_count)
     for k in keys(expected);need(same(getproperty(f,k),getproperty(expected,k)),"audit fit receipt independently derived fact differs: $k");end
     int(f.fit_elapsed_ns,0,typemax(Int64));pin!(pins,path;limit=META,expected=member.sha256,expected_bytes=member.bytes)
     member
@@ -635,7 +620,7 @@ function audit_cell(root,draftroot,c,cell,lead,a,L,h,X,rows,route,selected,runti
         if s==lead.selected_index
             need(lead.selected_model_id==modelid&&all(reinterpret(UInt64,absolute[j])==reinterpret(UInt64,selected[j]) for j in eachindex(rows)),"audit selected candidate column differs bitwise")
         end
-        fm=fit_receipt(root,record,cell,a,L,h,s,encoder,fitsha,mask,trainmask,valmask,increment,c.execution_authority_sha256,runtimesha,pins)
+        fm=fit_receipt(root,record,cell,a,L,h,s,encoder,fitsha,mask,trainmask,valmask,increment,runtimesha,pins)
         pin!(pins,P._member(root,mm.name);limit=PAYLOAD,expected=mm.sha256,expected_bytes=mm.bytes);pin!(pins,P._member(draftroot,cm.name);limit=16+8MAXROWS,expected=cm.sha256,expected_bytes=cm.bytes)
         check=(;setting_index=s,model_id=modelid,model_sha256=mm.sha256,fit_receipt_sha256=fm.sha256,native_increment_sha256=increment,reloaded_increment_sha256=increment,audited_increment_sha256=increment,candidate_prediction_sha256=cm.sha256,n=m.n,rmse_nt=bits(m.rmse_nt),mae_nt=bits(m.mae_nt),bias_nt=bits(m.bias_nt))
         fields(check,MODELCHECK);push!(checks,check)
@@ -646,38 +631,32 @@ function audit_cell(root,draftroot,c,cell,lead,a,L,h,X,rows,route,selected,runti
 end
 replay_encoder_with_identity(e,derived)=merge(e,(;sha256=derived.sha256,object=derived.object))
 
-function calculate(pair,cref,qref,proofref,contracts,runtime,authorityref,drafts,auditroot,expected_sources,auditsha;allow_published=false)
+function calculate(pair,cref,contracts,runtime,drafts,auditroot,expected_sources,auditsha;allow_published=false)
     a=independent_pair(pair,expected_sources);pins=NamedTuple[]
     cref=fileref(cref);need(basename(cref.path)=="completion.json"&&basename(dirname(cref.path))=="component","audit fixed component completion path differs")
     root=dirname(cref.path);c,_=readjson(cref.path;expected=cref.sha256,names=COMPONENT);component_headers(c,a)
     contracts=check_contracts(contracts,auditsha);runtime=check_runtime(runtime);need(same(c.runtime,runtime),"audit external expected fitted runtime differs")
-    proofref=fileref(proofref);pin!(pins,proofref.path;limit=META,expected=proofref.sha256)
-    FC.recheck_source_proof(proofref;expected_head=String(c.baseline_qualified_head),expected_sources=source_map(a.sources))
-    qref,q=qualification(qref,a,c.baseline_qualified_head,proofref.sha256,pins)
-    need(c.baseline_qualification_sha256==qref.sha256,"audit component qualification external SHA differs")
-    authorityref=historical_permit(authorityref,a,c,qref,proofref,contracts,runtime,pins)
     need(is_sequence(drafts)&&length(drafts)==2,"audit two fixed draft requests required")
-    cnames=component_names();dirs=vcat(["L$L-h$h" for (L,h) in CELLS],["routing"])
+    cnames=component_names(c.members);dirs=vcat(["L$L-h$h" for (L,h) in CELLS],["routing"])
     exact_tree(root,vcat(cnames,["completion.json"]),dirs)
     members=fixed_members(root,c.members,cnames;payload=true)
     for m in members;pin!(pins,P._member(root,m.name);limit=m.bytes,expected=m.sha256,expected_bytes=m.bytes);end
     pin!(pins,cref.path;limit=META,expected=cref.sha256)
-    need(P._bound(P._member(root,"qualification.json"))==P._bound(qref.path)&&sha(P._bound(P._member(root,"feature-contract")))==FEATURE&&sha(P._bound(P._member(root,"loss-contract")))==LOSS,"audit exact qualification/contract copies differ")
+    need(sha(P._bound(P._member(root,"feature-contract")))==FEATURE&&sha(P._bound(P._member(root,"loss-contract")))==LOSS,"audit exact scientific contract copies differ")
     checks=NamedTuple[];references=NamedTuple[];ras=NamedTuple[]
     runtimesha=T._id((;schema="matched342_native_runtime_v1",runtime))
     for L in 0:1
         request=drafts[L+1];fields(request,(:delay_hours,:root,:members));d=c.drafts[L+1]
         draftroot=P._ordinary(String(request.root));need(int(request.delay_hours,0,1)==L&&isabspath(request.root)&&draftroot==request.root&&draftroot==joinpath(dirname(root),"reference-L$L"),"audit externally pinned fixed sibling draft root differs")
-        member_headers(request.members,draft_names());need(same(request.members,d.members),"audit request/C draft inventory differs")
-        exact_tree(draftroot,draft_names(),("candidates","candidates/h4","candidates/h6");optional=allow_published ? ("audit.json","completion.json") : ())
-        dm=fixed_members(draftroot,d.members,draft_names())
+        member_headers(request.members,draft_names(request.members));need(same(request.members,d.members),"audit request/C draft inventory differs")
+        exact_tree(draftroot,draft_names(d.members),("candidates","candidates/h4","candidates/h6");optional=allow_published ? ("audit.json","completion.json") : ())
+        dm=fixed_members(draftroot,d.members,draft_names(d.members))
         for m in dm;pin!(pins,P._member(draftroot,m.name);limit=m.bytes,expected=m.sha256,expected_bytes=m.bytes);end
-        need(P._bound(P._member(draftroot,"qualification.json"))==P._bound(qref.path),"audit B22 qualification copy differs")
         cs=(cohorts(a,L,4),cohorts(a,L,6));rows=sort!(union(cs[1].validation,cs[2].validation))
         need(d.model_count+d.persistence_count==length(rows)&&raw_row_sha(a,L,rows)==d.raw_row_identity_sha256,"audit full union/raw row identity differs")
         routing,route=route_values(root,d.routing_member,a,L,rows)
         need(count(==(0x00),route)==d.model_count&&count(==(0x01),route)==d.persistence_count,"audit saved union routing counts differ")
-        grid,tuning=grid_and_tuning(draftroot,d,a,L,qref.sha256,pins)
+        grid,tuning=grid_and_tuning(draftroot,d,a,L,pins)
         selectedpath=P._member(draftroot,"predictions.bin");need(P._file_sha(selectedpath)[1]==d.prediction_panel_sha256,"audit selected panel SHA differs")
         selected=selected_values(selectedpath,length(rows));X=design342(a.clean,L)
         for (k,h) in enumerate((4,6))
@@ -686,7 +665,7 @@ function calculate(pair,cref,qref,proofref,contracts,runtime,authorityref,drafts
             push!(checks,audit_cell(root,draftroot,c,cell,lead,a,L,h,X,rows,route,@view(selected[:,k]),runtimesha,pins))
         end
         X=nothing
-        common=check_common(tuning,a,L,qref.sha256)
+        common=check_common(tuning,a,L)
         ra=withid((;schema="b_matched_reference_audit_v2",common...,audit_contract_sha256=auditsha,raw_row_identity_sha256=String(d.raw_row_identity_sha256),prediction_panel_sha256=String(d.prediction_panel_sha256),grid_sha256=String(d.grid_sha256),tuning_sha256=String(d.tuning_sha256),all_eight_settings_checked=true,full_per_lead_cohorts_checked=true,feature_receipt_history_checked=true,selected_prediction_columns_checked=true,initial_only=true),:audit_id)
         need(length(T._bytes(ra))<=META,"audit reference receipt size bound");push!(ras,ra)
         ref=(;delay_hours=L,source_binding=a.bindings[L+1],draft_root=draftroot,draft_members=dm,routing_member=routing,model_count=Int(d.model_count),persistence_count=Int(d.persistence_count),audit_ref=(;path=joinpath(auditroot,"reference-audit-L$L.json"),sha256=sha(T._bytes(ra))),training_history_start=clock(first(a.times)),training_boundary=clock(a.boundary),validation_start=clock(a.start),validation_end=clock(a.stop),raw_row_identity_sha256=String(d.raw_row_identity_sha256),prediction_panel_sha256=String(d.prediction_panel_sha256),grid_sha256=String(d.grid_sha256),tuning_sha256=String(d.tuning_sha256),model_ids=Tuple(String.(d.model_ids)),selected_setting_ids=Tuple(Int.(d.selected_setting_ids)))
@@ -695,8 +674,7 @@ function calculate(pair,cref,qref,proofref,contracts,runtime,authorityref,drafts
     report=withid((;schema="matched342_initial_component_audit_report_v1",complete=true,evidence_mode=a.mode,pair_id=a.pair_id,component_completion_sha256=cref.sha256,source_bindings=a.bindings,cells=Tuple(checks),references=Tuple(references),fitting_performed=false,native_model_deserialization=false),:report_id)
     fields(report,REPORT);need(length(T._bytes(report))<=META,"audit report size bound")
     recheck_pins(pins);FC.recheck_pair(pair);current_sources(expected_sources)
-    FC.recheck_source_proof(proofref;expected_head=String(c.baseline_qualified_head),expected_sources=source_map(a.sources))
-    (;a,c,cref,qref,proofref,authorityref,contracts,runtime,references=Tuple(references),ras=Tuple(ras),report,pins)
+    (;a,c,cref,contracts,runtime,references=Tuple(references),ras=Tuple(ras),report,pins)
 end
 
 function audit_root(path;fresh=false)
@@ -707,9 +685,8 @@ function audit_root(path;fresh=false)
     end
     full
 end
-function check_output_disjoint(root,a,component,qref,proofref,authorityref,requestpath=nothing)
-    controls=String[Parent.PACKAGE_ROOT,dirname(dirname(component.path)),qref.path,proofref.path]
-    authorityref===nothing||push!(controls,authorityref.path)
+function check_output_disjoint(root,a,component,requestpath=nothing)
+    controls=String[Parent.PACKAGE_ROOT,dirname(dirname(component.path))]
     requestpath===nothing||push!(controls,requestpath)
     for s in a.admissions
         push!(controls,s.source_proof_path)
@@ -723,22 +700,17 @@ end
 function ca_header(ca,pair,expected_sources,expected_component_sha256,auditsha)
     fields(ca,CA);check_identity(ca,:audit_id)
     need(ca.schema=="matched342_initial_component_audit_completion_v1"&&ca.complete===true&&ca.operation==OP&&ca.evidence_mode in ("synthetic_only","archival_assumed_completion_research"),"audit completed receipt header differs")
-    need(is_digest(expected_component_sha256)&&ca.component_completion_sha256==expected_component_sha256&&is_digest(ca.pair_id)&&is_digest(ca.source_proof_sha256)&&is_digest(ca.report_sha256)&&ca.qualified_head isa AbstractString&&occursin(r"\A[0-9a-f]{40}\z",ca.qualified_head),"audit outside completion/code/proof pins differ")
+    need(is_digest(expected_component_sha256)&&ca.component_completion_sha256==expected_component_sha256&&is_digest(ca.pair_id)&&is_digest(ca.report_sha256),"audit outside completion and report pins differ")
     need(same(ca.implementation_sources,current_sources(expected_sources)),"audit receipt source closure differs")
     FC.recheck_pair(pair);metadata=FC.source_pair_metadata(pair)
     need(ca.evidence_mode==String(metadata.evidence_mode)&&ca.pair_id==metadata.pair_id,"audit completed nominal source pair differs")
     check_bindings(ca.source_bindings,metadata.source_bindings);check_contracts(ca.contracts,auditsha);check_runtime(ca.runtime)
-    proof=fileref(ca.source_proof);need(proof.sha256==ca.source_proof_sha256,"audit restart whole-proof reference differs")
-    fileref(ca.component_qualification)
-    if ca.evidence_mode=="synthetic_only";need(ca.execution_authority===nothing&&ca.execution_authority_sha256===nothing,"audit generated receipt carries actual authority")
-    else;authority=fileref(ca.execution_authority);need(authority.sha256==ca.execution_authority_sha256,"audit restart historical permit reference differs")
-    end
     need(ca.component_root isa AbstractString&&isabspath(ca.component_root)&&P._ordinary(ca.component_root)==ca.component_root&&basename(ca.component_root)=="component","audit completed component root differs")
     need(is_sequence(ca.references)&&length(ca.references)==2,"audit completed two-delay reference projection required")
     for (k,r) in enumerate(ca.references)
         fields(r,REFERENCE);L=k-1;need(int(r.delay_hours,0,1)==L&&same(r.source_binding,ca.source_bindings[k]),"audit completed ordered reference source differs")
         need(r.draft_root isa AbstractString&&isabspath(r.draft_root)&&P._ordinary(r.draft_root)==r.draft_root&&r.draft_root==joinpath(dirname(ca.component_root),"reference-L$L"),"audit completed fixed reference root differs")
-        member_headers(r.draft_members,draft_names());fields(r.routing_member,(:name,:bytes,:sha256))
+        member_headers(r.draft_members,draft_names(r.draft_members));fields(r.routing_member,(:name,:bytes,:sha256))
         need(r.routing_member.name=="routing/L$L.bin"&&is_digest(r.routing_member.sha256),"audit completed route member differs");int(r.routing_member.bytes,17,MAXROWS+16)
         int(r.model_count,0,MAXROWS);int(r.persistence_count,0,MAXROWS);fields(r.audit_ref,(:path,:sha256));need(is_digest(r.audit_ref.sha256)&&r.audit_ref.path isa AbstractString&&isabspath(r.audit_ref.path),"audit completed reference receipt pin differs")
         for f in (:training_history_start,:training_boundary,:validation_start,:validation_end);T._clock(getproperty(r,f));end
@@ -753,14 +725,14 @@ function publication_state(pair,metadata)
     admissions=FC.source_admissions(pair)
     for ref in metadata.references
         root=ref.draft_root
-        exact_tree(root,draft_names(),("candidates","candidates/h4","candidates/h6");optional=("audit.json","completion.json"))
+        exact_tree(root,draft_names(ref.draft_members),("candidates","candidates/h4","candidates/h6");optional=("audit.json","completion.json"))
         if isfile(joinpath(root,"audit.json"))
             need(P._file_sha(joinpath(root,"audit.json"))[1]==ref.audit_ref.sha256,"audit later reference audit copy differs")
         end
         if isfile(joinpath(root,"completion.json"))
             need(isfile(joinpath(root,"audit.json")),"audit later completion lacks copied reference audit")
             cp=joinpath(root,"completion.json");ch=P._file_sha(cp)[1]
-            pins=BI.BReferencePins(;completion_sha256=ch,audit_sha256=ref.audit_ref.sha256,grid_sha256=ref.grid_sha256,tuning_sha256=ref.tuning_sha256,prediction_sha256=ref.prediction_panel_sha256,feature_contract_sha256=FEATURE,tuning_loss_contract_sha256=LOSS,baseline_qualification_sha256=metadata.component_qualification.sha256,baseline_sources=source_map(metadata.implementation_sources),baseline_qualified_head=metadata.qualified_head,feature_contract_member=Parent.FEATURE_CONTRACT_MEMBER,tuning_loss_contract_member=Parent.LOSS_CONTRACT_MEMBER)
+            pins=BI.BReferencePins(;completion_sha256=ch,audit_sha256=ref.audit_ref.sha256,grid_sha256=ref.grid_sha256,tuning_sha256=ref.tuning_sha256,prediction_sha256=ref.prediction_panel_sha256,feature_contract_sha256=FEATURE,tuning_loss_contract_sha256=LOSS,baseline_sources=source_map(metadata.implementation_sources),feature_contract_member=Parent.FEATURE_CONTRACT_MEMBER,tuning_loss_contract_member=Parent.LOSS_CONTRACT_MEMBER)
             BI.admit_reference(cp;trusted_pins=pins,roots=Dict("reference"=>root),view=admissions[ref.delay_hours+1].view,expected_sources=P.source_identity())
         end
     end
@@ -791,17 +763,18 @@ function make_handle(pair,path,digest,expected_sources,auditsha,pins,metadata)
 end
 function publisher_metadata(result,root,digest)
     a=result.a
-    (;schema="checked_matched342_component_audit_v1",evidence_mode=a.mode,pair_id=a.pair_id,qualified_head=String(result.c.baseline_qualified_head),implementation_sources=a.sources,source_proof_sha256=result.proofref.sha256,source_bindings=a.bindings,contracts=result.contracts,runtime=result.runtime,component_root=dirname(result.cref.path),component_completion_sha256=result.cref.sha256,component_qualification=result.qref,audit_root=root,audit_completion_sha256=String(digest),references=result.references)
+    (;schema="checked_matched342_component_audit_v1",evidence_mode=a.mode,pair_id=a.pair_id,implementation_sources=a.sources,source_bindings=a.bindings,contracts=result.contracts,runtime=result.runtime,component_root=dirname(result.cref.path),component_completion_sha256=result.cref.sha256,audit_root=root,audit_completion_sha256=String(digest),references=result.references)
 end
-"Recheck all source/qualification/control/member pins; never restart fitting."
+"Recheck all source, data and member pins; never restart fitting."
 function recheck_component_audit(h::CheckedComponentAudit342)
     need(h.seal_sha256==T._id(handle_data(h.pair,h.completion_path,h.completion_sha256,h.expected_sources,h.expected_audit_contract_sha256,h.pins,h.metadata)),"audit sealed handle differs")
     FC.recheck_pair(h.pair);current_sources(h.expected_sources);recheck_pins(h.pins)
     ca,_=readjson(h.completion_path;expected=h.completion_sha256,names=CA)
     ca_header(ca,h.pair,h.expected_sources,h.metadata.component_completion_sha256,h.expected_audit_contract_sha256)
-    FC.recheck_source_proof(fileref(ca.source_proof);expected_head=String(ca.qualified_head),expected_sources=h.expected_sources)
     exact_tree(dirname(h.completion_path),AUDIT_NAMES,();cap=4META)
-    exact_tree(h.metadata.component_root,vcat(component_names(),["completion.json"]),vcat(["L$L-h$h" for (L,h) in CELLS],["routing"]))
+    cnames=component_names()
+    any(p->p.path==joinpath(h.metadata.component_root,"qualification.json"),h.pins)&&push!(cnames,"qualification.json")
+    exact_tree(h.metadata.component_root,vcat(cnames,["completion.json"]),vcat(["L$L-h$h" for (L,h) in CELLS],["routing"]))
     publication_state(h.pair,h.metadata);recheck_pins(h.pins);nothing
 end
 "Return only the frozen publisher projection after source/file rechecks."
@@ -817,9 +790,9 @@ function read_component_audit(pair,completion_path,completion_sha256;expected_co
     exact_tree(root,AUDIT_NAMES,();cap=4META)
     members=fixed_members(root,ca.members,("audit-report.json","reference-audit-L0.json","reference-audit-L1.json"))
     drafts=Tuple((;delay_hours=r.delay_hours,root=r.draft_root,members=r.draft_members) for r in ca.references)
-    result=calculate(pair,(;path=joinpath(ca.component_root,"completion.json"),sha256=String(ca.component_completion_sha256)),ca.component_qualification,ca.source_proof,ca.contracts,ca.runtime,ca.execution_authority,drafts,root,expected_sources,expected_audit_contract_sha256;allow_published=true)
-    a=result.a;check_output_disjoint(root,a,result.cref,result.qref,result.proofref,result.authorityref)
-    need(ca.qualified_head==result.c.baseline_qualified_head&&ca.source_proof_sha256==result.proofref.sha256&&same(ca.source_bindings,a.bindings)&&same(ca.references,result.references)&&same(ca.runtime,result.runtime)&&same(ca.contracts,result.contracts),"audit completed independently reconstructed facts differ")
+    result=calculate(pair,(;path=joinpath(ca.component_root,"completion.json"),sha256=String(ca.component_completion_sha256)),ca.contracts,ca.runtime,drafts,root,expected_sources,expected_audit_contract_sha256;allow_published=true)
+    a=result.a;check_output_disjoint(root,a,result.cref)
+    need(same(ca.source_bindings,a.bindings)&&same(ca.references,result.references)&&same(ca.runtime,result.runtime)&&same(ca.contracts,result.contracts),"audit completed independently reconstructed facts differ")
     report,rb=readjson(joinpath(root,"audit-report.json");expected=ca.report_sha256,names=REPORT);check_identity(report,:report_id)
     need(rb==T._bytes(result.report),"audit report does not match independent reconstruction")
     for L in 0:1
@@ -842,19 +815,18 @@ function audit_component(pair,request_path;request_sha256,expected_sources,expec
     contracts=check_contracts(request.contracts,expected_audit_contract_sha256);runtime=check_runtime(request.runtime)
     metadata=FC.source_pair_metadata(pair);need(request.evidence_mode==String(metadata.evidence_mode),"audit request nominal source mode differs")
     check_bindings(request.source_bindings,metadata.source_bindings)
-    cref=fileref(request.component);qref=fileref(request.component_qualification);proofref=fileref(request.source_proof)
-    authorityref=request.evidence_mode=="synthetic_only" ? (need(request.execution_authority===nothing,"audit generated request carries actual authority");nothing) : fileref(request.execution_authority)
+    cref=fileref(request.component)
     need(is_sequence(request.drafts)&&length(request.drafts)==2,"audit request two fixed drafts required")
     for (k,d) in enumerate(request.drafts)
         fields(d,(:delay_hours,:root,:members));need(int(d.delay_hours,0,1)==k-1&&d.root isa AbstractString&&isabspath(d.root),"audit request ordered draft root differs")
-        member_headers(d.members,draft_names())
+        member_headers(d.members,draft_names(d.members))
     end
     root=audit_root(String(request.output_directory);fresh=true)
     # Validate disjointness before large body loading and repeat with independently
     # reconstructed source records after the numerical audit.
-    a=independent_pair(pair,expected_sources);check_output_disjoint(root,a,cref,qref,proofref,authorityref,requestpath)
-    result=calculate(pair,cref,qref,proofref,contracts,runtime,authorityref,request.drafts,root,expected_sources,expected_audit_contract_sha256)
-    check_output_disjoint(root,result.a,cref,qref,proofref,authorityref,requestpath)
+    a=independent_pair(pair,expected_sources);check_output_disjoint(root,a,cref,requestpath)
+    result=calculate(pair,cref,contracts,runtime,request.drafts,root,expected_sources,expected_audit_contract_sha256)
+    check_output_disjoint(root,result.a,cref,requestpath)
     need(P._bound(requestpath)==requestbody,"audit request changed during independent audit")
     completionbody=nothing
     mkdir(root)
@@ -863,7 +835,7 @@ function audit_component(pair,request_path;request_sha256,expected_sources,expec
         reportbody=T._bytes(result.report);P._exclusive(joinpath(root,"audit-report.json"),reportbody)
         names=("audit-report.json","reference-audit-L0.json","reference-audit-L1.json")
         members=Tuple(begin p=joinpath(root,n);digest,bytes=P._file_sha(p);(;name=n,bytes,sha256=digest) end for n in names)
-        ca=withid((;schema="matched342_initial_component_audit_completion_v1",complete=true,evidence_mode=result.a.mode,operation=OP,qualified_head=String(result.c.baseline_qualified_head),implementation_sources=result.a.sources,pair_id=result.a.pair_id,source_proof_sha256=result.proofref.sha256,source_proof=result.proofref,source_bindings=result.a.bindings,contracts=result.contracts,runtime=result.runtime,component_root=dirname(result.cref.path),component_completion_sha256=result.cref.sha256,component_qualification=result.qref,execution_authority_sha256=result.authorityref===nothing ? nothing : result.authorityref.sha256,execution_authority=result.authorityref,references=result.references,report_sha256=sha(reportbody),members),:audit_id)
+        ca=withid((;schema="matched342_initial_component_audit_completion_v1",complete=true,evidence_mode=result.a.mode,operation=OP,implementation_sources=result.a.sources,pair_id=result.a.pair_id,source_bindings=result.a.bindings,contracts=result.contracts,runtime=result.runtime,component_root=dirname(result.cref.path),component_completion_sha256=result.cref.sha256,references=result.references,report_sha256=sha(reportbody),members),:audit_id)
         fields(ca,CA);completionbody=T._bytes(ca);need(length(completionbody)<=META,"audit completion metadata bound")
         recheck_pins(result.pins);FC.recheck_pair(pair);current_sources(expected_sources)
         need(P._bound(requestpath)==requestbody,"audit request changed before completion")

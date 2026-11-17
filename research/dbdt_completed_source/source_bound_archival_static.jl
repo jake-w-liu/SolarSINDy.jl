@@ -7,7 +7,6 @@ const K=SourceBoundSharedReplay.K
 const F=SolarSINDy.ArchiveSourceBoundPointFit
 const B=SolarSINDy.ArchiveCatalogCaseReader
 const J=SolarSINDy.ArchiveCatalogSourceJob
-const A=SolarSINDy.ArchiveCatalogCaseAuthority
 const FS=SolarSINDy.ArchiveCatalogSnapshotFilesystem
 const D=SolarSINDy.CompletedSourceDBDT
 const R=D.CompletedRefitArtifacts
@@ -19,18 +18,9 @@ const JOB_FILES=("source_bound_archival_static.jl","source_bound_static_artifact
     "source_bound_static_bounds.jl","source_bound_calibration.jl","source_bound_calibration_codec.jl")
 const JOB_PINS=Tuple(digest(read(joinpath(@__DIR__,name))) for name in JOB_FILES)
 const PREFIX="research/dbdt_completed_source/"
-export StaticFitAuthority,ArchivalStaticCapsule,ExpectedStatic,prepare_request,calibrate_archival,
+export ArchivalStaticCapsule,ExpectedStatic,prepare_request,calibrate_archival,
     check_calibration,predict_upper,publish_static,read_static
 
-"""A fixed request permit and current full-source software qualification."""
-struct StaticFitAuthority
-    grant_path::String
-    grant_sha256::String
-    source_proof_path::String
-    source_proof_sha256::String
-    qualification_path::String
-    qualification_sha256::String
-end
 struct _Token end
 owned(value)=String(copy(value isa AbstractString ? codeunits(value) : value))
 """Owned data only; construction itself grants no source or fit authority."""
@@ -93,72 +83,28 @@ function prepare_request(value::B.ReverifiedCases,index,point,calibration,expect
     prepared=_metadata(value,index,point,calibration,expected;nominal)
     (;request_bytes=copy(prepared.bytes),request_sha256=digest(prepared.bytes))
 end
-function _retained_attempt(directory,name,pin)
-    path=joinpath(directory,name);J._ordinary(path)
-    before=J._identity(path);body=R.bounded_read(path;limit=16384)
-    need(digest(body)==J._sha(pin) && J._identity(path)==before,"archival producer attempt changed")
-    nothing
-end
-function _admit(value,index,point,calibration,expected,prepared,authority,calibration_producer,point_producer)
-    need(authority isa StaticFitAuthority,"archival static requires distinct uncertainty-fit authority")
-    grant=A._pinned(authority.grant_path,authority.grant_sha256;canonical=true,limit=131072)
-    J._object(grant,Set(("schema","operation","request_sha256","job_sha256","source_proof_sha256","qualification_sha256","head",
-        "actual_source_access_authorized","actual_point_model_fit_authorized","actual_uncertainty_fit_authorized",
-        "expected_uncertainty_fits","new_case_generation_authorized","dataset_discovery","provider_receipts_available","execution_directory")))
-    need(grant["schema"]=="archival_static_fit_grant_v1" && grant["operation"]=="fixed_point_static_uncertainty_2017_only" &&
-        grant["request_sha256"]==digest(prepared.bytes) && grant["job_sha256"]==job_identity() &&
-        grant["source_proof_sha256"]==J._sha(authority.source_proof_sha256)==prepared.admission["reader_source_proof_sha256"] &&
-        grant["qualification_sha256"]==J._sha(authority.qualification_sha256)==prepared.admission["reader_qualification_sha256"] &&
-        grant["actual_source_access_authorized"]===true && grant["actual_point_model_fit_authorized"]===false &&
-        grant["actual_uncertainty_fit_authorized"]===true && F.isint(grant["expected_uncertainty_fits"]) && grant["expected_uncertainty_fits"]==1 &&
-        grant["new_case_generation_authorized"]===false && grant["dataset_discovery"]===false && grant["provider_receipts_available"]===false,
-        "archival static grant differs")
-    execution=J._text(grant["execution_directory"];limit=4096)
-    need(isabspath(execution),"static execution directory must be absolute");J._ordinary(execution;directory=true)
-    need(J._same(realpath(execution),realpath(dirname(authority.grant_path))),"static grant outside execution directory")
-    root_parts=splitpath(realpath(pkgdir(SolarSINDy)));execution_parts=splitpath(realpath(execution))
-    need(!(length(execution_parts)>=length(root_parts) && all(J._same(a,b) for (a,b) in zip(root_parts,execution_parts))),
-        "static execution would modify qualified source")
-    proof=A._pinned(authority.source_proof_path,authority.source_proof_sha256;limit=1048576)
-    qualification=A._pinned(authority.qualification_path,authority.qualification_sha256;limit=1048576)
-    A._qualification(proof,qualification,authority,grant)
-    need(proof["head"]==prepared.admission["reader_head"] &&
-        all(get(proof["source_sha256"],PREFIX*name,nothing)==pin for (name,pin) in zip(JOB_FILES,JOB_PINS)),
-        "static job absent from qualification")
-    c=prepared.kc.context
-    producer_auth=K._admit(value,index,point,expected,F._fit_clock(c["start_inclusive"]),F._fit_clock(c["stop_exclusive"]),
-        F._fit_clock(c["target_asof"]),F._fit_clock(c["first_evaluation_issue"]),calibration_producer,point_producer)
-    retained=prepared.kc.receipt["authorization"]
-    need(producer_auth==Dict(key=>value for (key,value) in retained if key!="attempt_sha256"),"calibration producer admission differs")
-    _retained_attempt(realpath(dirname(calibration_producer.grant_path)),"CALIBRATION_ATTEMPT.json",retained["attempt_sha256"])
-    Dict("schema"=>"archival_static_fit_admission_v1","head"=>proof["head"],"grant_sha256"=>authority.grant_sha256,
-        "source_proof_sha256"=>authority.source_proof_sha256,"qualification_sha256"=>authority.qualification_sha256,
-        "request_sha256"=>digest(prepared.bytes),"case_read_admission_sha256"=>prepared.request["case_read_admission_sha256"],
-        "calibration_grant_sha256"=>retained["grant_sha256"],"calibration_source_proof_sha256"=>retained["source_proof_sha256"],
-        "calibration_qualification_sha256"=>retained["qualification_sha256"],"calibration_attempt_sha256"=>retained["attempt_sha256"],
-        "uncertainty_fit_authorized"=>true,"actual_point_model_fit_authorized"=>false,"provider_receipts_available"=>false)
-end
-"""Fit uncertainty parameters once after checking distinct current and producer evidence."""
+"""Fit the fixed uncertainty comparison models from bound archival inputs."""
 function calibrate_archival(value::B.ReverifiedCases,index,point,calibration,expected;
                             nominal=.1,authority=nothing,calibration_producer=nothing,point_producer=nothing)
-    need(authority isa StaticFitAuthority,"archival static requires distinct uncertainty-fit authority")
+    need(authority===nothing && calibration_producer===nothing && point_producer===nothing,
+        "static calibration uses case/model bindings, not execution permits")
+    started=time_ns();started_utc=F.clock(now(UTC));available=Sys.free_memory()
     prepared=_metadata(value,index,point,calibration,expected;nominal)
-    auth=_admit(value,index,point,calibration,expected,prepared,authority,calibration_producer,point_producer)
-    attempt=R.canonical_bytes(Dict("schema"=>"archival_static_fit_attempt_v1","grant_sha256"=>authority.grant_sha256,
-        "request_sha256"=>digest(prepared.bytes),"started_utc"=>F.clock(now(UTC)));limit=16384)
-    path=joinpath(realpath(dirname(authority.grant_path)),"STATIC_FIT_ATTEMPT.json");R._exclusive_write(path,attempt)
     values=S._calibration_values(value.cases,index,point,prepared.pc,prepared.kc;nominal=prepared.alpha)
     need(values.training_input_sha256==prepared.request["training_input_sha256"] &&
         values.training_rows==prepared.request["training_rows"] && values.calibration_rows==prepared.request["calibration_rows"],
         "static fitted cohort differs from fixed request")
     fresh=_metadata(value,index,point,calibration,expected;nominal=prepared.alpha)
-    need(fresh.bytes==prepared.bytes && _admit(value,index,point,calibration,expected,fresh,authority,calibration_producer,point_producer)==auth,
-        "static source or producer admission changed")
-    _retained_attempt(dirname(path),basename(path),digest(attempt));auth["attempt_sha256"]=digest(attempt)
+    need(fresh.bytes==prepared.bytes,"static inputs changed during calibration")
     context=R.canonical_bytes(Dict("schema"=>"archival_static_calibration_v1","request"=>prepared.request,
         "request_sha256"=>digest(prepared.bytes),"numeric_sha256"=>digest(values.bytes),
         "regime_bin_counts"=>values.numeric.counts,"empty_regime_bins"=>findall(==(0),values.numeric.counts));limit=32768)
     expected_static=ExpectedStatic(digest(context),digest(values.bytes))
+    auth=Dict("schema"=>"archival_static_binding_v2","request_sha256"=>digest(prepared.bytes),
+        "case_read_admission_sha256"=>prepared.request["case_read_admission_sha256"],
+        "calibration_context_sha256"=>expected.context_sha256,"calibration_input_sha256"=>expected.input_sha256,
+        "calibration_receipt_sha256"=>digest(prepared.kc.receipt_bytes),"job_sha256"=>job_identity(),
+        "runtime_observations"=>K.execution_observations(started,started_utc,available))
     receipt=R.canonical_bytes(Dict("schema"=>"archival_static_calibration_receipt_v1","complete"=>true,
         "context_sha256"=>expected_static.context_sha256,"numeric_sha256"=>expected_static.numeric_sha256,
         "actual_source_access"=>true,"actual_point_model_fits"=>0,"uncertainty_parameter_fits"=>1,
@@ -190,7 +136,17 @@ function check_calibration(value::ArchivalStaticCapsule,point,calibration,expect
         F.isint(r["actual_point_model_fits"]) && r["actual_point_model_fits"]==0 && F.isint(r["uncertainty_parameter_fits"]) && r["uncertainty_parameter_fits"]==1 &&
         r["provider_receipts_available"]===false && r["software_qualification"]===false && r["scientific_coverage_qualified"]===false,
         "archival static receipt differs")
-    auth=r["authorization"];ca=kc.receipt["authorization"]
+    auth=r["authorization"]
+    if get(auth,"schema",nothing)=="archival_static_binding_v2"
+        J._object(auth,Set(("schema","request_sha256","case_read_admission_sha256","calibration_context_sha256",
+            "calibration_input_sha256","calibration_receipt_sha256","job_sha256","runtime_observations")))
+        need(auth["request_sha256"]==c["request_sha256"] &&
+            auth["case_read_admission_sha256"]==prepared.request["case_read_admission_sha256"] &&
+            auth["calibration_context_sha256"]==expected.context_sha256 && auth["calibration_input_sha256"]==expected.input_sha256 &&
+            auth["calibration_receipt_sha256"]==digest(kc.receipt_bytes) && auth["job_sha256"]==job_identity(),"archival static binding differs")
+        K._check_observations(auth["runtime_observations"])
+    else
+    ca=kc.receipt["authorization"]
     J._object(auth,Set(("schema","head","grant_sha256","source_proof_sha256","qualification_sha256","request_sha256","case_read_admission_sha256",
         "calibration_grant_sha256","calibration_source_proof_sha256","calibration_qualification_sha256","calibration_attempt_sha256",
         "uncertainty_fit_authorized","actual_point_model_fit_authorized","provider_receipts_available","attempt_sha256")))
@@ -200,6 +156,7 @@ function check_calibration(value::ArchivalStaticCapsule,point,calibration,expect
         "archival static authorization differs")
     for key in ("grant_sha256","source_proof_sha256","qualification_sha256","attempt_sha256")
         J._sha(auth[key]);need(auth["calibration_"*key]==ca[key],"archival static calibration producer differs")
+    end
     end
     (;context=c,numeric,context_bytes=cb,numeric_bytes=nb,receipt_bytes=rb,
       context_sha256=expected_static.context_sha256,numeric_sha256=expected_static.numeric_sha256)

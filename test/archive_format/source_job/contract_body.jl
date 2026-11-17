@@ -93,12 +93,7 @@ function source_job_contract(directory, role, layout, fixture_path)
     altered = deepcopy(request); altered["runtime"]="1.0.0"; reject(altered)
     altered = deepcopy(request); altered["inputs"][1]["sha256"]="0"^64; reject(altered;absent=false)
     altered = deepcopy(request); altered["inputs"][1]["bytes"]+=1; reject(altered)
-    altered = deepcopy(request); altered["evidence_mode"]="actual_archival_cache"; reject(altered)
-    unused_authority = J.Authority(request_path,"0"^64,request_path,"0"^64,request_path,"0"^64,request_path,"0"^64)
-    reject(request;authority=unused_authority)
-    incomplete_proof = Dict("complete"=>true,"all_commit_filters_match"=>true,
-        "source_sha256"=>Dict("Project.toml"=>source_job_hash(read(joinpath(pkgdir(SolarSINDy),"Project.toml")))))
-    @test_throws ArgumentError J._source_inventory(incomplete_proof)
+    reject(request;authority=Dict())
     if layout=="ground-only"
         altered = deepcopy(request)
         wind = deepcopy(altered["inputs"][1]); wind["kind"]="wind"; wind["logical_id"]="generated-forbidden-wind.csv"

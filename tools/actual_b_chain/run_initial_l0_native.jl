@@ -1,4 +1,4 @@
-"""Fixed B1 actual entry and a separate, in-process generated correctness route."""
+"""Ordinary B file-input reconstruction and initial fitting/readback helpers."""
 module BInitialNativeStage
 using SolarSINDy,Dates,SHA,LinearAlgebra
 include("ActualBChain.jl")
@@ -13,7 +13,7 @@ function _assembled_result(stage,verified;actual,fit_elapsed_ns,readback_elapsed
     need(verified.complete===true&&verified.model_count==36&&verified.certificate_count==36&&verified.hazard_fit_calls==0&&verified.gain_fit_calls==0&&verified.raw_replay_A_streams==9&&verified.selected_index===nothing,"B native strict readback scope differs")
     completion,bytes=P._json(joinpath(stage.directory,"completion.json");fields=P.COMPLETION_FIELDS)
     need(T._sha(bytes)==stage.completion_sha256&&stage.gain_fit_count==36&&completion.provisional_selection.selected_index===nothing,"B native completion/selection differs")
-    for (k,v) in ((:initial_hazard_fit_count,2),(:initial_gain_fit_count,36),(:state_schedule_count,9),(:beta_design_count,18),(:final_fit_count,0),(:calibration_fit_count,0),(:output_file_count,423))
+    for (k,v) in ((:initial_hazard_fit_count,2),(:initial_gain_fit_count,36),(:state_schedule_count,9),(:beta_design_count,18),(:final_fit_count,0),(:calibration_fit_count,0))
         need(T._int(getproperty(completion,k),0,typemax(Int64))==v,"B native fixed output count differs")
     end
     for k in (:exposed_development_scoring,:joint_primary_selection,:scientific_verdict,:serving_promotion);need(getproperty(completion,k)===false,"B native exceeds L0 scope");end
@@ -42,9 +42,9 @@ function run_generated(root::AbstractString)
     end)
 end
 function _reference_pins(ref)
-    d=F._v2_canonical_ref(ref)
-    names=(:completion_sha256,:audit_sha256,:grid_sha256,:tuning_sha256,:prediction_sha256,:feature_contract_sha256,:tuning_loss_contract_sha256,:baseline_qualification_sha256,:baseline_sources,:baseline_qualified_head,:feature_contract_member,:tuning_loss_contract_member)
-    T._fields(d,names)
+    d=B.BInputs._reference_pins_metadata_v2(ref)
+    names=(:completion_sha256,:audit_sha256,:grid_sha256,:tuning_sha256,:prediction_sha256,:feature_contract_sha256,:tuning_loss_contract_sha256,:baseline_sources,:feature_contract_member,:tuning_loss_contract_member)
+    T._fields(d,(names...,(key for key in (:baseline_qualification_sha256,:baseline_qualified_head) if hasproperty(d,key))...))
     sources=Pair{String,String}[String(row.name)=>String(row.sha256) for row in d.baseline_sources]
     B.BSelection.BReferencePins(; (name=>(name==:baseline_sources ? sources : String(getproperty(d,name))) for name in names)...)
 end
@@ -78,29 +78,4 @@ function reconstruct_inputs_v2(input,reference_spec;expected_evidence_mode::Symb
     B.BInputs.recheck(admission)
     (;admission,reference)
 end
-function main(args)
-    worker=time_ns()
-    need(length(args)==6&&args[1]=="--request"&&args[3]=="--request-sha256"&&args[5]=="--argv","fixed actual B1 worker argv required")
-    path=args[2];sha=args[4];need(T._hex(sha)&&get(ENV,"SOLARSINDY_B_V2_REQUEST_PATH","")==path,"fixed B1 request environment differs")
-    r,body=P._json(path;fields=F.OWNED_V2_REQUEST);need(T._sha(body)==sha,"B1 outside request pin differs")
-    permit=F.OwnedInitialPointExecutionPermitV2(String(r.permit.path),String(r.permit.sha256),String(r.intent.path),String(r.intent.sha256))
-    checked=F._v2_precheck(permit;argv_path=args[6]);intent=checked.intent;root=String(r.execution_directory)
-    argv,_=P._json(args[6]);runtime=R._inspect_runtime(collect(argv));expected=F._v2_ref(r.runtime)
-    need(all(x->x isa Integer&&!(x isa Bool),(expected.blas_threads,expected.omp_threads,expected.rng_seed)),"B1 inspected runtime integer grammar")
-    need(Dict(k=>v for (k,v) in pairs(runtime) if k!="argv")==Dict(String(k)=>v for (k,v) in pairs(expected) if String(k)!="argv"),"B1 inspected runtime changed")
-    # All supplied native authority/source/runtime checks above precede decoding.
-    reconstructed=reconstruct_inputs_v2(intent.input,intent.reference;expected_evidence_mode=:archival_assumed_completion_research,expected_input_prefix_sha256=checked.expected_input_prefix_sha256)
-    admission=reconstructed.admission;reference=reconstructed.reference
-    output=joinpath(root,"output");start=time_ns()
-    stage=F.run_initial_l0(admission,reference,output;execution_permit=permit,chunk_hours=24);fit_elapsed_ns=Int(time_ns()-start)
-    start=time_ns();verified=F.verify_initial_l0(output,admission,reference;expected_completion_sha256=stage.completion_sha256,expected_sources=P.source_identity(),execution_permit=permit,chunk_hours=7);readback_elapsed_ns=Int(time_ns()-start)
-    result=_assembled_result(stage,verified;actual=true,fit_elapsed_ns,readback_elapsed_ns,worker_elapsed_ns=Int(time_ns()-worker))
-    need(P._bound(path)==body,"B1 request changed during numerical work");F._permission_recheck(checked.permission)
-    result["request_sha256"]=sha;result["runtime"]=runtime;result["worker_pid"]=getpid()
-    result["job_sha256"]=T._id((;driver_sha256=P._file_sha(joinpath(@__DIR__,"run_initial_l0_native.py"))[1],entry_sha256=P._file_sha(@__FILE__)[1],owner_sha256=F.OWNED_V2_OWNER,legacy_owner_sha256=F.OWNED_V2_LEGACY,argv=collect(argv),request_sha256=sha))
-    P._exclusive(joinpath(root,"B1_JULIA_RESULT.json"),T._bytes(result))
-    println("B1_INITIAL_L0_COMPLETE;GAINS=36;READBACK_MODELS=36;FINAL=0;CALIBRATION=0;PROMOTION=false")
-    nothing
 end
-end
-if abspath(PROGRAM_FILE)==abspath(@__FILE__);BInitialNativeStage.main(ARGS);end

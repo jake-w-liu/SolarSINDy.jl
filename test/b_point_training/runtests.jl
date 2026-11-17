@@ -18,7 +18,6 @@ include("consistency_checks.jl")
 include("basis_integer_checks.jl")
 include("reference_checks.jl")
 include("selector_checks.jl")
-include("qualification_checks.jl")
 include("tree_checks.jl")
 include("fixture_runtime_checks.jl")
 F.with_single_blas() do
@@ -44,8 +43,6 @@ F.with_single_blas() do
         root=realpath(root)
         println("B_POINT_STAGE reference_admission");flush(stdout)
         @test reference_checks(root)
-        println("B_POINT_STAGE qualification_grammar");flush(stdout)
-        @test qualification_checks(root)
         println("B_POINT_STAGE joint_selector_controls");flush(stdout)
         @test selector_checks(root)
     end

@@ -1,7 +1,7 @@
 """Sealed source-bound artifact publication and independent verified reading.
 
-Archival features require a separate qualified feature-only authority. Model
-fitting is outside this API.
+Archival features bind explicitly pinned source snapshots. Model fitting is
+outside this API.
 Every reader recomputes the complete feature and label bytes from the separately
 pinned source snapshot; no unchecked binary object reconstruction is exposed.
 """
@@ -15,9 +15,7 @@ const J=ArchiveCatalogSourceJob
 const R=CompletedSourceDBDT.CompletedRefitArtifacts
 const C=ArchiveCatalogCases
 const V=F.V
-"""Caller pins for a feature-only grant, locked source agreement and qualified worker."""
-const Authority=ArchiveCatalogCaseAuthority.Authority
-export Authority, VerifiedCases, publish, read_verified, split_arrays
+export VerifiedCases, publish, read_verified, split_arrays
 const ROWS_PER_SHARD=8192
 const MAX_TABLES=16
 const MAX_TOTAL_ROWS=1_320_000
@@ -99,8 +97,8 @@ end
 """Publish feature tables first, then separately matured labels.
 
 The completion marker is the last exclusive write. Failures retain the partial
-directory. Actual sources need a feature-only grant; source-only grants and
-unqualified code cannot authorize this operation.
+directory. Actual sources retain their declared source identity and evidence
+mode; execution certificates are not inputs to publication.
 """
 function publish(request_path,destination;request_sha256,authority=nothing)
     request,request_bytes,request_identity=_request(request_path,request_sha256)
@@ -171,7 +169,14 @@ function _read_verified_bound(request_path,directory,request_sha256,manifest_sha
     J._object(marker,Set(("schema","manifest_sha256","members","snapshot_bytes_without_marker","actual_fits")))
     need(metadata["schema"]==(archival ? "archive_catalog_case_artifact_v1" : "generated_catalog_case_artifact_v1") &&
          marker["schema"]==(archival ? "archive_catalog_case_complete_v1" : "generated_catalog_case_complete_v1"),"case reader schema")
-    archival && need(metadata["authority"]==binding,"case reader authority binding differs")
+    if archival
+        recorded=metadata["authority"]
+        need(recorded isa AbstractDict,"case reader source binding differs")
+        # Historical grants remain inert provenance. All source, table and
+        # payload bytes are recomputed below under the caller's outside pins.
+        get(recorded,"schema",nothing)=="archive_case_source_binding_v2" &&
+            need(recorded==binding,"case reader source binding differs")
+    end
     need(metadata["request_sha256"]==request_sha256 && metadata["source"]==request["source"] &&
          all(metadata[key]==request[key] for key in ("runtime","role","layout")),"case reader request binding")
     need(metadata["actual_source_authority_granted"]===archival && metadata["provider_receipts_available"]===false &&

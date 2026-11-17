@@ -5,6 +5,21 @@ function structural_runtime(tag,path)
         "blas_vendor"=>"OpenBLAS/ilp64","blas_version"=>"structural-only","blas_library_sha256"=>repeat("4",64),
         "blas_threads"=>1,"omp_threads"=>1,"rng_kind"=>"none","rng_seed"=>0,"compiled_modules"=>false,"pkgimages"=>false)
 end
+@testset "Optional environment lockfile provenance" begin
+    runtime=structural_runtime("x86_64/Linux","/unopened/julia");numeric_id=R._runtime_id(runtime)
+    for manifest in (nothing,repeat("5",64))
+        recorded=copy(runtime);recorded["julia_manifest_sha256"]=manifest
+        @test R._validate_runtime(recorded)===recorded
+        @test R._runtime_id(recorded)==numeric_id
+    end
+    changed=copy(runtime);changed["blas_library_sha256"]=repeat("6",64)
+    @test R._runtime_id(changed)!=numeric_id
+    malformed=copy(runtime);malformed["julia_manifest_sha256"]=true
+    @test_throws ArgumentError R._validate_runtime(malformed)
+    protocol=make_protocol(protocol_fixture());context=structural_native_context(protocol)
+    context["julia_manifest_sha256"]=nothing
+    @test R._context_shape(context,protocol,"native_job")===context
+end
 @testset "recorded runtime OS and complete ownership pairs" begin
     windows=("CREATE_SUSPENDED -> AssignProcessToJobObject -> ResumeThread","private Windows Job Object closed with KILL_ON_JOB_CLOSE")
     posix=("start_new_session=True","owned POSIX session has no live members after stage")

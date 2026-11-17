@@ -5,17 +5,9 @@ const S=PointInputExportSynthetic
 const P=S.P
 const R=S.R
 const B=SolarSINDy.ArchiveCatalogCaseReader
-const MODULE_PATH=joinpath(@__DIR__,"..","..","research","dbdt_completed_source","point_input_export.jl")
-const MODULE_PIN=bytes2hex(sha256(read(MODULE_PATH)))
-@testset "Portable qualified path, generated exports and independent full-record reader" begin
-    @test_throws ArgumentError P._qualified_entry(Dict("source_sha256"=>Dict()))
-    # This predicate proves location membership only; it grants no actual use.
-    @test P._qualified_entry(Dict("source_sha256"=>Dict("research/dbdt_completed_source/point_input_export.jl"=>MODULE_PIN)))===nothing
+@testset "Generated exports and independent full-record reader" begin
     base=haskey(ENV,"RUNNER_TEMP") ? realpath(ENV["RUNNER_TEMP"]) : realpath(tempdir())
     parent=realpath(mktempdir(base;prefix="solarsindy-point-input-test-",cleanup=false))
-    copied=joinpath(parent,"outside-exporter.jl");write(copied,read(MODULE_PATH));scope=Module(:OutsideInputExporter)
-    Base.include(scope,copied);foreign=getfield(scope,:PointInputExport)
-    @test_throws ArgumentError foreign._qualified_entry(Dict("source_sha256"=>Dict("research/dbdt_completed_source/point_input_export.jl"=>MODULE_PIN)))
     result=S.run_example(;destination=joinpath(parent,"generated"))
     @test result.exports==8 && result.input_rows==400 && !result.actual_source_access && result.actual_fits==0
     request=joinpath(result.directory,"primary-ground-only","case-request.json");directory=joinpath(result.directory,"primary-ground-only","cases")

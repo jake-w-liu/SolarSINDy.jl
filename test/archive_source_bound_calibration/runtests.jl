@@ -13,7 +13,6 @@ const START=DateTime(2020)
 digest(x)=bytes2hex(sha256(x))
 clock(t)=Dates.format(t,dateformat"yyyy-mm-ddTHH:MM:SS.sss")*"Z"
 include(joinpath(@__DIR__,"..","archive_source_bound_fit","case_fixture.jl"))
-include("authority_tests.jl")
 function recipes()
     (F.BoostRecipe(depth=1,rounds=2,bins=2,seed=17,eta=.5,min_weight=1.,lambda=0.,L2=0.),
      C.Recipe(kind=:ridge,penalty=1.,bins=2),C.Recipe(kind=:boost,depth=1,trees=2,bins=2,rate=.5,minleaf=1),
@@ -74,16 +73,6 @@ function run_scope(root)
                 @test_throws ArgumentError K.prepare_expected(value,1,point;start,stop,asof,first_issue=stop-Millisecond(1))
                 @test_throws MethodError K.calibrate_archival(value,1,point,expected;start,stop,asof,first_issue)
                 @test_throws ArgumentError K.calibrate_archival(rereverified,1,point,expected;start,stop,asof,first_issue)
-                missing=joinpath(case_root,"does-not-exist");pin=repeat("a",64)
-                authority=K.CalibrationAuthority(missing,pin,missing,pin,missing,pin)
-                producer=F.FitAuthority(missing,pin,missing,pin,missing,pin)
-                @test_throws ArgumentError K.calibrate_archival(rereverified,1,point,expected;start,stop,asof,first_issue,authority,producer)
-                @test_throws ArgumentError K._producer_evidence(point,nothing)
-                @test_throws ArgumentError K._producer_evidence(point,producer)
-                @test !ispath(missing) && !ispath(joinpath(case_root,"CALIBRATION_ATTEMPT.json"))
-                if role=="primary" && layout=="ground-only" && i==1
-                    run_invalid_calibration_authority_tests(value,rereverified,point,expected,case_root)
-                end
                 # A record with a changed score is rejected even with freshly
                 # recomputed surrounding data hashes. Keep the external context
                 # exact to distinguish a formula/rank check from a hash check.

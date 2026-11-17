@@ -8,7 +8,7 @@ function codec_checks(root,result)
         T.D.load_model(path;expected_manifest_sha256=T._sha(read(joinpath(path,"MANIFEST.json"))))
     end
     basis=joinpath(stage,"basis");proof=P._verify_basis(a.view,laws,basis;expected_manifest_sha256=T._sha(read(joinpath(basis,"manifest.json"))),expected_sources=P.source_identity(),chunk_hours=7)
-    panel=P._read_verified_panel(proof,a.view,1,1);context=B.BInitialPointFits._export_context(a,panel,nothing)
+    panel=P._read_verified_panel(proof,a.view,1,1);context=B.BInitialPointFits._export_context(a,panel)
     bundle=joinpath(stage,"models","setting-1");pin=T._sha(read(joinpath(bundle,"manifest.json")))
     genuine=P.load_point_bundle(bundle;expected_manifest_sha256=pin,expected_sources=P.source_identity(),expected_binding=context)
     @test genuine.provenance.initial_hazard_fit_count==2&&genuine.provenance.initial_gain_fit_count==36
@@ -26,7 +26,7 @@ function codec_checks(root,result)
         :training_boundary=>string(Dates.value(a.metadata.training_boundary+Hour(1))),:validation_start=>string(Dates.value(a.metadata.validation_start-Hour(1))),:validation_end=>string(Dates.value(a.metadata.validation_end+Hour(1))),
         :basis_sha256=>repeat("0",64),:fit_input_manifest_sha256=>repeat("0",64),
         :initial_hazard_fit_count=>3,:initial_gain_fit_count=>35,:final_fit_count=>1,:calibration_fit_count=>1,
-        :exposed_development_scoring=>true,:scientific_verdict=>true,:serving_promotion=>true,:actual_execution_permit_sha256=>repeat("d",64),
+        :exposed_development_scoring=>true,:scientific_verdict=>true,:serving_promotion=>true,
         :final_fit_count=>false,:calibration_fit_count=>false,:initial_hazard_fit_count=>true,:initial_gain_fit_count=>true]
     for (index,(field,value)) in enumerate(mutations)
         changed=plain(genuine.provenance);changed[String(field)]=value
@@ -67,7 +67,7 @@ function codec_checks(root,result)
 end
 function completion_checks(root,result)
     a=result.admission;stage=result.stage.directory;m=a.metadata
-    changes=["evidence_mode"=>"archival_assumed_completion_research","source_sha256"=>repeat("0",64),"training_semantics"=>"wrong","training_boundary"=>string(Dates.value(m.training_boundary+Hour(1))),"validation_start"=>string(Dates.value(m.validation_start-Hour(1))),"validation_end"=>string(Dates.value(m.validation_end+Hour(1))),"actual_execution_permit_sha256"=>repeat("d",64),"qualified_head"=>repeat("e",40),"source_rows"=>a.view.source_hours+1,"retained_prefix_rows"=>a.view.source_hours+1,"input_envelope_sha256"=>repeat("0",64),"reference_completion_sha256"=>repeat("0",64),"reference_audit_sha256"=>repeat("0",64),"input_prefix_sha256"=>repeat("0",64),"initial_gain_fit_count"=>35,"scientific_verdict"=>true,"input_view_id"=>repeat("0",64)]
+    changes=["evidence_mode"=>"archival_assumed_completion_research","source_sha256"=>repeat("0",64),"training_semantics"=>"wrong","training_boundary"=>string(Dates.value(m.training_boundary+Hour(1))),"validation_start"=>string(Dates.value(m.validation_start-Hour(1))),"validation_end"=>string(Dates.value(m.validation_end+Hour(1))),"source_rows"=>a.view.source_hours+1,"retained_prefix_rows"=>a.view.source_hours+1,"input_envelope_sha256"=>repeat("0",64),"reference_completion_sha256"=>repeat("0",64),"reference_audit_sha256"=>repeat("0",64),"input_prefix_sha256"=>repeat("0",64),"initial_gain_fit_count"=>35,"scientific_verdict"=>true,"input_view_id"=>repeat("0",64)]
     for (index,(field,value)) in enumerate(changes)
         clone=joinpath(root,"stage-metadata-$index");cp(stage,clone)
         data=plain(JSON3.read(read(joinpath(clone,"completion.json"))));data[field]=value

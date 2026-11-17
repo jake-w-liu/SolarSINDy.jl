@@ -137,59 +137,21 @@ function _verify_candidate(value,index,id,split,fit::FitPublication,directory,pi
 end
 verify_candidate_validation_generated(value::Q.VerifiedCases,index,id,split::CandidateSplit,fit::FitPublication,directory,pins::ValidationPins)=
     _verify_candidate(value,index,id,split,fit,directory,pins)
-function _validation_producer_evidence(artifact,producer,native)
-    need(producer isa CandidateValidationAuthority && native isa NativeEvidence,"independent verifier requires original validation permit/native evidence")
-    context=decode(Vector{UInt8}(codeunits(artifact.context_json)));d=context["descriptor"]
-    receipt=decode(Vector{UInt8}(codeunits(artifact.receipt_json));limit=65536);auth=receipt["authorization"]
-    grant=A._pinned(producer.grant_path,producer.grant_sha256;canonical=true,limit=131072)
-    _whole_qualification(producer,grant)
-    need(auth["grant_sha256"]==producer.grant_sha256 && auth["source_proof_sha256"]==producer.source_proof_sha256 &&
-        auth["qualification_sha256"]==producer.qualification_sha256 && auth["input_descriptor_sha256"]==digest(canonical(d)) &&
-        grant["operation"]=="fixed_candidate_2017_validation_only" && grant["input_descriptor_sha256"]==digest(canonical(d)) &&
-        grant["actual_model_fit_authorized"]===false && grant["actual_source_access_authorized"]===true,"independent validation producer authority")
-    attempt=R.bounded_read(grant["attempt_path"];limit=16384)
-    need(digest(attempt)==auth["attempt_sha256"],"independent validation producer attempt")
-    owner=_checked_native_stage(native,"candidate-validation",producer);raw,_=FS._read(native.raw_path,64*1024^2)
-    need(digest(codeunits(raw))==native.raw_sha256==owner["raw_sha256"] && owner["complete"]===true &&
-        owner["schema"]=="candidate_native_stage_evidence_v1" && owner["grant_sha256"]==producer.grant_sha256 &&
-        owner["head"]==grant["head"] && owner["source_proof_sha256"]==producer.source_proof_sha256 &&
-        owner["qualification_sha256"]==producer.qualification_sha256 && F.isint(owner["native_exit"]) && owner["native_exit"]==0 &&
-        owner["timed_out"]===false && owner["ownership_boundary_closed"]===true && owner["stage_seconds_limit"]==7200 &&
-        owner["available_physical_bytes"]>=8589934592 && owner["free_disk_bytes"]>=17179869184 &&
-        owner["output_context_sha256"]==artifact.pins.context_sha256 && owner["output_complete_sha256"]==artifact.pins.complete_sha256,
-        "independent validation native output evidence")
-    nothing
-end
 function verify_candidate_validation_archival(value::B.ReverifiedCases,index,id,split::CandidateSplit,fit::FitPublication,directory,pins::ValidationPins;
-                                               authority=nothing,producer=nothing,native=nothing,validation_producer=nothing,validation_native=nothing)
-    need(authority isa IndependentReadAuthority,"independent numerical verification requires distinct read authority")
-    artifact=read_validation(directory,pins);_validation_producer_evidence(artifact,validation_producer,validation_native)
-    execution=authority isa IndependentReadAuthority ? joinpath(realpath(dirname(authority.grant_path)),"independent-verification") : ""
-    auth,d,attempt=_admit_and_spend(value,index,id,split,execution,authority,:read;point=fit.point,producer,native)
-    result=_verify_candidate(value.cases,index,id,split,fit,directory,pins;actual=true,admission=d["case_read_admission_sha256"],verification_authorization=auth)
-    _close_admission(value,index,id,split,execution,authority,:read,d,attempt;point=fit.point,producer,native)
-    witness=canonical(Dict("schema"=>"candidate_independent_numeric_witness_v1","witness_sha256"=>result.witness_sha256,
-        "authorization"=>auth,"validation_context_sha256"=>pins.context_sha256,"validation_complete_sha256"=>pins.complete_sha256,
-        "fit_complete_sha256"=>fit.pins.complete_sha256,"cohort_sha256"=>result.cohort,"rows"=>result.n,"loss_bits"=>C.bits(result.loss)))
-    _publish_payloads(execution,[("request.json",canonical(d)),("receipt.json",witness)],"candidate_independent_numeric";
-        limit=MAX_INPUT_BYTES,closecheck=()->_close_admission(value,index,id,split,execution,authority,:read,d,attempt;point=fit.point,producer,native))
+        authority=nothing,producer=nothing,native=nothing,validation_producer=nothing,validation_native=nothing,witness_directory=nothing)
+    need(all(isnothing,(authority,producer,native,validation_producer,validation_native)),"execution certificates are not accepted; supply scientific artifact pins")
+    _locked_split(split,:validation);F._archival_request(value,index,split.start,split.stop,split.asof)
+    d=descriptor(value.cases,index,id,split;operation="fixed_candidate_2017_validation_only",point=fit.point,
+        actual=true,admission=digest(B.admission_bytes(value)))
+    auth=Dict("schema"=>"candidate_operation_binding_v2","operation"=>"fixed_candidate_2017_independent_read_only",
+        "input_descriptor_sha256"=>digest(canonical(d)),"case_read_admission_sha256"=>d["case_read_admission_sha256"],"native_fits"=>0)
+    result=_verify_candidate(value.cases,index,id,split,fit,directory,pins;actual=true,
+        admission=d["case_read_admission_sha256"],verification_authorization=auth)
+    if witness_directory!==nothing
+        _publish_payloads(witness_directory,[("request.json",canonical(d)),("receipt.json",_completed_witness(result,auth))],
+            "candidate_independent_numeric";limit=MAX_INPUT_BYTES,closecheck=()->job_identity())
+    end
     result
-end
-function _independent_native(candidate,evidence)
-    need(evidence isa NativeEvidence && candidate.verification_authorization!==nothing,"actual R2 needs completed independent native evidence")
-    auth=decode(Vector{UInt8}(codeunits(candidate.verification_authorization)))
-    preliminary=A._pinned(evidence.receipt_path,evidence.receipt_sha256;limit=262144)
-    request=A._pinned(preliminary["request_path"],preliminary["request_sha256"];canonical=true,limit=1048576)
-    q=request["qualification_authority"];J._object(q,Set(String.(fieldnames(IndependentReadAuthority))))
-    # Resolve the original supplied permit for evidence checking only. This is
-    # never passed to a new source/target operation and creates no grant.
-    original=IndependentReadAuthority((q[String(name)] for name in fieldnames(IndependentReadAuthority))...)
-    owner=_checked_native_stage(evidence,"independent-verify",original);raw,_=FS._read(evidence.raw_path,64*1024^2)
-    need(digest(codeunits(raw))==evidence.raw_sha256==owner["raw_sha256"] && owner["schema"]=="candidate_native_stage_evidence_v1" &&
-        owner["complete"]===true && owner["grant_sha256"]==auth["grant_sha256"] && owner["head"]==auth["head"] &&
-        owner["source_proof_sha256"]==auth["source_proof_sha256"] && owner["qualification_sha256"]==auth["qualification_sha256"] &&
-        F.isint(owner["native_exit"]) && owner["native_exit"]==0 && owner["timed_out"]===false && owner["ownership_boundary_closed"]===true &&
-        owner["stage_seconds_limit"]==7200 && owner["output_witness_sha256"]==candidate.witness_sha256,"actual independent native witness differs")
 end
 function _completed_witness(candidate,authorization)
     canonical(Dict("schema"=>"candidate_independent_numeric_witness_v1","witness_sha256"=>candidate.witness_sha256,
@@ -264,60 +226,38 @@ function _read_completed(value,index,id,split,fit,directory,pins,witness_directo
     VerifiedCandidate(d["station"],String(id),recipe_for(id).kind,context["cohort_sha256"],n,loss,String(canonical(d)),artifact,
         fit,actual,witness,actual ? String(canonical(report["authorization"])) : nothing,_VerifiedToken())
 end
-function read_completed_generated_candidate(value::Q.VerifiedCases,index,id,split,fit,directory,pins,witness_directory,witness_pins;completion=nothing)
+function read_completed_generated_candidate(value::Q.VerifiedCases,index,id,split,fit,directory,pins,witness_directory,witness_pins)
     candidate=_read_completed(value,index,id,split,fit,directory,pins,witness_directory,witness_pins;actual=false)
     independently_reconstructed=_verify_candidate(value,index,id,split,fit,directory,pins)
     need(independently_reconstructed.witness_sha256==candidate.witness_sha256,"generated completed witness source reconstruction differs")
-    if completion!==nothing
-        need(completion isa NativeEvidence,"generated completion fixture pins required")
-        owner=A._pinned(completion.receipt_path,completion.receipt_sha256;limit=16384);raw,_=FS._read(completion.raw_path,16384)
-        need(owner["schema"]=="generated_candidate_completion_fixture_v1" && owner["actual_authority"]===false &&
-            owner["native_execution_evidence"]===false && owner["declared_fixture_native_exit"]===0 && owner["timed_out"]===false &&
-            owner["job_sha256"]==job_identity() && owner["output_witness_sha256"]==candidate.witness_sha256 &&
-            owner["output_manifest_sha256"]==witness_pins.manifest_sha256 && owner["output_complete_sha256"]==witness_pins.complete_sha256 &&
-            digest(codeunits(raw))==completion.raw_sha256==owner["raw_sha256"],"generated completion fixture binding differs")
-    end
     independently_reconstructed
 end
 function read_completed_candidate(value::B.ReverifiedCases,index,id,split,fit,directory,pins,witness_directory,witness_pins;
                                   request_path,case_directory,verification_authority=nothing,verification_native=nothing,
                                   producer=nothing,native=nothing,validation_producer=nothing,validation_native=nothing)
-    need(verification_authority isa IndependentReadAuthority,"completed numeric evidence needs original independent read grant")
-    grant=A._pinned(verification_authority.grant_path,verification_authority.grant_sha256;canonical=true,limit=131072)
-    proof,_=_whole_qualification(verification_authority,grant)
-    need(grant["operation"]=="fixed_candidate_2017_independent_read_only" && grant["actual_model_fit_authorized"]===false,
-        "completed witness requires original score-read provenance")
-    admission=F._archival_request(value,index,split.start,split.stop,split.asof);_locked_split(split,:validation)
+    need(all(isnothing,(verification_authority,verification_native,producer,native,validation_producer,validation_native)),
+        "execution certificates are not accepted; supply scientific artifact pins")
+    F._archival_request(value,index,split.start,split.stop,split.asof);_locked_split(split,:validation)
     _rebind_case_files(value.cases,request_path,case_directory)
     candidate=_read_completed(value.cases,index,id,split,fit,directory,pins,witness_directory,witness_pins;
         actual=true,admission=digest(B.admission_bytes(value)))
-    auth=decode(Vector{UInt8}(codeunits(candidate.verification_authorization)))
-    d=decode(Vector{UInt8}(codeunits(candidate.descriptor_json)))
-    need(grant["schema"]=="candidate_input_only_authority_v1" && grant["operation"]=="fixed_candidate_2017_independent_read_only" &&
-        grant["input_descriptor_sha256"]==digest(canonical(d))==auth["input_descriptor_sha256"] &&
-        grant["case_read_admission_sha256"]==digest(B.admission_bytes(value)) && grant["head"]==proof["head"]==admission["reader_head"] &&
-        auth["grant_sha256"]==verification_authority.grant_sha256 && auth["source_proof_sha256"]==verification_authority.source_proof_sha256 &&
-        auth["qualification_sha256"]==verification_authority.qualification_sha256 && grant["actual_source_access_authorized"]===true &&
-        grant["actual_model_fit_authorized"]===false && grant["new_case_generation_authorized"]===false &&
-        grant["dataset_discovery"]===false && grant["provider_receipts_available"]===false,"completed independent producer grant differs")
-    attempt=R.bounded_read(grant["attempt_path"];limit=16384)
-    need(digest(attempt)==auth["attempt_sha256"] && decode(attempt;limit=16384)["grant_sha256"]==verification_authority.grant_sha256,"completed independent spent marker differs")
-    _native_evidence(native,fit.point,producer);_validation_producer_evidence(candidate.artifact,validation_producer,validation_native)
-    _independent_native(candidate,verification_native)
-    closed=A._pinned(verification_native.receipt_path,verification_native.receipt_sha256;limit=262144)
-    need(closed["output_manifest_sha256"]==witness_pins.manifest_sha256 && closed["output_complete_sha256"]==witness_pins.complete_sha256 &&
-        closed["job_sha256"]==job_identity() && closed["input_descriptor_sha256"]==digest(canonical(d)),"completed owner/witness/source pins differ")
-    need(J._same(abspath(witness_directory),joinpath(realpath(dirname(verification_authority.grant_path)),"independent-verification")),"completed witness producer path differs")
-    job_identity();candidate
+    rebuilt=verify_candidate_validation_archival(value,index,id,split,fit,directory,pins)
+    need(rebuilt.witness_sha256==candidate.witness_sha256,"completed witness independent source reconstruction differs")
+    _check_operation_binding(decode(Vector{UInt8}(codeunits(candidate.verification_authorization))),
+        decode(Vector{UInt8}(codeunits(candidate.descriptor_json))))
+    rebuilt
 end
+
 function choose_verified_R2(candidates::AbstractVector{VerifiedCandidate};independent_native=nothing)
     need(length(candidates)==16,"verified full16 candidates required")
     first_candidate=first(candidates);metadata=decode(Vector{UInt8}(codeunits(first_candidate.descriptor_json)))
+    need(independent_native===nothing,"native certificates are not selection prerequisites")
     if first_candidate.actual
-        need(independent_native isa AbstractVector && length(independent_native)==16,"actual R2 requires all16 independent native completions")
-        for (candidate,evidence) in zip(candidates,independent_native);_independent_native(candidate,evidence);end
-    else
-        need(independent_native===nothing,"generated R2 cannot consume actual native evidence")
+        for candidate in candidates
+            need(candidate.verification_authorization!==nothing,"actual R2 requires independent numerical reconstruction")
+            _check_operation_binding(decode(Vector{UInt8}(codeunits(candidate.verification_authorization))),
+                decode(Vector{UInt8}(codeunits(candidate.descriptor_json))))
+        end
     end
     for candidate in candidates
         need(candidate.actual===first_candidate.actual && candidate.station==first_candidate.station && candidate.cohort==first_candidate.cohort &&
@@ -369,54 +309,25 @@ function prepare_selected_refit_input_archival(selection::CheckedR2Selection,val
                                                authority=nothing)
     _selection_target(selection,value.cases,index;actual=true)
     id=_selected_id(selection,family,split;actual=true)
-    auth,d,attempt=_admit_and_spend(value,index,id,split,directory,authority,:refitinput;selection)
+    auth,d,attempt=_start_operation(value,index,id,split,directory,authority,:refitinput;selection)
     _prepare_input(value.cases,index,id,split,directory;authorization=auth,actual=true,admission=d["case_read_admission_sha256"],
         operation=d["operation"],selection_sha256=selection.evidence_sha256,attempt_bytes=attempt.bytes,
-        closecheck=()->_close_admission(value,index,id,split,directory,authority,:refitinput,d,attempt;selection))
+        closecheck=()->_close_operation(value,index,id,split,directory,authority,:refitinput,d,attempt;selection))
 end
 function refit_selected_archival(selection::CheckedR2Selection,value::B.ReverifiedCases,index,family,split::CandidateSplit,input;
                                  directory,authority=nothing,fit_authority=nothing)
-    need(authority isa SelectedRefitAuthority && fit_authority isa F.FitAuthority,"selected refit needs distinct outer and original F permits")
+    need(authority===nothing && fit_authority===nothing,"execution certificates are not accepted; supply checked selection and input pins")
     _selection_target(selection,value.cases,index;actual=true);_assert_fresh_destination(directory)
     id=_selected_id(selection,family,split;actual=true);admission=digest(B.admission_bytes(value))
     need(input.descriptor["operation"]=="selected_R2_2017_refit_input_only" &&
         input.descriptor["selection_sha256"]==selection.evidence_sha256,"selected input does not retain checked decision")
     expected=_match_input(value.cases,index,id,split,input;actual=true,admission)
-    grant=A._pinned(authority.grant_path,authority.grant_sha256;canonical=true,limit=131072)
-    J._object(grant,Set(("schema","operation","selection_evidence_sha256","decision_sha256","input_descriptor_sha256",
-        "context_sha256","inner_fit_grant_sha256","source_proof_sha256","qualification_sha256","head","execution_directory",
-        "case_read_admission_sha256","expected_model_fits","actual_source_access_authorized","actual_model_fit_authorized",
-        "new_case_generation_authorized","dataset_discovery","provider_receipts_available")))
-    need(grant["schema"]=="producer_checked_selected_refit_grant_v1" && grant["operation"]=="selected_R2_2017_refit_only" &&
-        grant["selection_evidence_sha256"]==selection.evidence_sha256 && grant["decision_sha256"]==selection.decision.decision_sha256 &&
-        grant["input_descriptor_sha256"]==input.pins.descriptor_sha256 && grant["context_sha256"]==expected.context_sha256 &&
-        grant["inner_fit_grant_sha256"]==fit_authority.grant_sha256 && grant["source_proof_sha256"]==authority.source_proof_sha256 &&
-        grant["qualification_sha256"]==authority.qualification_sha256 && grant["case_read_admission_sha256"]==admission &&
-        F.isint(grant["expected_model_fits"]) && grant["expected_model_fits"]==1 && grant["actual_source_access_authorized"]===true &&
-        grant["actual_model_fit_authorized"]===true && grant["new_case_generation_authorized"]===false &&
-        grant["dataset_discovery"]===false && grant["provider_receipts_available"]===false,"selected refit outer permit differs")
-    proof,_=_whole_qualification(authority,grant);read_admission=F._archival_request(value,index,split.start,split.stop,split.asof)
-    need(proof["head"]==read_admission["reader_head"] && authority.source_proof_sha256==fit_authority.source_proof_sha256 &&
-        authority.qualification_sha256==fit_authority.qualification_sha256,"selected refit current qualification differs")
-    execution=realpath(dirname(authority.grant_path));J._ordinary(execution;directory=true)
-    need(grant["execution_directory"]==execution && abspath(directory)==joinpath(execution,"output") && BLAS.get_num_threads()==1 &&
-        Sys.free_memory()>=8589934592 && Base.Filesystem.diskstat(execution).available>=17179869184,"selected refit execution/resource admission")
-    need(!ispath(joinpath(realpath(dirname(fit_authority.grant_path)),"POINT_FIT_ATTEMPT.json")) &&
-        !islink(joinpath(realpath(dirname(fit_authority.grant_path)),"POINT_FIT_ATTEMPT.json")),"selected inner F fit permit already spent")
-    bytes=canonical(Dict("schema"=>"selected_R2_refit_attempt_v1","grant_sha256"=>authority.grant_sha256,
-        "selection_evidence_sha256"=>selection.evidence_sha256,"inner_fit_grant_sha256"=>fit_authority.grant_sha256,
-        "started_utc"=>F.clock(now(UTC)));limit=16384)
-    attempt=joinpath(execution,"SELECTED_R2_REFIT_ATTEMPT.json");R._exclusive_write(attempt,bytes);started=time_ns()
-    result=F.fit_archival(value,index,recipe_for(id),expected;start=split.start,stop=split.stop,asof=split.asof,authority=fit_authority)
-    need((time_ns()-started)/1e9<=7200 && R.bounded_read(attempt;limit=16384)==bytes,"selected refit attempt/time changed")
-    need(A._pinned(authority.grant_path,authority.grant_sha256;canonical=true,limit=131072)==grant,"selected refit grant changed")
-    _whole_qualification(authority,grant)
+    result=F.fit_archival(value,index,recipe_for(id),expected;start=split.start,stop=split.stop,asof=split.asof)
     p=F.publish_fit(result.capsule,directory)
     point=F.read_published(directory;expected,model_sha256=p.model_sha256,receipt_sha256=p.receipt_sha256,complete_sha256=p.complete_sha256)
     fit=FitPublication(point,String(directory),p)
     binding=canonical(Dict("schema"=>"producer_checked_archival_R2_refit_v1","selection_evidence_sha256"=>selection.evidence_sha256,
         "decision_sha256"=>selection.decision.decision_sha256,"family"=>String(family),"candidate_id"=>id,"point"=>point_descriptor(point),
-        "outer_grant_sha256"=>authority.grant_sha256,"outer_attempt_sha256"=>digest(bytes),"inner_grant_sha256"=>fit_authority.grant_sha256,
         "actual_source_access"=>true,"software_qualification"=>false))
     SelectedRefit(fit,selection,family,id,String(binding))
 end

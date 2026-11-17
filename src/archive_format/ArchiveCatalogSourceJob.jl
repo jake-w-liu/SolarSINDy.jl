@@ -3,8 +3,7 @@
 
 Bounded, offline reconstruction of explicitly pinned archival bodies. A native
 job publishes original bytes, raw row ledgers and selected catalog witnesses.
-Generated jobs grant no archival authority. Actual cache access additionally
-requires caller-pinned authorization, admission plan and full software evidence.
+Generated and archival requests explicitly declare and pin every input body.
 A single-role snapshot does not establish independent source qualification,
 historical provider availability, model skill or a forecasting result.
 """
@@ -31,8 +30,8 @@ digest(bytes) = bytes2hex(sha256(bytes))
     Authority(grant_path, grant_sha256, plan_path, plan_sha256,
               source_proof_path, source_proof_sha256, qualification_path, qualification_sha256)
 
-Explicit caller pins for actual-cache reconstruction. Recorded paths in these
-documents are never executed or used to locate other evidence files.
+Historical authority metadata type. Ordinary reconstruction takes only the
+explicit source request; supplied execution-certificate arguments are rejected.
 """
 struct Authority
     grant_path::String
@@ -173,47 +172,12 @@ function _source_inventory(proof)
     nothing
 end
 function _authorize(request, request_digest, authority)
-    if request["evidence_mode"]=="generated"
-        need(authority===nothing, "generated jobs cannot consume actual-source authority")
-        return nothing
-    end
-    need(authority isa Authority, "actual-cache job requires caller-pinned authority")
-    grant = _pinned(authority.grant_path,authority.grant_sha256;canonical=true,limit=131072)
-    _object(grant,Set(("schema","request_sha256","plan_sha256","source_proof_sha256",
-        "qualification_sha256","head","actual_source_access_authorized","dataset_discovery",
-        "provider_receipts_available","operation")))
-    need(grant["schema"]=="archive_catalog_actual_grant_v1" &&
-        grant["request_sha256"]==request_digest && grant["plan_sha256"]==authority.plan_sha256 &&
-        grant["source_proof_sha256"]==authority.source_proof_sha256 &&
-        grant["qualification_sha256"]==authority.qualification_sha256 &&
-        grant["actual_source_access_authorized"]===true && grant["dataset_discovery"]===false &&
-        grant["provider_receipts_available"]===false && grant["operation"]=="source_reconstruction_only",
-        "actual-source grant differs")
-    plan = _pinned(authority.plan_path,authority.plan_sha256)
-    need(get(plan,"complete",false)===true && plan["schema"]=="actual_archive_catalog_admission_precode_v1",
-        "admission plan is incomplete")
-    subset = filter(x->request["layout"]=="mixed" || x["kind"]=="ground",plan["admitted_on_execution"])
-    need(request["inputs"]==subset, "actual inputs differ from frozen admission plan subset")
-    proof = _pinned(authority.source_proof_path,authority.source_proof_sha256)
-    qualification = _pinned(authority.qualification_path,authority.qualification_sha256)
-    need(get(qualification,"complete",false)===true && qualification["head"]==proof["head"]==grant["head"] &&
-        qualification["source_proof"]["sha256"]==authority.source_proof_sha256 &&
-        qualification["software_qualification_only"]===true &&
-        qualification["unfiltered_package_and_full_experiments_executed"]===true &&
-        qualification["strict_docs_both_complete"]===true &&
-        qualification["all_eight_latest_ci_jobs_passed"]===true &&
-        qualification["all_eight_raw_logs_retained"]===true && qualification["harness_counts"]["FAIL"]==0,
-        "full software qualification differs")
-    jobs = qualification["ci_jobs"]
-    expected = Set(["Julia $v / $s-latest" for v in ("1.12.6","1.13.1") for s in ("ubuntu","macos","windows")])
-    union!(expected,Set(("Documentation build","Julia 1.12 deployment images")))
-    need(length(jobs)==8 && length(Set(j["job_id"] for j in jobs))==8 &&
-        Set(j["name"] for j in jobs)==expected, "eight native CI evidence identities differ")
-    for job in jobs
-        for key in ("log","receipt","original_log","original_receipt"); _sha(job[key]["sha256"]); end
-    end
-    _source_inventory(proof)
-    proof
+    need(authority===nothing,"execution certificates are not accepted; supply the pinned source request")
+    _sha(request_digest)
+    # _validate has checked bounded descriptors, explicit source paths, stations
+    # and clocks. Each body is independently pinned before parsing below.
+    need(request["evidence_mode"] in ("generated","actual_archival_cache"),"source evidence mode differs")
+    nothing
 end
 
 function _catalog_metadata(catalog, shards)
@@ -238,7 +202,7 @@ function reconstruct(request_path::AbstractString, destination::AbstractString; 
     request_bytes = R.bounded_read(request_path;limit=131072)
     request = R.decode_canonical(request_bytes;limit=131072)
     inputs = _validate(request,request_path)
-    proof = _authorize(request,digest(request_bytes),authority)
+    _authorize(request,digest(request_bytes),authority)
     need(isabspath(destination) && normpath(destination)==destination &&
         !(basename(destination) in ("",".","..")), "destination path differs")
     _ordinary(dirname(destination);directory=true)
@@ -301,7 +265,6 @@ function reconstruct(request_path::AbstractString, destination::AbstractString; 
     end
     need(all(i->_identity(inputs[i]["path"])==before[i],eachindex(inputs)), "source identity changed during reconstruction")
     need(R.bounded_read(request_path;limit=131072)==request_bytes, "request changed during reconstruction")
-    proof===nothing || _source_inventory(proof)
     manifest = Dict("schema"=>"archive_catalog_snapshot_v1","request_sha256"=>digest(request_bytes),
         "evidence_mode"=>request["evidence_mode"],"layout"=>request["layout"],"role"=>request["role"],
         "runtime"=>string(VERSION),"bodies"=>bodies,"catalogs"=>catalogs,"members"=>members,"read_trace"=>trace,

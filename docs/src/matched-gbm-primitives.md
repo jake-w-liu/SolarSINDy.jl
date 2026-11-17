@@ -2,8 +2,8 @@
 
 `SolarSINDy.MatchedGBMPrimitives342` provides a receipt-aware feature builder,
 explicit training-only finite encoder, fixed-grid generated-data fit capsule and
-independent scalar tree replay. It does not implement actual-source admission,
-the complete32-fit matched producer, B22 qualification or a serving path.
+independent scalar tree replay. Actual-source admission and the complete
+32-fit matched producer are provided by the separate B experiment tools.
 
 The342 ordered coordinates retain the maintained29-feature block, append eight
 lags for each of17 raw channels, preserve165 pre-imputation missing flags, and
@@ -38,9 +38,10 @@ strings and duplicate keys are checked before JSON parsing. External content,
 cohort, preprocessing, source, cell/grid and admission pins are required.
 
 These primitives carry no held-out skill verdict. The complete matched32-fit
-producer, full per-lead evaluation UNION, native evidence and B22 actual
-admission remain separate required stages. The diagnostic old29 reference and
-all stronger mandatory baseline families remain in scope.
+experiment separately checks admitted source identity, full per-lead validation
+cohorts, native and saved-model prediction equality, and independent numerical
+reconstruction. The diagnostic old29 reference remains distinct from that
+matched experiment.
 
 ```jldoctest
 julia> using SolarSINDy
@@ -94,8 +95,6 @@ independent fitted predictions and model save/load replay. The standard CI runs
 the package tests and numerical examples on Linux, Windows and macOS with both
 supported Julia versions. Documentation is built with strict checks.
 
-Historical certificate, workflow-hash, fixed-count and repeated process-launch
-test frameworks are no longer part of the package tests or CI. Research tools
-that consume historical CI18 certificates do not obtain those certificates from
-the current CI. Passing software tests does not establish predictive gains or
-authorize a scientific performance claim.
+The actual B experiment uses ordinary source and artifact pins without CI
+certificates or prior resource profiles. Passing software tests does not
+establish predictive gains or authorize a scientific performance claim.

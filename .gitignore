@@ -1,5 +1,7 @@
 docs/build/
 docs/site/
+# Each supported Julia version resolves its own package environment.
+/Manifest.toml
 storm_monitor.log
 .DS_Store
 

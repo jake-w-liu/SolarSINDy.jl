@@ -1,5 +1,35 @@
 # Candidate implementation notes
 
+## Current development contract (18 November 2026)
+
+The user requires essential behavior tests. Historical sections below record
+superseded development experiments; their CI18, frozen-source, fixed-count,
+native-census, container-certificate and execution-permit prerequisites are not
+the current test policy. They must not be restored as test or execution gates.
+
+Keep direct independent numerical expectations, causal source/label boundaries,
+training-only preprocessing, matched candidate selection, saved-model replay,
+input validation, dashboard behavior and owned-process cleanup. Full Pkg.test,
+examples/experiments.jl and strict documentation builds remain development
+checks. Capacity benchmarks, source clones and certificate assertions are
+removed from the test suite; scientific tolerances and comparison grids remain.
+
+The ordinary B342 and completed-source dB/dt routes now use admitted data and
+code identities without retired CI/resource certificates or spent permits.
+Current fit/runtime observations describe the actual process. Existing data,
+cohort, readiness, split, model and prediction checks still apply.
+
+CI run44133857316 passed package tests and examples on both Linux runtimes and
+Windows1.13.1, then failed only on generated root Manifest.toml differences.
+The package now resolves an ignored root environment per Julia runtime and
+requires exactly EvoTrees0.18.7, matching its saved-tree reader. The docs/app
+environment locks remain separate. A root Manifest, when present, is optional
+environment provenance rather than a mandatory code-identity member.
+
+Reverification of this follow-up is still required: the successful earlier
+run does not validate later source changes. No new predictive-performance or
+scientific result follows from the cleanup.
+
 ## Archival shared replay implementation (28 October 2026)
 
 The new source_bound_archival_replay module connects separately reverified
@@ -2174,3 +2204,32 @@ all candidate recipes/refits, small matched342 native fits and independent saved
 prediction replay. The previous 5537faa CI remained live with six package jobs;
 its elapsed time alone did not establish which workload dominated. A new full
 Pkg.test/examples run is required on the final cleanup commit.
+## Ordinary scientific execution without CI certificates (2026-11-18)
+
+Objective: actual matched-B342 and completed-source dB/dt model fitting,
+readback and evaluation must work from admitted scientific inputs without
+retired CI18/17-worker/container/harness certificates, spent execution permits,
+or prior resource-profile certificates. Pkg.test, numerical examples and strict
+documentation remain external development checks on the committed source.
+
+Preserve bounded ordinary source readback, data/code digests and identity,
+chronological source/label eligibility, 168-hour embargo where specified,
+training-only preprocessing, fixed candidate grids, deterministic selection,
+independent saved-prediction reconstruction and existing numerical tolerances.
+B342 retains four delay/lead cells times eight recipes. The dB/dt station and
+2017 split/readiness contracts, candidate grid and separate refit splits remain.
+Actual time, memory/allocation and thread observations belong to the current
+experiment output and process owner; a prior profile is not an execution grant.
+
+Contract: valid admitted data can execute ordinary numerical APIs and publish
+readable artifacts without software-qualification metadata. Wrong source,
+station, cohort, readiness, split, encoder, model or prediction bindings still
+fail. Remove obsolete fields and strict-member dependencies coherently across
+writers/readers/callers; preserve readable existing scientific artifacts where
+possible. Retired validators must not become permissive no-op validators.
+
+Oracle/reverification: retain direct causal/source and native-versus-independent
+saved-state replay tests, candidate loss/selection/refit and corruption checks.
+Remove certificate-only fixtures/assertions. Run the narrow affected tests,
+then complete Pkg.test/examples/docs on the resulting commit before promotion.
+No scientific performance, publication or serving promotion is implied.

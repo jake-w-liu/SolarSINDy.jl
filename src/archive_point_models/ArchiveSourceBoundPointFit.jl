@@ -14,7 +14,7 @@ const FS=ArchiveCatalogSnapshotFilesystem
 const Q=ArchiveCatalogCaseJob
 const R=CompletedSourceDBDT.CompletedRefitArtifacts
 const P=ArchivePointNumericTrees
-export BoostRecipe,LockedMixed8RidgeRecipe,ExpectedFit,BoundFit,FitAuthority,prepare_expected,fit_generated,fit_archival,predict_log,receipt_bytes,publish_fit,read_published
+export BoostRecipe,LockedMixed8RidgeRecipe,ExpectedFit,BoundFit,prepare_expected,fit_generated,fit_archival,predict_log,receipt_bytes,publish_fit,read_published
 need(ok,message)=ok || throw(ArgumentError(message))
 isint(x)=x isa Integer && !(x isa Bool)
 hex(x)=x isa AbstractString && occursin(r"\A[0-9a-f]{64}\z",x)
@@ -120,7 +120,7 @@ function _prepare(value::Q.VerifiedCases,index,recipe::PointRecipe,start,stop,as
     source=source_identity()
     arrays=Q.split_arrays(value,index;start,stop,asof)
     input,y=_data_sha(arrays)
-    actual && need(input==binding.input_sha256,"archival fit input differs from independent grant")
+    actual && need(input==binding.input_sha256,"archival fit input differs from its bound data")
     object=Dict("schema"=>(actual ? "source_bound_archival_fit_context_v1" : "source_bound_generated_fit_context_v1"),"evidence_mode"=>request["evidence_mode"],
         "case_request_sha256"=>value.request_sha256,"case_manifest_sha256"=>value.manifest_sha256,"case_complete_sha256"=>value.complete_sha256,
         "table_index"=>Int(index),"table"=>request["tables"][index],"role"=>request["role"],"layout"=>request["layout"],
@@ -172,10 +172,11 @@ function _native_fit(X,y,recipe::L.Recipe)
 end
 function _fit_prepared(value,index,recipe,expected,start,stop,asof,fitter,binding;attempt_sha256=nothing)
     actual=binding isa _ArchivalBinding
-    actual ? J._sha(attempt_sha256) : need(attempt_sha256===nothing,"generated fit cannot consume an archival attempt")
+    need(attempt_sha256===nothing,"execution permit markers are not accepted")
     prepared=_prepare(value,index,recipe,start,stop,asof,binding);_matches(expected,prepared,recipe)
     X=copy(prepared.arrays.features);y=copy(prepared.y)
-    fitted=fitter(X,y,recipe)
+    observed=@timed fitter(X,y,recipe)
+    fitted=observed.value
     need(isequal(X,prepared.arrays.features) && isequal(y,prepared.y),"native fitter mutated its owned inputs")
     need(fitted isa NamedTuple && all(k->hasproperty(fitted,k),(:model,:native,:author)),"fit native result fields")
     need(fitted.model isa PointModel,"fit numeric model type")
@@ -195,8 +196,10 @@ function _fit_prepared(value,index,recipe,expected,start,stop,asof,fitter,bindin
         "actual_source_access"=>actual,"actual_fit_performed"=>actual,"software_qualification"=>false)
     if actual
         authorization=R.decode_canonical(Vector{UInt8}(codeunits(binding.json));limit=16384)
-        authorization["fit_attempt_sha256"]=J._sha(attempt_sha256)
         receipt["authorization"]=authorization
+        receipt["runtime_observations"]=Dict("fit_seconds"=>observed.time,"allocated_bytes"=>observed.bytes,
+            "julia_threads"=>Threads.nthreads(),"blas_threads"=>BLAS.get_num_threads(),"available_physical_bytes"=>Sys.free_memory(),
+            "peak_rss_bytes"=>Int(Sys.maxrss()))
     else
         need(attempt_sha256===nothing,"generated fit cannot consume an archival attempt")
     end

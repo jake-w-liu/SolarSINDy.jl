@@ -1,83 +1,91 @@
-"""Actual initial32 entry: supplied authority precedes all archive source decoding."""
+"""Fit, independently audit and read back the four actual matched342 cells."""
 module Matched342InitialActual
-include("run_matched342_full_shape_profile.jl")
-const Profile=Matched342FullShapeProfile
-using JSON3,LinearAlgebra
-const FC=Profile.FC;const T=Profile.T;const P=Profile.P;const Entry=Profile.Entry
-const Producer=Profile.Producer;const Audit=Profile.Audit
-const need=Profile.need;const fields=Profile.fields;const same=Profile.same
-const ACTUAL_FIELDS=(:schema,:evidence_mode,:operation,:execution_authority,:sources,:source_proof,:runtime,:output_directory,:owner_directory,:request_id)
-function validate_actual_metadata(d)
-    fields(d,ACTUAL_FIELDS);FC._check_id(d,:request_id)
-    need(d.schema=="matched342_initial_actual_request_v1"&&d.evidence_mode=="archival_assumed_completion_research"&&
-        d.operation=="initial_matched342_32fits","actual request mode/operation differs")
-    Profile.ref_grammar(d.execution_authority);Profile.ref_grammar(d.source_proof);Audit.check_runtime(d.runtime)
-    Profile.absolute_grammar(d.output_directory);Profile.absolute_grammar(d.owner_directory)
-    need((d.sources isa Tuple||d.sources isa AbstractVector)&&length(d.sources)==2,"two outside source specifications required")
-    for (k,s) in enumerate(d.sources)
-        fields(s,(:delay_hours,:source_proof,:roots));T._int(s.delay_hours,k-1,k-1);Profile.ref_grammar(s.source_proof)
-        need(1<=length(s.roots)<=32,"ordinary source root map required")
-        for (label,path) in pairs(s.roots)
-            need((label isa AbstractString||label isa Symbol)&&occursin(r"\A[A-Za-z0-9_-]+\z",String(label)),"source root label differs")
-            Profile.absolute_grammar(path)
-        end
+using SolarSINDy, JSON3, LinearAlgebra
+include("BMatchedReference342.jl")
+const Entry=BMatchedReference342
+const FC=Entry.BMatched342Core
+const T=Entry.T
+const P=Entry.P
+const BI=Entry.BI
+const Producer=Entry.BMatchedInitialProducer
+const Audit=Entry.MatchedReferenceAudit342
+const REQUEST_FIELDS=(:schema,:evidence_mode,:sources,:output_directory,:audit_directory,:audit_contract_sha256)
+
+function write_json(path,data)
+    body=T._bytes(data)
+    T._need(length(body)<=T.MAX_META,"matched342 output metadata exceeds its byte bound")
+    P._exclusive(path,body)
+    (;path,sha256=T._sha(body))
+end
+identified(data,key)=merge(data,NamedTuple{(key,)}((T._id(data),)))
+
+function main(request_path,request_sha)
+    BLAS.set_num_threads(1)
+    controls=Dict{String,String}()
+    ref=FC._pinned((;path=request_path,sha256=request_sha),controls)
+    request=FC._json_ref(ref,controls;fields=REQUEST_FIELDS)
+    T._need(request.schema=="matched342_initial_actual_request_v2"&&
+        request.evidence_mode=="archival_assumed_completion_research"&&T._hex(request.audit_contract_sha256),
+        "actual matched342 request schema/mode differs")
+    T._need((request.sources isa AbstractVector||request.sources isa Tuple)&&length(request.sources)==2,
+        "actual matched342 requires separate L0 and L1 source specifications")
+    admissions=map(enumerate(request.sources)) do (index,spec)
+        T._fields(spec,(:delay_hours,:source_proof,:roots))
+        T._int(spec.delay_hours,index-1,index-1)
+        source=FC._pinned(spec.source_proof,controls)
+        roots=Dict(String(key)=>String(value) for (key,value) in pairs(spec.roots))
+        admission=BI.admit_source_prefix_v2(source.path;expected_source_proof_sha256=source.sha256,
+            roots,expected_sources=P.source_identity())
+        T._need(admission.metadata.evidence_mode===:archival_assumed_completion_research,
+            "actual matched342 rejects generated source admissions")
+        admission
     end
-    d
-end
-function attempt_marker_path(directory,sha)
-    Profile.absolute_grammar(directory);need(T._hex(sha),"permit SHA grammar differs")
-    joinpath(dirname(directory),basename(directory)*".matched342-"*sha*".attempt.json")
-end
-function main(request_path,request_sha,bridge_path)
-    BLAS.set_num_threads(1);controls=Dict{String,String}()
-    ref=FC._pinned((;path=request_path,sha256=request_sha),controls);d=FC._json_ref(ref,controls;fields=ACTUAL_FIELDS)
-    validate_actual_metadata(d)
-    # Only bounded control metadata is read here. The outside permit's complete
-    # qualifications/resource proof are admitted before BI decodes either archive.
-    permit=FC._json_ref(d.execution_authority,controls;fields=FC.PERMIT_FIELDS);FC._check_id(permit,:permit_id)
-    need(permit.schema=="qualified_actual_initial_matched342_permit_v1"&&permit.complete===true&&
-        permit.evidence_mode==d.evidence_mode&&permit.operation==d.operation&&same(d.source_proof,permit.source_proof)&&
-        same(d.runtime,permit.runtime)&&d.output_directory==permit.execution.directory,"outside actual request/permit differs")
-    Profile.validate_limits(permit.limits)
-    resource=FC._json_ref(permit.resource_qualification,controls;fields=FC.RESOURCE_FIELDS)
-    bridge_data=(;owner_directory=d.owner_directory,qualified_head=permit.qualified_head,source_proof=d.source_proof,
-        fixture_spec=resource.fixture_spec,runtime=d.runtime,limits=permit.limits)
-    prelaunch=Profile.read_bridge(bridge_path,ref,bridge_data;mode=:archival_assumed_completion_research,permit_sha=d.execution_authority.sha256)
-    witness=FC._json_ref(prelaunch,controls;fields=FC.PRELAUNCH_FIELDS)
-    marker=attempt_marker_path(String(permit.execution.directory),String(d.execution_authority.sha256))
-    m,_=P._json(marker;fields=(:schema,:execution_directory,:permit_sha256,:request_sha256,:owner_pid,:created_monotonic_ns,:marker_id))
-    FC._check_id(m,:marker_id)
-    need(m.schema=="matched342_permanent_actual_attempt_v1"&&m.execution_directory==d.output_directory&&
-        m.permit_sha256==d.execution_authority.sha256&&m.request_sha256==ref.sha256&&m.owner_pid==witness.owner_pid,
-        "permanent outside actual attempt marker differs")
-    T._int(m.created_monotonic_ns,1,typemax(Int64));controls[P._ordinary(marker)]=P._file_sha(marker)[1]
-    authority=FC.admit_execution_authority(d.execution_authority;expected_sources=Entry.source_identity(),prelaunch_admission=prelaunch)
-    meta=FC.execution_authority_metadata(authority)
-    need(meta.execution_directory==d.output_directory,"actual authority output differs")
-    input=Profile.admit_sources(d.sources;mode=:archival_assumed_completion_research)
-    FC.recheck_execution_authority(authority,input.pair);FC._check_controls(controls)
-    feature=(;member=Entry.FEATURE_CONTRACT_MEMBER,path=joinpath(Profile.REPO,Entry.FEATURE_CONTRACT_MEMBER),sha256=Entry.FEATURE_CONTRACT_SHA256)
-    loss=(;member=Entry.LOSS_CONTRACT_MEMBER,path=joinpath(Profile.REPO,Entry.LOSS_CONTRACT_MEMBER),sha256=Entry.LOSS_CONTRACT_SHA256)
-    draft=Producer.produce_initial_actual(input.admissions...,String(d.output_directory);qualification=permit.component_qualification,
-        feature_contract=feature,loss_contract=loss,qualified_head=String(permit.qualified_head),execution_authority=authority,expected_sources=Entry.source_identity())
-    # Historical permit links are checked by the independent reader after fitting;
-    # an elapsed active fitting clock is not reinterpreted as audit authority.
-    contracts=merge(FC._freeze(permit.contracts),(;audit_contract_sha256=Profile.AUDIT_SHA))
-    published=Profile.audit_and_publish(input.pair,draft,String(d.owner_directory),
-        (;component_qualification=permit.component_qualification,source_proof=d.source_proof,contracts,runtime=d.runtime);authority_ref=d.execution_authority)
-    # This is a postcondition on the same bounded owner stage, not a new fit:
-    # include the audit's observed RSS/allocation/descriptor use in its budget.
-    FC.recheck_execution_authority(authority,input.pair);FC._check_controls(controls)
-    result=Profile.identified((;schema="matched342_initial_actual_result_v1",complete=true,evidence_mode=d.evidence_mode,
-        request_sha256=ref.sha256,execution_authority_sha256=d.execution_authority.sha256,pair_id=FC.source_pair_metadata(input.pair).pair_id,
-        component=published.component,component_audit=published.component_audit,publication=published.publication,
-        scientific_qualified=false,serving_promoted=false),:result_id)
-    saved=Profile.write_json(joinpath(String(d.owner_directory),"ACTUAL_RESULT.json"),result)
-    println("MATCHED342_ACTUAL_COMPLETE ",JSON3.write((;request=ref,julia_pid=getpid(),result=saved,execution_authority_sha256=d.execution_authority.sha256)));flush(stdout)
-    nothing
+    pair=FC.bind_source_pair(admissions...;loss_contract_sha256=Entry.LOSS_CONTRACT_SHA256,
+        expected_sources=Entry.source_identity())
+    audit_directory=Audit.audit_root(String(request.audit_directory);fresh=true)
+    T._need(!Producer._overlap(audit_directory,String(request.output_directory))&&
+        !Producer._overlap(audit_directory,Entry.PACKAGE_ROOT)&&!Producer._overlap(audit_directory,ref.path),
+        "actual matched342 audit output overlaps code, input or producer output")
+    for admission in admissions, source_root in values(admission.roots)
+        T._need(!Producer._overlap(audit_directory,source_root),"actual matched342 audit output overlaps source data")
+    end
+    feature=(;member=Entry.FEATURE_CONTRACT_MEMBER,path=joinpath(Entry.PACKAGE_ROOT,Entry.FEATURE_CONTRACT_MEMBER),
+        sha256=Entry.FEATURE_CONTRACT_SHA256)
+    loss=(;member=Entry.LOSS_CONTRACT_MEMBER,path=joinpath(Entry.PACKAGE_ROOT,Entry.LOSS_CONTRACT_MEMBER),
+        sha256=Entry.LOSS_CONTRACT_SHA256)
+    started=time_ns();gc_before=Base.gc_num()
+    draft=Producer.produce_initial_actual(admissions...,String(request.output_directory);
+        feature_contract=feature,loss_contract=loss,expected_sources=Entry.source_identity())
+    metadata=Producer.draft_metadata(draft)
+    component,_=P._json(metadata.component_completion_path;fields=Producer.COMPONENT_FIELDS)
+    contracts=merge(FC._contracts(),(;audit_contract_sha256=String(request.audit_contract_sha256)))
+    audit_request=identified((;schema="matched342_initial_component_audit_request_v1",
+        evidence_mode="archival_assumed_completion_research",operation="independent_saved_state_audit_initial32",
+        component=(;path=metadata.component_completion_path,sha256=metadata.component_completion_sha256),
+        source_bindings=component.source_bindings,contracts,runtime=component.runtime,
+        drafts=Tuple((;delay_hours=index-1,root=metadata.reference_roots[index],members=component.drafts[index].members)
+            for index in 1:2),output_directory=String(request.audit_directory)),:request_id)
+    audit_input=write_json(String(request.audit_directory)*".request.json",audit_request)
+    checked=Audit.audit_component(pair,audit_input.path;request_sha256=audit_input.sha256,
+        expected_sources=Entry.source_identity(),expected_audit_contract_sha256=String(request.audit_contract_sha256))
+    audit=Audit.component_audit_metadata(checked)
+    publication=Producer.publish_initial(draft,checked;expected_audit_completion_sha256=audit.audit_completion_sha256)
+    audit_path=joinpath(audit.audit_root,"audit-completion.json")
+    reread=Audit.read_component_audit(pair,audit_path,audit.audit_completion_sha256;
+        expected_component_sha256=metadata.component_completion_sha256,expected_sources=Entry.source_identity(),
+        expected_audit_contract_sha256=String(request.audit_contract_sha256))
+    Audit.recheck_component_audit(reread)
+    FC.recheck_pair(pair);FC._check_controls(controls)
+    result=(;complete=true,evidence_mode="archival_assumed_completion_research",request_sha256=ref.sha256,
+        publication,component_audit=(;path=audit_path,sha256=audit.audit_completion_sha256),
+        observations=(;elapsed_ns=Int(time_ns()-started),allocated_bytes=Base.GC_Diff(Base.gc_num(),gc_before).allocd,
+            peak_rss_bytes=Sys.maxrss(),threads=Threads.nthreads(),blas_threads=BLAS.get_num_threads()),
+        scientific_qualified=false,serving_promoted=false)
+    println("MATCHED342_ACTUAL_COMPLETE ",JSON3.write(result));flush(stdout)
+    result
 end
 end
 if abspath(PROGRAM_FILE)==abspath(@__FILE__)
-    length(ARGS)==3||error("actual initial32 requires request path, SHA and on-launch bridge path")
+    length(ARGS)==2||error("usage: run_matched342_initial_actual.jl REQUEST_JSON REQUEST_SHA256")
     Matched342InitialActual.main(ARGS...)
 end

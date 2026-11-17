@@ -37,34 +37,34 @@ duration artifact has its own completion contract; the public duration loader
 rejects this embedded directory. B bundle readers reconstruct and validate the
 duration law and verify its identity directly.
 
-Saved provenance has exactly 22 fields. Its expected values come from independently
-admitted input, reference and execution authority, the model, and the SHA-bound
-replayed basis. Both bundle save and load compare every value. An export context
-without the separate expected-provenance scope supports fit-input export only.
-Initial publication records exactly two hazard fits, 36 gain fits, zero final or
-calibration fits, and false development, scientific-verdict and serving flags.
+Saved provenance binds independently admitted input and reference identities,
+the model, and the SHA-bound replayed basis. Both bundle save and load compare
+every scientific value. An export context without the separate expected-provenance
+scope supports fit-input export only. Initial publication records exactly two
+hazard fits, 36 gain fits, zero final or calibration fits, and false development,
+scientific-verdict and serving flags.
 
-Matched-reference admission requires the exact 22-member prediction, eight-setting
-tuning, grid, independent-audit and qualification tree. Each lead uses its full raw
-cohort. The reader verifies every candidate column, recomputes maintained RMSE,
-MAE and bias, checks both stored and recomputed first strict minima, and compares
-the selected columns bitwise. The original-reference diagnostic uses a separate
-four-member adapter and remains L0 only. A matched GBM implementation and its
-independent qualification are separate prerequisites.
+Matched-reference admission checks the complete prediction, eight-setting tuning,
+grid and independent-audit member tree. Each lead uses its full raw cohort. The
+reader verifies every candidate column, recomputes maintained RMSE, MAE and bias,
+checks both stored and recomputed first strict minima, and compares the selected
+columns bitwise. The original-reference diagnostic has its own data-only adapter
+and remains L0 only.
 
-Reference-component and point-execution software qualification use distinct,
-versioned private wrappers. Each wrapper binds its own externally supplied head,
-complete source map and whole-file SHA, plus raw gate, log, harness and source-proof
-identity links. Root-issued software wrappers require independent full-gate review;
-synthetic parser fixtures grant no actual execution authority. Qualification
-counters retain canonical unsigned integer tokens. Existing release qualification
-receipts require their declared format rather than implicit reinterpretation.
+Ordinary actual fitting uses admitted source files, external artifact pins and
+the current numerical source identity. Historical qualification fields and files
+remain readable as hashed provenance; readers do not load grants or execution
+permits. Runtime, allocation, process-lifetime peak RSS and thread observations
+are reported during execution. The matched342 actual entry fits all four
+delay/lead cells and eight recipes per cell, independently audits the saved
+models and predictions, then publishes and reads back the reference artifacts.
+See `tools/actual_b_chain/README.md` for the request format and command.
 
 All input and artifact readers enforce bounded ordinary paths, closed field sets,
 fixed binary records, source ownership and entry/exit checks. The initial stage
-leaves primary joint-delay selection, later refits and distribution calibration to
-their separately admitted stages. Actual execution additionally requires a new
-qualified point-stage permit.
+leaves primary joint-delay selection, later refits and distribution calibration
+to their respective scientific stages. Package tests and numerical examples
+provide software verification; predictive claims require separate evaluation.
 
 Run `examples/b_point_training_synthetic.jl` for a generated 1900-start,
 source-to-36-fit-to-bundle-to-prediction example with independent readback. It uses

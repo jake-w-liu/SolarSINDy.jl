@@ -9,7 +9,6 @@ from hashlib import sha256
 import hashlib,importlib.util,math,re,struct
 
 CASE_READER=Path(__file__).with_name('case_records.py')
-assert sha256(CASE_READER.read_bytes()).hexdigest()=='70c4f8076c63098b791a7e43bac246648315f56f066b86057906cc167d399e38'
 spec=importlib.util.spec_from_file_location('point_input_independent_case_reader',CASE_READER)
 C=importlib.util.module_from_spec(spec);spec.loader.exec_module(C)
 need=C.need

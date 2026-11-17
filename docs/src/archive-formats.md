@@ -90,10 +90,9 @@ request shape, paths, stream membership and bounded minute intervals before
 reading dataset bytes. Ground-only requests reject wind descriptors. Generated
 requests admit only generated fixture files under their own input directory.
 
-Actual-cache execution also requires four caller-supplied path/hash pairs:
-authorization, frozen source-admission plan, exact package source proof and
-completed software qualification. The loaded worker must occur in that proof.
-Recorded paths never launch code or discover additional datasets. Historical
+Actual-cache execution uses the same bounded, explicitly pinned source request.
+Recorded paths never launch code or discover additional datasets. No CI,
+software-qualification or execution-permit files are required. Historical
 provider receipt availability remains false for this archival-cache route.
 
 Each fresh snapshot preserves original text,48-byte raw records and selected
@@ -105,7 +104,6 @@ source qualification, eligible-case count, fit or forecasting verdict.
 
 ```@docs
 SolarSINDy.ArchiveCatalogSourceJob
-SolarSINDy.ArchiveCatalogSourceJob.Authority
 SolarSINDy.ArchiveCatalogSourceJob.reconstruct
 ```
 
@@ -150,12 +148,11 @@ then reconstructs the catalogs from preserved original text. Recorded cache
 paths are never opened. Feature and label members have at most8192rows; the
 existing8MiB/member,1GiB/artifact and1024-member limits remain in force.
 
-Generated requests accept generated snapshots and no actual authority. Archival
-requests require a distinct feature-only grant bound to the exact request,
-locked schedule plan, eight-job source agreement, loaded package inventory,
-complete software qualification and a predeclared floating comparison policy.
-A source-reconstruction grant does not authorize features. Neither grant
-authorizes model fitting or historical provider receipt claims.
+Generated requests accept generated snapshots. Archival requests bind their
+request and source manifest/completion pins in `archive_case_source_binding_v2`
+metadata. Both modes retain explicit station, schedule and source declarations.
+Feature publication performs no model fit and makes no historical provider
+receipt claim.
 
 Publication uses fresh exclusive files and writes its completion marker last.
 The reader recomputes and compares every feature and label byte before returning
@@ -167,7 +164,6 @@ SolarSINDy.ArchiveCatalogSnapshotFilesystem
 SolarSINDy.ArchiveCatalogCaseAuthority
 SolarSINDy.ArchiveCatalogSnapshotValues
 SolarSINDy.ArchiveCatalogCaseJob
-SolarSINDy.ArchiveCatalogCaseJob.Authority
 SolarSINDy.ArchiveCatalogCaseJob.VerifiedCases
 SolarSINDy.ArchiveCatalogCaseJob.publish
 SolarSINDy.ArchiveCatalogCaseJob.read_verified
@@ -189,7 +185,7 @@ and integral bounds with integers, retaining the data-only metadata contract.
 The criterion has independent Decimal and MPFR regression checks. It is not a
 universal floating-point proof, a source-provenance certificate, or permission
 to use an unverified artifact for fitting. The native artifact reader and outer
-source/grant bindings remain required. Comparison results contain diagnostics
+source and artifact bindings remain required. Comparison results contain diagnostics
 and exclusion counts, with false authority, provenance and fit flags.
 
 ```@docs
@@ -244,27 +240,20 @@ SolarSINDy.ArchivePointNumericTrees.decode_model
 
 ## Reverification across package versions
 
-A producer qualification binds the complete source inventory that created its
-sealed case artifacts. The ordinary case reader requires that exact inventory
-to be loaded. A newer package therefore needs a separately qualified read
-admission to reverify those existing artifacts.
+`ArchiveCatalogCaseReader` accepts outside pins for the original request,
+manifest and completion marker. It reconstructs the catalogs from preserved
+source text and recomputes every feature and label byte before returning
+`ReverifiedCases`. Changed declarations, source bytes, membership or numerical
+payloads fail verification.
 
-`ArchiveCatalogCaseReader` preserves the original producer authority in the
-artifact. Its independent read-only grant binds the original request, manifest,
-completion marker and producer evidence together with the current reader's
-qualified source inventory. The reader recomputes every feature and label byte
-from the original sealed source snapshots. Any drift fails before a verified
-capsule is returned. The capsule owns a canonical admission receipt recording
-both software identities. It authorizes neither new case generation nor fitting.
-
-Generated rereads accept no archival authorities. Actual rereads require a
-genuine producer qualification and a distinct genuine qualification of the
-loaded reader, including the complete source inventory. These software checks
-do not establish historical provider receipt times or forecast accuracy.
+Actual rereads record the request and artifact identities in
+`archive_catalog_case_read_admission_v2`. Historical v1 authority metadata stays
+in the original artifact as provenance; the reader does not open its certificate
+paths. Generated and archival evidence modes remain distinct. Neither a reread
+nor its receipt establishes historical provider receipt times or forecast skill.
 
 ```@docs
 SolarSINDy.ArchiveCatalogCaseReader
-SolarSINDy.ArchiveCatalogCaseReader.ReaderAuthority
 SolarSINDy.ArchiveCatalogCaseReader.ReverifiedCases
 SolarSINDy.ArchiveCatalogCaseReader.read_reverified
 SolarSINDy.ArchiveCatalogCaseReader.admission_bytes
@@ -300,26 +289,31 @@ source closure. It supports the retained baseline families and the separate
 CPU EvoTrees comparator. Every fitted numeric value must reproduce all native
 training predictions exactly in its producing runtime before publication.
 
-Generated cases consume no archival permission. Archival fits require a
-reverified case capsule and a distinct fixed-recipe fit grant, tied to the
-complete genuine software qualification. Training issues and label readiness
-remain within a strict 2017 split. Each grant names its execution directory;
-an exclusive attempt marker consumes it before fitting. Failed attempts remain
-recorded and cannot silently retry. The library is research infrastructure:
-none of these checks establish historical provider receipt times or skill.
+Archival fits require reverified actual cases and an independently supplied
+`ExpectedFit` binding. `prepare_expected` derives that binding from the exact
+data, recipe, numerical source and library identities. Training issues and label
+readiness remain within a strict 2017 split. The resulting
+`archive_point_fit_binding_v2` contains data identities, with no execution permit
+or prior resource-profile certificate.
+
+Current archival fit receipts and candidate CLI results record elapsed time, allocation,
+thread counts, available physical memory and `peak_rss_bytes`. The RSS value is
+the Julia process lifetime peak observed at recording time, not a per-fit memory
+increment. Receipt decoding accepts earlier records without that observation,
+subject to the existing source and model identity checks; no missing measurement
+is fabricated. These observations are not execution gates.
 
 Publication writes five ordinary files with the completion marker last. Reload
 requires outside context, recipe, source, library, model, receipt and completion
 pins; it validates the complete fileset and reconstructs owned numeric values.
-A published model grants no permission to refit. The loaded numerical source
-closure must match the fit's expected closure.
+The loaded numerical source closure must match the fit's expected closure.
+Reading a fitted model does not perform a new fit.
 
 ```@docs
 SolarSINDy.ArchiveSourceBoundPointFit
 SolarSINDy.ArchiveSourceBoundPointFit.BoostRecipe
 SolarSINDy.ArchiveSourceBoundPointFit.ExpectedFit
 SolarSINDy.ArchiveSourceBoundPointFit.BoundFit
-SolarSINDy.ArchiveSourceBoundPointFit.FitAuthority
 SolarSINDy.ArchiveSourceBoundPointFit.prepare_expected
 SolarSINDy.ArchiveSourceBoundPointFit.fit_generated
 SolarSINDy.ArchiveSourceBoundPointFit.fit_archival
@@ -334,10 +328,10 @@ The offline `research/dbdt_completed_source/source_bound_calibration.jl` module
 provides a calibration bridge for immutable source-bound ridge, histogram boost,
 bootstrap forest and CPU EvoTrees point models. Include that file explicitly
 after loading SolarSINDy. `prepare_expected` and `calibrate_generated` operate on
-generated verified cases. `calibrate_archival` instead requires reverified
-archival cases, a distinct score-only `CalibrationAuthority`, and the original
-point-fit producer evidence. A case-read or point-fit permit cannot authorize a
-calibration job.
+generated verified cases. For actual data, `prepare_expected` and
+`calibrate_archival` accept reverified archival cases and the bound point model.
+They check the exact calibration input/context pins and record an
+`archive_calibration_binding_v2`, without CI certificates or separate permits.
 
 `publish_calibration` writes bounded chronological score shards, stable rank
 indices and canonical metadata to a fresh directory. `read_calibration` requires

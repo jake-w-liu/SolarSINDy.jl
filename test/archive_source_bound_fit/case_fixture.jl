@@ -1,4 +1,4 @@
-function make_cases(root,role,layout;profile=:pulse)
+function make_cases(root,role,layout;profile=:pulse,epoch=START,actual=false)
     input=joinpath(root,"inputs");mkdir(input);descriptors=Any[]
     for station in ("CMO","FRD")
         lines=[" Format                 IAGA-2002 |"," Source of Data         GENERATED |",
@@ -18,32 +18,32 @@ function make_cases(root,role,layout;profile=:pulse)
             else
                 throw(ArgumentError("generated calibration profile"))
             end
-            push!(lines,"$(Dates.format(START+Minute(i),dateformat"yyyy-mm-dd HH:MM:SS.sss")) 001 $x $y 0 0")
+            push!(lines,"$(Dates.format(epoch+Minute(i),dateformat"yyyy-mm-dd HH:MM:SS.sss")) 001 $x $y 0 0")
         end
         name="generated-"*station*".txt";path=joinpath(input,name)
         bytes=Vector{UInt8}(codeunits(join(lines,"\n")*"\n"));R._exclusive_write(path,bytes)
         push!(descriptors,Dict("logical_id"=>name,"path"=>path,"kind"=>"ground","station"=>station,
-            "stream_labels"=>[station],"product"=>"quasi-definitive","start_inclusive"=>clock(START),
-            "stop"=>clock(START+Minute(180)),"stop_inclusive"=>true,"bytes"=>length(bytes),"sha256"=>digest(bytes),
+            "stream_labels"=>[station],"product"=>"quasi-definitive","start_inclusive"=>clock(epoch),
+            "stop"=>clock(epoch+Minute(180)),"stop_inclusive"=>true,"bytes"=>length(bytes),"sha256"=>digest(bytes),
             "role"=>"generated_fixture","provenance"=>"generated_fixture"))
     end
     if layout=="mixed"
-        bytes=Vector{UInt8}(codeunits(join([clock(START+Minute(i))*",1,-2,400,5" for i in 0:179],"\n")*"\n"))
+        bytes=Vector{UInt8}(codeunits(join([clock(epoch+Minute(i))*",1,-2,400,5" for i in 0:179],"\n")*"\n"))
         name="generated-wind.csv";path=joinpath(input,name);R._exclusive_write(path,bytes)
         push!(descriptors,Dict("logical_id"=>name,"path"=>path,"kind"=>"wind","station"=>nothing,
-            "stream_labels"=>["CMO","FRD"],"product"=>"OMNI_HRO_1MIN","start_inclusive"=>clock(START),
-            "stop"=>clock(START+Minute(180)),"stop_inclusive"=>false,"bytes"=>length(bytes),"sha256"=>digest(bytes),
+            "stream_labels"=>["CMO","FRD"],"product"=>"OMNI_HRO_1MIN","start_inclusive"=>clock(epoch),
+            "stop"=>clock(epoch+Minute(180)),"stop_inclusive"=>false,"bytes"=>length(bytes),"sha256"=>digest(bytes),
             "role"=>"generated_fixture","provenance"=>"generated_fixture"))
     end
-    req=Dict("schema"=>"archive_catalog_audit_request_v1","evidence_mode"=>"generated","layout"=>layout,
+    req=Dict("schema"=>"archive_catalog_audit_request_v1","evidence_mode"=>(actual ? "actual_archival_cache" : "generated"),"layout"=>layout,
         "role"=>role,"runtime"=>string(VERSION),"data_root"=>input,"inputs"=>descriptors)
     path=joinpath(root,"source-request.json");R._exclusive_write(path,R.canonical_bytes(req))
     source=joinpath(root,"source");J.reconstruct(path,source)
-    request=Dict("schema"=>"generated_catalog_case_request_v1","evidence_mode"=>"generated","layout"=>layout,
+    request=Dict("schema"=>(actual ? "archive_catalog_case_request_v1" : "generated_catalog_case_request_v1"),"evidence_mode"=>(actual ? "actual_archival_cache" : "generated"),"layout"=>layout,
         "role"=>role,"runtime"=>string(VERSION),"source"=>Dict("directory"=>source,
             "manifest_sha256"=>digest(read(joinpath(source,"manifest.json"))),"complete_sha256"=>digest(read(joinpath(source,"COMPLETE.json")))),
-        "tables"=>[Dict("id"=>station*"-generated","station"=>station,"start_inclusive"=>clock(START),
-            "stop_exclusive"=>clock(START+Minute(181)),"label_asof"=>clock(START+Minute(211))) for station in ("CMO","FRD")])
+        "tables"=>[Dict("id"=>station*"-generated","station"=>station,"start_inclusive"=>clock(epoch),
+            "stop_exclusive"=>clock(epoch+Minute(181)),"label_asof"=>clock(epoch+Minute(211))) for station in ("CMO","FRD")])
     path=joinpath(root,"case-request.json");R._exclusive_write(path,R.canonical_bytes(request));rp=digest(read(path))
     output=joinpath(root,"cases");Q.publish(path,output;request_sha256=rp)
     Q.read_verified(path,output;request_sha256=rp,manifest_sha256=digest(read(joinpath(output,"manifest.json"))),complete_sha256=digest(read(joinpath(output,"COMPLETE.json"))))

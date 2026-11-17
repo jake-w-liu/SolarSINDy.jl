@@ -67,7 +67,9 @@ function _check_capsule(value::BoundFit)
     fields=Set(("schema","complete","family","context_sha256","recipe_sha256","source_sha256","library_sha256",
         "input_sha256","model_sha256","training_rows","all_training_native_predictions_exact",
         "actual_source_access","actual_fit_performed","software_qualification"))
-    actual && push!(fields,"authorization");J._object(receipt,fields)
+    actual && push!(fields,"authorization")
+    actual && haskey(receipt,"runtime_observations") && push!(fields,"runtime_observations")
+    J._object(receipt,fields)
     need(receipt["schema"]=="source_bound_point_fit_receipt_v1" && receipt["complete"]===true &&
         receipt["family"]==family(recipe) && receipt["context_sha256"]==expected.context_sha256 &&
         receipt["recipe_sha256"]==expected.recipe_sha256 && receipt["source_sha256"]==expected.source_sha256 &&
@@ -77,16 +79,31 @@ function _check_capsule(value::BoundFit)
         receipt["actual_fit_performed"]===actual && receipt["software_qualification"]===false,"fit receipt binding differs")
     if actual
         authorization=receipt["authorization"]
-        J._object(authorization,Set(("schema","operation","head","grant_sha256","source_proof_sha256","qualification_sha256",
-            "case_read_admission_sha256","input_sha256","actual_model_fit_authorized","expected_model_fits",
-            "dataset_discovery","provider_receipts_available","fit_attempt_sha256")))
-        need(authorization["schema"]=="archive_point_fit_admission_v1" && authorization["operation"]=="fixed_recipe_2017_point_fit_only" &&
-            authorization["actual_model_fit_authorized"]===true && isint(authorization["expected_model_fits"]) &&
-            authorization["expected_model_fits"]==1 && authorization["dataset_discovery"]===false &&
-            authorization["provider_receipts_available"]===false && authorization["input_sha256"]==context["input_sha256"] &&
-            authorization["case_read_admission_sha256"]==J._sha(context["case_read_admission_sha256"]),"published archival fit admission differs")
-        need(authorization["head"] isa String && occursin(r"\A[0-9a-f]{40}\z",authorization["head"]),"published fit source head")
-        for key in ("grant_sha256","source_proof_sha256","qualification_sha256","fit_attempt_sha256");J._sha(authorization[key]);end
+        need(authorization isa AbstractDict && authorization["input_sha256"]==context["input_sha256"] &&
+            authorization["case_read_admission_sha256"]==J._sha(context["case_read_admission_sha256"]),
+            "published archival fit input binding differs")
+        if authorization["schema"]=="archive_point_fit_binding_v2"
+            J._object(authorization,Set(("schema","case_read_admission_sha256","input_sha256","context_sha256",
+                "recipe_sha256","source_sha256","library_sha256")))
+            need(all(authorization[k]==getproperty(expected,Symbol(k)) for k in
+                ("context_sha256","recipe_sha256","source_sha256","library_sha256")),"published archival fit recipe/source binding differs")
+        else
+            need(authorization["schema"]=="archive_point_fit_admission_v1" && authorization["actual_model_fit_authorized"]===true &&
+                isint(authorization["expected_model_fits"]) && authorization["expected_model_fits"]==1,"published fit binding schema differs")
+        end
+        if haskey(receipt,"runtime_observations")
+            observed=receipt["runtime_observations"]
+            need(observed isa AbstractDict,"fit runtime observations differ")
+            observed_fields=Set(("fit_seconds","allocated_bytes","julia_threads","blas_threads","available_physical_bytes"))
+            haskey(observed,"peak_rss_bytes") && push!(observed_fields,"peak_rss_bytes")
+            J._object(observed,observed_fields)
+            need(observed["fit_seconds"] isa Real && !(observed["fit_seconds"] isa Bool) &&
+                isfinite(observed["fit_seconds"]) && observed["fit_seconds"]>=0 &&
+                all(k->isint(observed[k])&&observed[k]>=0,("allocated_bytes","available_physical_bytes")) &&
+                all(k->isint(observed[k])&&observed[k]>=1,("julia_threads","blas_threads")),"fit runtime observations differ")
+            haskey(observed,"peak_rss_bytes") && need(isint(observed["peak_rss_bytes"]) && observed["peak_rss_bytes"]>=0,
+                "fit process peak RSS observation differs")
+        end
     end
     need(source_identity()==expected.source_sha256,"fit prediction loaded source differs")
     (;context_bytes,recipe_bytes,model_bytes=encoded,receipt_bytes,context,receipt,actual)

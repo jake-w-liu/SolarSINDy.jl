@@ -2,15 +2,10 @@ function core_checks()
     oracle=JSON3.read(read(joinpath(@__DIR__,"independent_literals_v1.json")))
     @test T._sha(read(joinpath(@__DIR__,"independent_literals_v1.json")))=="736e8e052c513647dd1c712e447fb801fb4d452381e1dfa7d9ec3ebbabe74b58"
     @test length(T.settings())==36
-    @test length(P.PROVENANCE_FIELDS)==22
     @test all(s.index==i&&s.beta==(isodd(i) ? 5 : 20) for (i,s) in enumerate(T.settings()))
     for value in (true,false,1.,"1",-1,500001);@test_throws ArgumentError T._int(value,0,500000);end
     @test T._int(500000,0,500000)==500000
     for name in ("../x","./x","x/../y","x//y","/x","C:/x","x\\y");@test_throws ArgumentError P._member(pwd(),name);end
-    @test P._qualification_counter(collect(codeunits("{\"harness\":{\"counts\":{\"FAIL\":0}}}")))
-    for token in ("0.0","0e0","-0","false","true","\"0\"")
-        @test_throws ArgumentError P._qualification_counter(collect(codeunits("{\"harness\":{\"counts\":{\"FAIL\":"*token*"}}}")))
-    end
     issue=T._clock(string(oracle.clock.latest_l0_training_issue_ms));ctx=repeat("6",64)
     design=T.DesignValues(1,issue,-45.,(-42.,-63.),((1.,0.),(0.,1.)),true,true,:model,:available,repeat("1",64),repeat("2",64),repeat("3",64),repeat("4",64),repeat("5",64),ctx)
     row=T.BTrainingRow(T.BTrainingDesignRow(design),(-40.,-60.))

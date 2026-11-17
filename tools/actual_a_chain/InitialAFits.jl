@@ -24,7 +24,7 @@ function code_identity()
     own=P.code_identity()
     need(I.sha(@__FILE__)==LOADED_SOURCE_SHA256,"loaded initial-A executor changed")
     own["tools/actual_a_chain/InitialAFits.jl"]=LOADED_SOURCE_SHA256
-    for name in ("Project.toml","Manifest.toml")
+    for name in ("Project.toml",)
         own[name]=I.sha(joinpath(I.PROJECT,name))
     end
     own

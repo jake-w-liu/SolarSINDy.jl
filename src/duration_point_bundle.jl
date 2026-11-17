@@ -122,7 +122,7 @@ function load_point_bundle(directory;expected_manifest_sha256,expected_sources,e
     _need(c.schema=="b_point_state_closure_v1"&&c.a_checkpoint_type=="A.StreamCheckpoint"&&c.wind_checkpoint_type=="DurationCurrentStateStream.CurrentStateCheckpoint","B state type differs")
     a=_decode_a(c.a_checkpoint);wind=_decode_wind(c.wind_checkpoint)
     _need(_bytes(_closure_data(model,a,wind,sources))==closurebody,"B closure metadata/identity differs")
-    provenance,provenancebody=_json(_member(root,"provenance.json");fields=PROVENANCE_FIELDS)
+    provenance,provenancebody=_json(_member(root,"provenance.json");fields=PROVENANCE_FIELDS,legacy_fields=(:actual_execution_permit_sha256,))
     _check_provenance(provenance,model,expected_binding)
     _check_closures(model,a,wind,expected_binding)
     for (name,saved) in (("manifest.json",body),("model.json",modelbody),("checkpoints.json",closurebody),("provenance.json",provenancebody));_need(_bound(_member(root,name))==saved,"B bundle changed during readback");end

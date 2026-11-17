@@ -42,10 +42,10 @@ it is not an OS-enforced memory cap. This authoring note supplies no native run.
 
 The full-file pins form a dependency chain: the bootstrap owner pins the memory
 helper, which itself pins the native owner. A helper-owner pin edit therefore
-also changes the memory helper's full-file hash. The package-invoked controls in
-`test/cme_gsm_bootstrap/` check these transitive references and exercise the real
-source preflight on bounded clean generated repositories, including the original
-stale-memory-pin rejection. They perform no Julia or observational work.
+also changes the memory helper's full-file hash. The package suite directly
+exercises the numerical bootstrap index oracles. The optional package adapters
+and their transitive software-certificate controls have been retired; standalone
+native generation retains its independent RNG and artifact corruption checks.
 
 The original preparation workflow was an inert `.yml.template`; the integrated
 workflow is now active on the declared repository events. Its four jobs are Linux

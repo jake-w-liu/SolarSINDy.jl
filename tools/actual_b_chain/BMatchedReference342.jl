@@ -13,11 +13,7 @@ const LOSS_CONTRACT_MEMBER="tools/actual_b_chain/contracts/matched342_initial_lo
 const LOSS_CONTRACT_SHA256="f24c0dd5b9ef4baf58f0595056d5b5a30ab21ff5c278126b5ebefaa9435bc73c"
 # A fixed explicit new closure. This does not alter the legacy36 source set.
 const COMPONENT_SOURCE_FILES=(
-    "Manifest.toml",
     "Project.toml",
-    "research/dbdt_completed_source/candidate_native_owner.py",
-    "research/dbdt_completed_source/native_stage.py",
-    "research/dbdt_completed_source/run_candidate_stage.py",
     "src/SolarSINDy.jl",
     "src/alarm.jl",
     "src/analog.jl",
@@ -135,20 +131,18 @@ const COMPONENT_SOURCE_FILES=(
     "src/superlearner_serving.jl",
     "src/utils.jl",
     "tools/actual_b_chain/ActualBChain.jl",
-    "tools/actual_b_chain/BInitialNativePermitV2.jl",
     "tools/actual_b_chain/BInitialPointFits.jl",
+    "tools/actual_b_chain/run_initial_l0_native.jl",
     "tools/actual_b_chain/BInputs.jl",
     "tools/actual_b_chain/BMatched342Core.jl",
     "tools/actual_b_chain/BMatchedInitialProducer.jl",
+    "tools/actual_b_chain/run_matched342_initial_actual.jl",
     "tools/actual_b_chain/BMatchedReference342.jl",
     "tools/actual_b_chain/BMatchedReferenceAudit342.jl",
     "tools/actual_b_chain/BReferenceAdmission.jl",
     "tools/actual_b_chain/BSelection.jl",
     "tools/actual_b_chain/contracts/matched342_features_v2.md",
     "tools/actual_b_chain/contracts/matched342_initial_loss_v1.md",
-    "tools/actual_b_chain/run_initial_l0_native.jl",
-    "tools/actual_b_chain/run_initial_l0_native.py",
-    "tools/run_canonical_harness.py",
 )
 T._need(realpath(pkgdir(SolarSINDy))==PACKAGE_ROOT,"matched342 package/code checkout differs")
 for name in COMPONENT_SOURCE_FILES

@@ -18,13 +18,13 @@ const V=SolarSINDy.ArchiveCatalogCases
 const S=SolarSINDy.CompletedSelectionPrimitives
 const M=SolarSINDy.ArchiveSelectedPointBindings
 const R=SolarSINDy.CompletedSourceDBDT.CompletedRefitArtifacts
-export CandidateSplit,InputPreparationAuthority,CandidateValidationAuthority,IndependentReadAuthority,
+export CandidateSplit,
     prepare_candidate_fit_input_generated,prepare_candidate_fit_input_archival,read_fit_input,
     expected_candidate_fit,fit_candidate_generated,fit_candidate_archival,
     validate_candidate_generated,validate_candidate_archival,read_validation,
     verify_candidate_validation_generated,verify_candidate_validation_archival,
     choose_verified_R2,refit_selected_generated,refit_selected_archival,
-    prepare_selected_refit_input_archival,SelectedRefitAuthority,NativeEvidence,FitPublication,ValidationPins,
+    prepare_selected_refit_input_archival,FitPublication,ValidationPins,
     read_completed_candidate,publish_generated_verification,read_completed_generated_candidate
 need(ok,message)=ok || throw(ArgumentError(message))
 digest(bytes)=bytes2hex(sha256(bytes))
@@ -159,9 +159,9 @@ function prepare_candidate_fit_input_generated(value::Q.VerifiedCases,index,id,s
     _prepare_input(value,index,id,split,directory;attempt_bytes=attempt.bytes,closecheck=()->_close_generated(attempt))
 end
 function prepare_candidate_fit_input_archival(value::B.ReverifiedCases,index,id,split::CandidateSplit,directory;authority=nothing)
-    auth,d,attempt=_admit_and_spend(value,index,id,split,directory,authority,:input)
+    auth,d,attempt=_start_operation(value,index,id,split,directory,authority,:input)
     _prepare_input(value.cases,index,id,split,directory;authorization=auth,actual=true,admission=d["case_read_admission_sha256"],attempt_bytes=attempt.bytes,
-        closecheck=()->_close_admission(value,index,id,split,directory,authority,:input,d,attempt))
+        closecheck=()->_close_operation(value,index,id,split,directory,authority,:input,d,attempt))
 end
 function expected_candidate_fit(input)
     _check_input(input);d=input.descriptor;s=input.summary;actual=d["actual_source_access"]
@@ -193,25 +193,10 @@ end
 function fit_candidate_archival(value::B.ReverifiedCases,index,id,split::CandidateSplit,input;directory,authority=nothing)
     _assert_fresh_destination(directory)
     _locked_split(split,:input);admission=digest(B.admission_bytes(value))
-    need(input.descriptor["selection_sha256"]===nothing,"selected archival refit requires its distinct entry/permit")
+    need(input.descriptor["selection_sha256"]===nothing,"selected archival refit requires its distinct entry")
     expected=_match_input(value.cases,index,id,split,input;actual=true,admission)
-    need(authority isa F.FitAuthority,"candidate requires independently supplied original F fit grant")
-    # Original F admission is metadata-only. Spend this wrapper's own producer
-    # attempt before entering F's first of three target preparations.
-    F._admit_archival(value,index,recipe_for(id),expected,split.start,split.stop,split.asof,authority)
-    grant=A._pinned(authority.grant_path,authority.grant_sha256;canonical=true,limit=131072)
-    _whole_qualification(authority,grant)
-    execution=realpath(dirname(authority.grant_path))
-    need(Sys.free_memory()>=8589934592 && Base.Filesystem.diskstat(execution).available>=17179869184,
-        "candidate fit current native memory/disk admission")
-    need(!ispath(joinpath(execution,"POINT_FIT_ATTEMPT.json")) && !islink(joinpath(execution,"POINT_FIT_ATTEMPT.json")),"original point fit permit already spent")
-    attempt=joinpath(execution,"CANDIDATE_POINT_FIT_ATTEMPT.json")
-    bytes=canonical(Dict("schema"=>"candidate_point_fit_attempt_v1","grant_sha256"=>authority.grant_sha256,
-        "input_descriptor_sha256"=>input.pins.descriptor_sha256,"context_sha256"=>expected.context_sha256,
-        "candidate_id"=>String(id),"started_utc"=>F.clock(now(UTC)));limit=16384)
-    R._exclusive_write(attempt,bytes);started=time_ns()
-    result=F.fit_archival(value,index,recipe_for(id),expected;start=split.start,stop=split.stop,asof=split.asof,authority)
-    need((time_ns()-started)/1e9<=7200 && R.bounded_read(attempt;limit=16384)==bytes,"candidate producer attempt/time changed")
+    need(authority===nothing,"execution certificates are not accepted; supply expected fit and input pins")
+    result=F.fit_archival(value,index,recipe_for(id),expected;start=split.start,stop=split.stop,asof=split.asof)
     publication=F.publish_fit(result.capsule,directory)
     point=F.read_published(directory;expected,model_sha256=publication.model_sha256,receipt_sha256=publication.receipt_sha256,complete_sha256=publication.complete_sha256)
     FitPublication(point,String(directory),publication)
@@ -246,9 +231,9 @@ function validate_candidate_generated(value::Q.VerifiedCases,index,id,split::Can
 end
 function validate_candidate_archival(value::B.ReverifiedCases,index,id,split::CandidateSplit,point::F.BoundFit,directory;
                                       authority=nothing,producer=nothing,native=nothing)
-    auth,d,attempt=_admit_and_spend(value,index,id,split,directory,authority,:validation;point,producer,native)
+    auth,d,attempt=_start_operation(value,index,id,split,directory,authority,:validation;point,producer,native)
     _validate(value.cases,index,id,split,point,directory;authorization=auth,actual=true,admission=d["case_read_admission_sha256"],attempt_bytes=attempt.bytes,
-        closecheck=()->_close_admission(value,index,id,split,directory,authority,:validation,d,attempt;point,producer,native))
+        closecheck=()->_close_operation(value,index,id,split,directory,authority,:validation,d,attempt;point,producer,native))
 end
 include("candidate_validation_authority.jl")
 include("candidate_validation_codec.jl")

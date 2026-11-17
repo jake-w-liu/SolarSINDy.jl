@@ -36,16 +36,6 @@ function poison_cases(N,value;index=1,role=nothing,request_pin=nothing,manifest_
         complete_pin===nothing ? value.complete_sha256 : complete_pin,actual,false)
     (;cases,feature_reads=f,target_reads=l)
 end
-function fake_actual_read(N,cases)
-    pin="a"^64
-    receipt=Dict("schema"=>"archive_catalog_case_read_admission_v1","evidence_mode"=>"actual_archival_cache",
-        "request_sha256"=>cases.request_sha256,"artifact_manifest_sha256"=>cases.manifest_sha256,"artifact_complete_sha256"=>cases.complete_sha256,
-        "producer_head"=>"1"^40,"producer_grant_sha256"=>pin,"producer_source_proof_sha256"=>pin,"producer_qualification_sha256"=>pin,
-        "reader_head"=>"1"^40,"reader_grant_sha256"=>pin,"reader_source_proof_sha256"=>pin,"reader_qualification_sha256"=>pin,
-        "all_artifact_bytes_recomputed"=>true,"new_case_generation_authorized"=>false,"actual_model_fit_authorized"=>false,
-        "provider_receipts_available"=>false,"actual_fits"=>0)
-    N.B.ReverifiedCases(cases,String(N.canonical(receipt)),N.B._ReadToken())
-end
 function run_authority_controls(N,result,root)
     @testset "Prework freshness and station-specific R2 refit lineage" begin
         station=result.stations[1];selection=station.decision;family=:ridge
@@ -63,31 +53,6 @@ function run_authority_controls(N,result,root)
         @test_throws ArgumentError N.validate_candidate_generated(p.cases,1,winner,result.validation,station.fits[1].point,existing)
         @test_throws ArgumentError N.fit_candidate_generated(p.cases,1,winner,result.train,input.input;directory=existing)
         @test p.feature_reads[]==p.target_reads[]==0 && isempty(readdir(existing))
-    end
-    @testset "Distinct actual operations fail closed before poisoned sources" begin
-        p=poison_cases(N,result.cases;actual=true);read=fake_actual_read(N,p.cases);id="ridge-0.01"
-        training=N.CandidateSplit(DateTime(2017),DateTime(2017,7,1),DateTime(2018))
-        validation=N.CandidateSplit(DateTime(2017,7,1),DateTime(2017,10,1),DateTime(2018))
-        absent=joinpath(root,"absent-native-qualification");pin="a"^64
-        bogus=N.InputPreparationAuthority(absent,pin,absent,pin,absent,pin)
-        wrong=N.CandidateValidationAuthority(absent,pin,absent,pin,absent,pin)
-        for authority in (nothing,wrong)
-            destination=joinpath(root,authority===nothing ? "missing-input-permit" : "wrong-operation-permit")
-            @test_throws ArgumentError N.prepare_candidate_fit_input_archival(read,1,id,training,destination;authority)
-            @test !ispath(destination)
-        end
-        existing=joinpath(root,"actual-existing");mkdir(existing)
-        @test_throws ArgumentError N.prepare_candidate_fit_input_archival(read,1,id,training,existing;authority=bogus)
-        @test isempty(readdir(existing))
-        @test p.feature_reads[]==p.target_reads[]==0
-        @test !ispath(joinpath(root,"CANDIDATE_FIT_INPUT_ATTEMPT.json")) && !ispath(absent)
-        # A generated result cannot be reclassified as producer-checked actual
-        # evidence or used to consume any actual source/refit permission.
-        @test_throws ArgumentError N.prepare_selected_refit_input_archival(result.stations[1].decision,read,1,:ridge,
-            N.CandidateSplit(DateTime(2017),DateTime(2017,10,1),DateTime(2018)),joinpath(root,"fake-selected");authority=bogus)
-        @test_throws ArgumentError N.validate_candidate_archival(read,1,id,validation,result.stations[1].fits[1].point,
-            joinpath(root,"no-score-authority"))
-        @test p.feature_reads[]==p.target_reads[]==0
     end
     @testset "Admitted generated numerical failure retains spent attempt" begin
         original=result.cases;calls=Int[];label=original.labels[1]

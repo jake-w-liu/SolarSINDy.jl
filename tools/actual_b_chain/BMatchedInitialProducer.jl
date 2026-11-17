@@ -13,16 +13,17 @@ const CELLS=((0,4),(0,6),(1,4),(1,6))
 const MODEL_BYTES=4*1024^2
 const STORE_BYTES=128*1024^2
 const RUNTIME_FIELDS=(:julia_version,:julia_binary_sha256,:evotrees_version,:evotrees_source_sha256,:threads,:blas_threads,:omp_threads)
-const COMPONENT_FIELDS=(:schema,:complete,:evidence_mode,:initial_only,:pair_id,:source_bindings,:training_boundary,:validation_start,:validation_end,:feature_contract_sha256,:feature_schema_sha256,:tuning_loss_contract_sha256,:evotrees_source_sha256,:baseline_qualified_head,:baseline_qualification_sha256,:baseline_sources,:runtime,:execution_authority_sha256,:cells,:drafts,:members,:component_id)
+const COMPONENT_FIELDS=(:schema,:complete,:evidence_mode,:initial_only,:pair_id,:source_bindings,:training_boundary,:validation_start,:validation_end,:feature_contract_sha256,:feature_schema_sha256,:tuning_loss_contract_sha256,:evotrees_source_sha256,:baseline_sources,:runtime,:cells,:drafts,:members,:component_id)
 const CELL_FIELDS=(:delay_hours,:horizon,:context_id,:matched_input_id,:training_count,:validation_count,:union_count,:validation_persistence_count,:model_training_mask_sha256,:reference_training_mask_sha256,:reference_validation_cohort_sha256,:fit_input_sha256,:preprocessing_sha256,:training_design_sha256,:max_fit_target_complete,:max_fit_label_receipt,:max_validation_target_complete,:max_validation_label_receipt,:encoder_member,:models)
 const MODEL_FIELDS=(:setting_index,:model_id,:model_member,:fit_receipt_member,:candidate_member,:native_increment_sha256,:reloaded_increment_sha256,:n,:rmse_nt,:mae_nt,:bias_nt)
-const FIT_FIELDS=(:schema,:complete,:evidence_mode,:pair_id,:context_id,:delay_hours,:horizon,:setting_index,:model_training_mask_sha256,:reference_training_mask_sha256,:reference_validation_cohort_sha256,:fit_input_sha256,:preprocessing_sha256,:training_design_sha256,:runtime_sha256,:recipe,:model_id,:model_sha256,:encoder_sha256,:native_increment_sha256,:reloaded_increment_sha256,:union_count,:fit_elapsed_ns,:execution_authority_sha256,:receipt_id)
+const FIT_FIELDS=(:schema,:complete,:evidence_mode,:pair_id,:context_id,:delay_hours,:horizon,:setting_index,:model_training_mask_sha256,:reference_training_mask_sha256,:reference_validation_cohort_sha256,:fit_input_sha256,:preprocessing_sha256,:training_design_sha256,:runtime_sha256,:recipe,:model_id,:model_sha256,:encoder_sha256,:native_increment_sha256,:reloaded_increment_sha256,:union_count,:fit_elapsed_ns,:receipt_id)
 const DRAFT_FIELDS=(:delay_hours,:root,:raw_row_identity_sha256,:prediction_panel_sha256,:grid_sha256,:tuning_sha256,:routing_member,:model_count,:persistence_count,:model_ids,:selected_setting_ids,:members)
 const SOURCE_BINDING_FIELDS=(:delay_hours,:source_proof_sha256,:source_admission_id,:input_view_id,:input_prefix_sha256,:raw_prefix_sha256,:source_sha256,:matched_input_id,:context_id)
 const _HEAD=r"\A[0-9a-f]{40}\z"
 export InitialMatchedDraft342,produce_initial_generated,produce_initial_actual,read_draft,recheck_draft,draft_metadata,publish_initial
 
 _need(ok,message)=T._need(ok,message)
+_json(path;fields=nothing)=P._json(path;fields,legacy_fields=(:baseline_qualified_head,:baseline_qualification_sha256,:execution_authority_sha256))
 _same(a,b)=T._bytes(a)==T._bytes(b)
 _cellname(d,h)="L$d-h$h"
 _modelname(d,h,s)="$(_cellname(d,h))/setting-$s.model.json"
@@ -63,7 +64,7 @@ function _member_fields(row)
     T._int(row.bytes,1,T.MAX_FILE);(;name=String(row.name),bytes=Int(row.bytes),sha256=String(row.sha256))
 end
 function _component_names()
-    names=String["qualification.json","feature-contract","loss-contract",_routename(0),_routename(1)]
+    names=String["feature-contract","loss-contract",_routename(0),_routename(1)]
     for (d,h) in CELLS
         push!(names,_encodername(d,h))
         for s in 1:8;push!(names,_modelname(d,h,s),_fitname(d,h,s));end
@@ -71,7 +72,7 @@ function _component_names()
     sort!(names)
 end
 function _draft_names()
-    sort!(vcat(String["grid.json","tuning.json","predictions.bin","qualification.json"],[_candidate(h,s) for h in (4,6) for s in 1:8]))
+    sort!(vcat(String["grid.json","tuning.json","predictions.bin"],[_candidate(h,s) for h in (4,6) for s in 1:8]))
 end
 function _inventory(root,files,dirs;later=false)
     observed=String[];directories=String[]
@@ -91,7 +92,7 @@ function _inventory(root,files,dirs;later=false)
     true
 end
 function _component_members(root;completion=false)
-    names=_component_names();files=completion ? vcat(names,["completion.json"]) : names
+    names=_component_names();isfile(joinpath(root,"qualification.json"))&&(push!(names,"qualification.json");sort!(names));files=completion ? vcat(names,["completion.json"]) : names
     _inventory(root,files,vcat([_cellname(d,h) for (d,h) in CELLS],["routing"]))
     rows=NamedTuple[];total=completion ? filesize(joinpath(root,"completion.json")) : 0
     for name in names
@@ -101,7 +102,7 @@ function _component_members(root;completion=false)
     Tuple(rows)
 end
 function _draft_members(root;later=false)
-    names=_draft_names();_inventory(root,names,("candidates","candidates/h4","candidates/h6");later)
+    names=_draft_names();isfile(joinpath(root,"qualification.json"))&&(push!(names,"qualification.json");sort!(names));_inventory(root,names,("candidates","candidates/h4","candidates/h6");later)
     rows=Tuple(_member(root,name;limit=endswith(name,".json") ? T.MAX_META : T.MAX_FILE) for name in names)
     total=sum(x.bytes for x in rows)
     for name in ("audit.json","completion.json");isfile(joinpath(root,name))&&(total+=filesize(joinpath(root,name)));end
@@ -119,17 +120,12 @@ function _runtime(runtime)
     NamedTuple{RUNTIME_FIELDS}(Tuple(k in (:threads,:blas_threads,:omp_threads) ? Int(getproperty(runtime,k)) : String(getproperty(runtime,k)) for k in RUNTIME_FIELDS))
 end
 _runtime_sha(runtime)=T._id((;schema="matched342_native_runtime_v1",runtime))
-function _qualification(body,mode,head,sources)
-    _need(head isa AbstractString&&occursin(_HEAD,head),"matched342 qualified head grammar differs")
-    P._software_qualification(body;schema="b_reference_component_software_qualification_v1",evidence_mode=mode=="synthetic_only" ? "synthetic_only" : "software_qualified",head=String(head),sources)
-end
-function _controls(pair,qualification,feature,loss,head,sources)
-    meta=FC.source_pair_metadata(pair);q=_ref(qualification);f=_ref(feature;contract=true);l=_ref(loss;contract=true)
+function _controls(pair,feature,loss,sources)
+    meta=FC.source_pair_metadata(pair);f=_ref(feature;contract=true);l=_ref(loss;contract=true)
     _need(feature.member==Parent.FEATURE_CONTRACT_MEMBER&&feature.sha256==Parent.FEATURE_CONTRACT_SHA256&&loss.member==Parent.LOSS_CONTRACT_MEMBER&&loss.sha256==Parent.LOSS_CONTRACT_SHA256,"matched342 registered feature/loss contracts differ")
     mapping=Dict(sources)
-    _need(get(mapping,String(feature.member),nothing)==f.sha256&&get(mapping,String(loss.member),nothing)==l.sha256&&meta.tuning_loss_contract_sha256==l.sha256,"matched342 contract absent from qualified closure")
-    _qualification(q.body,String(meta.evidence_mode),head,sources)
-    (;qualification=q,feature=f,loss=l,head=String(head))
+    _need(get(mapping,String(feature.member),nothing)==f.sha256&&get(mapping,String(loss.member),nothing)==l.sha256&&meta.tuning_loss_contract_sha256==l.sha256,"matched342 contract absent from component source identity")
+    (;feature=f,loss=l)
 end
 function _overlap(a,b)
     clean(p)=begin s=replace(normpath(p),'\\'=>'/');Sys.iswindows() ? lowercase(s) : s end
@@ -141,7 +137,7 @@ function _fresh_stage(output,pair,controls)
     _need(!Sys.iswindows()||(!endswith(full,".")&&!endswith(full," ")),"matched342 output has a Windows path alias")
     _path(dirname(full);directory=true);_need(!_overlap(full,Parent.PACKAGE_ROOT),"matched342 output overlaps source checkout")
     for source in FC.source_admissions(pair),root in values(source.roots);_need(!_overlap(full,root),"matched342 output overlaps admitted source");end
-    for ref in (controls.qualification,controls.feature,controls.loss);_need(!_overlap(full,ref.path),"matched342 output overlaps input control");end
+    for ref in (controls.feature,controls.loss);_need(!_overlap(full,ref.path),"matched342 output overlaps input control");end
     root=P._root_new(full);component=P._root_new(joinpath(root,"component"));P._root_new(joinpath(component,"routing"))
     for (d,h) in CELLS;P._root_new(joinpath(component,_cellname(d,h)));end
     references=ntuple(i->begin
@@ -204,9 +200,9 @@ end
 function _raw_row_id(g,d)
     T._id([(;issue=T.Adapter._shift(g.view.input.time[i],1),anchor=T._clean(g.view,15,i-d),target=ntuple(k->begin x=T._clean(g.view,15,i+(4,6)[k]);isfinite(x) ? x : nothing end,2),source_sha256=g.view.source_sha256,delay_hours=d) for i in g.indices])
 end
-function _common(meta,d,qsha,head,sources)
+function _common(meta,d,sources)
     s=meta.source_bindings[d+1]
-    (;complete=true,evidence_mode=String(meta.evidence_mode),reference_kind="matched_information_gbm_initial_v1",source_sha256=s.source_sha256,input_prefix_sha256=s.input_prefix_sha256,input_view_id=s.input_view_id,delay_hours=d,training_boundary=meta.training_boundary,validation_start=meta.validation_start,validation_end=meta.validation_end,training_history_start=meta.training_history_start,feature_contract_sha256=Parent.FEATURE_CONTRACT_SHA256,tuning_loss_contract_sha256=Parent.LOSS_CONTRACT_SHA256,baseline_qualification_sha256=qsha,baseline_sources=_source_rows(sources))
+    (;complete=true,evidence_mode=String(meta.evidence_mode),reference_kind="matched_information_gbm_initial_v1",source_sha256=s.source_sha256,input_prefix_sha256=s.input_prefix_sha256,input_view_id=s.input_view_id,delay_hours=d,training_boundary=meta.training_boundary,validation_start=meta.validation_start,validation_end=meta.validation_end,training_history_start=meta.training_history_start,feature_contract_sha256=Parent.FEATURE_CONTRACT_SHA256,tuning_loss_contract_sha256=Parent.LOSS_CONTRACT_SHA256,baseline_sources=_source_rows(sources))
 end
 function _common_check(data,common)
     for k in BI.REFERENCE_COMMON;_need(_same(getproperty(data,k),getproperty(common,k)),"matched342 repeated B22 fact differs: $k");end
@@ -237,7 +233,7 @@ function _metric_check(record,metric)
     end
 end
 function _fit_receipt(path,c,cell,model,d,h,s,modelsha,encodersha;expected_sha256)
-    fit,body=P._json(path;fields=FIT_FIELDS);_need(T._sha(body)==expected_sha256,"matched342 fit receipt content pin differs");_identity(fit,:receipt_id)
+    fit,body=_json(path;fields=FIT_FIELDS);_need(T._sha(body)==expected_sha256,"matched342 fit receipt content pin differs");_identity(fit,:receipt_id)
     _need(fit.schema=="matched342_initial_fit_receipt_v1"&&fit.complete===true&&fit.evidence_mode==c.evidence_mode&&fit.pair_id==c.pair_id&&fit.context_id==cell.context_id,"matched342 fit receipt context differs")
     _need(T._int(fit.delay_hours,0,1)==d&&T._int(fit.horizon,4,6)==h&&T._int(fit.setting_index,1,8)==s,"matched342 fit receipt cell differs")
     for k in (:model_training_mask_sha256,:reference_training_mask_sha256,:reference_validation_cohort_sha256,:fit_input_sha256,:preprocessing_sha256,:training_design_sha256)
@@ -245,7 +241,7 @@ function _fit_receipt(path,c,cell,model,d,h,s,modelsha,encodersha;expected_sha25
     end
     _need(fit.runtime_sha256==_runtime_sha(c.runtime)&&_same(fit.recipe,M._recipe(s))&&fit.model_id==model.model_id&&fit.model_sha256==modelsha&&fit.encoder_sha256==encodersha,"matched342 fit receipt recipe/runtime/model differs")
     _need(fit.native_increment_sha256==fit.reloaded_increment_sha256==model.native_increment_sha256==model.reloaded_increment_sha256&&T._hex(fit.native_increment_sha256),"matched342 retained native/saved increment evidence differs")
-    _need(T._int(fit.union_count,1,T.MAX_ROWS)==cell.union_count&&_same(fit.execution_authority_sha256,c.execution_authority_sha256),"matched342 fit receipt union/authority differs")
+    _need(T._int(fit.union_count,1,T.MAX_ROWS)==cell.union_count,"matched342 fit receipt union differs")
     T._int(fit.fit_elapsed_ns,0,typemax(Int64));fit
 end
 function _ref_matches(row,expected,name)
@@ -255,18 +251,14 @@ function _read_info(pair,path,expected_sha,expected_sources)
     sources=_sources(expected_sources);FC.recheck_pair(pair);meta=FC.source_pair_metadata(pair)
     full=_path(path);component=dirname(full);stage=dirname(component)
     _need(basename(full)=="completion.json"&&basename(component)=="component"&&T._hex(expected_sha),"matched342 fixed component completion path differs")
-    c,body=P._json(full;fields=COMPONENT_FIELDS);_need(T._sha(body)==expected_sha,"matched342 component outside SHA differs");_identity(c,:component_id)
+    c,body=_json(full;fields=COMPONENT_FIELDS);_need(T._sha(body)==expected_sha,"matched342 component outside SHA differs");_identity(c,:component_id)
     _need(c.schema=="matched342_initial_component_completion_v1"&&c.complete===true&&c.initial_only===true&&c.evidence_mode==String(meta.evidence_mode)&&c.pair_id==meta.pair_id,"matched342 component role/context differs")
     _need(_same(c.source_bindings,meta.source_bindings)&&_same(c.baseline_sources,_source_rows(sources)),"matched342 component source bindings differ")
     for (k,value) in ((:training_boundary,meta.training_boundary),(:validation_start,meta.validation_start),(:validation_end,meta.validation_end));_need(T._clock(getproperty(c,k))==value,"matched342 component split differs");end
     _need(c.feature_contract_sha256==Parent.FEATURE_CONTRACT_SHA256&&c.feature_schema_sha256==M.FEATURE_SCHEMA_SHA256&&c.tuning_loss_contract_sha256==Parent.LOSS_CONTRACT_SHA256&&c.evotrees_source_sha256==M.EVOTREES_SOURCE_SHA256,"matched342 component contracts/library differ")
-    runtime=_runtime(c.runtime);_need(c.baseline_qualified_head isa AbstractString&&occursin(_HEAD,c.baseline_qualified_head)&&T._hex(c.baseline_qualification_sha256),"matched342 component qualification grammar differs")
-    _need(c.evidence_mode=="synthetic_only" ? c.execution_authority_sha256===nothing : T._hex(c.execution_authority_sha256),"matched342 generated/actual authority domain differs")
+    runtime=_runtime(c.runtime)
     members=_component_members(component;completion=true);_ledger(c.members,members);membermap=Dict(x.name=>x for x in members)
-    _need(membermap["qualification.json"].sha256==c.baseline_qualification_sha256&&membermap["feature-contract"].sha256==Parent.FEATURE_CONTRACT_SHA256&&membermap["loss-contract"].sha256==Parent.LOSS_CONTRACT_SHA256,"matched342 component contract copy differs")
-    qualification_body=P._bound(joinpath(component,"qualification.json"))
-    _need(T._sha(qualification_body)==c.baseline_qualification_sha256,"matched342 qualification content pin differs")
-    _qualification(qualification_body,c.evidence_mode,c.baseline_qualified_head,sources)
+    _need(membermap["feature-contract"].sha256==Parent.FEATURE_CONTRACT_SHA256&&membermap["loss-contract"].sha256==Parent.LOSS_CONTRACT_SHA256,"matched342 component contract copy differs")
     _need(c.cells isa AbstractVector&&length(c.cells)==4&&c.drafts isa AbstractVector&&length(c.drafts)==2,"matched342 four cells/two drafts required")
     geometries=ntuple(i->_geometry(pair,i-1),2);routes=ntuple(i->_routing(geometries[i]),2)
     for (ci,(d,h)) in enumerate(CELLS)
@@ -299,12 +291,12 @@ function _read_info(pair,path,expected_sha,expected_sources)
         members20=_draft_members(root;later=true);_ledger(draft.members,members20);map20=Dict(x.name=>x for x in members20)
         _ref_matches(draft.routing_member,membermap[_routename(d)],_routename(d))
         _need(_read_routing(joinpath(component,_routename(d)),n;expected_sha256=membermap[_routename(d)].sha256)==route&&T._int(draft.persistence_count,0,T.MAX_ROWS)==count(==(UInt8(1)),route)&&T._int(draft.model_count,0,T.MAX_ROWS)==count(==(UInt8(0)),route),"matched342 routing bytes/counts differ")
-        _need(draft.raw_row_identity_sha256==_raw_row_id(g,d)&&draft.prediction_panel_sha256==map20["predictions.bin"].sha256&&draft.grid_sha256==map20["grid.json"].sha256&&draft.tuning_sha256==map20["tuning.json"].sha256&&map20["qualification.json"].sha256==c.baseline_qualification_sha256,"matched342 draft identity links differ")
-        common=_common(meta,d,c.baseline_qualification_sha256,c.baseline_qualified_head,sources)
-        grid,grid_body=P._json(joinpath(root,"grid.json");fields=(:schema,:complete,:evidence_mode,:feature_contract_sha256,:settings,:grid_id));_need(T._sha(grid_body)==draft.grid_sha256,"matched342 grid content pin differs");_identity(grid,:grid_id)
+        _need(draft.raw_row_identity_sha256==_raw_row_id(g,d)&&draft.prediction_panel_sha256==map20["predictions.bin"].sha256&&draft.grid_sha256==map20["grid.json"].sha256&&draft.tuning_sha256==map20["tuning.json"].sha256,"matched342 draft identity links differ")
+        common=_common(meta,d,sources)
+        grid,grid_body=_json(joinpath(root,"grid.json");fields=(:schema,:complete,:evidence_mode,:feature_contract_sha256,:settings,:grid_id));_need(T._sha(grid_body)==draft.grid_sha256,"matched342 grid content pin differs");_identity(grid,:grid_id)
         _need(grid.schema=="fixed_eight_gbm_settings_v2"&&grid.complete===true&&grid.evidence_mode==c.evidence_mode&&grid.feature_contract_sha256==Parent.FEATURE_CONTRACT_SHA256&&length(grid.settings)==8,"matched342 fixed grid header differs")
         for s in 1:8;item=grid.settings[s];T._fields(item,(:index,:max_depth,:nrounds,:nbins));_need(T._int(item.index,1,8)==s&&all(T._int(getproperty(item,k),1,10000)==getproperty(M.GRID342[s],k) for k in keys(M.GRID342[s])),"matched342 exact grid recipe differs");end
-        tuning,tuning_body=P._json(joinpath(root,"tuning.json");fields=BI.REFERENCE_TUNING_FIELDS);_need(T._sha(tuning_body)==draft.tuning_sha256,"matched342 tuning content pin differs");_identity(tuning,:tuning_id);_common_check(tuning,common)
+        tuning,tuning_body=_json(joinpath(root,"tuning.json");fields=BI.REFERENCE_TUNING_FIELDS);_need(T._sha(tuning_body)==draft.tuning_sha256,"matched342 tuning content pin differs");_identity(tuning,:tuning_id);_common_check(tuning,common)
         _need(tuning.schema=="b_matched_reference_tuning_v2"&&tuning.grid_sha256==draft.grid_sha256&&collect(tuning.lead_order)==[4,6]&&all(x->x isa Integer&&!(x isa Bool),tuning.lead_order)&&length(tuning.leads)==2,"matched342 tuning header differs")
         _need(length(draft.model_ids)==length(draft.selected_setting_ids)==2&&all(T._hex,draft.model_ids),"matched342 selected model shape differs")
         selected=_column(joinpath(root,"predictions.bin"),n;selected=true,expected_sha256=draft.prediction_panel_sha256)
@@ -349,7 +341,7 @@ struct InitialMatchedDraft342{C}
 end
 _draft_seal(pair,path,sha,sources,metadata)=T._id((;schema="checked_matched342_initial_draft_v1",pair_id=FC.source_pair_metadata(pair).pair_id,completion_path=path,completion_sha256=sha,baseline_sources=_source_rows(sources),metadata))
 function _draft_projection(info)
-    (;evidence_mode=String(info.data.evidence_mode),pair_id=String(info.data.pair_id),component_root=info.component,component_completion_path=info.path,component_completion_sha256=info.sha256,reference_roots=info.roots,qualified_head=String(info.data.baseline_qualified_head),baseline_sources=_source_rows(info.sources))
+    (;evidence_mode=String(info.data.evidence_mode),pair_id=String(info.data.pair_id),component_root=info.component,component_completion_path=info.path,component_completion_sha256=info.sha256,reference_roots=info.roots,baseline_sources=_source_rows(info.sources))
 end
 function read_draft(pair,completion_path;expected_component_sha256,expected_sources)
     info=_read_info(pair,completion_path,expected_component_sha256,expected_sources);metadata=_draft_projection(info)
@@ -364,23 +356,13 @@ function draft_metadata(draft::InitialMatchedDraft342)
     recheck_draft(draft);draft.metadata
 end
 
-function _run(pair,output;qualification,feature_contract,loss_contract,qualified_head,execution_authority,expected_sources)
+function _run(pair,output;feature_contract,loss_contract,expected_sources)
     sources=_sources(expected_sources);meta=FC.source_pair_metadata(pair);mode=String(meta.evidence_mode)
-    controls=_controls(pair,qualification,feature_contract,loss_contract,qualified_head,sources)
+    controls=_controls(pair,feature_contract,loss_contract,sources)
     runtime_info=FC.runtime_identity();runtime=_runtime(runtime_info.runtime);runtime_sha=_runtime_sha(runtime)
     _need(runtime_info.runtime_sha256==runtime_sha,"matched342 runtime digest domain differs")
-    authority_sha=nothing
-    if mode=="archival_assumed_completion_research"
-        FC.recheck_execution_authority(execution_authority,pair);authority=FC.execution_authority_metadata(execution_authority)
-        _need(authority.qualified_head==controls.head&&authority.component_qualification_sha256==controls.qualification.sha256&&authority.runtime_sha256==runtime_sha&&_same(authority.runtime,runtime)&&_same(authority.implementation_sources,_source_rows(sources))&&_same(authority.source_bindings,meta.source_bindings),"matched342 actual component/permit facts differ")
-        _need(normpath(String(output))==normpath(authority.execution_directory)&&authority.contracts.feature_contract_sha256==controls.feature.sha256&&authority.contracts.loss_contract_sha256==controls.loss.sha256,"matched342 actual output/contracts differ")
-        authority_sha=String(authority.permit_sha256)
-    else
-        _need(mode=="synthetic_only"&&execution_authority===nothing,"generated producer cannot accept actual authority")
-    end
     stage=_fresh_stage(output,pair,controls)
-    for (name,ref) in (("qualification.json",controls.qualification),("feature-contract",controls.feature),("loss-contract",controls.loss));P._exclusive(joinpath(stage.component,name),ref.body);end
-    for root in stage.references;P._exclusive(joinpath(root,"qualification.json"),controls.qualification.body);end
+    for (name,ref) in (("feature-contract",controls.feature),("loss-contract",controls.loss));P._exclusive(joinpath(stage.component,name),ref.body);end
     geometries=ntuple(i->_geometry(pair,i-1),2);routes=ntuple(i->_routing(geometries[i]),2)
     for d in 0:1;_write_routing(joinpath(stage.component,_routename(d)),routes[d+1]);end
     cell_records=NamedTuple[]
@@ -394,9 +376,9 @@ function _run(pair,output;qualification,feature_contract,loss_contract,qualified
         for s in 1:8
             FC.recheck_pair(pair);FC.recheck_cell(cell);_sources(sources)
             now=FC.runtime_identity();_need(now.runtime_sha256==runtime_sha&&_same(now.runtime,runtime),"matched342 runtime changed before fit")
-            execution_authority===nothing||FC.recheck_execution_authority(execution_authority,pair)
             expected=FC.expected_bindings(cell,s);started=time_ns()
-            fitted=mode=="synthetic_only" ? FC.fit_generated_cell(cell,expected) : FC.fit_actual_cell(cell,expected;execution_authority)
+            fitted=mode=="synthetic_only" ? FC.fit_generated_cell(cell,expected) : FC.fit_actual_cell(cell,expected)
+            println(JSON3.write((;event="matched342_fit_observations",delay_hours=d,horizon=h,setting_index=s,fitted.observations...)));flush(stdout)
             elapsed=time_ns()-started;_need(elapsed<=typemax(Int64),"matched342 measured fit clock overflow")
             native_values=FC.predict_cell(cell,fitted.capsule,expected;native=fitted.native)
             model=FC.save_model(joinpath(stage.component,_modelname(d,h,s)),fitted.capsule;expected_bindings=expected)
@@ -408,12 +390,11 @@ function _run(pair,output;qualification,feature_contract,loss_contract,qualified
             _need(all(isfinite,values),"matched342 absolute prediction overflow")
             candidate=_candidate(h,s);_write_column(joinpath(stage.references[d+1],candidate),values)
             metric=BI._reference_metric(values[leadpos],labels)
-            receipt=_identified((;schema="matched342_initial_fit_receipt_v1",complete=true,evidence_mode=mode,pair_id=meta.pair_id,context_id=cm.context_id,delay_hours=d,horizon=h,setting_index=s,model_training_mask_sha256=cm.model_training_mask_sha256,reference_training_mask_sha256=cm.reference_training_mask_sha256,reference_validation_cohort_sha256=cm.reference_validation_cohort_sha256,fit_input_sha256=cm.fit_input_sha256,preprocessing_sha256=cm.preprocessing_sha256,training_design_sha256=cm.training_design_sha256,runtime_sha256=runtime_sha,recipe=M._recipe(s),model_id,model_sha256=model.sha256,encoder_sha256=enc.sha256,native_increment_sha256=digest,reloaded_increment_sha256=digest,union_count=length(g.indices),fit_elapsed_ns=Int(elapsed),execution_authority_sha256=authority_sha),:receipt_id)
+            receipt=_identified((;schema="matched342_initial_fit_receipt_v1",complete=true,evidence_mode=mode,pair_id=meta.pair_id,context_id=cm.context_id,delay_hours=d,horizon=h,setting_index=s,model_training_mask_sha256=cm.model_training_mask_sha256,reference_training_mask_sha256=cm.reference_training_mask_sha256,reference_validation_cohort_sha256=cm.reference_validation_cohort_sha256,fit_input_sha256=cm.fit_input_sha256,preprocessing_sha256=cm.preprocessing_sha256,training_design_sha256=cm.training_design_sha256,runtime_sha256=runtime_sha,recipe=M._recipe(s),model_id,model_sha256=model.sha256,encoder_sha256=enc.sha256,native_increment_sha256=digest,reloaded_increment_sha256=digest,union_count=length(g.indices),fit_elapsed_ns=Int(elapsed)),:receipt_id)
             P._exclusive(joinpath(stage.component,_fitname(d,h,s)),T._bytes(receipt))
             push!(models,(;setting_index=s,model_id,model_member=_member(stage.component,_modelname(d,h,s);limit=MODEL_BYTES),fit_receipt_member=_member(stage.component,_fitname(d,h,s);limit=T.MAX_META),candidate_member=_member(stage.references[d+1],candidate),native_increment_sha256=digest,reloaded_increment_sha256=digest,n=metric.n,rmse_nt=metric.rmse_nt,mae_nt=metric.mae_nt,bias_nt=metric.bias_nt))
             FC.recheck_cell(cell);_sources(sources);after=FC.runtime_identity()
             _need(after.runtime_sha256==runtime_sha&&_same(after.runtime,runtime),"matched342 runtime changed during fit")
-            execution_authority===nothing||FC.recheck_execution_authority(execution_authority,pair)
             _need(P._file_sha(model.path)==(model.sha256,model.bytes)&&P._file_sha(enc.path)==(enc.sha256,enc.bytes),"matched342 saved state changed")
             fitted=nothing;loaded=nothing;expected=nothing;native_values=nothing;replay=nothing;values=nothing;object=nothing
         end
@@ -424,7 +405,7 @@ function _run(pair,output;qualification,feature_contract,loss_contract,qualified
     end
     drafts=NamedTuple[]
     for d in 0:1
-        g=geometries[d+1];root=stage.references[d+1];common=_common(meta,d,controls.qualification.sha256,controls.head,sources)
+        g=geometries[d+1];root=stage.references[d+1];common=_common(meta,d,sources)
         settings=Tuple(merge((;index=s),M.GRID342[s]) for s in 1:8)
         grid=_identified((;schema="fixed_eight_gbm_settings_v2",complete=true,evidence_mode=mode,feature_contract_sha256=Parent.FEATURE_CONTRACT_SHA256,settings),:grid_id)
         P._exclusive(joinpath(root,"grid.json"),T._bytes(grid));gridsha=_member(root,"grid.json";limit=T.MAX_META).sha256
@@ -441,35 +422,35 @@ function _run(pair,output;qualification,feature_contract,loss_contract,qualified
         P._exclusive(joinpath(root,"tuning.json"),T._bytes(tuning))
         push!(drafts,(;delay_hours=d,root="reference-L$d",raw_row_identity_sha256=_raw_row_id(g,d),prediction_panel_sha256=_member(root,"predictions.bin").sha256,grid_sha256=gridsha,tuning_sha256=_member(root,"tuning.json";limit=T.MAX_META).sha256,routing_member=_member(stage.component,_routename(d)),model_count=count(==(UInt8(0)),routes[d+1]),persistence_count=count(==(UInt8(1)),routes[d+1]),model_ids=Tuple(modelids),selected_setting_ids=Tuple(selected),members=_draft_members(root)))
     end
-    FC.recheck_pair(pair);_sources(sources);execution_authority===nothing||FC.recheck_execution_authority(execution_authority,pair)
-    for ref in (controls.qualification,controls.feature,controls.loss);_need(P._bound(ref.path)==ref.body,"matched342 input control changed during fitting");end
-    component=_identified((;schema="matched342_initial_component_completion_v1",complete=true,evidence_mode=mode,initial_only=true,pair_id=meta.pair_id,source_bindings=meta.source_bindings,training_boundary=meta.training_boundary,validation_start=meta.validation_start,validation_end=meta.validation_end,feature_contract_sha256=Parent.FEATURE_CONTRACT_SHA256,feature_schema_sha256=M.FEATURE_SCHEMA_SHA256,tuning_loss_contract_sha256=Parent.LOSS_CONTRACT_SHA256,evotrees_source_sha256=M.EVOTREES_SOURCE_SHA256,baseline_qualified_head=controls.head,baseline_qualification_sha256=controls.qualification.sha256,baseline_sources=_source_rows(sources),runtime,execution_authority_sha256=authority_sha,cells=Tuple(cell_records),drafts=Tuple(drafts),members=_component_members(stage.component)),:component_id)
+    FC.recheck_pair(pair);_sources(sources)
+    for ref in (controls.feature,controls.loss);_need(P._bound(ref.path)==ref.body,"matched342 input control changed during fitting");end
+    component=_identified((;schema="matched342_initial_component_completion_v1",complete=true,evidence_mode=mode,initial_only=true,pair_id=meta.pair_id,source_bindings=meta.source_bindings,training_boundary=meta.training_boundary,validation_start=meta.validation_start,validation_end=meta.validation_end,feature_contract_sha256=Parent.FEATURE_CONTRACT_SHA256,feature_schema_sha256=M.FEATURE_SCHEMA_SHA256,tuning_loss_contract_sha256=Parent.LOSS_CONTRACT_SHA256,evotrees_source_sha256=M.EVOTREES_SOURCE_SHA256,baseline_sources=_source_rows(sources),runtime,cells=Tuple(cell_records),drafts=Tuple(drafts),members=_component_members(stage.component)),:component_id)
     body=T._bytes(component)
     _need(length(body)<=T.MAX_META&&sum(x.bytes for x in component.members)+length(body)<=STORE_BYTES,"matched342 component completion/total byte bound")
     path=joinpath(stage.component,"completion.json");P._exclusive(path,body)
     try
         result=read_draft(pair,path;expected_component_sha256=T._sha(body),expected_sources=sources)
-        execution_authority===nothing||FC.recheck_execution_authority(execution_authority,pair);result
+        result
     catch
         P._invalidate(stage.component,"completion.json",body);rethrow()
     end
 end
-function produce_initial_generated(s0::BI.BSourcePrefixAdmissionV2,s1::BI.BSourcePrefixAdmissionV2,output;qualification,feature_contract,loss_contract,qualified_head,expected_sources)
+function produce_initial_generated(s0::BI.BSourcePrefixAdmissionV2,s1::BI.BSourcePrefixAdmissionV2,output;feature_contract,loss_contract,expected_sources)
     pair=FC.bind_source_pair(s0,s1;loss_contract_sha256=Parent.LOSS_CONTRACT_SHA256,expected_sources)
     _need(FC.source_pair_metadata(pair).evidence_mode===:synthetic_only,"generated matched342 producer requires synthetic admissions")
-    _run(pair,output;qualification,feature_contract,loss_contract,qualified_head,execution_authority=nothing,expected_sources)
+    _run(pair,output;feature_contract,loss_contract,expected_sources)
 end
-function produce_initial_actual(s0::BI.BSourcePrefixAdmissionV2,s1::BI.BSourcePrefixAdmissionV2,output;qualification,feature_contract,loss_contract,qualified_head,execution_authority,expected_sources)
+function produce_initial_actual(s0::BI.BSourcePrefixAdmissionV2,s1::BI.BSourcePrefixAdmissionV2,output;feature_contract,loss_contract,expected_sources)
     pair=FC.bind_source_pair(s0,s1;loss_contract_sha256=Parent.LOSS_CONTRACT_SHA256,expected_sources)
     _need(FC.source_pair_metadata(pair).evidence_mode===:archival_assumed_completion_research,"actual matched342 producer requires archival admissions")
-    _run(pair,output;qualification,feature_contract,loss_contract,qualified_head,execution_authority,expected_sources)
+    _run(pair,output;feature_contract,loss_contract,expected_sources)
 end
 
 function publish_initial(draft::InitialMatchedDraft342,checked_audit::Audit.CheckedComponentAudit342;expected_audit_completion_sha256)
     recheck_draft(draft);Audit.recheck_component_audit(checked_audit);audit=Audit.component_audit_metadata(checked_audit)
     info=_read_info(draft.pair,draft.completion_path,draft.completion_sha256,draft.expected_sources);c=info.data;meta=info.metadata
     _need(T._hex(expected_audit_completion_sha256)&&audit.audit_completion_sha256==expected_audit_completion_sha256&&audit.component_completion_sha256==info.sha256&&audit.component_root==info.component&&audit.pair_id==meta.pair_id&&audit.evidence_mode==c.evidence_mode,"matched342 outside audit/component identity differs")
-    _need(audit.qualified_head==c.baseline_qualified_head&&audit.component_qualification.sha256==c.baseline_qualification_sha256&&_same(audit.implementation_sources,c.baseline_sources)&&_same(audit.source_bindings,c.source_bindings)&&_same(audit.runtime,c.runtime),"matched342 audit qualification/source/runtime differs")
+    _need(_same(audit.implementation_sources,c.baseline_sources)&&_same(audit.source_bindings,c.source_bindings)&&_same(audit.runtime,c.runtime),"matched342 audit source/runtime differs")
     _need(audit.contracts.feature_contract_sha256==c.feature_contract_sha256&&audit.contracts.feature_schema_sha256==c.feature_schema_sha256&&audit.contracts.loss_contract_sha256==c.tuning_loss_contract_sha256&&audit.contracts.evotrees_source_sha256==c.evotrees_source_sha256&&T._hex(audit.contracts.audit_contract_sha256)&&length(audit.references)==2,"matched342 audit contract differs")
     _need(!_overlap(audit.audit_root,dirname(info.component)),"matched342 audit store overlaps producer stage")
     for root in info.roots;_need(!ispath(joinpath(root,"audit.json"))&&!ispath(joinpath(root,"completion.json")),"matched342 reference publication already started");end
@@ -482,8 +463,8 @@ function publish_initial(draft::InitialMatchedDraft342,checked_audit::Audit.Chec
                 _need(T._clock(getproperty(reference,key))==value,"matched342 audited reference clock differs")
             end
             for key in (:raw_row_identity_sha256,:prediction_panel_sha256,:grid_sha256,:tuning_sha256,:model_ids,:selected_setting_ids);_need(_same(getproperty(reference,key),getproperty(declared,key)),"matched342 audited reference fact differs");end
-            common=_common(meta,d,c.baseline_qualification_sha256,c.baseline_qualified_head,info.sources)
-            ra=_ref(reference.audit_ref);data,_=P._json(ra.path;fields=BI.REFERENCE_AUDIT_FIELDS);_identity(data,:audit_id);_common_check(data,common)
+            common=_common(meta,d,info.sources)
+            ra=_ref(reference.audit_ref);data,_=_json(ra.path;fields=BI.REFERENCE_AUDIT_FIELDS);_identity(data,:audit_id);_common_check(data,common)
             _need(data.schema=="b_matched_reference_audit_v2"&&data.audit_contract_sha256==audit.contracts.audit_contract_sha256,"matched342 independent reference audit contract differs")
             for key in (:raw_row_identity_sha256,:prediction_panel_sha256,:grid_sha256,:tuning_sha256);_need(getproperty(data,key)==getproperty(declared,key),"matched342 independent reference audit payload differs");end
             for key in (:all_eight_settings_checked,:full_per_lead_cohorts_checked,:feature_receipt_history_checked,:selected_prediction_columns_checked,:initial_only);_need(getproperty(data,key)===true,"matched342 independent audit incomplete");end
@@ -494,7 +475,7 @@ function publish_initial(draft::InitialMatchedDraft342,checked_audit::Audit.Chec
             body=T._bytes(completion)
             _need(length(body)<=T.MAX_META&&sum(x.bytes for x in members)+length(body)<=STORE_BYTES,"matched342 final reference byte bound")
             path=joinpath(root,"completion.json");P._exclusive(path,body);push!(owned,(;root,body))
-            pins=BI.BReferencePins(;completion_sha256=T._sha(body),audit_sha256=ra.sha256,grid_sha256=declared.grid_sha256,tuning_sha256=declared.tuning_sha256,prediction_sha256=declared.prediction_panel_sha256,feature_contract_sha256=Parent.FEATURE_CONTRACT_SHA256,tuning_loss_contract_sha256=Parent.LOSS_CONTRACT_SHA256,baseline_qualification_sha256=c.baseline_qualification_sha256,baseline_sources=collect(info.sources),baseline_qualified_head=c.baseline_qualified_head,feature_contract_member=Parent.FEATURE_CONTRACT_MEMBER,tuning_loss_contract_member=Parent.LOSS_CONTRACT_MEMBER)
+            pins=BI.BReferencePins(;completion_sha256=T._sha(body),audit_sha256=ra.sha256,grid_sha256=declared.grid_sha256,tuning_sha256=declared.tuning_sha256,prediction_sha256=declared.prediction_panel_sha256,feature_contract_sha256=Parent.FEATURE_CONTRACT_SHA256,tuning_loss_contract_sha256=Parent.LOSS_CONTRACT_SHA256,baseline_sources=collect(info.sources),feature_contract_member=Parent.FEATURE_CONTRACT_MEMBER,tuning_loss_contract_member=Parent.LOSS_CONTRACT_MEMBER)
             panel=BI.admit_reference(path;trusted_pins=pins,roots=Dict("reference"=>root),view=FC.source_admissions(draft.pair)[d+1].view,expected_sources=P.source_identity())
             pin_data=Selection._pins_data(pins)
             push!(results,(;delay_hours=d,completion_path=path,completion_sha256=T._sha(body),audit_sha256=ra.sha256,reference_pins=pin_data,readback_admission_id=panel.admission_id))
