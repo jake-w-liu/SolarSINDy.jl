@@ -148,7 +148,7 @@ while IFS= read -r toml; do
     if [ -n "$ALL_JL" ] && has_julia; then
         while IFS= read -r file; do
             [ -n "$file" ] || continue
-            if julia --startup-file=no -e 'Meta.parseall(read(ARGS[1], String))' "$file" >/dev/null 2>&1; then
+            if julia --startup-file=no -e 'using SHA; helper = ARGS[1]; body = read(helper); bytes2hex(sha256(body)) == "f1c342450194b97fe5033e2ac11b98218b229af0db89599abc1c8ade0c6f54fc" || error("strict Julia syntax helper bytes changed"); Base.include_string(Main, String(body), helper); exit(StrictJuliaSyntax.main(ARGS[2:end]))' "$(dirname -- "${BASH_SOURCE[0]}")/verify-julia-syntax.jl" "$file" >/dev/null 2>&1; then
                 note_pass "parse ok: ${file#$PROJECT_DIR/}"
             else
                 note_fail "parse failed: ${file#$PROJECT_DIR/}"

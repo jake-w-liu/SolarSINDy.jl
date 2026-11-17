@@ -2027,3 +2027,24 @@ in three methods, retaining the original 113 state rows, 21 current native
 cases, Darwin historical cases and all original clocks. The package wrapper
 requires the added result. These literals exercise the actual observer method
 but do not constitute native Darwin or scientific qualification.
+
+### Strict Julia syntax verification (2026-11-17)
+
+The matched-reference auditor used ambiguous decimal/operator tokens at two
+short-circuit conditions. Both now use explicit Float64 zero followed by a
+separate `||` operator; the thresholds and remaining arithmetic are unchanged.
+
+The canonical syntax phase previously accepted a normal `Meta.parseall` exit
+without inspecting its returned tree. It now uses a shared Base-only checker
+that recursively rejects parser error and incomplete nodes. Candidate source
+is parsed without evaluation. The shell verifies the helper's exact bytes
+before loading those same bytes, and its existing source inventory, package
+tests and complete experiments remain mandatory. Current hash bindings advance
+together; historical oracles and receipts remain preserved.
+
+The independent contracts are registered in package tests. A supplemental
+Ubuntu workflow runs them and parses every tracked Julia source on Julia
+1.12.6 and 1.13.1 before dependency setup, with explicit memory/disk admission.
+These two lanes supplement the original qualification matrix. Dependency setup
+also limits concurrent package precompilation to one task. That is a resource
+safeguard; the cause of the hosted Mac runner disconnect is unverified.

@@ -1868,3 +1868,34 @@ and 72 rows. The initial integrated attempt retained one failure because the
 patch changed an existing zombie error string; the original string was restored
 without changing its assertion, and both controllers then passed. Package
 wrapper execution, real macOS verification and final full CI remain pending.
+
+Subsequently, committed source `4977843` passed native workflow 43997952642 on
+macOS, Windows and Linux. All seven archives and 1,033 members were retained
+and independently reconciled. Mac V3 passed 21 current cases and three
+historical negatives; the anchor suite passed 12 current, three historical
+and one cleanup-negative outcome. Both formerly failing role-0 cases have
+positive Popen, callback, wait and closure evidence. The observer's internal
+recovery reads were not traced, so execution of that particular branch is
+not asserted. Full package and scientific qualification remain separate.
+
+### Julia parser failure and strict syntax gate (2026-11-17)
+
+On source `880cc1a`, Ubuntu Julia 1.13.1 passed all 250 acyclic B-source
+assertions, confirming that the fixture-directory correction reached the full
+handoff. Parsing then failed at auditor line 260 on `>0.||return`; line 269
+contained the same ambiguous form before `break`. Both conditions are repaired
+with explicit `0.0 ||`. The original harness had incorrectly reported the
+auditor as parseable because it did not inspect returned parser error nodes.
+
+The new independent syntax tests preserve 23 frozen facts: 23 assertions on
+1.13.1, and 21 assertions plus two explicitly unasserted old-form
+classifications on 1.12.6. They cover deep error nodes, incomplete syntax,
+valid Unicode and comments, non-evaluation, real CLI exits and the original
+false-positive command. A dispatch-only test-driver correction preserves all
+expectations while calling helper methods in their latest definition world.
+
+Source reviews, exact inverses, Bash syntax and canonical/mirror architecture
+checks have passed. Julia execution is pending on both supplemental runtimes;
+local Julia was not launched below the memory admission floor. Full unfiltered
+package tests, experiments, canonical audit, documentation, deployment images
+and platform/resource gates remain required for the new combined source.

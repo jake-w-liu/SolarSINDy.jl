@@ -45,6 +45,8 @@ jobs:
       - name: Verify the dashboard frontend directly
         run: node --test --test-reporter=tap app/test/frontend_freshness.cjs
       - name: Resolve the package environment
+        env:
+          JULIA_NUM_PRECOMPILE_TASKS: '1'
         # resolve() does not bootstrap registries in a fresh Julia depot.
         run: julia --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate()'
       - name: Confirm the checkout carries no generated study output

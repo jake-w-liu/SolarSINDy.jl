@@ -1069,3 +1069,6 @@ include(joinpath(@__DIR__, "jsoc_time_tests.jl"))
 
 # Native launch identity, loss and cancellation regressions; historical negatives stay explicit.
 include(joinpath(@__DIR__, "darwin_anchor_v1_tests.jl"))
+
+# Strict parser error-node and non-evaluation controls; standard-library dependencies only.
+include(joinpath(@__DIR__, "syntax_audit", "registered_tests.jl"))

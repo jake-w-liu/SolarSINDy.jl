@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / 'test/darwin_anchor_v1'
 OWNER = ROOT / 'research/dbdt_completed_source/candidate_native_owner.py'
 MEMORY = ROOT / 'tools/run_canonical_harness.py'
-MEMORY_SHA = 'defbb2a90690acd83ff0dc8eae05fd8622543871ecfa6c7a595b04069d44b331'
+MEMORY_SHA = '219669fea1b718ab997215762105f74dfb5dd8c0f630bc2ed906f00c4eae2236'
 OWNER_PINS = {
     'tools/initial_reference_audit/owned_process.py': '30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c',
     'research/dbdt_completed_source/native_stage.py': '30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c',
