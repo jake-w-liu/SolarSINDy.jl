@@ -1,7 +1,6 @@
 # Real-time solar wind data fetching from NOAA SWPC
 
 using HTTP
-using MbedTLS
 using JSON3
 
 # Real-time solar wind (RTSW) products. The former /products/solar-wind/{plasma,mag}-7-day.json
@@ -92,9 +91,7 @@ function _fetch_swpc_json(url::String;
     for (ui, u) in enumerate(urls)
         for attempt in 1:max_retries
             try
-                # OpenSSL stream GC cleanup can yield after a late TLS connect timeout.
-                resp = http_get(u; connect_timeout=15, readtimeout=30, retries=0,
-                                socket_type_tls=MbedTLS.SSLContext)
+                resp = http_get(u; connect_timeout=15, read_idle_timeout=30, retries=0)
                 status = getproperty(resp, :status)
                 status == 200 || error("HTTP status $status")
                 # NOAA RTSW occasionally emits bare NaN tokens for missing measurements.

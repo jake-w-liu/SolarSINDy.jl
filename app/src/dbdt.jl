@@ -12,7 +12,7 @@
 #
 # Depends on jnum/jdt from forecast_api.jl (included before this file).
 
-using HTTP, JSON3, Dates, MbedTLS
+using HTTP, JSON3, Dates
 
 const USGS_BASE = "https://geomag.usgs.gov/ws/data/"
 const USGS_LIVE_DATA_TYPE = "adjusted"  # provisional near-real-time observatory product
@@ -118,8 +118,8 @@ function _fetch_usgs(station::AbstractString, minutes::Int; http_get::Function=H
     try
         # Valid USGS responses can exceed a few seconds. Retrieval runs behind the bounded
         # background worker; API callers retain their separate, nonblocking wait budget.
-        r = http_get(url; socket_type_tls=MbedTLS.SSLContext,
-                     readtimeout=15, connect_timeout=5, retries=0, status_exception=true)
+        r = http_get(url; read_idle_timeout=15,
+                     connect_timeout=5, retries=0, status_exception=true)
         return JSON3.read(r.body)
     catch e
         e isa InterruptException && rethrow()

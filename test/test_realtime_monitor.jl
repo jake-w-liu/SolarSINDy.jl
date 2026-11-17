@@ -12,8 +12,8 @@ using Sockets
         server = HTTP.serve!((request -> begin
             count = Threads.atomic_add!(requests, 1) + 1
             count >= success_at[] ? HTTP.Response(200, body) : HTTP.Response(503)
-        end), ip"127.0.0.1", 0; verbose=false)
-        port = Sockets.getsockname(server.listener.server)[2]
+        end), "127.0.0.1", 0; verbose=false)
+        port = HTTP.port(server)
         try
             @test_throws ErrorException fetch_swpc_plasma(; url="http://127.0.0.1:$port/wind",
                 max_retries=3, retry_delay_sec=0)

@@ -13,21 +13,27 @@ function verify_collector_source(path,expected_sha)
 end
 
 function transport_failure(exception)
-    # HTTP's timeout boundary preserves an underlying error in CapturedException.
-    # Inspect it only after recoverable_acquisition has admitted an HTTP boundary;
-    # a captured local file error must remain fatal. Unknown/deep chains fail closed.
+    # Inspect causes only after a typed HTTP acquisition boundary. Raw local
+    # file errors remain fatal; bounded captured causes retain that boundary.
     for depth in 0:32
         exception isa InterruptException && return false
         exception isa HTTP.TimeoutError && return true
         exception isa Union{Base.IOError,EOFError,Sockets.DNSError} && return true
-        if exception isa Union{HTTP.ConnectError,HTTP.RequestError}
+        if exception isa Union{HTTP.ConnectError,HTTP.DNSError,HTTP.TLSHandshakeError,HTTP.TLSTransportError}
             depth<32 || return false
-            exception=exception.error
+            exception=exception.cause
+        elseif exception isa HTTP.HostResolvers.OpError
+            depth<32 || return false
+            exception=exception.err
+        elseif exception isa HTTP.HostResolvers.LookupError
+            return true
         elseif exception isa CapturedException
             depth<32 || return false
             exception=exception.ex
         else
-            return false
+            # HTTP 2 classifies its Reseau socket/TLS causes. This rejects
+            # ArgumentError, ordinary ErrorException and unknown exceptions.
+            return exception isa Exception && HTTP.isrecoverable(exception)
         end
     end
     false
@@ -36,7 +42,8 @@ end
 "Only known transport failures or exact producer transient-status errors may retry."
 function recoverable_acquisition(error)
     error isa InterruptException && return false
-    error isa Union{HTTP.TimeoutError,HTTP.ConnectError,HTTP.RequestError} && return transport_failure(error)
+    error isa Union{HTTP.TimeoutError,HTTP.ConnectError,HTTP.DNSError,HTTP.TLSHandshakeError,HTTP.TLSTransportError} &&
+        return transport_failure(error)
     return error isa ErrorException && occursin(r"^DONKI HTTP status (408|425|429|5[0-9]{2})$",error.msg)
 end
 

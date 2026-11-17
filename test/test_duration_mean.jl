@@ -49,10 +49,13 @@ end
     end
 end
 
-@testset "Independent exhaustive B equivalence: all9 corners, horizons and starts" begin
+@testset "Independent B equivalence: all9 corners, starts and six-hour prefixes" begin
     for beta in (5,20),state in (:N,:S),age in (2,48,49),taus in ((2.,12.),(4.,24.),(8.,48.)),sigma in (1.,3.,10.)
         m=model(beta);c=current(state,age,state==:S ? 3. : 0.)
-        for h in 1:6
+        # A six-hour tree checks all six prefixes without rebuilding them at
+        # every shorter horizon. Keep one one-hour call through the same oracle.
+        horizons=beta==5 && state===:N && age==2 && taus==(2.,12.) && sigma==1. ? (1,6) : (6,)
+        for h in horizons
             args=(;horizon=h,lambdas=1 ./ taus,sigmas=(sigma,sigma),mean=[-1e4,1e4],
               covariance=[1e4 500.;500. 1e4],basis=[-1e4 1e4;1e4 1e4],pressure=4.,noise=1.)
             meanonly=forecast(m,c;args...);full=forecast(m,c;args...,full=true)

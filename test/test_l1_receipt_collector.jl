@@ -85,7 +85,7 @@ end
     )
     fake_get = (url; kwargs...) -> begin
         @test url == source.url
-        @test kwargs[:socket_type_tls] === L1C.MbedTLS.SSLContext
+        @test kwargs[:read_idle_timeout] == 30
         @test !haskey(kwargs, :require_ssl_verification)
         @test kwargs[:status_exception] === false
         response

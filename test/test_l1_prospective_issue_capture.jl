@@ -80,7 +80,7 @@ function _pic_capture_l1!(root, receipt_start::DateTime,
         end,
         ephemeris_http_get=(url; kwargs...) -> begin
             @test url == PICL1.L1_NOAA_EPHEMERIS_URL
-            @test kwargs[:socket_type_tls] === PIC.MbedTLS.SSLContext
+            @test kwargs[:read_idle_timeout] == 30
             @test !haskey(kwargs, :require_ssl_verification)
             _pic_ephemeris()
         end,
@@ -104,7 +104,7 @@ function _pic_capture_dst!(root, started::DateTime, completed::DateTime,
         root;
         http_get=(url; kwargs...) -> begin
             @test url == PIC.STATIC_STACK_DST_SOURCE.url
-            @test kwargs[:socket_type_tls] === PIC.MbedTLS.SSLContext
+            @test kwargs[:read_idle_timeout] == 30
             @test !haskey(kwargs, :require_ssl_verification)
             @test kwargs[:status_exception] === false
             response

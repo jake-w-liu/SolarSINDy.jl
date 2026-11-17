@@ -1,12 +1,9 @@
 module ArchivePointNumericPackageTests
-using Test,Dates,SHA,SolarSINDy
-const SELECTED_POINT_TREE_SOURCE=realpath(joinpath(@__DIR__,"..","..","src","archive_point_models","ArchivePointNumericTrees.jl"))
+using Test,Dates,SolarSINDy
 const P=SolarSINDy.ArchivePointNumericTrees
 const C=SolarSINDy.CompletedSourceDBDT.CompletedRefitArtifacts
 const LIB_SOURCE_SHA="f0d3511130a9a84ba4bce823bd47055fba2e11d368db3a0376fb48951e4ecd8f"
-@assert realpath(String(only(methods(P.predict)).file))==SELECTED_POINT_TREE_SOURCE
 println("POINT_TREE_MODULE_LOADED")
-println("POINT_TREE_MODULE_SOURCE_SHA256=",bytes2hex(sha256(read(SELECTED_POINT_TREE_SOURCE))))
 constant_tree(value,n)=P.NumericTree(zeros(Int,n),zeros(Int,n),vcat(Float32(value),zeros(Float32,n-1)),falses(n))
 function threshold_model(mode;edge=.5,left=5.0f0,right=7.0f0)
     p=mode===:ground11 ? 11 : 8

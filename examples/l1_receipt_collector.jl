@@ -7,7 +7,6 @@
 using Dates
 using FileWatching: Pidfile
 using HTTP
-using MbedTLS
 using JSON3
 using SHA
 
@@ -389,9 +388,8 @@ function _l1_capture_ephemeris(http_get::Function,
     response = try
         http_get(
             L1_NOAA_EPHEMERIS_URL;
-            socket_type_tls=MbedTLS.SSLContext,
             connect_timeout=15,
-            readtimeout=30,
+            read_idle_timeout=30,
             retries=0,
             status_exception=false,
         )
@@ -1524,9 +1522,8 @@ function capture_l1_receipts!(root::AbstractString;
             response = try
                 http_get(
                     String(source.url);
-                    socket_type_tls=MbedTLS.SSLContext,
                     connect_timeout=15,
-                    readtimeout=30,
+                    read_idle_timeout=30,
                     retries=0,
                     status_exception=false,
                 )

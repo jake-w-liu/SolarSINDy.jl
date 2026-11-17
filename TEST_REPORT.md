@@ -2115,3 +2115,35 @@ all candidate recipes/refits, small matched342 native fits and independent saved
 prediction replay. The previous 5537faa CI remained live with six package jobs;
 its elapsed time alone did not establish which workload dominated. A new full
 Pkg.test/examples run is required on the final cleanup commit.
+
+### Verified essential cleanup and remaining transport work (2026-11-18)
+
+Commit 19e843f0b7c9c4424cc845a0def4b17d1dbad2ad passed all seven jobs in
+[CI run 44176624998](https://github.com/jake-w-liu/SolarSINDy.jl/actions/runs/44176624998):
+full Pkg.test and examples on Windows, Ubuntu and macOS with Julia 1.12.6 and
+1.13.1, strict documentation on both versions, and the frontend checks. The
+verified commit was fast-forwarded to main; all redundant remote branches were
+removed and the independent user checkout is clean and current.
+
+The earlier blanket 8 GiB restriction on all local Julia commands was incorrect.
+That admission requirement belongs to the designated large experiment runners.
+Lightweight parsing ran on both Julia versions, and native network/app checks
+now execute with package images and module caches disabled. Windows security
+policy remains unchanged.
+
+The follow-up removes four remaining method/source censuses and
+oversized duplicate coverage toys. Small boundary/value tests and independent
+scientific oracles remain. The HTTP 2 migration requires separate verification;
+19e843f CI does not validate it. An isolated HTTP 2 HTTPS smoke passed, while
+focused migration checks exposed TLS client configuration, String fixture body
+handling and a renamed bind-error type. Those compatibility changes require
+rerun focused checks and full CI before promotion. The corrected native app
+suite passed all 1535 assertions in 197.78 seconds. The TLS, realtime monitor,
+live verification and receipt checks passed all 1409 assertions in 377.63
+seconds. Both used Julia 1.12.6, disabled module/package-image caches and closed
+their owned process boundaries. All 30 changed Julia files passed strict
+syntax parsing on both supported versions; Bash syntax and whitespace passed.
+The remaining collector and final numerical cleanup checks are still running;
+full package/examples/docs qualification on the follow-up remains pending.
+No new scientific results,
+dashboard health or predictive superiority are claimed by this verification.

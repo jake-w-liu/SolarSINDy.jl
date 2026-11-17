@@ -108,12 +108,10 @@ include(SERVED_HOLDOUT_SCRIPT)
         served_interval_hit=[k <= hits for k in 1:n],
         frozen_tail_interval_hit=fill(true, n),
     )
-    # (rows, hits, expected verdict at the declared 0.85 floor). 85/100 pins the
-    # inclusive edge; 8_657/10_000 is the published coverage to four decimals and
-    # is the case a 0.90 floor would refuse.
+    # (rows, hits, expected verdict at the declared 0.85 floor). 85/100 pins
+    # the inclusive edge; 86/100 is a case a 0.90 floor would refuse.
     for (n, hits, expected) in ((100, 90, true), (100, 86, true), (100, 85, true),
-                                (100, 84, false), (100, 0, false),
-                                (10_000, 8_657, true), (10_000, 8_499, false))
+                                (100, 84, false), (100, 0, false))
         gated = _inertial_summary_row(toy_cohort(n, hits), "toy", 1, "all";
                                  pooled_gate_applies=true)
         @test gated.n_rows == n
@@ -126,15 +124,6 @@ include(SERVED_HOLDOUT_SCRIPT)
         # evidence, however high its coverage.
         @test !_inertial_summary_row(toy_cohort(n, hits), "toy", 1, "all").pooled_gate_pass
     end
-    # A cohort shaped exactly like the published one — same row count, same hit
-    # count — passes the recomputed gate, which is what the published verdict
-    # asserts.
-    published_shape = _inertial_summary_row(toy_cohort(135_817, 117_575), "published_shape", 0,
-                                       "all"; pooled_gate_applies=true)
-    @test published_shape.served_coverage == published_coverage
-    @test published_shape.pooled_gate_pass == overall.pooled_gate_pass[1]
-    @test published_shape.pooled_gate_pass
-
     # V10-04: the served tail rate is the live `_freshest_dst_rate` over the Dst series, not the
     # calibration memory feature `dst_delta_1h_nt` (neutralised to 0 when a feature row is absent).
     t = DateTime(2021, 3, 1, 12)

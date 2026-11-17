@@ -12,7 +12,6 @@ using CSV
 using DataFrames
 using Dates
 using HTTP
-using MbedTLS
 using JSON3
 using SHA
 using Statistics
@@ -372,8 +371,7 @@ function _fetch_dst(; max_retries::Int=3, retry_delay_sec::Real=1.0,
         started_ns = monotonic_clock()
         response_received = false
         try
-            resp = fetch_fn(KYOTO_DST_JSON_URL; socket_type_tls=MbedTLS.SSLContext,
-                           connect_timeout=15, readtimeout=30, retries=0,
+            resp = fetch_fn(KYOTO_DST_JSON_URL; connect_timeout=15, read_idle_timeout=30, retries=0,
                            status_exception=false)
             completed = utc_clock()
             completed_ns = monotonic_clock()
@@ -4176,7 +4174,14 @@ function prepare_issue_inputs(cfg::LiveVerifyConfig;
         response = http_get(url; kwargs...)
         received = now(UTC)
         if snapshot_dir !== nothing
-            bytes = Vector{UInt8}(codeunits(String(copy(response.body))))
+            body = response.body
+            bytes = if body isa AbstractVector{UInt8}
+                Vector{UInt8}(body)
+            elseif body isa Union{String,SubString{String}}
+                Vector{UInt8}(codeunits(body))
+            else
+                throw(ArgumentError("HTTP response evidence requires bytes or UTF-8 text"))
+            end
             digest = bytes2hex(sha256(bytes))
             relative = joinpath("responses", digest * ".body")
             _persist_issue_bytes(joinpath(snapshot_dir, relative), bytes)

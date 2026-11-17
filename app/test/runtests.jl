@@ -2001,13 +2001,13 @@ const INERTIAL_SINDY_DRIVER_TOKEN =
                     owned = setdiff(open_timers(), baseline)
                     try
                         @test length(owned) == 1
-                        port = Int(last(getsockname(server.listener.server)))
+                        port = HTTP.port(server)
                         health = HTTP.get("http://127.0.0.1:$port/api/health";
-                                          readtimeout=30, connect_timeout=2, retries=0)
+                                          read_idle_timeout=30, connect_timeout=2, retries=0)
                         @test health.status == 200
                         @test JSON3.read(health.body).status == "no_log"
                         forecast = HTTP.get("http://127.0.0.1:$port/api/forecast";
-                                            readtimeout=30, connect_timeout=2, retries=0)
+                                            read_idle_timeout=30, connect_timeout=2, retries=0)
                         @test forecast.status == 200
                         @test !JSON3.read(forecast.body).available
                     finally
@@ -2020,7 +2020,7 @@ const INERTIAL_SINDY_DRIVER_TOKEN =
                 try
                     port = Int(last(getsockname(listener)))
                     for blocking in (false, true)
-                        @test_throws Base.IOError start_server(;
+                        @test_throws HTTP.AddressInUseError start_server(;
                             host="127.0.0.1", port=port, log_path=log_path,
                             blocking=blocking,
                         )
@@ -4138,7 +4138,6 @@ esac
     end
 
     @eval @testset "outbound requests select TLS without changing trust or deadlines" begin
-        original_default = HTTP.SOCKET_TYPE_TLS[]
         calls = NamedTuple[]
         get_request(url; kwargs...) = begin
             push!(calls, (; url, kwargs=(; kwargs...)))
@@ -4157,13 +4156,12 @@ esac
             http_post=post_request).status == 204
         @test length(calls) == 3
         for call in calls
-            @test call.kwargs.socket_type_tls === MbedTLS.SSLContext
+            @test !haskey(call.kwargs, :socket_type_tls)
             @test !haskey(call.kwargs, :require_ssl_verification)
             @test call.kwargs.status_exception === true
         end
-        @test [(c.kwargs.connect_timeout, c.kwargs.readtimeout, c.kwargs.retries)
+        @test [(c.kwargs.connect_timeout, c.kwargs.read_idle_timeout, c.kwargs.retries)
                for c in calls] == [(1, 1, 0), (5, 15, 0), (10, 10, 1)]
-        @test HTTP.SOCKET_TYPE_TLS[] === original_default
     end
 
     @eval @testset "non-finite Dst threat is unknown" begin

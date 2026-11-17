@@ -10,12 +10,13 @@ const R = DailyOperationalReview
     getter(url;kwargs...) = begin
         push!(calls,url)
         @test kwargs[:retries] == 0
-        @test kwargs[:readtimeout] == 10
+        @test kwargs[:read_idle_timeout] == 10
         @test kwargs[:connect_timeout] == 3
         data = endswith(url,"/api/health") ? (;status="ok") :
             endswith(url,"CMO") ? (;station="CMO",available=true,data_type="adjusted",refresh_in_progress=true,forecast_status="disabled") :
             (;station="FRD",available=false,data_type="variation",forecast_status="disabled")
-        HTTP.Response(200,JSON3.write(data))
+        body = JSON3.write(data)
+        HTTP.Response(200,endswith(url,"/api/health") ? Vector{UInt8}(codeunits(body)) : body)
     end
     mktempdir() do root
         claim = joinpath(root,"superlearner_live_claim_status.json")

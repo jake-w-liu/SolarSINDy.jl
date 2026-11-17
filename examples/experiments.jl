@@ -211,7 +211,6 @@ include(joinpath(@__DIR__, "completed_label_events_synthetic.jl"))
 run_synthetic_completed_label_events()
 run_synthetic_completed_label_events_bounded()
 
-include(joinpath(@__DIR__, "b_point_training_synthetic.jl"))
 include(joinpath(@__DIR__, "matched_gbm_primitives_synthetic.jl"))
 run_matched_gbm_primitives_synthetic()
 include(joinpath(@__DIR__, "archive_format_synthetic.jl"))
@@ -266,8 +265,6 @@ CompletedSelectionSynthetic.run_example()
 include(joinpath(@__DIR__,"selected_point_binding_synthetic.jl"))
 SelectedPointBindingSynthetic.run_example()
 
-include(joinpath(@__DIR__,"candidate_validation_synthetic.jl"))
-CandidateValidationSynthetic.run_example()
 
 include(joinpath(@__DIR__,"cme_gsm_labels_synthetic.jl"))
 CMEGSMLabelsSynthetic.run_example()

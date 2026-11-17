@@ -20,7 +20,6 @@ using CSV
 using DataFrames
 using Dates
 using HTTP
-using MbedTLS
 using JSON3
 using Printf
 using SHA
@@ -503,9 +502,10 @@ function _with_external_dst_collector_locks(f::Function,
 end
 
 function _http_text(url::AbstractString; http_get::Function = HTTP.get)
-    resp = http_get(String(url); socket_type_tls=MbedTLS.SSLContext,
-                    connect_timeout = 15, readtimeout = 30,
-                    retries = 1, status_exception = true)
+    resp = http_get(String(url); connect_timeout = 15, read_idle_timeout = 30,
+                    retries = 1, status_exception = true,
+                    retry_if = (_, _, _, response) -> response === nothing ? nothing :
+                        (response.status in (403, 408, 409, 429) || 500 <= response.status < 600))
     body = String(getproperty(resp, :body))
     last_modified = _parse_http_last_modified(getproperty(resp, :headers))
     return body, last_modified

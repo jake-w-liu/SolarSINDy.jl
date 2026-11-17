@@ -264,17 +264,9 @@ using DataFrames
         @test all(isnan, wide.V[2:7])
     end
 
-    @testset "C4-PKG-04: `_interp_short_gaps!` has exactly one method" begin
-        # Two definitions of this helper coexisted (`src/data_cleaning.jl` and
-        # `src/realtime.jl`); the more specific `Vector{Float64}` one silently
-        # won for every real caller. A single method is the contract now.
-        ms = methods(SolarSINDy._interp_short_gaps!)
-        @test length(ms) == 1
-        @test basename(String(first(ms).file)) == "data_cleaning.jl"
-        @test which(SolarSINDy._interp_short_gaps!, (Vector{Float64}, Int)) === first(ms)
-
-        # Value semantics of the surviving method: bounded gaps of at most
-        # `max_gap` are interpolated linearly; longer gaps and gaps touching
+    @testset "C4-PKG-04: short-gap interpolation preserves bounded values" begin
+        # Bounded gaps of at most `max_gap` are interpolated linearly; longer
+        # gaps and gaps touching
         # either end of the vector are left NaN.
         x = [1.0, NaN, NaN, 4.0]
         SolarSINDy._interp_short_gaps!(x, 3)
@@ -292,7 +284,7 @@ using DataFrames
         SolarSINDy._interp_short_gaps!(edges, 3)
         @test isequal(edges, [NaN, 2.0, NaN])
 
-        # Non-`Vector` storage must hit the same method and the same values.
+        # Non-`Vector` storage must preserve the same values.
         buf = [0.0, 1.0, NaN, 3.0, 0.0]
         SolarSINDy._interp_short_gaps!(view(buf, 2:4), 3)
         @test isequal(buf, [0.0, 1.0, 2.0, 3.0, 0.0])

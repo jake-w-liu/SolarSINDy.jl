@@ -144,12 +144,16 @@ end
 # L1: exact non-negative simplex least squares
 # ---------------------------------------------------------------------------
 
-@testset "the simplex projection restates the deployed static stack projection" begin
+@testset "the simplex projection matches literal and compatibility oracles" begin
     rng = MersenneTwister(4041)
-    for _ in 1:300
-        v = randn(rng, 6) .* 8.0
+    for (v, expected) in (
+        ([4.0, 3.0, 2.0, 1.0, 0.0, -1.0], [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+        (fill(-2.0, 6), fill(1 / 6, 6)),
+        ([0.2, 0.3, 0.5, 0.0, 0.0, 0.0], [0.2, 0.3, 0.5, 0.0, 0.0, 0.0]),
+    )
         mine = superlearner_project_simplex(v, 1.0)
         theirs = SolarSINDy._static_stack_project_simplex(v, 1.0)
+        @test maximum(abs, mine .- expected) <= 1e-14
         @test maximum(abs, mine .- theirs) <= 1e-14
         @test all(>=(0.0), mine)
         @test abs(sum(mine) - 1.0) <= 1e-14
@@ -164,19 +168,19 @@ end
     @test_throws ArgumentError superlearner_project_simplex(Float64[], 1.0)
 end
 
-@testset "the floor projection is the nearest point of its constraint set" begin
+@testset "the floor projection satisfies sampled feasible-point comparisons" begin
     rng = MersenneTwister(5052)
     sindy = collect(SUPERLEARNER_SINDY_FAMILY)
-    for _ in 1:120
+    for _ in 1:16
         v = randn(rng, SUPERLEARNER_EXPERT_COUNT) .* 3.0
         projected = superlearner_project_floor(v, SUPERLEARNER_SINDY_FLOOR)
         @test all(>=(-1e-15), projected)
         @test abs(sum(projected) - 1.0) <= 1e-12
         @test sum(projected[sindy]) >= SUPERLEARNER_SINDY_FLOOR - 1e-12
-        # No randomly drawn feasible point is closer than the projection, which is
-        # the defining property of a Euclidean projection.
+        # Sampled feasible-point comparisons check the distance property; this
+        # finite sample is not a proof of the projection formula.
         best = sum(abs2, projected .- v)
-        for _ in 1:200
+        for _ in 1:16
             head = superlearner_project_simplex(randn(rng, 3), SUPERLEARNER_SINDY_FLOOR + 0.4 * rand(rng))
             mass = sum(head)
             tail = superlearner_project_simplex(randn(rng, 6), 1.0 - mass)

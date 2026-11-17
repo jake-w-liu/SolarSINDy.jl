@@ -553,10 +553,40 @@ function port_from_env(; name::AbstractString = "SWM_PORT", default::AbstractStr
     return port
 end
 
+struct DashboardServer{S,F}
+    server::S
+    shutdown::F
+end
+
+Base.isopen(server::DashboardServer) = isopen(server.server)
+HTTP.port(server::DashboardServer) = HTTP.port(server.server)
+function Base.wait(server::DashboardServer)
+    try
+        wait(server.server)
+    finally
+        server.shutdown()
+    end
+end
+function Base.close(server::DashboardServer)
+    try
+        close(server.server)
+    finally
+        server.shutdown()
+    end
+end
+function HTTP.forceclose(server::DashboardServer)
+    try
+        HTTP.forceclose(server.server)
+    finally
+        server.shutdown()
+    end
+end
+
 """
     start_server(; host, port, log_path, blocking=true)
 
-Start the dashboard server. Returns the `HTTP.Server` when `blocking=false`.
+Start the dashboard server. Return a server handle when `blocking=false`.
+Use `close`, `HTTP.forceclose`, `wait`, `isopen` and `HTTP.port` on the handle.
 """
 function start_server(; host::AbstractString = bind_setting_from_env("SWM_HOST", "127.0.0.1"),
                         port::Integer = port_from_env(),
@@ -600,14 +630,19 @@ function start_server(; host::AbstractString = bind_setting_from_env("SWM_HOST",
     end
     try
         notify_timer = start_notify_loop(log_path) # no-op unless SWM_WEBHOOK_URL is set
+        server = DashboardServer(HTTP.serve!(handler, host, port), shutdown)
         if blocking
-            return HTTP.serve(handler, host, port; on_shutdown=shutdown)
+            try
+                wait(server)
+            finally
+                close(server)
+            end
+            return nothing
         end
-        server = HTTP.serve!(handler, host, port; on_shutdown=shutdown)
         return server
     finally
-        # A failed bind has no HTTP.Server to run the shutdown callback.
-        (blocking || server === nothing) && shutdown()
+        # A failed bind has no server handle to release its timers.
+        server === nothing && shutdown()
     end
 end
 

@@ -2247,8 +2247,49 @@ large row/string/vector capacity cases from ordinary tests. Keep direct path
 safety, small parser grammar/limit rejection, mathematical and causal oracles,
 all declared candidate/refit experiments and saved-state corruption checks.
 No production calculation, data limit, split/grid or tolerance changes here.
+The final review also removes interpolation and numeric-tree method/location
+censuses, source-string bans already covered by replay behavior, and oversized
+coverage-gate toys. Small interpolation and gate-boundary cases, published
+snapshot checks, causal replay and native-versus-independent tree oracles remain.
+Duration-mean equivalence keeps all 108 parameter/start combinations and all six
+time-prefix oracles using six-hour trees, plus one one-hour API case. Rational
+wealth tests enumerate length-eight histories once, retaining every shorter
+prefix and representative short-state codec checks. Floor-projection feasible-
+point sampling is 16 by 16 instead of 120 by 200; analytical, slack-floor, ten-expert
+and independent-optimizer checks remain. These changes alter no numerical
+expectation, tolerance, declared candidate recipe or scientific refit.
+The 300 ordinary simplex compatibility samples are replaced by three literal
+projection oracles, retaining compatibility, nonnegativity and mass checks.
 The earlier blanket8GiB prohibition on every local Julia launch was incorrect:
 that budget belongs to scoped large-experiment/resource runners. Lightweight
 strict syntax checks have run on both supported Julia versions. Current local
-native execution is blocked by Windows Smart App Control rejecting dependency
-DLLs; hosted full package/examples verification remains required.
+native cached loading was blocked by Windows Smart App Control rejecting
+dependency DLLs. Full package/examples/docs verification subsequently passed
+on all six hosted platform/version combinations for19e843f. Further follow-up
+changes require their own verification.
+
+### HTTP 2 transport migration in progress (2026-11-18)
+
+Objective: restore ordinary dashboard/monitor HTTPS on the current Windows
+host using supported dependencies. HTTP 1 imports the blocked MbedTLS DLL;
+HTTP 2.16 uses Reseau and Julia's bundled OpenSSL. An isolated Julia 1.13.1
+environment passed actual localhost serving and USGS/NOAA HTTPS requests with
+the signed bundled libcrypto/libssl, package images disabled and one default
+plus one interactive thread. No security policy or trust-store change occurred.
+
+Contract: retain HTTPS verification, host identity checks, request deadlines,
+explicit retry limits, status/error classification and server cleanup. Remove
+obsolete backend selectors; migrate only the changed public HTTP APIs. Keep all
+forecast formulas, source/label clocks, candidate grids, splits and tolerances.
+Oracles: existing trusted/untrusted/hostname TLS cases, ingestion fixtures,
+dashboard API/timer cleanup, and actual provider HTTPS. Run focused checks,
+full Pkg.test, examples, strict docs and the development harness or report its
+blocker before any scientific verdict. CI on19e843f verifies the earlier cleanup,
+not this subsequent migration.
+
+The default examples also repeated the identical full36 B-point training fixture
+and two-station fixed16/three-refit candidate fixture already run by Pkg.test.
+Remove those two automatic duplicate runs. Their standalone examples and every
+package numerical/native/grid/readback check remain. The complete default
+experiments command still executes its other numerical examples and deployed
+model checks; no actual scientific experiment or candidate budget is reduced.

@@ -20,7 +20,7 @@
 # Config: SWM_WEBHOOK_URL (empty = disabled), SWM_ALERT_STATE (optional state-file override).
 # Depends on HTTP, JSON3, Dates.
 
-using HTTP, JSON3, Dates, MbedTLS
+using HTTP, JSON3, Dates
 
 # A stale status (issue time beyond the staleness threshold, or an expired cycle) must not
 # escalate the webhook: its threat reflects a forecast issued hours-to-days ago, not now.
@@ -193,8 +193,8 @@ end
 # Injectable transport so the success path is unit-testable without a network. Returns on
 # success, throws on delivery failure (2xx enforced via status_exception).
 _default_post(url, headers, body; http_post::Function=HTTP.post) =
-    http_post(url, headers, body; socket_type_tls=MbedTLS.SSLContext,
-              readtimeout = 10, connect_timeout = 10, retries = 1, status_exception = true)
+    http_post(url, headers, body; read_idle_timeout=10, connect_timeout=10,
+              retries=1, status_exception=true)
 
 # Compose the operator-facing message for a delivered transition.
 function _alert_message(kind::Symbol, level::Int, reasons::Vector{String}, prev_level::Int)

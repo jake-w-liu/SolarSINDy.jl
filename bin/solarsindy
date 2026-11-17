@@ -34,6 +34,8 @@
 #   SOLARSINDY_MONITOR_DIR       monitor state dir (default <clone>/var/monitor)
 #   SWM_WEBHOOK_URL              enable push alerts (Slack/Discord/generic JSON POST)
 #   JULIA                        julia launcher (default: ~/.juliaup/bin/julia, else `julia`)
+#   SOLARSINDY_JULIA_PKGIMAGES    CLI package-image mode: yes/no/existing; no uses source/JIT loading
+#   SOLARSINDY_JULIA_COMPILED_MODULES  CLI module-cache mode: yes/no/existing/strict
 #   LIVE_MONITOR_INTERVAL_SEC    forecast cadence (default 3600)
 #   LIVE_MONITOR_PHASE_SAMPLING  1 alternates UTC issue minutes 05/55 by hour parity
 #   SOLARSINDY_ENV_FILE          override the config file path (default <clone>/solarsindy.env);
@@ -123,6 +125,13 @@ case "$URL_HOST" in
 esac
 URL="http://$URL_HOST:$PORT"
 MIN_JULIA="1.12.6"
+JULIA_START_FLAGS=(--startup-file=no)
+if [ -n "${SOLARSINDY_JULIA_PKGIMAGES:-}" ]; then
+  JULIA_START_FLAGS+=("--pkgimages=$SOLARSINDY_JULIA_PKGIMAGES")
+fi
+if [ -n "${SOLARSINDY_JULIA_COMPILED_MODULES:-}" ]; then
+  JULIA_START_FLAGS+=("--compiled-modules=$SOLARSINDY_JULIA_COMPILED_MODULES")
+fi
 
 if [ -n "${JULIA:-}" ]; then
   :
@@ -156,7 +165,7 @@ need_julia() {
     err "'$JULIA' not found. Install Julia >= $MIN_JULIA or set JULIA=/path/to/julia."
     exit 1
   }
-  "$JULIA" --startup-file=no -e "exit(VERSION >= v\"$MIN_JULIA\" ? 0 : 1)" >/dev/null 2>&1 || {
+  "$JULIA" "${JULIA_START_FLAGS[@]}" -e "exit(VERSION >= v\"$MIN_JULIA\" ? 0 : 1)" >/dev/null 2>&1 || {
     err "Julia >= $MIN_JULIA is required (found: $("$JULIA" --version 2>/dev/null || echo unknown))."
     exit 1
   }
@@ -173,7 +182,7 @@ windows_process() {
     }
   helper_native="$(cygpath -aw "$PROCESS_HELPER")" && file_native="$(cygpath -aw "$file")" &&
     root_native="$(cygpath -aw "$ROOT")" && mark_native="$(cygpath -aw "$mark")" || return 2
-  MSYS2_ARG_CONV_EXCL='*' "$JULIA" --startup-file=no "$helper_native" \
+  MSYS2_ARG_CONV_EXCL='*' "$JULIA" "${JULIA_START_FLAGS[@]}" "$helper_native" \
     "$action" "$file_native" "$root_native" "$mark_native" "$@"
 }
 
@@ -377,7 +386,7 @@ windows_spawn() {
     project_native="$(cygpath -aw "$project")" || return 1
   SOLARSINDY_CLI_BOOTSTRAP=1 SOLARSINDY_CLI_STATE="$state_native" \
   SOLARSINDY_CLI_ROOT="$root_native" SOLARSINDY_CLI_ENTRY="$entry_native" SOLARSINDY_CLI_NONCE="$token" \
-  MSYS2_ARG_CONV_EXCL='*' nohup "$JULIA" --startup-file=no --project="$project_native" \
+  MSYS2_ARG_CONV_EXCL='*' nohup "$JULIA" "${JULIA_START_FLAGS[@]}" --project="$project_native" \
     -L "$helper_native" "$entry_native" >> "$log" 2>&1 &
   disown 2>/dev/null || true
   # Pending is expected only inside this bounded startup handshake. A failed query
@@ -570,7 +579,7 @@ while [ "$SECONDS" -lt "$deadline" ]; do
   sleep 0.05
 done
 exit 77
-' "$entry" "$gate" "${BASH_ENV+x}" "${BASH_ENV:-}" "$UNIX_FD_PLATFORM" "$JULIA" --startup-file=no --project="$project" "$entry"
+' "$entry" "$gate" "${BASH_ENV+x}" "${BASH_ENV:-}" "$UNIX_FD_PLATFORM" "$JULIA" "${JULIA_START_FLAGS[@]}" --project="$project" "$entry"
   ) </dev/null >> "$log" 2>&1 9>&- &
   newpid=$!
   if unix_write_pid "$newpid" && unix_pid_written "$file" "$newpid"; then :; else
@@ -720,9 +729,9 @@ cmd_setup() {
   need_julia
   say "Julia: $("$JULIA" --version)"
   say "Instantiating package environment (first run downloads dependencies)…"
-  "$JULIA" --startup-file=no --project="$ROOT" -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+  "$JULIA" "${JULIA_START_FLAGS[@]}" --project="$ROOT" -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
   say "Instantiating dashboard environment…"
-  "$JULIA" --startup-file=no --project="$ROOT/app" -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
+  "$JULIA" "${JULIA_START_FLAGS[@]}" --project="$ROOT/app" -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
   mkdir -p "$MONITOR_DIR" "$LOG_DIR" "$RUN_DIR"
   say "Setup complete. Next: bin/solarsindy start"
 }
@@ -975,7 +984,7 @@ cmd_once() {
   say "Running one forecast cycle in the foreground (needs network access to NOAA SWPC)…"
   SOLARSINDY_MONITOR_DIR="$MONITOR_DIR" \
   JULIA_NUM_THREADS="${SOLARSINDY_JULIA_THREADS:-2}" \
-    "$JULIA" --startup-file=no --project="$ROOT" "$ROOT/examples/live_monitor.jl" --once
+    "$JULIA" "${JULIA_START_FLAGS[@]}" --project="$ROOT" "$ROOT/examples/live_monitor.jl" --once
 }
 
 cmd_logs() {

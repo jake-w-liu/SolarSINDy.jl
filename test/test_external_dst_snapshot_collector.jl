@@ -177,9 +177,13 @@ end
     C = ExternalDstCollectorTestHarness
     @testset "external HTTP transport" begin
         get_request(url; kwargs...) = begin
-            @test kwargs[:socket_type_tls] === C.MbedTLS.SSLContext
             @test !haskey(kwargs, :require_ssl_verification)
-            @test (kwargs[:connect_timeout], kwargs[:readtimeout], kwargs[:retries]) == (15, 30, 1)
+            @test (kwargs[:connect_timeout], kwargs[:read_idle_timeout], kwargs[:retries]) == (15, 30, 1)
+            @test kwargs[:status_exception] === true
+            retry_status(status) = kwargs[:retry_if](1, nothing, nothing, (; status))
+            @test all(retry_status, (403, 408, 409, 429, 500, 501, 502, 503, 504, 599))
+            @test !retry_status(404)
+            @test kwargs[:retry_if](1, nothing, nothing, nothing) === nothing
             (; status=200, headers=Pair{String,String}[], body="observations")
         end
         body, _ = C._http_text("https://example.invalid/observations"; http_get=get_request)

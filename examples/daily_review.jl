@@ -1,6 +1,6 @@
 module DailyOperationalReview
 
-using Dates, HTTP, JSON3, MbedTLS, SHA
+using Dates, HTTP, JSON3, SHA
 include(joinpath(@__DIR__, "live_log_lock.jl"))
 
 utc(t) = string(t)*"Z"
@@ -33,12 +33,20 @@ function capture_endpoint(url; http_get=HTTP.get, clock=()->now(UTC))
     started = clock()
     body = nothing; sha = nothing; completed = nothing; http_status = nothing
     try
-        response = http_get(url;connect_timeout=3,readtimeout=10,retries=0,
-            socket_type_tls=MbedTLS.SSLContext)
+        response = http_get(url;connect_timeout=3,read_idle_timeout=10,retries=0)
         completed = clock()
         http_status = response.status
-        length(response.body) <= 1024*1024 || error("dashboard response exceeds 1 MiB")
-        body = String(copy(response.body)); sha = digest(response.body)
+        response_body = response.body
+        bytes = if response_body isa AbstractVector{UInt8}
+            length(response_body) <= 1024*1024 || error("dashboard response exceeds 1 MiB")
+            Vector{UInt8}(response_body)
+        elseif response_body isa Union{String,SubString{String}}
+            ncodeunits(response_body) <= 1024*1024 || error("dashboard response exceeds 1 MiB")
+            Vector{UInt8}(codeunits(response_body))
+        else
+            throw(ArgumentError("dashboard response requires bytes or UTF-8 text"))
+        end
+        body = String(copy(bytes)); sha = digest(bytes)
         completed >= started || error("clock moved backward during dashboard receipt")
         http_status == 200 || error("dashboard returned HTTP $http_status")
         payload = JSON3.read(body,Dict{String,Any})

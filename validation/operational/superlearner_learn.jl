@@ -472,9 +472,7 @@ end
     superlearner_project_simplex(values, mass) -> Vector{Float64}
 
 Exact Euclidean projection of `values` onto `{x >= 0, sum(x) = mass}` by the
-sorted-threshold rule. This restates the projection the static stack uses; the
-test suite requires the two to agree on random inputs, which is what makes the
-restatement safe rather than a second convention.
+sorted-threshold rule, using the same convention as the deployed static stack.
 """
 function superlearner_project_simplex(values::AbstractVector{<:Real}, mass::Real)
     m = Float64(mass)

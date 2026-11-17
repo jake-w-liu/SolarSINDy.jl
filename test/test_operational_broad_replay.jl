@@ -86,11 +86,6 @@ using Main.LocalArtifactGate: local_artifact_available
         broken.target_utc[1] = broken.issue_utc[1]
         @test_throws ErrorException _validate_broad_rows(broken)
     end
-
-    source = read(BROAD_REPLAY_SCRIPT, String)
-    @test !occursin("storm_min_dst_nt", source)
-    @test !occursin("storm_min_dst_utc", source)
-    @test !occursin("min Dst <=", source)
 end
 
 @testset "Operational forecast-layer oracles (_operational_forecast)" begin

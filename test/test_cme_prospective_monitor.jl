@@ -7,27 +7,25 @@ end
 const NEW=After.CMEProspectiveMonitor
 const URL="https://example.invalid"
 
-function timeout_boundary(exception)
-    try
-        HTTP.Connections.try_with_timeout(_->throw(exception),2.)
-    catch captured
-        return captured
-    end
-    error("throwing timeout-boundary control unexpectedly returned")
-end
+captured_cause(exception)=CapturedException(exception,backtrace())
 
-@testset "Installed HTTP timeout boundary retains a retryable transport cause" begin
+@testset "HTTP 2 acquisition boundaries retain retryable transport causes" begin
     io=Base.IOError("read: connection reset by peer (ECONNRESET)",Int32(-4077))
-    captured=timeout_boundary(io)
+    captured=captured_cause(io)
     @test captured isa CapturedException
     @test captured.ex===io
     direct=HTTP.ConnectError(URL,io);wrapped=HTTP.ConnectError(URL,captured)
     @test NEW.recoverable_acquisition(direct)
     @test NEW.recoverable_acquisition(wrapped)
-    @test NEW.recoverable_acquisition(HTTP.RequestError(nothing,captured))
+    @test NEW.recoverable_acquisition(HTTP.TLSTransportError(captured))
+    @test NEW.recoverable_acquisition(HTTP.TLSHandshakeError(EOFError()))
+    lookup=HTTP.HostResolvers.LookupError("temporary lookup failure","example.invalid")
+    @test NEW.recoverable_acquisition(HTTP.DNSError("example.invalid",lookup))
+    operation=HTTP.HostResolvers.OpError("dial","tcp",nothing,nothing,lookup)
+    @test NEW.recoverable_acquisition(HTTP.DNSError("example.invalid",operation))
     @test occursin("connection reset by peer (ECONNRESET)",sprint(showerror,wrapped))
-    for exception in (EOFError(),HTTP.TimeoutError(1))
-        @test NEW.recoverable_acquisition(HTTP.ConnectError(URL,timeout_boundary(exception)))
+    for exception in (EOFError(),HTTP.TimeoutError("request",1_000_000_000),SystemError("connect",Int32(111)))
+        @test NEW.recoverable_acquisition(HTTP.ConnectError(URL,captured_cause(exception)))
     end
 end
 
@@ -38,7 +36,9 @@ end
     for exception in (ErrorException("changed model hash"),ArgumentError("malformed response"),InterruptException())
         @test !NEW.recoverable_acquisition(exception)
         @test !NEW.recoverable_acquisition(HTTP.ConnectError(URL,exception))
-        @test !NEW.recoverable_acquisition(HTTP.ConnectError(URL,timeout_boundary(exception)))
+        @test !NEW.recoverable_acquisition(HTTP.ConnectError(URL,captured_cause(exception)))
+        @test !NEW.recoverable_acquisition(HTTP.TLSTransportError(exception))
+        @test !NEW.recoverable_acquisition(HTTP.DNSError("example.invalid",exception))
     end
     for status in (408,425,429,500,503,599)
         @test NEW.recoverable_acquisition(ErrorException("DONKI HTTP status $status"))
@@ -62,7 +62,7 @@ end
         actions=(verify=()->begin verifications[]+=1;push!(verify_order,captures[]);nothing end,
             capture=()->begin
                 captures[]+=1;time[]+=Second(5)
-                captures[]==1 && throw(HTTP.ConnectError(URL,timeout_boundary(EOFError())))
+                captures[]==1 && throw(HTTP.ConnectError(URL,captured_cause(EOFError())))
                 "capture-2"
             end,
             issue_all=capture->begin @test capture=="capture-2";issues[]+=1;"batch-2" end)

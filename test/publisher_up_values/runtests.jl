@@ -16,9 +16,11 @@ digest(x)=bytes2hex(sha256(x))
     @test_throws MethodError P.State(.1,0,0,0.)
 end
 @testset "Independent rational wealth paths" begin
-    for alpha in (1//10,1//4,1//2,3//4),n in 0:8,mask in 0:(2^n-1)
+    # Every shorter binary history is visited as a prefix of these length-eight
+    # histories; separate enumerations would repeat the same recurrence checks.
+    for alpha in (1//10,1//4,1//2,3//4),mask in 0:(2^8-1)
         s=P.State(;nominal=Float64(alpha));wealth=big(1)//big(1);misses=0
-        for i in 1:n
+        for i in 1:8
             weight=(2misses+1)//(2i)
             bound=max(big(0)//big(1),wealth*(weight-alpha)/(alpha*(1-alpha)))
             # Scores have a full unit margin from each rational threshold.
@@ -33,6 +35,15 @@ end
             misses+=wanted;s=next.state
             @test s.resolved==i && s.misses==misses
             @test isapprox(s.log_wealth,Float64(log(BigFloat(wealth)));rtol=0,atol=2e-13)
+        end
+        bytes=P.encode_state(s);decoded=P.decode_state(bytes;expected_sha256=digest(bytes))
+        @test P.encode_state(decoded)==bytes
+    end
+    # Preserve short-state serialization coverage, including the initial state.
+    for pattern in ((),(false,),(true,false),(false,true,false))
+        s=P.State(;nominal=.25)
+        for miss in pattern
+            s=P.advance(s,miss ? P.radius(s)+1. : 0.).state
         end
         bytes=P.encode_state(s);decoded=P.decode_state(bytes;expected_sha256=digest(bytes))
         @test P.encode_state(decoded)==bytes

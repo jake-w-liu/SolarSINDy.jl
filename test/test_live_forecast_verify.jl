@@ -18,9 +18,8 @@ using .SuperlearnerServingFixture
         calls = Ref(0)
         response(url; kwargs...) = begin
             calls[] += 1
-            @test kwargs[:socket_type_tls] === MbedTLS.SSLContext
             @test !haskey(kwargs, :require_ssl_verification)
-            @test (kwargs[:connect_timeout], kwargs[:readtimeout]) == (15, 30)
+            @test (kwargs[:connect_timeout], kwargs[:read_idle_timeout]) == (15, 30)
             @test kwargs[:retries] == 0
             HTTP.Response(200, """[{"time_tag":"2026-01-01T00:00:00","dst":-10}]""")
         end
@@ -1313,7 +1312,7 @@ using .SuperlearnerServingFixture
         response(url; kwargs...) = begin
             push!(calls, url)
             body = occursin("wind_1m", url) ? wind : occursin("mag_1m", url) ? mag : dst
-            HTTP.Response(200, body)
+            HTTP.Response(200, occursin("mag_1m", url) ? Vector{UInt8}(codeunits(body)) : body)
         end
         mktempdir(realpath(tempdir())) do directory
             isolated_cfg = _copy_config(cfg; log_path=joinpath(directory, "live.csv"))

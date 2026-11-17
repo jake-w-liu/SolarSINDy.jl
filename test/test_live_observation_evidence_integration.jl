@@ -36,7 +36,7 @@ quiet(f)=redirect_stdout(f,devnull)
         get_response(url;kwargs...)=begin
             @test url==KYOTO_DST_JSON_URL
             @test kwargs[:status_exception]===false
-            @test kwargs[:socket_type_tls]===MbedTLS.SSLContext
+            @test kwargs[:read_idle_timeout] == 30
             calls[]+=1;responses[calls[]]
         end
         times,values=_fetch_dst(;fetch_fn=get_response,max_retries=3,retry_delay_sec=0,
