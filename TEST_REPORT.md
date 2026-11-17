@@ -34,6 +34,14 @@ remain. Static traversal found no missing target among458 literal includes.
 Unused synthetic clone/checkpoint code is removed; the retained research
 driver's bounded Git utilities and numerical/artifact checks are unchanged.
 
+The last orphan-file cleanup removes seven unused initial-reference helpers,
+the CME/inertial implementation clones and their source-parity assertions,
+historical POSIX spies/owner clones, Darwin diagnostics and fixed-count/repeated
+CI wrappers. Direct transport, hand-derived rollout/admission arithmetic and
+saved scalar/tree/cohort oracles remain. Static traversal after these deletions
+found457 literal include files and no missing targets. These last changes are
+test/documentation-only and still require the final hosted package run.
+
 ## Archival shared replay verification contract (28 October 2026)
 
 The complete prior generated worker is frozen by SHA256

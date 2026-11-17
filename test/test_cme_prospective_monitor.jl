@@ -1,17 +1,11 @@
 module CMEProspectiveMonitorTests
 
-using Test, Dates, HTTP, SHA
-module Before
-    include(joinpath(@__DIR__,"cme_prospective","frozen","prospective_probability_monitor_before_v1.jl"))
-end
+using Test, Dates, HTTP
 module After
     include(joinpath(@__DIR__,"..","tools","cme_prospective","prospective_probability_monitor.jl"))
 end
-const OLD=Before.CMEProspectiveMonitor
 const NEW=After.CMEProspectiveMonitor
 const URL="https://example.invalid"
-const FROZEN=joinpath(@__DIR__,"cme_prospective","frozen","prospective_probability_monitor_before_v1.jl")
-@test bytes2hex(sha256(read(FROZEN)))=="3fa61b6884a8903cea7603f6b85bc4e29127158bfe91824672436158110f619a"
 
 function timeout_boundary(exception)
     try
@@ -28,8 +22,6 @@ end
     @test captured isa CapturedException
     @test captured.ex===io
     direct=HTTP.ConnectError(URL,io);wrapped=HTTP.ConnectError(URL,captured)
-    @test OLD.recoverable_acquisition(direct)
-    @test !OLD.recoverable_acquisition(wrapped)
     @test NEW.recoverable_acquisition(direct)
     @test NEW.recoverable_acquisition(wrapped)
     @test NEW.recoverable_acquisition(HTTP.RequestError(nothing,captured))
