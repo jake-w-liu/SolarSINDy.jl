@@ -35,33 +35,6 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-      - name: Check available memory before Julia setup
-        run: |
-          set -euo pipefail
-          case "$RUNNER_OS" in
-            Linux)
-              available=$(awk '/^MemAvailable:/ {printf "%.0f\n", $2 * 1024}' /proc/meminfo)
-              ;;
-            Windows)
-              available=$(powershell -NoLogo -NoProfile -NonInteractive -Command \
-                '([UInt64](Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1024).ToString()' | tr -d '\r')
-              ;;
-            macOS)
-              available=$(/usr/bin/vm_stat | awk '
-                /page size of/ {page = $8}
-                /^Pages free:/ {gsub(/\./, "", $3); free = $3; have_free = 1}
-                /^Pages speculative:/ {gsub(/\./, "", $3); speculative = $3; have_speculative = 1}
-                END {
-                  if (page > 0 && have_free && have_speculative) printf "%.0f\n", (free + speculative) * page
-                  else exit 1
-                }')
-              ;;
-            *) exit 1 ;;
-          esac
-          [[ "$available" =~ ^[0-9]+$ ]] && (( available >= 8589934592 )) || {
-            echo 'At least 8 GiB of available physical memory is required.' >&2
-            exit 1
-          }
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ runner.os == 'macOS' && '3.14' || '3.12' }}
@@ -98,10 +71,6 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-      - name: Check available memory before Julia setup
-        run: |
-          available=$(awk '/^MemAvailable:/ {printf "%.0f\n", $2 * 1024}' /proc/meminfo)
-          [[ "$available" =~ ^[0-9]+$ ]] && (( available >= 8589934592 ))
       - uses: julia-actions/setup-julia@v3
         with:
           version: '1.12.6'
