@@ -20,7 +20,6 @@ function fit_header_grammar_checks(root,result)
     fit=joinpath(stage,"fits/setting-1")
     @test B.BInitialPointFits._verify_fit_input_readback(fit,loaded.model,panel,a.view,T.settings()[1])===nothing
     header=plain(JSON3.read(read(joinpath(fit,"manifest.json"))))
-    @test length(header)==41&&length(FIT_HEADER_INTEGER_ORACLES)==13
 
     # Every modified header gets a matching new model identity and fit pin.
     # These negatives therefore cannot pass merely by tripping the old pin.

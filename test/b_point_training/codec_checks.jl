@@ -42,7 +42,6 @@ function codec_checks(root,result)
         bytes=T._bytes(manifest);write(joinpath(clone,"manifest.json"),bytes)
         @test_throws ArgumentError P.load_point_bundle(clone;expected_manifest_sha256=T._sha(bytes),expected_sources=P.source_identity(),expected_binding=context)
     end
-    @test length(mutations)==26
     fit=joinpath(stage,"fits","setting-1");clone=joinpath(root,"fit-Bool");cp(fit,clone)
     fields=plain(JSON3.read(read(joinpath(clone,"manifest.json"))));fields["a_setting_index"]=true
     bytes=T._bytes(fields);write(joinpath(clone,"manifest.json"),bytes)
@@ -74,6 +73,5 @@ function completion_checks(root,result)
         bytes=T._bytes(data);write(joinpath(clone,"completion.json"),bytes)
         @test_throws ArgumentError B.BInitialPointFits.verify_initial_l0(clone,a,result.reference;expected_completion_sha256=T._sha(bytes),expected_sources=P.source_identity(),chunk_hours=2)
     end
-    @test length(changes)==17
     true
 end

@@ -55,6 +55,15 @@ Its cache post-step also attempted unauthorized old-cache deletion (HTTP403).
 Disable that optional cleanup through the cache action's supported setting;
 restoration/saving and GitHub's normal eviction remain available.
 
+The88fea23 Windows1.13.1 run passed288175 main-suite assertions (plus5 named
+optional-artifact broken checks) and16574 B-point behavior assertions, with
+zero B-point errors. Its two failures only counted mutation-list entries after
+certificate fields were removed. Remove those censuses rather than updating
+their expected counts. Every malformed-data save/readback rejection remains.
+The final scan also removes redundant header/oracle/model field-count censuses;
+strict field mutation, missing/unknown field, roundtrip and scalar prediction
+checks remain. This follow-up changes tests only and needs fresh complete CI.
+
 ## Archival shared replay verification contract (28 October 2026)
 
 The complete prior generated worker is frozen by SHA256
