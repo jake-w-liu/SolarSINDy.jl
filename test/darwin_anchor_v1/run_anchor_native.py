@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 sys.dont_write_bytecode=True
 HERE=Path(__file__).resolve().parent
-STATE_SHA='072f740624bbb3e25910b3fbcfe7b6d6007ad9eedd7734d1c4d48322d9db385e'
+STATE_SHA='20bf5d7b7680ba9acaf7e11906920aa8392da268f0fb50c312a80724d460b6fb'
 _path=HERE/'test_anchor_state.py'
 _spec=importlib.util.spec_from_file_location('anchor_independent_common',_path)
 _common=importlib.util.module_from_spec(_spec)
@@ -409,7 +409,8 @@ def main():
     available,method,resource_processes=_common.available_memory();free=shutil.disk_usage(output.parent).free
     need(available>=536870912 and free>=8589934592,'actual engineering512MiB/8GiB admission failed')
     global _observer
-    _observer=load(ROOT/'test/posix_owner_v3/observations.py','anchor_independent_observer',value['independent_observer_sha256'])
+    observer_path=ROOT/'test/posix_owner_v3/observations.py'
+    _observer=load(observer_path,'anchor_independent_observer',pins[str(observer_path)])
     abi=load(ROOT/'test/initial_reference/diagnose_darwin_groups.py','anchor_independent_ABI',value['independent_darwin_abi_sha256'])
     observer=_observer.NativeObservation()
     output.mkdir()

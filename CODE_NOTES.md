@@ -2010,3 +2010,20 @@ containers and the full platform/resource gates before promotion. Actual
 archive fits, causal holdout gains, corrected paper results and scientific
 qualification remain unestablished. Local Julia remains withheld below the
 8 GiB available-memory floor.
+
+### Held Darwin observer transition (2026-11-17)
+
+The independent test observer now handles a held child's live-to-zombie
+transition between the complete BSD read and `getsid`. Only getter `ESRCH`
+permits one fresh BSD read, and both reads must match the held PID, birth,
+process group and credentials. Recovery requires a freshly proved zombie;
+other errors, changed identities and unavailable evidence remain fatal.
+Production ownership code, native ABI and frozen acceptance oracles are
+unchanged. A closed versioned binding connects the corrected current observer
+to the preserved historical source pins.
+
+The mandatory V3 controller additionally runs 25 independent metadata literals
+in three methods, retaining the original 113 state rows, 21 current native
+cases, Darwin historical cases and all original clocks. The package wrapper
+requires the added result. These literals exercise the actual observer method
+but do not constitute native Darwin or scientific qualification.

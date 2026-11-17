@@ -26,8 +26,8 @@ OWNER_PINS = {
 }
 TEST_PINS = {
     'oracles_v1.json': '12e90474203342f792aaa45365549449cab1d23107515e6f7563ffec1cd2e753',
-    'test_anchor_state.py': '072f740624bbb3e25910b3fbcfe7b6d6007ad9eedd7734d1c4d48322d9db385e',
-    'run_anchor_native.py': '5c9b404510344d5809eaef7cf3190acf7c02fbfd84d92b369d39015f1715ae6c',
+    'test_anchor_state.py': '20bf5d7b7680ba9acaf7e11906920aa8392da268f0fb50c312a80724d460b6fb',
+    'run_anchor_native.py': '790c6288cfb86015d0894ff359d97b04f8ec7e229f3ea13c43e636557221ef63',
     'fixture.py': 'af87432ffe060ba181766c748297cc4fdedd16f8bb8fb8c6698a1f8d9b65fa0c',
     'frozen/native_stage.py': '8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836',
     'frozen/candidate_native_owner.py': '3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1',

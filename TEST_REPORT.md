@@ -1847,3 +1847,24 @@ assertions and hosted hardware admission have not yet executed.
 Full package, experiments, canonical harness, strict docs, containers,
 native platform/resource checks, scientific comparisons and paper regeneration
 remain required on the final combined committed source.
+
+### Held Darwin observer transition (2026-11-17)
+
+Native macOS run 43987141823 failed two launch-anchor cases before the test
+Popen factory returned: signal-9 exit and transient-stop completion both
+encountered getter `ESRCH` after a held live identity. The missing BSD status
+at the failing getter was not recorded; the signal-9 cleanup independently
+observed the matching zombie. The failure artifacts remain preserved.
+
+An independently frozen 25-row, three-method regression reproduced both
+getter failures against the original observer. That original suite exited 1
+with 19 failed subtests, including stricter rejection call-trace expectations.
+The corrected observer passed all 25 rows with native Windows exit 0 and an
+observed closed Job. These are simulated metadata controls, with no Darwin
+process observations or scientific qualification. The registered Windows V3
+controller passed its original eight methods and 113 rows plus the three new
+methods and 25 rows. The registered anchor controller passed all three methods
+and 72 rows. The initial integrated attempt retained one failure because the
+patch changed an existing zombie error string; the original string was restored
+without changing its assertion, and both controllers then passed. Package
+wrapper execution, real macOS verification and final full CI remain pending.

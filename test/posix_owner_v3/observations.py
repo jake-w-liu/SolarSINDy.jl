@@ -115,17 +115,34 @@ class NativeObservation:
         if self.darwin is not None:
             row = self.darwin.info(pid)
             birth = [row['start_sec'], row['start_usec']]
+            anchor = self._held.get(pid)
+            if anchor is not None and (row['pid'] != pid or anchor['pid'] != pid or
+                    anchor['birth'] != birth or anchor['pgid'] != row['pgid'] or
+                    anchor['uid'] != row['uid'] or anchor['ruid'] != row['ruid']):
+                raise RuntimeError('held Darwin zombie native identity changed' if row['status'] == 5
+                                   else 'held Darwin native identity changed')
             if row['status'] == 5:
                 # XNU getsid uses proc_find, which does not hold dead procs.
                 # BSD arg1 can still prove birth/credentials/group for a zombie.
                 # Only a matching unreaped live-launch anchor supplies its SID.
-                anchor = self._held.get(pid)
-                if anchor is not None and (anchor['birth'] != birth or anchor['pgid'] != row['pgid'] or
-                        anchor['uid'] != row['uid'] or anchor['ruid'] != row['ruid']):
-                    raise RuntimeError('held Darwin zombie native identity changed')
                 sid = None if anchor is None else anchor['sid']
             else:
-                sid = os.getsid(pid)
+                try:
+                    sid = os.getsid(pid)
+                except OSError as error:
+                    if error.errno != errno.ESRCH or anchor is None:
+                        raise
+                    # A held child can become a zombie between the BSD read
+                    # and getsid. Prove that transition with one fresh full
+                    # native read; never substitute a stale identity.
+                    fresh = self.darwin.info(pid)
+                    if (fresh['status'] != 5 or fresh['pid'] != pid or
+                            anchor['birth'] != [fresh['start_sec'], fresh['start_usec']] or
+                            anchor['pgid'] != fresh['pgid'] or anchor['uid'] != fresh['uid'] or
+                            anchor['ruid'] != fresh['ruid']):
+                        raise RuntimeError('held Darwin zombie transition not proved') from error
+                    row = fresh
+                    sid = anchor['sid']
             return dict(pid=pid, pgid=row['pgid'], sid=sid,
                         birth=[row['start_sec'], row['start_usec']], uid=row['uid'], ruid=row['ruid'],
                         zombie=row['status'] == 5, stopped=row['status'] in (4,))

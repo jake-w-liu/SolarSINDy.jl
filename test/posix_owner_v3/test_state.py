@@ -13,7 +13,7 @@ sys.dont_write_bytecode = True
 import unittest
 from unittest.mock import patch
 _observations_path = Path(__file__).resolve().with_name('observations.py')
-_observations_sha = 'd9b02137f669e16819c82cdbf3b1cba182ecf9f8c94fc0e52ad6fe7f96bb01bf'
+_observations_sha = '8298bfde2dae44dfda643984e91c33ee21e70a096c6b47eee43a6b99dc7d7c07'
 with _observations_path.open('rb') as _stream:
     _observations_body = _stream.read(256*1024+1)
 if len(_observations_body)>256*1024 or hashlib.sha256(_observations_body).hexdigest()!=_observations_sha:
