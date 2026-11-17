@@ -64,6 +64,22 @@ The final scan also removes redundant header/oracle/model field-count censuses;
 strict field mutation, missing/unknown field, roundtrip and scalar prediction
 checks remain. This follow-up changes tests only and needs fresh complete CI.
 
+The4bb5e4b Ubuntu1.13.1 job then reached actual archival-format fitting and
+exposed a production receipt-serialization error: runtime timing observations
+used raw Float64 seconds in the integer/declared-bit-field JSON format. Store
+monotonic integer elapsed_ns in fit receipts and candidate-stage results;
+retain the strict codec and existing numerical tests. The four changed files
+strictly parse under both supported Julia versions. Full execution is pending.
+
+Existing integration includes now share one ordinary outer Julia testset, so a
+failed child testset does not hide all later independent integration checks.
+The same includes run once, in the same order. Bootstrap's module declaration
+remains at global scope and its unchanged numerical file is included inside
+the group. An isolated stdlib-Test check on both Julia versions confirmed that
+both module testsets execute and a child failure still rejects the whole group.
+The one-use verification file was removed; no new persistent test runner or
+skip policy was added.
+
 ## Archival shared replay verification contract (28 October 2026)
 
 The complete prior generated worker is frozen by SHA256

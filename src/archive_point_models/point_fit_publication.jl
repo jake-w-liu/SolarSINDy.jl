@@ -94,12 +94,10 @@ function _check_capsule(value::BoundFit)
         if haskey(receipt,"runtime_observations")
             observed=receipt["runtime_observations"]
             need(observed isa AbstractDict,"fit runtime observations differ")
-            observed_fields=Set(("fit_seconds","allocated_bytes","julia_threads","blas_threads","available_physical_bytes"))
+            observed_fields=Set(("elapsed_ns","allocated_bytes","julia_threads","blas_threads","available_physical_bytes"))
             haskey(observed,"peak_rss_bytes") && push!(observed_fields,"peak_rss_bytes")
             J._object(observed,observed_fields)
-            need(observed["fit_seconds"] isa Real && !(observed["fit_seconds"] isa Bool) &&
-                isfinite(observed["fit_seconds"]) && observed["fit_seconds"]>=0 &&
-                all(k->isint(observed[k])&&observed[k]>=0,("allocated_bytes","available_physical_bytes")) &&
+            need(all(k->isint(observed[k])&&observed[k]>=0,("elapsed_ns","allocated_bytes","available_physical_bytes")) &&
                 all(k->isint(observed[k])&&observed[k]>=1,("julia_threads","blas_threads")),"fit runtime observations differ")
             haskey(observed,"peak_rss_bytes") && need(isint(observed["peak_rss_bytes"]) && observed["peak_rss_bytes"]>=0,
                 "fit process peak RSS observation differs")

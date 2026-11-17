@@ -26,7 +26,9 @@ function run_authority_tests(results)
                 receipt_sha256=pins.receipt_sha256,complete_sha256=pins.complete_sha256)
             @test F.predict_log(saved,arrays.features)==F.predict_log(fitted.capsule,arrays.features)
             receipt=R.decode_canonical(F.receipt_bytes(saved));@test receipt["authorization"]["schema"]=="archive_point_fit_binding_v2"
-            @test receipt["runtime_observations"]["fit_seconds"]>=0
+            @test receipt["runtime_observations"]["elapsed_ns"] isa Integer
+            @test !(receipt["runtime_observations"]["elapsed_ns"] isa Bool)
+            @test receipt["runtime_observations"]["elapsed_ns"]>=0
             wrong=F.ExpectedFit("0"^64,expected.recipe_sha256,expected.source_sha256,expected.library_sha256)
             @test_throws ArgumentError F.fit_archival(actual,1,r,wrong;start,stop,asof)
             @test_throws ArgumentError F.prepare_expected(actual,1,r;start=DateTime(2016),stop,asof)

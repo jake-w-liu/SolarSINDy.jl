@@ -175,7 +175,9 @@ function _fit_prepared(value,index,recipe,expected,start,stop,asof,fitter,bindin
     need(attempt_sha256===nothing,"execution permit markers are not accepted")
     prepared=_prepare(value,index,recipe,start,stop,asof,binding);_matches(expected,prepared,recipe)
     X=copy(prepared.arrays.features);y=copy(prepared.y)
+    fit_started=time_ns()
     observed=@timed fitter(X,y,recipe)
+    fit_elapsed_ns=Int(time_ns()-fit_started)
     fitted=observed.value
     need(isequal(X,prepared.arrays.features) && isequal(y,prepared.y),"native fitter mutated its owned inputs")
     need(fitted isa NamedTuple && all(k->hasproperty(fitted,k),(:model,:native,:author)),"fit native result fields")
@@ -197,7 +199,7 @@ function _fit_prepared(value,index,recipe,expected,start,stop,asof,fitter,bindin
     if actual
         authorization=R.decode_canonical(Vector{UInt8}(codeunits(binding.json));limit=16384)
         receipt["authorization"]=authorization
-        receipt["runtime_observations"]=Dict("fit_seconds"=>observed.time,"allocated_bytes"=>observed.bytes,
+        receipt["runtime_observations"]=Dict("elapsed_ns"=>fit_elapsed_ns,"allocated_bytes"=>observed.bytes,
             "julia_threads"=>Threads.nthreads(),"blas_threads"=>BLAS.get_num_threads(),"available_physical_bytes"=>Sys.free_memory(),
             "peak_rss_bytes"=>Int(Sys.maxrss()))
     else

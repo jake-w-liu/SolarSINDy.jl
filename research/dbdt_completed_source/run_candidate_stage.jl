@@ -130,7 +130,7 @@ function main(args)
     result["schema"]="completed_source_candidate_result_v2";result["complete"]=true;result["operation"]=request["operation"]
     result["request_sha256"]=pin;result["job_sha256"]=N.job_identity()
     result["runtime_observations"]=Dict("julia_version"=>string(VERSION),"julia_threads"=>Threads.nthreads(),"blas_threads"=>BLAS.get_num_threads(),
-        "elapsed_seconds"=>Float64(time_ns()-started)/1e9,"allocated_bytes"=>observed.bytes,"available_physical_bytes"=>Sys.free_memory(),
+        "elapsed_ns"=>Int(time_ns()-started),"allocated_bytes"=>observed.bytes,"available_physical_bytes"=>Sys.free_memory(),
         "peak_rss_bytes"=>Int(Sys.maxrss()))
     R._exclusive_write(joinpath(request["execution_directory"],"JULIA_STAGE_RESULT.json"),N.canonical(result;limit=1048576))
     println("completed candidate operation ",request["operation"])

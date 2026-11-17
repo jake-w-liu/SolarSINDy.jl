@@ -979,6 +979,10 @@ include("test_versioned_shadow_trials.jl")
 
 end
 
+module BootstrapNumericalTests end
+
+@testset verbose=true "Scientific integration" begin
+
 include(joinpath(@__DIR__, "b_point_training", "runtests.jl"))
 
 include(joinpath(@__DIR__, "archive_format", "runtests.jl"))
@@ -1021,9 +1025,8 @@ include("selected_point_binding_tests.jl")
 # Direct bootstrap arithmetic and population validation.
 isdefined(Main, :CMEGSMBootstrap) || Base.include(Main,
     joinpath(@__DIR__, "..", "research", "cme_gsm_bootstrap", "bootstrap_indices.jl"))
-module BootstrapNumericalTests
-    include(joinpath(@__DIR__, "..", "research", "cme_gsm_bootstrap", "test_bootstrap_indices.jl"))
-end
+Base.include(BootstrapNumericalTests,
+    joinpath(@__DIR__, "..", "research", "cme_gsm_bootstrap", "test_bootstrap_indices.jl"))
 
 # Fixed-grid numerical candidate production and independent reconstruction.
 include(joinpath(@__DIR__,"candidate_validation","runtests.jl"))
@@ -1046,3 +1049,5 @@ include(joinpath(@__DIR__, "paper_source_schemas_tests.jl"))
 include(joinpath(@__DIR__, "jsoc_time_tests.jl"))
 
 include(joinpath(@__DIR__, "test_native_process.jl"))
+
+end
