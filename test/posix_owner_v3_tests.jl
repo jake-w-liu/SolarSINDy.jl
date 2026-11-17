@@ -3,7 +3,7 @@ using Test,SHA,JSON3,SolarSINDy
 include(joinpath(@__DIR__,"completed_refit_artifacts","run_ci_native_chain.jl"))
 const SUPPORT=CompletedRefitNativeDriver
 const CONTROL=joinpath(@__DIR__,"run_posix_owner_v3_controls.py")
-const CONTROL_SHA="f7ffb6a498e85f42f55fc009778ff438eca5a38ee8a2034beb820095b2b588b3"
+const CONTROL_SHA="9040d0d5508295984ba268f9cad4d9b53195b9f97979c142079e826f493cf6f6"
 file_sha(path)=open(io->bytes2hex(sha256(io)),path)
 
 function run_tests()
@@ -14,7 +14,7 @@ function run_tests()
         output=joinpath(root,"evidence")
         logpath=joinpath(root,"controller.log")
         python=SUPPORT.choose_python()
-        command=addenv(Cmd([python,"-B","-X","utf8",CONTROL,"--output-directory",output]),
+        command=addenv(Cmd([python,"-I","-B","-X","utf8",CONTROL,"--output-directory",output]),
             "PYTHONDONTWRITEBYTECODE"=>"1")
         process=nothing
         started=time_ns()
@@ -37,6 +37,7 @@ function run_tests()
             result=JSON3.read(bytes,Dict{String,Any})
             @test result["schema"]=="owned_posix_v3_registered_controls_v1"
             @test result["complete"]===true&&result["source_unchanged"]===true
+            @test result["identity_methods"]==3&&result["identity_literal_rows"]==25
             @test result["state_methods"]==8&&result["simulated_rows"]==113
             applicable=Sys.islinux()||Sys.isapple()
             @test result["native_POSIX_applicable"]===applicable

@@ -1888,3 +1888,88 @@ are unchanged per invocation. Original owner, state, literal, native, protocol a
 performance gates remain mandatory. The new Julia package wrapper, full package,
 experiments, harness, hosted platform suite and genuine SourceQ/resource/permit
 are pending; no new scientific or whole-software qualification is claimed.
+
+### Held Darwin observer transition (2026-11-17)
+
+Native macOS run 43987141823 failed two launch-anchor cases before the test
+Popen factory returned: signal-9 exit and transient-stop completion both
+encountered getter `ESRCH` after a held live identity. The missing BSD status
+at the failing getter was not recorded; the signal-9 cleanup independently
+observed the matching zombie. The failure artifacts remain preserved.
+
+An independently frozen 25-row, three-method regression reproduced both
+getter failures against the original observer. That original suite exited 1
+with 19 failed subtests, including stricter rejection call-trace expectations.
+The corrected observer passed all 25 rows with native Windows exit 0 and an
+observed closed Job. These are simulated metadata controls, with no Darwin
+process observations or scientific qualification. The registered Windows V3
+controller passed its original eight methods and 113 rows plus the three new
+methods and 25 rows. The registered anchor controller passed all three methods
+and 72 rows. The initial integrated attempt retained one failure because the
+patch changed an existing zombie error string; the original string was restored
+without changing its assertion, and both controllers then passed. Package
+wrapper execution, real macOS verification and final full CI remain pending.
+
+Subsequently, committed source `4977843` passed native workflow 43997952642 on
+macOS, Windows and Linux. All seven archives and 1,033 members were retained
+and independently reconciled. Mac V3 passed 21 current cases and three
+historical negatives; the anchor suite passed 12 current, three historical
+and one cleanup-negative outcome. Both formerly failing role-0 cases have
+positive Popen, callback, wait and closure evidence. The observer's internal
+recovery reads were not traced, so execution of that particular branch is
+not asserted. Full package and scientific qualification remain separate.
+
+### Julia parser failure and strict syntax gate (2026-11-17)
+
+On source `880cc1a`, Ubuntu Julia 1.13.1 passed all 250 acyclic B-source
+assertions, confirming that the fixture-directory correction reached the full
+handoff. Parsing then failed at auditor line 260 on `>0.||return`; line 269
+contained the same ambiguous form before `break`. Both conditions are repaired
+with explicit `0.0 ||`. The original harness had incorrectly reported the
+auditor as parseable because it did not inspect returned parser error nodes.
+
+The new independent syntax tests preserve 23 frozen facts: 23 assertions on
+1.13.1, and 21 assertions plus two explicitly unasserted old-form
+classifications on 1.12.6. They cover deep error nodes, incomplete syntax,
+valid Unicode and comments, non-evaluation, real CLI exits and the original
+false-positive command. A dispatch-only test-driver correction preserves all
+expectations while calling helper methods in their latest definition world.
+
+Source reviews, exact inverses, Bash syntax and canonical/mirror architecture
+checks have passed. Julia execution is pending on both supplemental runtimes;
+local Julia was not launched below the memory admission floor. Full unfiltered
+package tests, experiments, canonical audit, documentation, deployment images
+and platform/resource gates remain required for the new combined source.
+
+## Portable syntax registration verification status (2026-11-17)
+
+The intermediate private parser repair has an actual successful 1,063-file source proof covering 3,215 Git command records, with no source drift and a native exit of zero. Both registered Windows engineering controllers also completed successfully against those exact source bytes. These observations do not constitute Julia execution or whole-package qualification.
+
+A subsequent static review confirmed a new exact-version barrier in ordinary package registration. The follow-up adds 21 always-on portable contracts and keeps the original independent frozen test and oracle unchanged, additionally running that suite on the two pinned runtimes. A separate supplemental workflow process exercises both paths under each pinned runtime. The portable C05 case permits either a thrown parser error or an error-bearing returned tree; it still requires the strict checker to reject malformed text. Candidate source is never evaluated.
+
+The portable registration, additional workflow step and new oracle have not yet been executed in Julia. Available local physical memory remains below the 8 GiB launch requirement. Remote two-version syntax and registration execution, the final complete CI matrix, unfiltered Pkg.test(), experiments, and the canonical development harness remain required. No source, software or scientific qualification is granted here, and main has not been promoted.
+
+## Workflow-contract correction evidence (2026-11-17)
+
+The authenticated log for full CI run 44022564009, job 133835192472, reports one failure among the original 12 methods: the workflow prefix hash differs from its frozen oracle. The exact source-byte reversal confirms that the newly added step-local precompile setting is the missing approved extension. No generated full-size workload evidence was produced by that failed preflight, and that run is ineligible for qualification.
+
+The correction preserves workflow_extensions_v1.json, both original workflow hash constants and the original mutation dictionary. The new independently frozen oracle records the one allowed setup extension, 21 span-corruption cases and six non-bytes input cases. The first additive test fixture failed before these checks because it included later jobs in the canonical scope; the corrected fixture isolates the canonical job. The successful rerun completed 14 methods in a genuine native process (PID 4740, exit zero), with source pre/post equality and the Windows Job boundary closed. Raw output SHA256: 0df975b0a9e4c49036820282838ab947d48d2f5ce4dda028ef6ff6ef74ad6920.
+
+Remote execution of the updated fast workflow, final-source full CI, unfiltered package tests, experiments and the canonical harness remain required. The earlier R11 fast syntax/native jobs passed, but they do not replace those checks or qualify this follow-up. No source, software or scientific qualification is granted here.
+
+
+### Combined SourceQ and CI verification status (2026-11-17)
+
+Private SourceQ checkpoint cc09f3c preserved the verified Python controls. A
+subsequent independent source review found an accidentally duplicated constant
+declaration inside the Julia source-digest assertion. The declaration was
+removed and the original assertion restored before publication. This correction
+is source-reviewed only; Julia parsing and package execution remain required.
+
+The integration retains both unconditional package includes and both additive
+engineering histories. Current controls explicitly bind the R12 memory helper
+and lifecycle producer; the current interval runner receives the same memory
+helper update. The frozen historical capsule and its original pins remain
+unchanged. No native census predicate, retry count, deadline, scientific method
+or numerical tolerance is changed. Hosted native, package, experiments and
+harness verification on the final committed source remain pending.

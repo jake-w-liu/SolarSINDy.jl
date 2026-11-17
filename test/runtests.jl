@@ -1072,3 +1072,6 @@ include(joinpath(@__DIR__, "darwin_anchor_v1_tests.jl"))
 
 # Fixed offline SourceQ/materializer and interval-worker engineering controls.
 include(joinpath(@__DIR__, "sourceq_interval_controls_tests.jl"))
+
+# Strict parser error-node and non-evaluation controls; standard-library dependencies only.
+include(joinpath(@__DIR__, "syntax_audit", "registered_tests.jl"))

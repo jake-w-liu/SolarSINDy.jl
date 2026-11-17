@@ -22,6 +22,12 @@ sys.dont_write_bytecode=True
 HERE=Path(__file__).resolve().parent
 ROOT=HERE.parents[1]
 ORACLE_SHA='12e90474203342f792aaa45365549449cab1d23107515e6f7563ffec1cd2e753'
+OBSERVER_BINDING_V2={
+    'schema':'independent_darwin_observer_current_binding_v2',
+    'frozen_oracle_sha256':ORACLE_SHA,
+    'previous_observer_sha256':'d9b02137f669e16819c82cdbf3b1cba182ecf9f8c94fc0e52ad6fe7f96bb01bf',
+    'current_observer_sha256':'8298bfde2dae44dfda643984e91c33ee21e70a096c6b47eee43a6b99dc7d7c07',
+}
 ROLES=('tools/initial_reference_audit/owned_process.py','research/dbdt_completed_source/native_stage.py',
        'research/dbdt_completed_source/candidate_native_owner.py')
 PID=424242
@@ -62,7 +68,15 @@ def source_pins(value):
     pins[str(HERE/'frozen/native_stage.py')]=value['historical_legacy_sha256']
     pins[str(HERE/'frozen/candidate_native_owner.py')]=value['historical_candidate_sha256']
     pins[str(HERE/'frozen/before_waitid_identity_v2.py')]=value['before_waitid_identity_v2_sha256']
-    pins[str(ROOT/'test/posix_owner_v3/observations.py')]=value['independent_observer_sha256']
+    binding=OBSERVER_BINDING_V2
+    need(set(binding)=={'schema','frozen_oracle_sha256','previous_observer_sha256','current_observer_sha256'} and
+         binding['schema']=='independent_darwin_observer_current_binding_v2' and
+         binding['frozen_oracle_sha256']==ORACLE_SHA and
+         binding['previous_observer_sha256']==value['independent_observer_sha256'] and
+         binding['current_observer_sha256']!=binding['previous_observer_sha256'] and
+         re.fullmatch('[0-9a-f]{64}',binding['current_observer_sha256']) is not None,
+         'versioned current independent observer binding differs')
+    pins[str(ROOT/'test/posix_owner_v3/observations.py')]=binding['current_observer_sha256']
     pins[str(ROOT/'test/initial_reference/diagnose_darwin_groups.py')]=value['independent_darwin_abi_sha256']
     need(all(digest(path)==sha for path,sha in pins.items()),'current or historical source pin differs')
     return pins

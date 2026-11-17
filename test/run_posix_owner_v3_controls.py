@@ -88,6 +88,13 @@ def main():
     observations = load(TESTS / 'observations.py', 'registered_posix_v3_observations')
     need(observations.source_pins() == OWNER_PINS, 'independent current owner bindings differ')
     test_sources = observations.test_inventory()
+    need(test_sources.get('test_identity_transition.py') ==
+         '85b15f7ff53bd7a4ee34cd4c58eb06e544e4a0395578887ad84de6fbfd7c897f' and
+         test_sources.get('ORACLES_V1.json') ==
+         '590493deffeb0e2e7e9ffdc2e7310de0b38f35497dfa2ac478479ed8ed8dd51c' and
+         test_sources.get('observations.py') ==
+         '8298bfde2dae44dfda643984e91c33ee21e70a096c6b47eee43a6b99dc7d7c07',
+         'independent held-identity transition regression source changed')
     memory = load(memory_path, 'registered_posix_v3_resources')
 
     def unchanged():
@@ -108,7 +115,7 @@ def main():
         Julia_launched=False, actual_archive_exposed=False, source_qualified=False, scientific_qualified=False,
         native_POSIX_applicable=os.name == 'posix' and (sys.platform.startswith('linux') or sys.platform == 'darwin'))
     write_new(output / 'PREEXECUTION.json', record)
-    def stage(name, filename, seconds):
+    def stage(name, filename, seconds, *fixed_arguments):
         need(unchanged(), 'source changed before stage')
         resource = admit()
         remaining = (deadline - time.monotonic_ns()) / 1e9 - 20
@@ -121,8 +128,8 @@ def main():
             need(type(pid) is int and pid > 0 and not launched, 'one genuine native launch required')
             launched.append(pid)
             write_new(output / (name + '-launch.json'), dict(pid=pid, monotonic_ns=time.monotonic_ns()))
-        native = owner.run_owned([sys.executable, '-B', '-X', 'utf8', str(TESTS / filename),
-            '--output-directory', str(target)], cwd=str(ROOT), environment=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'),
+        native = owner.run_owned([sys.executable, '-I', '-B', '-X', 'utf8', str(TESTS / filename),
+            *fixed_arguments, '--output-directory', str(target)], cwd=str(ROOT), environment=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'),
             logpath=raw, timeout=allowance, on_launch=on_launch)
         # Keep the actual receipt even if a later semantic or file check fails.
         receipt = dict(native=native, launch_pid=launched[0] if launched else None,
@@ -152,6 +159,37 @@ def main():
         if os.name == 'posix':
             previous_term = signal.signal(signal.SIGTERM, interrupted)
         owner = load(OWNER, 'registered_posix_v3_current_owner')
+        transition, transition_receipt = stage('identity', 'test_identity_transition.py', 30,
+            '--subject', str(TESTS / 'observations.py'), '--expected-subject-sha256',
+            '8298bfde2dae44dfda643984e91c33ee21e70a096c6b47eee43a6b99dc7d7c07')
+        need(transition['schema'] == 'independent_darwin_observer_transition_literals_v1' and
+             type(transition['unittest_methods']) is int and
+             transition['unittest_methods'] == transition['expected_methods'] == 3 and
+             type(transition['literal_rows']) is int and
+             transition['literal_rows'] == transition['expected_rows'] == 25 and
+             transition['recovery_rows'] == 2 and transition['negative_rows'] == 20 and
+             transition['compatibility_rows'] == 3 and
+             transition['failures'] == transition['errors'] == transition['skipped'] == 0,
+             'all25 independent held-identity transition literals required')
+        expected_transition_sources = {
+            str(TESTS / 'test_identity_transition.py'): test_sources['test_identity_transition.py'],
+            str(TESTS / 'ORACLES_V1.json'): test_sources['ORACLES_V1.json'],
+            str(TESTS / 'observations.py'): test_sources['observations.py'],
+            str(ROOT / 'test/initial_reference/diagnose_darwin_groups.py'): observations.OLD_OBSERVER_SHA,
+        }
+        need(transition['source_before'] == transition['source_after'] == expected_transition_sources and
+             transition['source_unchanged'] is True and len(transition['rows']) == 25 and
+             [row['id'] for row in transition['rows']] ==
+             ['C01', 'C02', 'C03', *[f'N{index:02d}' for index in range(1, 21)], 'P01', 'P02'] and
+             all(row['passed'] is True for row in transition['rows']),
+             'transition rows and physical fixed source bindings required')
+        need(all(type(transition[key]) is int and transition[key] == 0 for key in
+             ('actual_Darwin_observations', 'actual_native_test_processes_started',
+              'actual_POSIX_test_processes_started', 'actual_signals_sent')) and
+             all(transition[key] is False for key in
+             ('Julia_launched', 'source_qualified', 'software_qualified', 'scientific_qualified')),
+             'literal transition evidence cannot grant native or scientific qualification')
+        record.update(identity=transition_receipt, identity_methods=3, identity_literal_rows=25)
         state, state_receipt = stage('state', 'test_state.py', 90)
         need(type(state['unittest_methods']) is int and state['unittest_methods'] == 8 and
              type(state['simulated_rows']) is int and state['simulated_rows'] == state['expected_simulated_rows'] == 113,

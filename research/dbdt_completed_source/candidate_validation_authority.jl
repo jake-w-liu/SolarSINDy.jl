@@ -113,7 +113,7 @@ function _whole_qualification(authority,grant)
     J._object(ext,Set(("complete","head","jobs","harness_counts","harness_raw_path","harness_raw_sha256","harness_named_checks_sha256","both_actual_strict_docs_passed",
         "unfiltered_Pkg_and_complete_examples_passed","eight_full_resources_verified","agreement48_verified")))
     expected_checks=_expected_harness_checks(proof)
-    need(get(proof["source_sha256"],"tools/canonical_dev_harness.sh",nothing)=="c7cb2ad1d05a77cf0462c9af6f82f17394d2fc37476fe8c68e57bd4a625c2b28","candidate canonical H producer changed")
+    need(get(proof["source_sha256"],"tools/canonical_dev_harness.sh",nothing)=="a5cca8936116f6c215bad97807e7465ea7dc23f88e75132e1ac647442e93bfd4","candidate canonical H producer changed")
     hlog,_=FS._read(ext["harness_raw_path"],64*1024^2)
     named=[String(m.captures[1]) for m in eachmatch(r"(?m)^[ \t]*\[PASS\] ([^\r\n]+)\r?$",hlog)]
     warnings=[String(m.captures[1]) for m in eachmatch(r"(?m)^[ \t]*\[WARN\] ([^\r\n]+)\r?$",hlog)]

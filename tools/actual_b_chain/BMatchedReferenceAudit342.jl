@@ -257,7 +257,7 @@ function direct29!(out,raw,i,L)
     1<=ai<=size(raw,2)&&isfinite(raw[15,ai])&&ai>1&&isfinite(raw[15,ai-1])||return
     for lag in 0:6
         r=i-lag;r>=1||return
-        all(j->isfinite(raw[j,r]),(5,6,8,9,12))&&raw[9,r]>0.||return
+        all(j->isfinite(raw[j,r]),(5,6,8,9,12))&&raw[9,r] > 0.0 || return
     end
     all(lag->ai-lag>=1&&isfinite(raw[15,ai-lag]),DSTLAGS)||return
     bsum=0.;perpsum=0.;lnsum=0.
@@ -266,7 +266,7 @@ function direct29!(out,raw,i,L)
     for lag in 0:5;ss+=abs2(raw[6,i-lag]-bm);end
     for lag in 0:2;vs+=raw[8,i-lag]*max(0.,-raw[6,i-lag])/1000.;end
     south=0
-    for lag in 0:11;r=i-lag;r>=1&&isfinite(raw[6,r])&&raw[6,r]<0.||break;south+=1;end
+    for lag in 0:11;r=i-lag;r>=1&&isfinite(raw[6,r])&&raw[6,r] < 0.0 || break;south+=1;end
     out[1]=raw[6,i];out[2]=raw[6,i-1];out[3]=raw[6,i-2];out[4]=bm;out[5]=sqrt(ss/6)
     out[6]=raw[5,i];out[7]=hypot(raw[5,i],raw[6,i]);out[8]=perpsum/6
     out[9]=raw[8,i];out[10]=raw[8,i]-raw[8,i-6];out[11]=log(raw[9,i]);out[12]=lnsum/6

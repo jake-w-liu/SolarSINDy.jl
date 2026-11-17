@@ -25,7 +25,7 @@ MEMORY_LIMIT = 8 * 1024**3
 OWNER_RELATIVE = "research/dbdt_completed_source/native_stage.py"
 OWNER_SHA = "30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c"
 MEMORY_RELATIVE = "tools/run_canonical_harness.py"
-MEMORY_SHA = "defbb2a90690acd83ff0dc8eae05fd8622543871ecfa6c7a595b04069d44b331"
+MEMORY_SHA = "219669fea1b718ab997215762105f74dfb5dd8c0f630bc2ed906f00c4eae2236"
 INPUT_SHA = "14c7d83be58729868e8c86f949cbdc541f54f68f7891e07c3c569da91f9ff760"
 SOURCES = (
     "bootstrap_indices.jl", "bootstrap_entry.jl", "test_bootstrap_indices.jl",

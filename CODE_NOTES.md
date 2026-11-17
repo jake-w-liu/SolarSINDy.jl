@@ -2058,3 +2058,74 @@ canonical harness, current-source hosted CI, SourceQ/ResourceQ/permit and numeri
 claims remain unverified for this integration. The retained R12 Mac failure is
 an incomplete independent census in two diagnostic checks; no ownership gate,
 retry count or clock has been relaxed and no unsafe census replacement is used.
+
+### Held Darwin observer transition (2026-11-17)
+
+The independent test observer now handles a held child's live-to-zombie
+transition between the complete BSD read and `getsid`. Only getter `ESRCH`
+permits one fresh BSD read, and both reads must match the held PID, birth,
+process group and credentials. Recovery requires a freshly proved zombie;
+other errors, changed identities and unavailable evidence remain fatal.
+Production ownership code, native ABI and frozen acceptance oracles are
+unchanged. A closed versioned binding connects the corrected current observer
+to the preserved historical source pins.
+
+The mandatory V3 controller additionally runs 25 independent metadata literals
+in three methods, retaining the original 113 state rows, 21 current native
+cases, Darwin historical cases and all original clocks. The package wrapper
+requires the added result. These literals exercise the actual observer method
+but do not constitute native Darwin or scientific qualification.
+
+### Strict Julia syntax verification (2026-11-17)
+
+The matched-reference auditor used ambiguous decimal/operator tokens at two
+short-circuit conditions. Both now use explicit Float64 zero followed by a
+separate `||` operator; the thresholds and remaining arithmetic are unchanged.
+
+The canonical syntax phase previously accepted a normal `Meta.parseall` exit
+without inspecting its returned tree. It now uses a shared Base-only checker
+that recursively rejects parser error and incomplete nodes. Candidate source
+is parsed without evaluation. The shell verifies the helper's exact bytes
+before loading those same bytes, and its existing source inventory, package
+tests and complete experiments remain mandatory. Current hash bindings advance
+together; historical oracles and receipts remain preserved.
+
+The independent contracts are registered in package tests. A supplemental
+Ubuntu workflow runs them and parses every tracked Julia source on Julia
+1.12.6 and 1.13.1 before dependency setup, with explicit memory/disk admission.
+These two lanes supplement the original qualification matrix. Dependency setup
+also limits concurrent package precompilation to one task. That is a resource
+safeguard; the cause of the hosted Mac runner disconnect is unverified.
+
+## Portable parser contract registration (2026-11-17)
+
+Static compatibility review found that the new syntax test registration called a qualification driver restricted to exactly Julia 1.12.6 and 1.13.1, although Project.toml allows later compatible Julia releases. The registration now always exercises 21 portable parser contracts. The unchanged frozen qualification suite additionally executes on its two exact runtimes. This removes the new registration-level version barrier; it does not demonstrate that the entire package passes on a future Julia release.
+
+The portable helper loads into the registration module, while the frozen suite retains its separate Main helper. The portable cases cover nested error/incomplete expressions, valid and malformed source, file APIs, integer main return codes, and non-evaluation of a file-writing specimen. Their independent precode oracle is preserved byte-for-byte in PORTABLE_ORACLES_V1.json. The supplemental workflow executes the complete registration in a separate standard-library-only process on both pinned runtimes. Its new 240-second step is additional coverage; only this unpublished supplemental job has a 20-minute total budget. Original full CI, native-control and scientific limits are preserved.
+
+The intermediate parser repair was committed privately as dbe2be1bba7ea45ac3b442daff697c32e8d48177 and remained unpublished after the compatibility finding. Its complete source proof and Windows control results are retained. The portable follow-up still requires actual Julia execution and final whole-source checks before any full-package or scientific qualification.
+
+## Explicit setup-limit workflow contract (2026-11-17)
+
+The full CI run on 3e394ba failed its generated-workload preflight because the strict workflow test had no approved extension for the step-local precompile limit. The authenticated failed-job log identifies the frozen prefix hash assertion. Reversing the existing seven extension replacements and removing only the added two environment lines restores both original workflow hashes exactly. The original six-extension fixture and its hash remain unchanged.
+
+A pure bytes normalizer now accepts exactly one approved setup step in the test job, with the original command and adjacent frontend and clean-checkout anchors. It removes only the step-local task-count extension before the existing complete-workflow and prefix checks. Missing, duplicated, moved, renamed or altered extensions remain rejected; unrelated workflow changes still face the original checks. Two independently planned test methods add exact output and corruption/type checks. The supplemental two-version syntax workflow now also executes this full-size contract suite before Julia setup.
+
+The corrected local suite completed all 14 methods with native exit zero, unchanged source and a closed Windows Job boundary. Its first additive fixture attempt selected the canonical job together with later jobs and failed a checkout-count assertion; that attempt is retained. The correction bounds only the intended canonical section, preserving the original assertions, old mutations and frozen hashes. This is workflow validation; no forecaster performance or scientific qualification follows from it.
+
+
+### Combined SourceQ and CI integration review (2026-11-17)
+
+Private SourceQ checkpoint cc09f3c preserved the verified Python controls. A
+subsequent independent source review found an accidentally duplicated constant
+declaration inside the Julia source-digest assertion. The declaration was
+removed and the original assertion restored before publication. This correction
+is source-reviewed only; Julia parsing and package execution remain required.
+
+The integration retains both unconditional package includes and both additive
+engineering histories. Current controls explicitly bind the R12 memory helper
+and lifecycle producer; the current interval runner receives the same memory
+helper update. The frozen historical capsule and its original pins remain
+unchanged. No native census predicate, retry count, deadline, scientific method
+or numerical tolerance is changed. Hosted native, package, experiments and
+harness verification on the final committed source remain pending.

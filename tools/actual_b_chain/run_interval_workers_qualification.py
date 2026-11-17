@@ -33,7 +33,7 @@ PINS = {
     OWNER: 'c3575532cb67b4bf52d2db8a20e01ca7e8d97cfb0cb1054ded66467823e40c00',
     'research/dbdt_completed_source/native_stage.py': '30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c',
     STAGE: 'ea2f94ec709b5e58086b69fbd142f902499d9a2d2f5dabc8e0c871c452b4533b',
-    MEMORY: 'defbb2a90690acd83ff0dc8eae05fd8622543871ecfa6c7a595b04069d44b331',
+    MEMORY: '219669fea1b718ab997215762105f74dfb5dd8c0f630bc2ed906f00c4eae2236',
 }
 IMF_PINS = {
     'DstIntervalObserver.jl': '48e2af386d2b9b1a2b8afb4366e1c48508261e54a81447d438fd8a419581b816',

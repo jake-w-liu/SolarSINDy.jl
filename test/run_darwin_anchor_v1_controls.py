@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / 'test/darwin_anchor_v1'
 OWNER = ROOT / 'research/dbdt_completed_source/candidate_native_owner.py'
 MEMORY = ROOT / 'tools/run_canonical_harness.py'
-MEMORY_SHA = 'defbb2a90690acd83ff0dc8eae05fd8622543871ecfa6c7a595b04069d44b331'
+MEMORY_SHA = '219669fea1b718ab997215762105f74dfb5dd8c0f630bc2ed906f00c4eae2236'
 OWNER_PINS = {
     'tools/initial_reference_audit/owned_process.py': '30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c',
     'research/dbdt_completed_source/native_stage.py': '30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c',
@@ -26,8 +26,8 @@ OWNER_PINS = {
 }
 TEST_PINS = {
     'oracles_v1.json': '12e90474203342f792aaa45365549449cab1d23107515e6f7563ffec1cd2e753',
-    'test_anchor_state.py': '072f740624bbb3e25910b3fbcfe7b6d6007ad9eedd7734d1c4d48322d9db385e',
-    'run_anchor_native.py': '5c9b404510344d5809eaef7cf3190acf7c02fbfd84d92b369d39015f1715ae6c',
+    'test_anchor_state.py': '20bf5d7b7680ba9acaf7e11906920aa8392da268f0fb50c312a80724d460b6fb',
+    'run_anchor_native.py': '790c6288cfb86015d0894ff359d97b04f8ec7e229f3ea13c43e636557221ef63',
     'fixture.py': 'af87432ffe060ba181766c748297cc4fdedd16f8bb8fb8c6698a1f8d9b65fa0c',
     'frozen/native_stage.py': '8799458af4fe532c62726df503bb88a18385fe670485363290e45447737cc836',
     'frozen/candidate_native_owner.py': '3c1a2838a3381afe22ae69b95afc1d3b03523b569f34034604390a7122cccac1',

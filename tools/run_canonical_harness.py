@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime,timezone
 import argparse,ctypes,hashlib,importlib.util,json,os,re,shlex,shutil,stat,subprocess,sys,time,traceback
 
-AUDIT_SHA='c7cb2ad1d05a77cf0462c9af6f82f17394d2fc37476fe8c68e57bd4a625c2b28'
+AUDIT_SHA='a5cca8936116f6c215bad97807e7465ea7dc23f88e75132e1ac647442e93bfd4'
 OWNER_SHA='30c7fc96042c3d84814f0ea728c0415d657d90c02b5de4cf516da517c7f9a21c'
 GIB=1024**3
 def pin(path):

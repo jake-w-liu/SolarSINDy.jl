@@ -5,7 +5,7 @@ const SUPPORT = CompletedRefitNativeDriver
 const HIST_CONTROL = joinpath(@__DIR__, "source_qualification_materializer", "frozen", "sourceq_interval_v1", "test", "run_sourceq_interval_controls.py")
 const HIST_CONTROL_SHA = "8571b5c0321f10deda20f20fa1ccbbdb25e3d48402c2df8a9eedad5e8c7fd430"
 const CURRENT_CONTROL = joinpath(@__DIR__, "run_sourceq_interval_controls.py")
-const CURRENT_CONTROL_SHA = "ec9245a74cde052507e4525fb0751899338a7fdd701ce2346e459494347c5ab4"
+const CURRENT_CONTROL_SHA = "0c1009e2fd723dacad3f2672f9b6e7f4ff0671c32d6dd8f69dd379b7fe2d1d95"
 const HIST_CASES = (
     ("materializer24", 24, "matched342_sourceq_independent_tests_v1"),
     ("workers10", 10, "interval_workers_qualification_independent_controls_v1"),
