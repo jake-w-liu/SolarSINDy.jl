@@ -1847,3 +1847,44 @@ assertions and hosted hardware admission have not yet executed.
 Full package, experiments, canonical harness, strict docs, containers,
 native platform/resource checks, scientific comparisons and paper regeneration
 remain required on the final combined committed source.
+
+### SourceQ/interval fixed51 control registration (written, unexecuted)
+
+Added one mandatory package wrapper for the unchanged seven independent CLIs:
+materializer24, interval-worker10, canonical-boundary3, real copy-boundary2,
+completion-publication5, evidence-gap5 and lifecycle-event2. Their frozen
+expectations and all51 method bodies are preserved. The controller requires
+native0, untimed direct-child waits and observed ownership boundaries, exact
+unittest counts/unique names and zero failures/errors/skips, source equality,
+false qualification flags and per-case raw/RESULT hashes. Failures retain logs
+under matched342-sourceq-interval-* outside the checkout. Per-stage120s and
+aggregate900s deadlines retain existing owner cleanup; the Julia watchdog is930s.
+
+The newly registered path has not run. No new assertion total, platform success,
+SourceQ, native macOS qualification, Julia execution or scientific result is
+claimed. Full unfiltered Pkg.test(), complete examples, canonical audit, docs and
+required current-source CI remain pending for this integration.
+
+### Superseding current86 and immutable historical51 verification (2026-11-17)
+
+The earlier written-only registration is replaced by mandatory separate package
+invocations of historical7/51 and current9/86 controllers. Both Python controllers
+passed on Windows, including the historical capsule at its final package layout.
+Current native7 routing/hosted-step probes passed12 methods and exact original
+R11 data/source joins. All current86 methods and all historical51 methods passed
+with zero failures/errors/skips and genuine native0/reaping/closed-boundary stage
+receipts. Counts belong to these separate scopes and are not a scientific score.
+
+Before implementation, current identity23 reproduced the missing-stage/diagnostic
+coverage. Its first implementation rerun found one mixed-version error-priority
+mismatch; resolving the proof tuple before source joins fixed it without changing
+frozen tests. The subsequent23+2 target suites passed. Native7 then reproduced
+its absent shared API before implementation and passed12 after integration.
+Three isolated code mutations were killed by intended native7 assertions; the
+unmutated isolated closure passed first, with no errors/skips in mutant runs.
+
+Current controller900s/stage120s/cleanup20s/postcheck5s and package watchdog930s
+are unchanged per invocation. Original owner, state, literal, native, protocol and
+performance gates remain mandatory. The new Julia package wrapper, full package,
+experiments, harness, hosted platform suite and genuine SourceQ/resource/permit
+are pending; no new scientific or whole-software qualification is claimed.

@@ -1,0 +1,40 @@
+{
+  "schema": "sourceq_and_workers_cli_publication_boundary_oracles_v1",
+  "status": "frozen_before_producer_fix",
+  "existing_copy_oracle_sha256": "3d04346734aca03ba1a4b254da8f8aa955e36e3f0569fdcb61f3ba129c789eb9",
+  "scope": "Only final owned metadata/file-directory commit and CLI emission failure. Pure fixture metadata remains source/software/scientific false; no forged complete evidence, owner or SourceQ is supplied.",
+  "positive_rows": [
+    {
+      "id": "P01",
+      "input": "Fresh owned ordinary unqualified completion metadata, successful fsync/commit, emission and final original-clock check",
+      "expected": "Exactly one complete structural completion survives; original deadline and all false qualification fields preserved."
+    }
+  ],
+  "negative_rows": [
+    {
+      "id": "F01",
+      "fault": "Original deadline expires immediately after real final copy or qualification-directory rename",
+      "expected": "Nonzero/error; no accepted final target or qualifications directory. Preserve actual owned diagnostic and source bytes."
+    },
+    {
+      "id": "F02",
+      "fault": "CLI stdout emit raises BrokenPipeError/OSError after actual ordinary completion write/commit",
+      "expected": "Nonzero/error; positive completion must be atomically invalidated or moved out of accepted location. An already-written complete:true file cannot survive as accepted evidence."
+    },
+    {
+      "id": "F03",
+      "fault": "CLI flush/fsync or final post-output original-clock check fails after successful native stage",
+      "expected": "Completion false/absent, genuine native receipt preserved without relabelling actual child exit/closure, and no budget reset or numerical retry."
+    },
+    {
+      "id": "F04",
+      "fault": "Rollback/invalidation encounters a replaced/non-owned path or cannot complete",
+      "expected": "Fail closed, preserve uncertainty/error and prohibit accepted publication; no borrowed deletion or invented cleanup/rollback success."
+    }
+  ],
+  "implementer_policy": "One minimal completion/CLI finalization seam per existing producer may be exercised with real ordinary unqualified metadata and a failing emitter/clock. It cannot bypass source/evidence/native verification or accept trusted/fixture authority flags. Existing complete-source publication integration awaits genuine inputs.",
+  "test_execution_by_author": false,
+  "source_qualified": false,
+  "software_qualified": false,
+  "scientific_qualified": false
+}

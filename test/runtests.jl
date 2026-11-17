@@ -1069,3 +1069,6 @@ include(joinpath(@__DIR__, "jsoc_time_tests.jl"))
 
 # Native launch identity, loss and cancellation regressions; historical negatives stay explicit.
 include(joinpath(@__DIR__, "darwin_anchor_v1_tests.jl"))
+
+# Fixed offline SourceQ/materializer and interval-worker engineering controls.
+include(joinpath(@__DIR__, "sourceq_interval_controls_tests.jl"))

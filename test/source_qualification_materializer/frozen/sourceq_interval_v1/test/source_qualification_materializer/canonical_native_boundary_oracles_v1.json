@@ -1,0 +1,43 @@
+{
+  "schema": "sourceq_canonical_native_boundary_oracles_v1",
+  "status": "frozen_before_separate_test_body",
+  "unchanged_native_allowance_seconds": 21600,
+  "old_incorrect_importer_allowance_seconds": 900,
+  "source": "unchanged tools/run_canonical_harness.py timeout=21600; M verify_canonical_native API",
+  "method_count": 3,
+  "positive_walls": [
+    901,
+    1000,
+    21599
+  ],
+  "negative_wall_tags": [
+    "21600",
+    "21601",
+    "-1",
+    "Infinity",
+    "NaN"
+  ],
+  "negative_receipt_fields": [
+    [
+      "pid",
+      0
+    ],
+    [
+      "native_exit",
+      1
+    ],
+    [
+      "timed_out",
+      true
+    ],
+    [
+      "ownership_boundary_closed",
+      false
+    ]
+  ],
+  "expected_rejection_code": "nonpositive_owned_stage",
+  "metadata_only": true,
+  "source_qualified": false,
+  "software_qualified": false,
+  "scientific_qualified": false
+}

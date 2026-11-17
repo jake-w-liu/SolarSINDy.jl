@@ -1,0 +1,29 @@
+{
+  "schema": "sourceq_copy_boundary_independent_oracles_v1",
+  "status": "frozen_before_copy_correction",
+  "api": "copy_verified_file(source,target,expected_sha256,expected_bytes)",
+  "positive": "Real ordinary source copies byte-identically to a fresh target before each fault control; no SourceQ fixture or verifier bypass.",
+  "negative_rows": [
+    {
+      "id": "C01",
+      "fault": "Raise OSError on second actual exclusive-partial-file write, after first real block >=65536 bytes was retained",
+      "expected_code": "partial_or_late_publication",
+      "expected_final_target_exists": false,
+      "original_source_unchanged": true
+    },
+    {
+      "id": "C02",
+      "fault": "After the real owned partial-to-target rename, expire the existing whole-operation deadline before the immediately following _clock check",
+      "expected_code": "partial_or_late_publication",
+      "expected_final_target_exists": false,
+      "original_source_unchanged": true
+    }
+  ],
+  "methods": 2,
+  "partial_diagnostics_may_remain": true,
+  "full_qualification_transaction_mocked": false,
+  "authority_fixtures_issued": false,
+  "source_qualified": false,
+  "software_qualified": false,
+  "scientific_qualified": false
+}

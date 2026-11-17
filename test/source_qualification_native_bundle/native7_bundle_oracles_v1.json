@@ -1,0 +1,73 @@
+{
+    "schema":  "sourceq_native7_bundle_independent_oracles_v1",
+    "source_only_precode":  true,
+    "subject_before_sha256":  "a0386d2a519af35e0d59875dc083bc5b9733e65665d778ad1abfcf3ae350b8f3",
+    "head":  "3e394ba6afc5c32b2e645501fc24e59cb3d0ce9d",
+    "run_id":  44016373687,
+    "run_attempt":  1,
+    "source_proof_sha256":  "62d3f4b647551cdf9291cc3a548581b05b611528b86765ce8d33255bdf4b0696",
+    "native_jobs_raw_sha256":  "e3093001b6bc266da597c8905d22c07b4055501b75babd2b0dcf472c22925577",
+    "native_jobs_raw_bytes":  9426,
+    "job_ids":  {
+                    "V3 engineering / windows-latest":  133815182994,
+                    "V3 engineering / macos-26-intel":  133815183279,
+                    "V3 engineering / ubuntu-latest":  133815183338
+                },
+    "required_steps":  [
+                           "Run bounded independent current-source controls",
+                           "Run independent launch-anchor and cancellation controls"
+                       ],
+    "Darwin_diagnostic_step":  "Observe held macOS leader identity without changing acceptance",
+    "artifacts":  {
+                      "posix-v3-identity-44016373687-1":  {
+                                                              "artifact_id":  14299735606,
+                                                              "file":  "14299735606.zip",
+                                                              "bytes":  3635,
+                                                              "sha256":  "64bb0fff4a47719e1d28b8b6c62a492da7354bdee0c60766e6316712914e64a9"
+                                                          },
+                      "posix-v3-macos-26-intel-44016373687-1":  {
+                                                                    "artifact_id":  14299156600,
+                                                                    "file":  "14299156600.zip",
+                                                                    "bytes":  79271,
+                                                                    "sha256":  "7f0bd67522ea2e85825f1bab94aaf8aa85546ba3f6eabc18fbedf71503d46c05"
+                                                                },
+                      "darwin-anchor-v1-macos-26-intel-44016373687-1":  {
+                                                                            "artifact_id":  14299046750,
+                                                                            "file":  "14299046750.zip",
+                                                                            "bytes":  150544,
+                                                                            "sha256":  "7b67ad0cb6d967fdec7fdad0dc98d149fcad859dd51c59f225035b62321cafbf"
+                                                                        },
+                      "darwin-anchor-v1-ubuntu-latest-44016373687-1":  {
+                                                                           "artifact_id":  14299046388,
+                                                                           "file":  "14299046388.zip",
+                                                                           "bytes":  101660,
+                                                                           "sha256":  "2c0a8b1253b9c8afb8eb7f0f939e9fc6513bf41702be760a8baa684762adee3d"
+                                                                       },
+                      "posix-v3-windows-latest-44016373687-1":  {
+                                                                    "artifact_id":  14299001749,
+                                                                    "file":  "14299001749.zip",
+                                                                    "bytes":  20325,
+                                                                    "sha256":  "9efacab094a957bed7d7493c1eef3fba5a04efabd5945ba01b4d3cec44e4d5b4"
+                                                                },
+                      "posix-v3-ubuntu-latest-44016373687-1":  {
+                                                                   "artifact_id":  14298293858,
+                                                                   "file":  "14298293858.zip",
+                                                                   "bytes":  77176,
+                                                                   "sha256":  "6a9b9ed76b16e6c7c7e8a9565b77fca128a64a939d3332ab788765314241110e"
+                                                               },
+                      "darwin-anchor-v1-windows-latest-44016373687-1":  {
+                                                                            "artifact_id":  14298289436,
+                                                                            "file":  "14298289436.zip",
+                                                                            "bytes":  101621,
+                                                                            "sha256":  "635cf9595a859d5926c06f18f93ee42e791992f81c79a549ce4e05079f5110c8"
+                                                                        }
+                  },
+    "expected_artifacts":  7,
+    "expected_owner_receipts":  6,
+    "expected_diagnostic_receipts":  1,
+    "expected_jobs":  3,
+    "planned_unittest_methods":  12,
+    "source_qualified":  false,
+    "software_qualified":  false,
+    "scientific_qualified":  false
+}

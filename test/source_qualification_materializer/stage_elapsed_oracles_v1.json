@@ -1,0 +1,82 @@
+{
+  "schema": "sourceq_resource_whole_stage_elapsed_oracles_v1",
+  "status": "frozen_before_port_correction",
+  "original_collector": {
+    "path": "C:/Temp/p992-native-ci-20261109-v1/collect.py",
+    "sha256": "98f3cfcc937ddb600a5ea219139232cbc83ba1443c142d30745e77cb59f1b55b",
+    "function": "bounded_stage_evidence",
+    "lines": [
+      31,
+      40
+    ]
+  },
+  "rule": "For every original stage, elapsed_seconds has type int or float, finite and0<=elapsed_seconds<bound; runtimebound60, every other workload/agreement bound7200. Native wall check remains separately mandatory.",
+  "positive_rows": [
+    {
+      "stage": "runtime",
+      "bound": 60,
+      "elapsed": 59.5,
+      "native_wall": 1
+    },
+    {
+      "stage": "case-workload",
+      "bound": 7200,
+      "elapsed": 7199,
+      "native_wall": 2
+    },
+    {
+      "stage": "native-agreement",
+      "bound": 7200,
+      "elapsed": 7199.5,
+      "native_wall": 2
+    }
+  ],
+  "negative_rows": [
+    {
+      "stage": "runtime",
+      "bound": 60,
+      "elapsed_tag": "60"
+    },
+    {
+      "stage": "case-workload",
+      "bound": 7200,
+      "elapsed_tag": "7200"
+    },
+    {
+      "stage": "native-agreement",
+      "bound": 7200,
+      "elapsed_tag": "7201"
+    },
+    {
+      "stage": "case-workload",
+      "bound": 7200,
+      "elapsed_tag": "-1"
+    },
+    {
+      "stage": "runtime",
+      "bound": 60,
+      "elapsed_tag": "NaN"
+    },
+    {
+      "stage": "runtime",
+      "bound": 60,
+      "elapsed_tag": "Infinity"
+    },
+    {
+      "stage": "runtime",
+      "bound": 60,
+      "elapsed_tag": "BoolTrue"
+    },
+    {
+      "stage": "runtime",
+      "bound": 60,
+      "elapsed_tag": "missing"
+    }
+  ],
+  "native_receipt_in_mutants": "All other native/header/admission/raw facts remain structurally valid; this is targeted elapsed-bound rejection, not an unrelated bad fixture.",
+  "original_budget_extended": false,
+  "metadata_only": true,
+  "source_qualified": false,
+  "software_qualified": false,
+  "scientific_qualified": false
+}

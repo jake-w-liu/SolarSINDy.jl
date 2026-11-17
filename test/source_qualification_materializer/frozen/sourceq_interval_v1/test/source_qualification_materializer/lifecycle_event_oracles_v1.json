@@ -1,0 +1,276 @@
+{
+    "schema":  "sourceq_lifecycle_event_oracles_v1",
+    "original_lifecycle_path":  "test/matched_initial342/test_native_owner_lifecycle.py",
+    "original_lifecycle_sha256":  "14fcd2b2331e4e105507cbe1ccdb8bd9c8ce2334fa0c6bb032b4349cf4cb2f73",
+    "original_predicate_lines":  [
+                                     410,
+                                     411
+                                 ],
+    "api_reference":  "C:/Temp/sourceq-finite-evidence-patch-20261110-v1/F01_LIFECYCLE_EVENTS_API_V3.md",
+    "api_sha256":  "c4a4e35ece725fd256c19afea4e78c0633640adbede4e88f2c8303b6c7474898",
+    "public_seam":  "verify_lifecycle_zero_session_events(row)",
+    "expected_error_code":  "coherent_header_raw_counterfeit",
+    "expected_success":  {
+                             "source_qualified":  false,
+                             "software_qualified":  false,
+                             "independent_zero_live_SID_before_reap":  true,
+                             "scientific_qualified":  false,
+                             "complete_as_lifecycle_event_metadata":  true
+                         },
+    "positive_rows":  3,
+    "negative_rows":  12,
+    "planned_unittest_methods":  2,
+    "rows":  [
+                 {
+                     "row":  {
+                                 "events":  [
+                                                {
+                                                    "snapshot":  {
+                                                                     "complete":  true,
+                                                                     "positive_acceptance_eligible":  true,
+                                                                     "session_live":  0
+                                                                 },
+                                                    "operation":  "before_actual_terminal_wait"
+                                                }
+                                            ],
+                                 "independent_zero_live_SID_before_reap":  true
+                             },
+                     "accepted":  true,
+                     "description":  "One supporting retained event",
+                     "id":  "P01"
+                 },
+                 {
+                     "row":  {
+                                 "events":  [
+                                                {
+                                                    "operation":  "on_launch",
+                                                    "pid":  123
+                                                },
+                                                {
+                                                    "snapshot":  {
+                                                                     "complete":  true,
+                                                                     "positive_acceptance_eligible":  true,
+                                                                     "session_live":  0
+                                                                 },
+                                                    "operation":  "before_actual_terminal_wait"
+                                                }
+                                            ],
+                                 "independent_zero_live_SID_before_reap":  true
+                             },
+                     "accepted":  true,
+                     "description":  "Unrelated operation needs no snapshot; later supporting event establishes existential predicate",
+                     "id":  "P02"
+                 },
+                 {
+                     "row":  {
+                                 "events":  [
+                                                {
+                                                    "snapshot":  {
+                                                                     "complete":  true,
+                                                                     "positive_acceptance_eligible":  true,
+                                                                     "session_live":  1
+                                                                 },
+                                                    "operation":  "before_actual_terminal_wait"
+                                                },
+                                                {
+                                                    "snapshot":  {
+                                                                     "complete":  true,
+                                                                     "positive_acceptance_eligible":  true,
+                                                                     "session_live":  0
+                                                                 },
+                                                    "operation":  "before_actual_terminal_wait"
+                                                }
+                                            ],
+                                 "independent_zero_live_SID_before_reap":  true
+                             },
+                     "accepted":  true,
+                     "description":  "A prior non-supporting event does not mask a later supporting event",
+                     "id":  "P03"
+                 },
+                 {
+                     "row":  {
+                                 "events":  [
+
+                                            ],
+                                 "independent_zero_live_SID_before_reap":  true
+                             },
+                     "accepted":  false,
+                     "description":  "Forged true summary with empty events",
+                     "id":  "N01"
+                 },
+                 {
+                     "row":  {
+                                 "independent_zero_live_SID_before_reap":  true
+                             },
+                     "accepted":  false,
+                     "description":  "Missing events",
+                     "id":  "N02"
+                 },
+                 {
+                     "row":  {
+                                 "events":  {
+
+                                            },
+                                 "independent_zero_live_SID_before_reap":  true
+                             },
+                     "accepted":  false,
+                     "description":  "Events is not a list",
+                     "id":  "N03"
+                 },
+                 {
+                     "row":  {
+                                 "events":  [
+                                                {
+                                                    "snapshot":  {
+                                                                     "complete":  true,
+                                                                     "positive_acceptance_eligible":  true,
+                                                                     "session_live":  1
+                                                                 },
+                                                    "operation":  "before_actual_terminal_wait"
+                                                }
+                                            ],
+                                 "independent_zero_live_SID_before_reap":  true
+                             },
+                     "accepted":  false,
+                     "description":  "Matching operation still has a live session member",
+                     "id":  "N04"
+                 },
+                 {
+                     "row":  {
+                                 "events":  [
+                                                {
+                                                    "snapshot":  {
+                                                                     "complete":  1,
+                                                                     "positive_acceptance_eligible":  true,
+                                                                     "session_live":  0
+                                                                 },
+                                                    "operation":  "before_actual_terminal_wait"
+                                                }
+                                            ],
+                                 "independent_zero_live_SID_before_reap":  true
+                             },
+                     "accepted":  false,
+                     "description":  "Integer complete1 is not Boolean true",
+                     "id":  "N05"
+                 },
+                 {
+                     "row":  {
+                                 "events":  [
+                                                {
+                                                    "snapshot":  {
+                                                                     "complete":  true,
+                                                                     "positive_acceptance_eligible":  1,
+                                                                     "session_live":  0
+                                                                 },
+                                                    "operation":  "before_actual_terminal_wait"
+                                                }
+                                            ],
+                                 "independent_zero_live_SID_before_reap":  true
+                             },
+                     "accepted":  false,
+                     "description":  "Integer eligible1 is not Boolean true",
+                     "id":  "N06"
+                 },
+                 {
+                     "row":  {
+                                 "events":  [
+                                                {
+                                                    "snapshot":  {
+                                                                     "complete":  true,
+                                                                     "positive_acceptance_eligible":  true,
+                                                                     "session_live":  0
+                                                                 },
+                                                    "operation":  "after_actual_terminal_wait"
+                                                }
+                                            ],
+                                 "independent_zero_live_SID_before_reap":  true
+                             },
+                     "accepted":  false,
+                     "description":  "A zero snapshot at another operation cannot prove before-reap observation",
+                     "id":  "N07"
+                 },
+                 {
+                     "row":  {
+                                 "events":  [
+                                                {
+                                                    "snapshot":  {
+                                                                     "complete":  true,
+                                                                     "positive_acceptance_eligible":  true,
+                                                                     "session_live":  0
+                                                                 },
+                                                    "operation":  "before_actual_terminal_wait"
+                                                }
+                                            ],
+                                 "independent_zero_live_SID_before_reap":  false
+                             },
+                     "accepted":  false,
+                     "description":  "Supporting event contradicts false summary",
+                     "id":  "N08"
+                 },
+                 {
+                     "row":  {
+                                 "events":  [
+                                                {
+                                                    "snapshot":  {
+                                                                     "complete":  true,
+                                                                     "positive_acceptance_eligible":  true,
+                                                                     "session_live":  0
+                                                                 },
+                                                    "operation":  "before_actual_terminal_wait"
+                                                }
+                                            ]
+                             },
+                     "accepted":  false,
+                     "description":  "Supporting event but missing summary",
+                     "id":  "N09"
+                 },
+                 {
+                     "row":  {
+                                 "events":  [
+                                                {
+                                                    "snapshot":  {
+                                                                     "complete":  true,
+                                                                     "positive_acceptance_eligible":  true,
+                                                                     "session_live":  0
+                                                                 },
+                                                    "operation":  "before_actual_terminal_wait"
+                                                }
+                                            ],
+                                 "independent_zero_live_SID_before_reap":  1
+                             },
+                     "accepted":  false,
+                     "description":  "Integer summary1 is not exactly the derived Boolean",
+                     "id":  "N10"
+                 },
+                 {
+                     "row":  {
+                                 "events":  [
+                                                {
+                                                    "snapshot":  [
+
+                                                                 ],
+                                                    "operation":  "before_actual_terminal_wait"
+                                                }
+                                            ],
+                                 "independent_zero_live_SID_before_reap":  true
+                             },
+                     "accepted":  false,
+                     "description":  "Matching operation has malformed snapshot",
+                     "id":  "N11"
+                 },
+                 {
+                     "row":  {
+                                 "events":  [
+                                                "bad-event"
+                                            ],
+                                 "independent_zero_live_SID_before_reap":  true
+                             },
+                     "accepted":  false,
+                     "description":  "Malformed event member cannot be treated as supporting evidence",
+                     "id":  "N12"
+                 }
+             ],
+    "new_V3_implementation_not_read":  true,
+    "no_OS_native_source_qualification_or_fitting_authority_from_metadata":  true,
+    "original_E5_24_10_unchanged":  true
+}

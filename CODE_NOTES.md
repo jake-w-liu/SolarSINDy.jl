@@ -2010,3 +2010,51 @@ containers and the full platform/resource gates before promotion. Actual
 archive fits, causal holdout gains, corrected paper results and scientific
 qualification remain unestablished. Local Julia remains withheld below the
 8 GiB available-memory floor.
+
+### Mandatory offline SourceQ and interval engineering registration
+
+The closed controller runs the existing seven file-backed control CLIs through
+current native supervision and the production SIGTERM-safe stage helper. Their
+24/10/3/2/5/5/2 methods remain unchanged. Actual engineering admission requires
+512MiB available physical memory and8GiB disk before each120s stage; the original
+aggregate window is900s. Native callback PID/wait/boundary receipts, bounded raw
+unittest output, exact schemas/counts and physical source hashes are joined.
+The Julia wrapper is included unconditionally by Pkg.test(), which also places
+these controls on the unchanged canonical audit path. Linux/Windows Python3.12
+and macOS Python3.14 settings are preserved; the controller requires Python>=3.11.
+
+Status: registration written and unexecuted. Prior standalone control receipts
+remain separate. These offline metadata/file-protocol probes launch no Julia,
+models or actual-data work and issue no qualification. Current native macOS
+regressions, complete package/examples/harness/CI and genuine SourceQ/resource
+evidence remain independent requirements.
+
+### Current native identity evidence and mandatory historical/current controls (2026-11-17)
+
+The initial51-only registration above is superseded. The stable current Python
+entry point now runs nine suites/86 methods. Pkg registration invokes both that
+controller and the exact historical33-file source capsule/seven suites/51 methods
+in separate testsets. Original legacy assertions/oracles and producer14fcd remain
+unchanged; all15 lifecycle vectors additionally check the current materializer.
+
+The current materializer requires the proof-bound9040 controller/8298 observer
+and its complete original3-method/25-row identity stage on every platform.
+A separate source-bound69e diagnostic verifier preserves allowed observation
+errors and terminal event alternatives. A shared seven-artifact bundle verifier
+requires all seven semantic receipts and the exact successful Darwin diagnostic
+hosted step; the main verifier calls this shared path without a fallback.
+Malformed/mixed versions and bool-as-integer counterfeits fail closed.
+
+Actual Windows verification: current23+2 target suites passed; the independent
+native7 suite first failed on the missing shared API and then passed12 methods.
+All nine current CLIs/86 methods passed under native owned-stage receipts; the
+copied package-layout historical capsule separately passed7/51. Three isolated
+semantic counterfactuals (omitted Darwin step, diagnostic semantics, owner
+semantics) were rejected by intended assertions with no infrastructure errors.
+The live production/test closure remained unchanged by those mutations.
+
+The updated Julia wrapper is not yet executed. Complete Pkg.test(), examples,
+canonical harness, current-source hosted CI, SourceQ/ResourceQ/permit and numerical
+claims remain unverified for this integration. The retained R12 Mac failure is
+an incomplete independent census in two diagnostic checks; no ownership gate,
+retry count or clock has been relaxed and no unsafe census replacement is used.
