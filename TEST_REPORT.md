@@ -1899,3 +1899,11 @@ checks have passed. Julia execution is pending on both supplemental runtimes;
 local Julia was not launched below the memory admission floor. Full unfiltered
 package tests, experiments, canonical audit, documentation, deployment images
 and platform/resource gates remain required for the new combined source.
+
+## Portable syntax registration verification status (2026-11-17)
+
+The intermediate private parser repair has an actual successful 1,063-file source proof covering 3,215 Git command records, with no source drift and a native exit of zero. Both registered Windows engineering controllers also completed successfully against those exact source bytes. These observations do not constitute Julia execution or whole-package qualification.
+
+A subsequent static review confirmed a new exact-version barrier in ordinary package registration. The follow-up adds 21 always-on portable contracts and keeps the original independent frozen test and oracle unchanged, additionally running that suite on the two pinned runtimes. A separate supplemental workflow process exercises both paths under each pinned runtime. The portable C05 case permits either a thrown parser error or an error-bearing returned tree; it still requires the strict checker to reject malformed text. Candidate source is never evaluated.
+
+The portable registration, additional workflow step and new oracle have not yet been executed in Julia. Available local physical memory remains below the 8 GiB launch requirement. Remote two-version syntax and registration execution, the final complete CI matrix, unfiltered Pkg.test(), experiments, and the canonical development harness remain required. No source, software or scientific qualification is granted here, and main has not been promoted.

@@ -2048,3 +2048,11 @@ Ubuntu workflow runs them and parses every tracked Julia source on Julia
 These two lanes supplement the original qualification matrix. Dependency setup
 also limits concurrent package precompilation to one task. That is a resource
 safeguard; the cause of the hosted Mac runner disconnect is unverified.
+
+## Portable parser contract registration (2026-11-17)
+
+Static compatibility review found that the new syntax test registration called a qualification driver restricted to exactly Julia 1.12.6 and 1.13.1, although Project.toml allows later compatible Julia releases. The registration now always exercises 21 portable parser contracts. The unchanged frozen qualification suite additionally executes on its two exact runtimes. This removes the new registration-level version barrier; it does not demonstrate that the entire package passes on a future Julia release.
+
+The portable helper loads into the registration module, while the frozen suite retains its separate Main helper. The portable cases cover nested error/incomplete expressions, valid and malformed source, file APIs, integer main return codes, and non-evaluation of a file-writing specimen. Their independent precode oracle is preserved byte-for-byte in PORTABLE_ORACLES_V1.json. The supplemental workflow executes the complete registration in a separate standard-library-only process on both pinned runtimes. Its new 240-second step is additional coverage; only this unpublished supplemental job has a 20-minute total budget. Original full CI, native-control and scientific limits are preserved.
+
+The intermediate parser repair was committed privately as dbe2be1bba7ea45ac3b442daff697c32e8d48177 and remained unpublished after the compatibility finding. Its complete source proof and Windows control results are retained. The portable follow-up still requires actual Julia execution and final whole-source checks before any full-package or scientific qualification.
