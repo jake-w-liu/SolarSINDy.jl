@@ -84,17 +84,27 @@ using DataFrames
             extracted_path = joinpath(tmp, "omni_extract.csv")
 
             open(raw_path, "w") do io
-                first_row = collect(1:54)
-                first_row[1:3] = [1964, 60, 12]
-                second_row = collect(101:154)
-                second_row[1:3] = [1964, 60, 13]
+                first_row = string.(1:54)
+                first_row[1:3] = ["1964", "60", "12"]
+                first_row[16] = "1.600e1"
+                second_row = string.(101:154)
+                second_row[1:3] = ["1964", "60", "13"]
+                second_row[25] = "00125"
+                println(io)
                 println(io, join(first_row, ' '))
-                println(io, join(second_row, ' '))
+                println(io, " \t")
+                println(io, "  ", join(second_row, '\t'), "  ")
             end
 
-            extract_omni2_columns(raw_path, extracted_path)
+            withenv("PATH" => "") do
+                extract_omni2_columns(raw_path, extracted_path)
+            end
             out = CSV.read(extracted_path, DataFrame)
 
+            @test read(extracted_path, String) ==
+                  "year,doy,hour,By,Bz,T,n,V,Pdyn,Dst,AE,AL,AU\n" *
+                  "1964,60,12,1.600e1,17,23,24,25,29,41,42,53,54\n" *
+                  "1964,60,13,116,117,123,124,00125,129,141,142,153,154\n"
             @test names(out) == ["year", "doy", "hour", "By", "Bz", "T", "n", "V", "Pdyn", "Dst", "AE", "AL", "AU"]
             @test Tuple(out[1, :]) == (1964, 60, 12, 16, 17, 23, 24, 25, 29, 41, 42, 53, 54)
             @test Tuple(out[2, :]) == (1964, 60, 13, 116, 117, 123, 124, 125, 129, 141, 142, 153, 154)

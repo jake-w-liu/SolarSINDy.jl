@@ -35,8 +35,8 @@ A matched forecasting experiment is still required before any skill claim.
 
 - Julia **≥ 1.12.6** (`[compat].julia` in [Project.toml](Project.toml))
 - Network access to NOAA SWPC for the live path only
-- GNU Bash and POSIX utilities for shell launchers and shell/data validation
-  paths, including `awk` for OMNI extraction. On Windows, install Git for Windows
+- GNU Bash and POSIX utilities for shell launchers and shell validation.
+  OMNI extraction uses Julia directly. On Windows, install Git for Windows
   and run the shell commands below from Git Bash; WSL is not required. Use native
   Julia for the Julia API. Test helpers verify actual GNU Bash execution;
   `SOLARSINDY_TEST_BASH` can select an explicit Bash executable.

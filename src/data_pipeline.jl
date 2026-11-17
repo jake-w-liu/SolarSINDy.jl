@@ -261,7 +261,7 @@ end
 """
     extract_omni2_columns(raw_path, extracted_path)
 
-Use shell awk to extract needed columns from OMNI2 and write as CSV.
+Stream the needed whitespace-delimited OMNI2 columns into CSV using Julia.
 Columns: year, doy, hour, By_gsm(16), Bz_gsm(17), T(23), n(24), V(25),
          Pdyn(29), Dst(41), AE(42), AL(53), AU(54)
 """
@@ -300,17 +300,22 @@ function extract_omni2_columns(raw_path::String, extracted_path::String;
     end
     isfile(raw_path) || throw(ArgumentError("OMNI2 raw archive not found: $raw_path"))
     _validate_raw_omni(raw_path)
-    println("  Extracting columns with awk → CSV...")
+    println("  Extracting OMNI2 columns → CSV...")
     parent = dirname(extracted_path)
     !isempty(parent) && mkpath(parent)
     tmp_path, tmp_io = mktemp(parent; cleanup=false)
     try
         println(tmp_io, OMNI_EXTRACTED_HEADER)
-        close(tmp_io)
-        prog = "{OFS=\",\"; print \$1,\$2,\$3,\$16,\$17,\$23,\$24,\$25,\$29,\$41,\$42,\$53,\$54}"
-        open(tmp_path, "a") do io
-            run(pipeline(Cmd(["awk", prog, raw_path]), stdout=io))
+        columns = (1, 2, 3, 16, 17, 23, 24, 25, 29, 41, 42, 53, 54)
+        open(raw_path, "r") do raw_io
+            for line in eachline(raw_io)
+                fields = split(line)
+                isempty(fields) && continue
+                join(tmp_io, (fields[index] for index in columns), ',')
+                write(tmp_io, '\n')
+            end
         end
+        close(tmp_io)
         new_summary = _validate_extracted_omni(tmp_path)
         if isfile(extracted_path)
             old_summary = try

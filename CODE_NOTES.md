@@ -2293,3 +2293,15 @@ Remove those two automatic duplicate runs. Their standalone examples and every
 package numerical/native/grid/readback check remain. The complete default
 experiments command still executes its other numerical examples and deployed
 model checks; no actual scientific experiment or candidate budget is reduced.
+
+### Portable OMNI extraction (2026-11-18)
+
+The native Windows collector/numerical run passed285488 assertions but found two
+errors when the OMNI extractor tried to launch an unavailable awk executable.
+Replace only that field-selection stage with streamed Julia whitespace parsing.
+Keep source token text, the thirteen-column order/header, raw/output validation,
+coverage regression checks, atomic installation and failure cleanup unchanged.
+The existing ordering oracle now runs with an empty PATH and checks literal CSV
+bytes for mixed whitespace and numeric spellings. The complete existing data
+pipeline suite then passed184/184 on native Julia1.12.6; both supported versions
+strictly parse the changed Julia files. Full CI is required on the new commit.

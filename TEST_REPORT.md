@@ -2143,7 +2143,13 @@ live verification and receipt checks passed all 1409 assertions in 377.63
 seconds. Both used Julia 1.12.6, disabled module/package-image caches and closed
 their owned process boundaries. All 30 changed Julia files passed strict
 syntax parsing on both supported versions; Bash syntax and whitespace passed.
-The remaining collector and final numerical cleanup checks are still running;
-full package/examples/docs qualification on the follow-up remains pending.
+The collector and final numerical cleanup run completed with285488 passes,
+zero failures, two errors and one named optional-artifact check marked broken.
+Both errors exposed the same native Windows dependency on an absent awk tool.
+Streamed Julia extraction replaces that shell step. Its complete existing data
+pipeline suite then passed184/184 in147.56 seconds, including exact CSV bytes
+with an empty PATH and cache-preserving failure paths. Both changed Julia files
+strictly parse on both supported versions. Full package/examples/docs
+qualification on the follow-up remains pending.
 No new scientific results,
 dashboard health or predictive superiority are claimed by this verification.
