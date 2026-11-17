@@ -75,13 +75,7 @@ function run_controller(control, control_sha, case_specs, expected_schema, metho
             @test result["source_before"] == result["source_after"]
             for (path, pin) in result["source_after"]
                 @test isabspath(path) && isfile(path) && !islink(path)
-                @test const CURRENT_CASES = (
-    HIST_CASES[1:6]...,
-    ("current_identity23", 23, "sourceq_current_identity_coverage_independent_tests_v1"),
-    ("returned_values2", 2, "sourceq_current_identity_returned_value_independent_tests_v1"),
-    ("native_bundle12", 12, "sourceq_native7_bundle_independent_tests_v1"),
-)
-file_sha(path) == pin
+                @test file_sha(path) == pin
             end
             for key in ("Julia_launched", "actual_data_exposed", "native_Darwin_qualified", "qualification_issued",
                         "source_qualified", "software_qualified", "scientific_qualified")
