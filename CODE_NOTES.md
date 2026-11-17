@@ -2129,3 +2129,20 @@ helper update. The frozen historical capsule and its original pins remain
 unchanged. No native census predicate, retry count, deadline, scientific method
 or numerical tolerance is changed. Hosted native, package, experiments and
 harness verification on the final committed source remain pending.
+
+## Essential test suite and CI (2026-11-17)
+
+The default package suite now tests forecasting behavior, mathematical oracles,
+causal source/label boundaries, model persistence, malformed inputs and the
+bundled dashboard. A direct interval suite replaces seventeen fresh worker
+processes. Process supervision has three small checks: success, nonzero exit,
+and timeout/cleanup. Historical certificate capsules, workflow byte hashes,
+fixed method counts, repeated native-launch suites and full-profile test
+orchestration have been removed from default tests and CI.
+
+CI runs Pkg.test and the numerical examples once on each of six platform/runtime
+combinations, with bounds checking on every lane and coverage on one Linux lane.
+One strict documentation job builds both Julia versions. Production numerical
+implementations and tolerances are unchanged. Legacy CI18 certificate tools do
+not receive qualifying evidence from this new CI; no predictive-gain or paper
+qualification follows from this test cleanup.

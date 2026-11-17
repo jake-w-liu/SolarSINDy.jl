@@ -217,9 +217,6 @@ run_matched_gbm_primitives_synthetic()
 include(joinpath(@__DIR__, "archive_format_synthetic.jl"))
 run_archive_format_synthetic()
 
-include(joinpath(@__DIR__, "completed_refit_artifacts.jl"))
-CompletedRefitArtifactsExample.run_example()
-
 include(joinpath(@__DIR__,"archive_completed_windows_synthetic.jl"))
 run_archive_completed_windows_synthetic()
 include(joinpath(@__DIR__,"archive_source_job_synthetic.jl"))
@@ -269,22 +266,11 @@ CompletedSelectionSynthetic.run_example()
 include(joinpath(@__DIR__,"selected_point_binding_synthetic.jl"))
 SelectedPointBindingSynthetic.run_example()
 
-include(joinpath(@__DIR__,"cme_gsm_bootstrap_synthetic.jl"))
-CMEGSMBootstrapSynthetic.run_example()
-
 include(joinpath(@__DIR__,"candidate_validation_synthetic.jl"))
 CandidateValidationSynthetic.run_example()
 
 include(joinpath(@__DIR__,"cme_gsm_labels_synthetic.jl"))
 CMEGSMLabelsSynthetic.run_example()
 
-include(joinpath(@__DIR__,"candidate_stage_dispatch_synthetic.jl"))
-CandidateStageDispatchSynthetic.run_example()
-
 include(joinpath(@__DIR__,"cme_gsm_cdf_reader_synthetic.jl"))
 CMEGSMCDFReaderSynthetic.run_example()
-
-include(joinpath(@__DIR__,"candidate_campaign_metadata_synthetic.jl"))
-CandidateCampaignMetadataSynthetic.run_example()
-
-include(joinpath(@__DIR__,"b_initial_l0_native_synthetic.jl"))

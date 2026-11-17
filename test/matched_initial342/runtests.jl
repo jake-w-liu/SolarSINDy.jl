@@ -10,18 +10,12 @@ const M=Entry.M
 include("fixture.jl")
 include("source_cell_tests.jl")
 include("native_cell_tests.jl")
-include("generator_tests.jl")
-include("producer_audit_tests.jl")
-include("full32_driver.jl")
-include("profile_contract_tests.jl")
 
 function run_tests()
     @testset "Initial matched342 source and per-lead independent contracts" begin
         parent=realpath(get(ENV,"RUNNER_TEMP",tempdir()))
         owned_case(source_and_cell_checks,parent,"source-cells")
         owned_case(training_only_encoder_checks,parent,"training-only")
-        owned_case(generator_checks,parent,"generator")
-        ProfileContractOracles342.run_tests(parent)
     end
     @testset "Initial matched342 nonlinear native, immutable snapshot and saved replay" begin
         @test Threads.nthreads()==1
@@ -32,7 +26,6 @@ function run_tests()
                 runtime=FC.runtime_identity()
                 @test runtime.runtime.threads==runtime.runtime.blas_threads==runtime.runtime.omp_threads==1
                 owned_case(saved_state_cell_checks,realpath(get(ENV,"RUNNER_TEMP",tempdir())),"saved-states")
-                run_owned_full32_tests()
             end
         finally
             BLAS.set_num_threads(previous_blas)

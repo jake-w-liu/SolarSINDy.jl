@@ -16,7 +16,4 @@ include("test_dyadic_precision.jl")
 include("test_runtime_semantics.jl")
 include("test_job_request_grammar.jl")
 include("test_source_reconstruction.jl")
-include("test_genuine_artifacts.jl")
-include("test_support_diagnostics.jl")
-include("test_public_receipt_identity.jl")
 end

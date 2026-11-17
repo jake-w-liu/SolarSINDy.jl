@@ -1973,3 +1973,17 @@ helper update. The frozen historical capsule and its original pins remain
 unchanged. No native census predicate, retry count, deadline, scientific method
 or numerical tolerance is changed. Hosted native, package, experiments and
 harness verification on the final committed source remain pending.
+
+## Essential suite verification (2026-11-17)
+
+Removed duplicate certification/orchestration execution while retaining direct
+numerical, causal, fitting, serialization and dashboard regressions. The interval
+suite uses Brownian/OU closed forms, an independently manufactured two-gain fit,
+label embargo boundaries and streamed/chunked replay comparisons. Independent
+source review confirmed its API calls and 120 eligible training origins.
+
+The three process checks passed locally on Windows; dashboard frontend tests
+passed 17/17. Literal include references and shell syntax were checked. Julia
+Pkg.test, examples and strict docs execution on this trimmed source remain
+pending hosted CI because local available physical memory is below 8 GiB.
+Earlier CI results on 70ee527 do not validate this later test cleanup.

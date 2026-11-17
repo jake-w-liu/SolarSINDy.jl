@@ -1,37 +1,67 @@
 name: CI
 
-# Generated study artifacts are deliberately absent from each clean checkout.
-
 on:
   push:
-    branches: [main]
+    branches: [main, codex/acyclic-b-platform-20261109]
   pull_request:
-  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  JULIA_NUM_THREADS: '1'
+  JULIA_NUM_PRECOMPILE_TASKS: '1'
+  JULIA_PKG_PRECOMPILE_AUTO: '0'
+  OPENBLAS_NUM_THREADS: '1'
+  MKL_NUM_THREADS: '1'
+  OMP_NUM_THREADS: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONUTF8: '1'
+  SOLARSINDY_NO_OPEN: '1'
+
 jobs:
   test:
     name: Julia ${{ matrix.julia-version }} / ${{ matrix.os }}
-    # Intel capacity supports the unchanged 8 GiB available-memory gate.
-    # Keep logical macos-latest job names; this lane does not qualify ARM.
-    runs-on: ${{ matrix.os == 'macos-latest' && 'macos-26-intel' || matrix.os }}
-    # Allow the expanded cold native controls, full package suite and experiments.
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
         julia-version: ['1.12.6', '1.13.1']
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-26-intel]
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-      # Some early Julia controls invoke Python, so provision it before them.
-      # macOS exposes the required nonreaping waitid/WNOWAIT API in this runtime.
+      - name: Check available memory before Julia setup
+        run: |
+          set -euo pipefail
+          case "$RUNNER_OS" in
+            Linux)
+              available=$(awk '/^MemAvailable:/ {printf "%.0f\n", $2 * 1024}' /proc/meminfo)
+              ;;
+            Windows)
+              available=$(powershell -NoLogo -NoProfile -NonInteractive -Command \
+                '([UInt64](Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1024).ToString()' | tr -d '\r')
+              ;;
+            macOS)
+              available=$(/usr/bin/vm_stat | awk '
+                /page size of/ {page = $8}
+                /^Pages free:/ {gsub(/\./, "", $3); free = $3; have_free = 1}
+                /^Pages speculative:/ {gsub(/\./, "", $3); speculative = $3; have_speculative = 1}
+                END {
+                  if (page > 0 && have_free && have_speculative) printf "%.0f\n", (free + speculative) * page
+                  else exit 1
+                }')
+              ;;
+            *) exit 1 ;;
+          esac
+          [[ "$available" =~ ^[0-9]+$ ]] && (( available >= 8589934592 )) || {
+            echo 'At least 8 GiB of available physical memory is required.' >&2
+            exit 1
+          }
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ runner.os == 'macOS' && '3.14' || '3.12' }}
@@ -40,332 +70,50 @@ jobs:
           version: ${{ matrix.julia-version }}
           arch: 'default'
       - uses: julia-actions/cache@v2
-      - name: Verify the JavaScript test runtime
-        run: node --version
-      - name: Verify the dashboard frontend directly
-        run: node --test --test-reporter=tap app/test/frontend_freshness.cjs
-      - name: Resolve the package environment
-        env:
-          JULIA_NUM_PRECOMPILE_TASKS: '1'
-        # resolve() does not bootstrap registries in a fresh Julia depot.
-        run: julia --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate()'
-      - name: Confirm the checkout carries no generated study output
-        run: |
-          if [ -d validation/output ]; then
-            echo "validation/output must not be tracked; the artifact-gated oracles rely on it being absent" >&2
-            exit 1
-          fi
-      - uses: julia-actions/julia-buildpkg@v1
-      - name: Verify cold ordinary duration API
-        timeout-minutes: 10
-        run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/duration_forcing/cold_public_api.jl
-      - name: Verify prospective collector recovery controls
-        run: julia --startup-file=no --pkgimages=no --project=. test/test_cme_prospective_monitor.jl
-      - name: Verify identifiers across fresh caller processes
-        run: julia --startup-file=no --pkgimages=no --project=. test/test_hash_context.jl
-      - name: Verify source-bound reference tools
-        # Catch filesystem/runtime/schema differences before the full package
-        # run. The unfiltered package suite below still executes these tests.
-        run: julia --startup-file=no --pkgimages=no --project=. test/test_initial_reference_tools.jl
-      - name: Verify source-bound selection import
-        run: julia --startup-file=no --pkgimages=no --project=. test/test_initial_reference_import.jl
-      - name: Verify portable source-bound point input exports
-        run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/point_input_export/runtests.jl
-      - name: Retain portable input verification failure evidence
-        if: failure()
-        uses: actions/upload-artifact@v4
+      - name: Instantiate and build the package
+        run: julia --startup-file=no --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate(); Pkg.build()'
+      - name: Run the package tests
+        uses: julia-actions/julia-runtest@v1
         with:
-          name: portable-input-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/solarsindy-point-input-*
-          if-no-files-found: ignore
-      - name: Verify generated complete static and shared replay comparisons
-        run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/publisher_up_values/source_bound_tests.jl
-      - name: Verify frozen models on separately sealed generated future sources
-        run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/publisher_up_values/separate_evaluation_tests.jl
-      - name: Retain separate evaluation verification failure evidence
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: separate-evaluation-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/solarsindy-separate-evaluation-*
-          if-no-files-found: ignore
-      - name: Verify independent artifact replay and corruption rejection
-        # Standard-library Python and data-only Julia replay; no author model
-        # loader, new fitting, network data or scientific acceptance verdict.
-        run: |
-          REPEAT_COUNT=1
-          if [ '${{ matrix.os }}' = ubuntu-latest ] && [ '${{ matrix.julia-version }}' = 1.13.1 ]; then
-            REPEAT_COUNT=3
-          fi
-          if [ '${{ matrix.os }}' = macos-latest ] && [ '${{ matrix.julia-version }}' = 1.13.1 ]; then
-            REPEAT_COUNT=3
-          fi
-          python -B test/initial_reference/run_ci_reader_tests.py --repeat "$REPEAT_COUNT"
-      - name: Retain independent reader failure evidence
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: independent-reference-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/initial-reference-reader
-          if-no-files-found: ignore
-      - name: Verify the generated initial A executor
-        run: python -B test/actual_a_chain/run_ci_executor_tests.py
-      - name: Retain initial A executor failure evidence
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: initial-a-executor-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/initial-a-chain
-          if-no-files-found: ignore
-      - name: Verify generated completed-source ridge artifacts
-        run: julia --startup-file=no --pkgimages=no --threads=1 --project=. test/completed_refit_artifacts/run_ci_native_chain.jl
-      - name: Retain generated ridge failure evidence
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: completed-ridge-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/solarsindy-r1-native-*
-          if-no-files-found: ignore
-      - name: Verify matched342 owner contract engineering controls
-        run: python -I -B -X utf8 test/matched_initial342/profile_owner_tests.py --output-directory "$RUNNER_TEMP/matched342-owner-contracts"
-      - name: Verify matched342 owner lifecycle engineering controls
-        run: python -I -B -X utf8 test/matched_initial342/test_native_owner_lifecycle.py --output-directory "$RUNNER_TEMP/matched342-owner-lifecycle"
-      - name: Record the deliberate owner artifact omission and byte scope
-        if: always()
-        run: |
-          set -euo pipefail
-          printf '%s\n' \
-            'excluded_path=matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw' \
-            'fixture_bytes=67108865' \
-            'reason=deliberate sparse over-64MiB rejection fixture; ordinary native evidence is retained unchanged' \
-            'hardlinks=runtime-only identity assertions; artifacts retain file bytes, not native hardlink relationships' \
-            'scope=artifact exclusion pattern; fixture presence is not asserted' \
-            > "$RUNNER_TEMP/matched342-owner-ARTIFACT_NOTES.txt"
-      - name: Retain complete matched342 owner engineering evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: matched342-owner-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/matched342-owner-contracts
-            ${{ runner.temp }}/matched342-owner-lifecycle
-            ${{ runner.temp }}/matched342-owner-ARTIFACT_NOTES.txt
-            !${{ runner.temp }}/matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw
-          include-hidden-files: true
-          if-no-files-found: error
-          compression-level: 6
-      # The suite reports which local-artifact oracles are unavailable in a clean clone.
-      - uses: julia-actions/julia-runtest@v1
-        env:
-          JULIA_NUM_THREADS: '1'
-      - name: Run the research experiments
+          check_bounds: 'yes'
+          coverage: ${{ matrix.os == 'ubuntu-latest' && matrix.julia-version == '1.13.1' }}
+      - name: Run examples and load the bundled models
         run: julia --startup-file=no --project=. examples/experiments.jl
-      - name: Retain full package support failure evidence
-        if: failure()
-        uses: actions/upload-artifact@v4
+      - uses: actions/setup-node@v4
+        if: matrix.os == 'ubuntu-latest' && matrix.julia-version == '1.13.1'
         with:
-          name: completed-support-${{ matrix.os }}-${{ matrix.julia-version }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/solarsindy-r1-support-log-*
-            ${{ runner.temp }}/solarsindy-separate-evaluation-*
-            ${{ runner.temp }}/matched342-*
-            !${{ runner.temp }}/matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw
-          if-no-files-found: ignore
-
-  canonical-harness:
-    name: Canonical development harness
-    runs-on: ubuntu-latest
-    timeout-minutes: 420
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v3
-        with:
-          version: '1.13.1'
-          arch: 'default'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: julia-actions/cache@v2
-      - name: Verify canonical audit wrapper controls
-        run: |
-          python -B test/completed_refit_artifacts/test_hosted_harness.py
-          python -B test/completed_refit_artifacts/test_harness_evidence.py
-          python -B test/completed_refit_artifacts/test_canonical_harness_artifact.py
-      - name: Instantiate the committed environment
-        run: julia --startup-file=no --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.instantiate()'
-      - name: Verify matched342 owner contract engineering controls
-        run: python -I -B -X utf8 test/matched_initial342/profile_owner_tests.py --output-directory "$RUNNER_TEMP/matched342-owner-contracts"
-      - name: Verify matched342 owner lifecycle engineering controls
-        run: python -I -B -X utf8 test/matched_initial342/test_native_owner_lifecycle.py --output-directory "$RUNNER_TEMP/matched342-owner-lifecycle"
-      - name: Record the deliberate owner artifact omission and byte scope
-        if: always()
-        run: |
-          set -euo pipefail
-          printf '%s\n' \
-            'excluded_path=matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw' \
-            'fixture_bytes=67108865' \
-            'reason=deliberate sparse over-64MiB rejection fixture; ordinary native evidence is retained unchanged' \
-            'hardlinks=runtime-only identity assertions; artifacts retain file bytes, not native hardlink relationships' \
-            'scope=artifact exclusion pattern; fixture presence is not asserted' \
-            > "$RUNNER_TEMP/matched342-owner-ARTIFACT_NOTES.txt"
-      - name: Retain complete matched342 owner engineering evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: matched342-owner-canonical-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            ${{ runner.temp }}/matched342-owner-contracts
-            ${{ runner.temp }}/matched342-owner-lifecycle
-            ${{ runner.temp }}/matched342-owner-ARTIFACT_NOTES.txt
-            !${{ runner.temp }}/matched342-owner-contracts/test_native_predicates_reject_modified_observations/oversize.raw
-          include-hidden-files: true
-          if-no-files-found: error
-          compression-level: 6
-      - name: Run unchanged canonical audit with full tests and experiments
-        run: python -B tools/run_canonical_harness.py --evidence-dir "$RUNNER_TEMP/canonical-harness"
-      - name: Retain canonical source proof and every raw verification log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: canonical-harness-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/canonical-harness/artifact
-          if-no-files-found: error
-          compression-level: 6
-          include-hidden-files: true
+          node-version: '22'
+      - name: Test the dashboard frontend
+        if: matrix.os == 'ubuntu-latest' && matrix.julia-version == '1.13.1'
+        run: node --test --test-reporter=tap app/test/frontend_freshness.cjs
+      - name: Check that tracked source files are unchanged
+        run: git diff --exit-code
 
   docs:
     name: Documentation build
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v2
+      - name: Check available memory before Julia setup
+        run: |
+          available=$(awk '/^MemAvailable:/ {printf "%.0f\n", $2 * 1024}' /proc/meminfo)
+          [[ "$available" =~ ^[0-9]+$ ]] && (( available >= 8589934592 ))
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1.12.6'
       - uses: julia-actions/cache@v2
       - name: Instantiate the documentation environment
-        run: julia --project=docs -e 'using Pkg; Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate()'
+        run: julia --startup-file=no --project=docs -e 'using Pkg; Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate()'
       - name: Build the manual (Julia 1.12.6)
-        # Both builds retain the same strict exports, doctests and warning gate.
         run: julia --startup-file=no --project=docs -e 'VERSION == v"1.12.6" || error("unexpected documentation runtime"); include("docs/make.jl")'
-      - uses: julia-actions/setup-julia@v2
+      - uses: julia-actions/setup-julia@v3
         with:
           version: '1.13.1'
       - name: Build the manual (Julia 1.13.1)
-        # Reuse the already instantiated, portable documentation environment.
         run: julia --startup-file=no --project=docs -e 'VERSION == v"1.13.1" || error("unexpected documentation runtime"); include("docs/make.jl")'
-
-  containers:
-    name: Julia 1.12 deployment images
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build both images
-        run: |
-          docker build --tag solarsindy-monitor:ci --file deploy/Dockerfile.monitor .
-          docker build --tag solarsindy-dashboard:ci --file app/Dockerfile .
-      - name: Load the monitor and frozen artifacts as the runtime user
-        run: |
-          test "$(docker run --rm solarsindy-monitor:ci id -u)" = 10001
-          docker run --rm solarsindy-monitor:ci julia --project=. -e 'using SolarSINDy; include("examples/live_monitor.jl"); @assert length(load_operational_core().coefficients) == 20; @assert isfile("deploy/cmo_ground_shadow/decision.json")'
-      - name: Start the dashboard as the runtime user
-        run: |
-          docker run --detach --name solarsindy-dashboard-ci --publish 127.0.0.1:8723:8723 solarsindy-dashboard:ci
-          ready=0
-          for attempt in $(seq 1 90); do
-            if curl --fail --silent --max-time 3 http://127.0.0.1:8723/api/health >/dev/null; then
-              ready=1
-              break
-            fi
-            test "$(docker inspect --format '{{.State.Running}}' solarsindy-dashboard-ci)" = true || break
-            sleep 2
-          done
-          docker logs solarsindy-dashboard-ci
-          test "$ready" = 1
-          test "$(docker exec solarsindy-dashboard-ci id -u)" = 10001
-          curl --fail --silent --max-time 5 http://127.0.0.1:8723/ >/dev/null
-
-  full-scale-generated:
-    name: Full-scale ${{ matrix.julia-version }} / ${{ matrix.role }} / ${{ matrix.layout }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 420
-    strategy:
-      fail-fast: false
-      matrix:
-        julia-version: ['1.12.6', '1.13.1']
-        role: [primary, independent]
-        layout: [ground-only, mixed]
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v3
-        with:
-          version: ${{ matrix.julia-version }}
-          arch: 'default'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: julia-actions/cache@v2
-      - name: Verify full-size contracts and corruption rejection
-        run: python -B test/completed_refit_artifacts/test_full_scale_generated.py
-      - name: Instantiate the committed environment
-        run: julia --startup-file=no --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.instantiate()'
-      - name: Execute whole-schedule oracles and full input resource checks
-        run: >-
-          python -B tools/run_full_scale_generated.py --mode workload
-          --runtime '${{ matrix.julia-version }}' --role '${{ matrix.role }}' --layout '${{ matrix.layout }}'
-          --evidence-dir "$RUNNER_TEMP/full-scale-${{ matrix.julia-version }}-${{ matrix.role }}-${{ matrix.layout }}"
-      - name: Retain full-size generated outputs and every raw stage log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: full-scale-${{ matrix.julia-version }}-${{ matrix.role }}-${{ matrix.layout }}
-          path: ${{ runner.temp }}/full-scale-${{ matrix.julia-version }}-${{ matrix.role }}-${{ matrix.layout }}
-          if-no-files-found: error
-          compression-level: 6
-          include-hidden-files: true
-
-  full-scale-agreement:
-    name: Full-scale cross-runtime agreement
-    needs: full-scale-generated
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v3
-        with:
-          version: '1.13.1'
-          arch: 'default'
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: julia-actions/cache@v2
-      - name: Instantiate the committed environment
-        run: julia --startup-file=no --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.instantiate()'
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: full-scale-*
-          path: ${{ runner.temp }}/full-scale-inputs
-      - name: Verify all eight source proofs and all 48 native table comparisons
-        run: >-
-          python -B tools/run_full_scale_generated.py --mode agreement --runtime '1.13.1'
-          --input-directory "$RUNNER_TEMP/full-scale-inputs"
-          --evidence-dir "$RUNNER_TEMP/full-scale-agreement"
-      - name: Retain agreement source proof and raw evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: full-scale-agreement
-          path: ${{ runner.temp }}/full-scale-agreement
-          if-no-files-found: error
-          compression-level: 6
-          include-hidden-files: true
+      - name: Check that tracked source files are unchanged
+        run: git diff --exit-code

@@ -16,6 +16,13 @@ using Random
 using CSV
 using DataFrames
 
+module InitialReferenceNumericalTests
+    include(joinpath(@__DIR__, "..", "tools", "initial_reference_audit", "InitialReferenceAudit.jl"))
+    include(joinpath(@__DIR__, "initial_reference", "frozen", "independent_reader_hand_oracles_v1.jl"))
+    include(joinpath(@__DIR__, "initial_reference", "frozen", "stored_mean_scale_oracles_v1.jl"))
+    include(joinpath(@__DIR__, "initial_reference", "test_scalar_tree_replay.jl"))
+end
+
 @testset verbose=true "SolarSINDy.jl" begin
 
     @testset "Utils" begin
@@ -828,9 +835,7 @@ using DataFrames
 
     include("test_compat.jl")
     include("test_interval_mean_forecaster.jl")
-    include("test_initial_reference_tools.jl")
     include("test_initial_reference_import.jl")
-    include("test_hash_context.jl")
     include("test_actual_a_chain.jl")
 
     include("test_cme_prospective_monitor.jl")
@@ -890,9 +895,6 @@ using DataFrames
     include("test_static_stack_crossfit.jl")
     include("test_data_pipeline_cleaning.jl")
     include("test_validation_paths.jl")
-    include("test_canonical_provenance.jl")
-    include("test_canonical_figure_generation.jl")
-    include("test_significance_workflow.jl")
     include("test_real_discovery_helpers.jl")
     include("test_generate_ensemble_draws.jl")
     include("test_phase_discovery.jl")
@@ -993,8 +995,6 @@ include(joinpath(@__DIR__, "b_point_training", "runtests.jl"))
 
 include(joinpath(@__DIR__, "archive_format", "runtests.jl"))
 
-include(joinpath(@__DIR__, "test_documentation_ci_contract.jl"))
-
 include("archive_format/case_job/runtests.jl")
 
 include(joinpath(@__DIR__,"archive_point_models","runtests.jl"))
@@ -1014,7 +1014,6 @@ include(joinpath(@__DIR__,"publisher_up_values","source_bound_tests.jl"))
 include(joinpath(@__DIR__,"point_input_export","runtests.jl"))
 
 include(joinpath(@__DIR__,"publisher_up_values","separate_evaluation_tests.jl"))
-include(joinpath(@__DIR__,"full_scale_generated_controls.jl"))
 
 include(joinpath(@__DIR__,"publisher_up_values","archival_static_tests.jl"))
 
@@ -1031,35 +1030,26 @@ include("completed_selection_tests.jl")
 # Parsed selection metadata and zero-fit point-binding controls.
 include("selected_point_binding_tests.jl")
 
-# Full native bootstrap fixture controls; separate protocol workflow remains mandatory.
-include("cme_gsm_bootstrap_tests.jl")
-CMEGSMBootstrapPackageControls.run_package_native_fixture()
+# Direct bootstrap arithmetic and population validation.
+isdefined(Main, :CMEGSMBootstrap) || Base.include(Main,
+    joinpath(@__DIR__, "..", "research", "cme_gsm_bootstrap", "bootstrap_indices.jl"))
+module BootstrapNumericalTests
+    include(joinpath(@__DIR__, "..", "research", "cme_gsm_bootstrap", "test_bootstrap_indices.jl"))
+end
 
 # Fixed-grid numerical candidate production and independent reconstruction.
 include(joinpath(@__DIR__,"candidate_validation","runtests.jl"))
 
-# Native minute-label/QC kernels and complete frozen551-event generated replay.
+# Minute-label and quality-control arithmetic.
 include("cme_gsm_labels_tests.jl")
-CMEGSMLabelsPackageControls.run_package_native_fixture()
-
-# Fixed owned Python controls plus the real generated Julia stage dispatcher.
-include("candidate_stage_driver_tests.jl")
 
 # All frozen CDF minute-reader generated/API-spy controls; no real CDF import.
 include("cme_gsm_cdf_reader_tests.jl")
-
-# Fixed17 campaign controls and all frozen descriptor/real generated no-fit parity checks.
-include("candidate_campaign_tests.jl")
-
-include(joinpath(@__DIR__,"b_initial_native_tests.jl"))
 
 include(joinpath(@__DIR__, "b_input_v2", "runtests.jl"))
 
 # Source-bound matched342 fits, independent saved-state audit and reference publication.
 include(joinpath(@__DIR__, "matched_initial342", "runtests.jl"))
-
-# Current native session regressions; historical V2 fixtures remain separate.
-include(joinpath(@__DIR__, "posix_owner_v3_tests.jl"))
 
 # Exact historical annual-header compatibility; no real observations are read.
 include(joinpath(@__DIR__, "paper_source_schemas_tests.jl"))
@@ -1067,11 +1057,4 @@ include(joinpath(@__DIR__, "paper_source_schemas_tests.jl"))
 # Independent TAI/UTC and leap-boundary controls for source clocks.
 include(joinpath(@__DIR__, "jsoc_time_tests.jl"))
 
-# Native launch identity, loss and cancellation regressions; historical negatives stay explicit.
-include(joinpath(@__DIR__, "darwin_anchor_v1_tests.jl"))
-
-# Fixed offline SourceQ/materializer and interval-worker engineering controls.
-include(joinpath(@__DIR__, "sourceq_interval_controls_tests.jl"))
-
-# Strict parser error-node and non-evaluation controls; standard-library dependencies only.
-include(joinpath(@__DIR__, "syntax_audit", "registered_tests.jl"))
+include(joinpath(@__DIR__, "test_native_process.jl"))

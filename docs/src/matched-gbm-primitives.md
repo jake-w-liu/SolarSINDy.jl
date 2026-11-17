@@ -87,26 +87,15 @@ SolarSINDy.MatchedGBMPrimitives342.MatchedScalarTreeReplay342.predict_delta
 SolarSINDy.MatchedGBMPrimitives342.MatchedScalarTreeReplay342.predict_deltas
 ```
 
-## Offline qualification-tool controls
+## Tests
 
-The current source-qualification materializer and interval-worker evidence tools
-have nine engineering suites with86 unittest methods. They verify the current
-literal identity stage on all three supported platforms, all seven native
-artifact roles, the required macOS diagnostic command and retained-data/file
-completion boundaries. The15 frozen lifecycle-event vectors also exercise the
-current materializer. The seven historical suites retain their original source
-and51 methods in a separate immutable fixture root.
+`Pkg.test()` checks causal source selection, training-only preprocessing,
+independent fitted predictions and model save/load replay. The standard CI runs
+the package tests and numerical examples on Linux, Windows and macOS with both
+supported Julia versions. Documentation is built with strict checks.
 
-```text
-python -I -B -X utf8 test/run_sourceq_interval_controls.py --output-directory ABSENT_EXTERNAL_PATH
-```
-
-The output must be a fresh absolute directory outside the checkout. Each stage
-requires512MiB available physical memory and8GiB free disk and receives120s within
-the same900s controller window. Native receipts, original raw logs, exact input
-hashes and result counts are retained. The package wrapper invokes historical
-and current controllers unconditionally, each with its original930s watchdog.
-The current86-method and packaged historical51-method Python controllers passed
-on Windows. The Julia package registration and other-platform execution remain
-pending. These data-verification controls issue no source, software or scientific
-qualification; the numerical, resource and actual-execution gates still apply.
+Historical certificate, workflow-hash, fixed-count and repeated process-launch
+test frameworks are no longer part of the package tests or CI. Research tools
+that consume historical CI18 certificates do not obtain those certificates from
+the current CI. Passing software tests does not establish predictive gains or
+authorize a scientific performance claim.
