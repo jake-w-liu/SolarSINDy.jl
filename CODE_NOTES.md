@@ -30,6 +30,12 @@ Reverification of this follow-up is still required: the successful earlier
 run does not validate later source changes. No new predictive-performance or
 scientific result follows from the cleanup.
 
+The historical8GiB blanket restriction on every local Julia launch was ledger
+scope creep: it originated in optional full-scale qualification and canonical
+wrapper admission, not the repository rules. Lightweight syntax and dashboard
+checks can run without that blanket gate. Existing large-experiment resource
+admission remains scoped to those runners.
+
 ## Archival shared replay implementation (28 October 2026)
 
 The new source_bound_archival_replay module connects separately reverified

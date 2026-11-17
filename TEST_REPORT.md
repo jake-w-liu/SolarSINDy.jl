@@ -42,6 +42,19 @@ saved scalar/tree/cohort oracles remain. Static traversal after these deletions
 found457 literal include files and no missing targets. These last changes are
 test/documentation-only and still require the final hosted package run.
 
+Follow-up: strict Julia parsing now passes for all97 changed Julia files on
+both1.12.6 and1.13.1 using the repository's parser-error-aware helper, without
+evaluating candidate source. The earlier blanket8GiB local launch restriction
+was traced to ledger scope creep from full-scale/resource-wrapper budgets;
+the supplied repository rules and syntax/dashboard tools do not impose it.
+This syntax result does not establish numerical execution or a harness pass.
+
+CIb6dc82b reported missing public docstrings for case readback and admission
+bytes; restore those API descriptions while retaining strict Documenter checks.
+Its cache post-step also attempted unauthorized old-cache deletion (HTTP403).
+Disable that optional cleanup through the cache action's supported setting;
+restoration/saving and GitHub's normal eviction remain available.
+
 ## Archival shared replay verification contract (28 October 2026)
 
 The complete prior generated worker is frozen by SHA256

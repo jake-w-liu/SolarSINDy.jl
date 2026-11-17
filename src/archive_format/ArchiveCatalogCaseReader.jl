@@ -18,6 +18,13 @@ struct ReverifiedCases
         new(cases,receipt)
     end
 end
+"""
+    read_reverified(request_path, directory; request_sha256, manifest_sha256, complete_sha256)
+
+Recompute an existing case artifact from its pinned request and preserved source
+snapshot. Check every feature and label byte and return `ReverifiedCases` with a
+canonical data-identity receipt. This operation performs no model fitting.
+"""
 function read_reverified(request_path,directory;request_sha256,manifest_sha256,complete_sha256,producer=nothing,reader=nothing)
     need(producer===nothing && reader===nothing,"execution certificates are not accepted; supply artifact pins")
     request,request_bytes,request_identity=Q._request(request_path,request_sha256)
@@ -36,5 +43,10 @@ function read_reverified(request_path,directory;request_sha256,manifest_sha256,c
     end
     ReverifiedCases(cases,String(R.canonical_bytes(receipt;limit=131072)),_ReadToken())
 end
+"""
+    admission_bytes(value::ReverifiedCases)
+
+Return a caller-owned `Vector{UInt8}` containing the canonical case-read receipt.
+"""
 admission_bytes(value::ReverifiedCases)=Vector{UInt8}(codeunits(value.admission_json))
 end

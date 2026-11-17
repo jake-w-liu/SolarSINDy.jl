@@ -43,6 +43,8 @@ jobs:
           version: ${{ matrix.julia-version }}
           arch: 'default'
       - uses: julia-actions/cache@v2
+        with:
+          delete-old-caches: 'false'
       - name: Instantiate and build the package
         run: julia --startup-file=no --project=. -e 'using Pkg; Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate(); Pkg.build()'
       - name: Run the package tests
@@ -75,6 +77,8 @@ jobs:
         with:
           version: '1.12.6'
       - uses: julia-actions/cache@v2
+        with:
+          delete-old-caches: 'false'
       - name: Instantiate the documentation environment
         run: julia --startup-file=no --project=docs -e 'using Pkg; Pkg.Registry.add("General"); Pkg.resolve(); Pkg.instantiate()'
       - name: Build the manual (Julia 1.12.6)
