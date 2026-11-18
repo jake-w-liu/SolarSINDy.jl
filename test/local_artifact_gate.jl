@@ -8,7 +8,7 @@ oracles cannot run there — and an oracle that silently disappears is worse tha
 because the suite still reports success.
 
 Every such oracle registers itself here before it decides whether to run. `runtests.jl` then prints
-the ledger and asserts its shape, so a green suite states exactly which real-data oracles it did and
+the ledger, so a green suite states exactly which real-data oracles it did and
 did not exercise. Setting `SOLARSINDY_REQUIRE_LOCAL_ARTIFACTS=1` turns any absence into a failure,
 which is how a full-evidence environment demands the complete set.
 

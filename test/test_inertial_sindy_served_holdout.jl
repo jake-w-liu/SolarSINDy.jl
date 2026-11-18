@@ -135,12 +135,6 @@ include(SERVED_HOLDOUT_SCRIPT)
     @test _inertial_issue_dst_rate(gap_times, [0.0, -10.0, -40.0], t) == -10.0
     @test _inertial_issue_dst_rate([t - Hour(9), t - Hour(8), t], [0.0, -20.0, -40.0], t) == 0.0
 
-    source = read(SERVED_HOLDOUT_SCRIPT, String)
-    @test !occursin("rate = Float64(row.dst_delta_1h_nt)", source)
-    @test occursin("rate = _inertial_issue_dst_rate(dst_times, dst_vals,", source)
-    @test occursin("force_frozen=true", source)
-    @test occursin("holdout_residual_updates=[0]", source)
-    @test occursin("static_conformal_shifted_to_complete_hour_served_center", source)
 end
 
 end

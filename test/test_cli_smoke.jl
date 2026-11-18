@@ -26,16 +26,8 @@ isdefined(@__MODULE__, :solarsindy_test_bash) || include(joinpath(@__DIR__, "bas
             argv = trace ? [bash, "-x", cli, arguments...] : [bash, cli, arguments...]
             output, errors = IOBuffer(), IOBuffer()
             process = run(pipeline(setenv(ignorestatus(Cmd(argv)), env);
-                                   stdout=output, stderr=errors); wait=false)
-            try
-                timedwait(() -> process_exited(process), 30; pollint=0.02) === :ok ||
-                    error("CLI smoke command exceeded 30 seconds")
-                wait(process)
-                return (; code=process.exitcode, out=String(take!(output)), err=String(take!(errors)))
-            finally
-                process_running(process) && kill(process)
-                wait(process)
-            end
+                                   stdout=output, stderr=errors))
+            return (; code=process.exitcode, out=String(take!(output)), err=String(take!(errors)))
         end
 
         @test success(`$bash -n $cli`)

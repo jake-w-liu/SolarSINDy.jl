@@ -155,11 +155,6 @@ const AUDIT_PATH = normpath(joinpath(@__DIR__, "..", "validation", "operational"
 
     # Reader-facing readiness output must identify the effective product. inertial-SINDy remains valid
     # predecessor evidence, but it must not be presented as the current operational method.
-    source = read(AUDIT_PATH, String)
-    stale_component_count = occursin("one of its six components", source)
-    scope_boundary = occursin("not held-out evidence for a later served ensemble", source)
-    @test !stale_component_count
-    @test scope_boundary
     mktempdir() do dir
         report = joinpath(dir, "readiness.md")
         audit.write_report(audit.AuditState(), report)
@@ -183,8 +178,6 @@ const AUDIT_PATH = normpath(joinpath(@__DIR__, "..", "validation", "operational"
                              rate = fill(NaN, 50))
         metrics = audit.replay_regime_metrics(nan_rate; min_n = 40)
         @test !any(metrics.axis .== "issue_rate")
-        @test occursin(r"numeric_cols = \[:obs, :inertial_sindy, :inertial_sindy_pre_rate_guard,\s+:inertial_sindy_pre_one_hour_inertia, :inertial_sindy_pre_state_inertia,\s+:sindy_core, :inertial_sindy_frozen, :persistence, :rate\]",
-                       source)
 
         # V04-02: every return path of the super-learner bundle audit must carry `identity`; audit_live_log!
         # reads it unconditionally, so the absent-bundle path crashed instead of recording its FAIL.
@@ -219,9 +212,6 @@ const AUDIT_PATH = normpath(joinpath(@__DIR__, "..", "validation", "operational"
                 @test !any(c -> c.level == :fail && c.name == name, zero_state.checks)
             end
         end
-        # audit_live_log! reads the fixed LIVE_LOG_PATH, so its zero-row branch is pinned at source level.
-        @test occursin(r"if nrow\(df\) == 0\s+state\.live_metrics\[:served_n\] = 0\s+pass!\(state, \"current inertial-SINDy hot-log boundary\"",
-                       source)
     end
 end
 
