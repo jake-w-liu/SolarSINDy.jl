@@ -4,7 +4,6 @@ using CSV
 using DataFrames
 using Dates
 using HTTP
-using MbedTLS
 using JSON3
 using Printf
 using SHA
@@ -2354,8 +2353,8 @@ function audit_dashboard_api!(state::AuditState, api_url::Union{Nothing, String}
 
     payload = nothing
     try
-        resp = HTTP.get(api_url; socket_type_tls=MbedTLS.SSLContext,
-                        connect_timeout = 2, readtimeout = 5, status_exception = false)
+        resp = HTTP.get(api_url; connect_timeout = 2, read_idle_timeout = 5,
+                        status_exception = false)
         if resp.status != 200
             msg = "HTTP status $(resp.status) from $api_url"
             require_api ? fail!(state, "dashboard API reachable", msg) : warn!(state, "dashboard API reachable", msg)

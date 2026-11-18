@@ -2305,3 +2305,14 @@ The existing ordering oracle now runs with an empty PATH and checks literal CSV
 bytes for mixed whitespace and numeric spellings. The complete existing data
 pipeline suite then passed184/184 on native Julia1.12.6; both supported versions
 strictly parse the changed Julia files. Full CI is required on the new commit.
+
+### Complete readiness-audit transport migration (2026-11-18)
+
+CI found one omitted runtime import in validation/operational: the readiness
+audit still required MbedTLS after the package moved to HTTP2. Windows and
+Ubuntu1.12.6 reported zero failed assertions and one load error at that import.
+Remove the import/obsolete backend selector and retain the2-second connect,
+5-second read-idle limit, default retry policy and status handling. The complete
+existing readiness self-test then passed54/54 on native Julia1.12.6 in224.87s.
+A tracked Julia/TOML sweep found no other runtime MbedTLS imports or selectors.
+Run the full matrix again; the failed commit is not software-qualified.

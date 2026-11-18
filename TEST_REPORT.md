@@ -2153,3 +2153,13 @@ strictly parse on both supported versions. Full package/examples/docs
 qualification on the follow-up remains pending.
 No new scientific results,
 dashboard health or predictive superiority are claimed by this verification.
+
+The subsequent full run44203670227 failed while loading the readiness audit:
+it retained a MbedTLS import outside the originally migrated source/example
+directories. Windows1.12.6 reported263164 passes and Ubuntu1.12.6 reported263203
+passes, each with zero failed assertions, one import error and five named
+optional-artifact checks marked broken. The import and obsolete TLS selector
+are removed, retaining connection/read deadlines, default retries and status
+handling. Its complete existing native self-test passed54/54 in224.87seconds.
+All tracked Julia/TOML files were searched for the retired dependency/API;
+full matrix qualification is required again on the corrected commit.
